@@ -1,0 +1,22 @@
+// SPIKE SHIM — not part of the original aztec-packages tree.
+//
+// `FALLBACK_TEARDOWN_DA_GAS_LIMIT` / `FALLBACK_TEARDOWN_L2_GAS_LIMIT` are exported from
+// `@aztec/stdlib/gas` on master at 3a68d68ac2 (the removal parent) but NOT in the published
+// `@aztec/stdlib@5.0.0-nightly.20260626` we pin against — that nightly inlines the same
+// arithmetic inside `GasSettings.fallback()` instead of naming it.
+//
+// Reproduced verbatim from
+//   aztec-packages@3a68d68ac2:yarn-project/stdlib/src/gas/gas_settings.ts:11-16
+// so the test fixtures compute identical values.
+//
+// This is the ONLY source edit made to the vendored tree, and it affects test fixtures only
+// (neither constant is referenced anywhere under `public/avm/`, `public/state_manager/`,
+// `public/public_tx_simulator/*.ts` or `public/public_processor/*.ts`).
+import { MAX_PROCESSABLE_DA_GAS_PER_CHECKPOINT, MAX_PROCESSABLE_L2_GAS } from '@aztec/constants';
+
+/** Approximate max DA gas limit. Arbitrary, assuming 4 blocks per checkpoint — users should use gas estimation. */
+export const APPROXIMATE_MAX_DA_GAS_PER_BLOCK = Math.floor(MAX_PROCESSABLE_DA_GAS_PER_CHECKPOINT / 4);
+/** Fallback teardown L2 gas limit. Arbitrary — users should use gas estimation. */
+export const FALLBACK_TEARDOWN_L2_GAS_LIMIT = Math.floor(MAX_PROCESSABLE_L2_GAS / 8);
+/** Fallback teardown DA gas limit. Arbitrary — users should use gas estimation. */
+export const FALLBACK_TEARDOWN_DA_GAS_LIMIT = Math.floor(APPROXIMATE_MAX_DA_GAS_PER_BLOCK / 2);
