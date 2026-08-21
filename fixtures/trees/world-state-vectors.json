@@ -1,0 +1,2427 @@
+{
+  "note": "Tier D world-state root vectors. Sections marked upstreamPublished MUST agree with the aztec-packages fork at anchor `cpp`; sections marked captured MUST NOT appear there. Regenerate with: cd drift && node capture_world_state.mjs > ../fixtures/trees/world-state-vectors.json",
+  "oracle": "@aztec/world-state NativeWorldStateService (the native LMDB production world state)",
+  "generator": "drift/capture_world_state.mjs",
+  "licence": "Apache-2.0 — output of upstream Apache-2.0 code; see fixtures/CORPUS.md",
+  "upstreamPublished": {
+    "note": "Every value below is also checked in upstream. Recorded so the checker can compare, not as evidence of its own.",
+    "genesisTrees": {
+      "NULLIFIER_TREE": {
+        "depth": 42,
+        "size": "128",
+        "root": "0x18935581a8ed73d08ffd00386fba55ba6c89f3ab848a76b8fedfa9034cee0454"
+      },
+      "NOTE_HASH_TREE": {
+        "depth": 42,
+        "size": "0",
+        "root": "0x2590f2aab19dd791700b4a43d3f52bb88ef2409a3731da8e848663559202e4c6"
+      },
+      "PUBLIC_DATA_TREE": {
+        "depth": 40,
+        "size": "128",
+        "root": "0x1bef38b621017d3c7416663d0cd81369424560710526a3fbaaec13e356b9d084"
+      },
+      "L1_TO_L2_MESSAGE_TREE": {
+        "depth": 36,
+        "size": "0",
+        "root": "0x0fef6d80d31109ddb56d6b3f607cbc9c0af0bff3ea0d43e8f278983c64c11f7a"
+      },
+      "ARCHIVE": {
+        "depth": 30,
+        "size": "1",
+        "root": "0x177a4955b31ecaafad999753938a44e526b54c5ba5d536688227f85f15cfbdf5"
+      }
+    },
+    "genesisStateReference": {
+      "l1ToL2MessageTree": {
+        "root": "0x0fef6d80d31109ddb56d6b3f607cbc9c0af0bff3ea0d43e8f278983c64c11f7a",
+        "nextAvailableLeafIndex": 0
+      },
+      "partial": {
+        "noteHashTree": {
+          "root": "0x2590f2aab19dd791700b4a43d3f52bb88ef2409a3731da8e848663559202e4c6",
+          "nextAvailableLeafIndex": 0
+        },
+        "nullifierTree": {
+          "root": "0x18935581a8ed73d08ffd00386fba55ba6c89f3ab848a76b8fedfa9034cee0454",
+          "nextAvailableLeafIndex": 128
+        },
+        "publicDataTree": {
+          "root": "0x1bef38b621017d3c7416663d0cd81369424560710526a3fbaaec13e356b9d084",
+          "nextAvailableLeafIndex": 128
+        }
+      }
+    },
+    "postGenesisStep1": {
+      "NULLIFIER_TREE": {
+        "depth": 42,
+        "size": "129",
+        "root": "0x2e2e2d8b72294a440c728a646f01476624063f0b50dcfe293cc0fc26bef9e311"
+      },
+      "NOTE_HASH_TREE": {
+        "depth": 42,
+        "size": "1",
+        "root": "0x25c4ef02ba2bec9490376d5b56b8f1a8e5bcf5ecff91636e76660b68c2a9952d"
+      },
+      "PUBLIC_DATA_TREE": {
+        "depth": 40,
+        "size": "129",
+        "root": "0x1e2d8d1c3ea2449b3e4787d8295df3f137e08b56e891c006b3d93faef56ca3df"
+      },
+      "L1_TO_L2_MESSAGE_TREE": {
+        "depth": 36,
+        "size": "1",
+        "root": "0x22c6f7877092ecea5b313b22515e31f2e1e37349b787da10eff298800e3c7c0c"
+      },
+      "ARCHIVE": {
+        "depth": 30,
+        "size": "1",
+        "root": "0x177a4955b31ecaafad999753938a44e526b54c5ba5d536688227f85f15cfbdf5"
+      }
+    },
+    "emptyRootsAtPublishedHeights": {
+      "1": "0x19f1a0c09db4cd026f686e9c8fb45501a9fefb4eb1b4c6c328a51343a0094eeb",
+      "2": "0x14e4b977b2203b70e6ee1c2456eb7114d090fe4b907f631eecd0919fed432e7d",
+      "6": "0x119f56a2e8423a7feaab49b9b5dcbadec0648dfa4096b61b6774ea33ae29dc7f",
+      "10": "0x0d04c63f36bd168215c9b09a227c7e8d3ad48e2f11b8202fd07c524bd30ee88f"
+    }
+  },
+  "captured": {
+    "note": "Upstream publishes no vector for any of this.",
+    "mutationSequence": [
+      {
+        "step": 2,
+        "name": "append-only batch",
+        "what": "three note hashes appended in one call — the append-only path with a non-unit batch",
+        "upstreamAnchored": false,
+        "trees": {
+          "NULLIFIER_TREE": {
+            "depth": 42,
+            "size": "129",
+            "root": "0x2e2e2d8b72294a440c728a646f01476624063f0b50dcfe293cc0fc26bef9e311"
+          },
+          "NOTE_HASH_TREE": {
+            "depth": 42,
+            "size": "4",
+            "root": "0x12ec9b028e2bb489d98ff2ec3582a9101e7b613d4aa57f5bbe0127b24580b6dc"
+          },
+          "PUBLIC_DATA_TREE": {
+            "depth": 40,
+            "size": "129",
+            "root": "0x1e2d8d1c3ea2449b3e4787d8295df3f137e08b56e891c006b3d93faef56ca3df"
+          },
+          "L1_TO_L2_MESSAGE_TREE": {
+            "depth": 36,
+            "size": "1",
+            "root": "0x22c6f7877092ecea5b313b22515e31f2e1e37349b787da10eff298800e3c7c0c"
+          },
+          "ARCHIVE": {
+            "depth": 30,
+            "size": "1",
+            "root": "0x177a4955b31ecaafad999753938a44e526b54c5ba5d536688227f85f15cfbdf5"
+          }
+        }
+      },
+      {
+        "step": 3,
+        "name": "indexed insert, ascending",
+        "what": "two nullifiers above every existing key — low-leaf linkage extends at the tail",
+        "upstreamAnchored": false,
+        "trees": {
+          "NULLIFIER_TREE": {
+            "depth": 42,
+            "size": "131",
+            "root": "0x19ee473678b20a4a1cfd3a111d3c3f844117bdb178c7705fc7f39f7b3cb589b1"
+          },
+          "NOTE_HASH_TREE": {
+            "depth": 42,
+            "size": "4",
+            "root": "0x12ec9b028e2bb489d98ff2ec3582a9101e7b613d4aa57f5bbe0127b24580b6dc"
+          },
+          "PUBLIC_DATA_TREE": {
+            "depth": 40,
+            "size": "129",
+            "root": "0x1e2d8d1c3ea2449b3e4787d8295df3f137e08b56e891c006b3d93faef56ca3df"
+          },
+          "L1_TO_L2_MESSAGE_TREE": {
+            "depth": 36,
+            "size": "1",
+            "root": "0x22c6f7877092ecea5b313b22515e31f2e1e37349b787da10eff298800e3c7c0c"
+          },
+          "ARCHIVE": {
+            "depth": 30,
+            "size": "1",
+            "root": "0x177a4955b31ecaafad999753938a44e526b54c5ba5d536688227f85f15cfbdf5"
+          }
+        }
+      },
+      {
+        "step": 4,
+        "name": "indexed insert, interleaved",
+        "what": "a nullifier BETWEEN two existing keys — the case that rewrites an existing low leaf rather than appending past it, and the one an implementation with correct hashing but wrong linkage gets wrong",
+        "upstreamAnchored": false,
+        "trees": {
+          "NULLIFIER_TREE": {
+            "depth": 42,
+            "size": "132",
+            "root": "0x1c8a1927ae56730b3cc92d385ef893830904c726c858ddcf99edff666d0a035a"
+          },
+          "NOTE_HASH_TREE": {
+            "depth": 42,
+            "size": "4",
+            "root": "0x12ec9b028e2bb489d98ff2ec3582a9101e7b613d4aa57f5bbe0127b24580b6dc"
+          },
+          "PUBLIC_DATA_TREE": {
+            "depth": 40,
+            "size": "129",
+            "root": "0x1e2d8d1c3ea2449b3e4787d8295df3f137e08b56e891c006b3d93faef56ca3df"
+          },
+          "L1_TO_L2_MESSAGE_TREE": {
+            "depth": 36,
+            "size": "1",
+            "root": "0x22c6f7877092ecea5b313b22515e31f2e1e37349b787da10eff298800e3c7c0c"
+          },
+          "ARCHIVE": {
+            "depth": 30,
+            "size": "1",
+            "root": "0x177a4955b31ecaafad999753938a44e526b54c5ba5d536688227f85f15cfbdf5"
+          }
+        }
+      },
+      {
+        "step": 5,
+        "name": "public data update in place",
+        "what": "slot 145, written in step 1, rewritten from value 1 to value 999. Measured: the tree does NOT grow (129 leaves before and after) — the existing leaf is rewritten and only the path above it rehashes. This separates the update path from the insert path below, which is exactly the pair an implementation can get half right",
+        "upstreamAnchored": false,
+        "trees": {
+          "NULLIFIER_TREE": {
+            "depth": 42,
+            "size": "132",
+            "root": "0x1c8a1927ae56730b3cc92d385ef893830904c726c858ddcf99edff666d0a035a"
+          },
+          "NOTE_HASH_TREE": {
+            "depth": 42,
+            "size": "4",
+            "root": "0x12ec9b028e2bb489d98ff2ec3582a9101e7b613d4aa57f5bbe0127b24580b6dc"
+          },
+          "PUBLIC_DATA_TREE": {
+            "depth": 40,
+            "size": "129",
+            "root": "0x2f323d44825ceeef201dd935e8eb63fb32a98c0452cc0fb6f216902f64773eb5"
+          },
+          "L1_TO_L2_MESSAGE_TREE": {
+            "depth": 36,
+            "size": "1",
+            "root": "0x22c6f7877092ecea5b313b22515e31f2e1e37349b787da10eff298800e3c7c0c"
+          },
+          "ARCHIVE": {
+            "depth": 30,
+            "size": "1",
+            "root": "0x177a4955b31ecaafad999753938a44e526b54c5ba5d536688227f85f15cfbdf5"
+          }
+        }
+      },
+      {
+        "step": 6,
+        "name": "public data insert past the tail",
+        "what": "slot 500, above every key present (the genesis prefill occupies slots 0..127 and step 1 added 145). Measured: the tree grows. Insertion, not update",
+        "upstreamAnchored": false,
+        "trees": {
+          "NULLIFIER_TREE": {
+            "depth": 42,
+            "size": "132",
+            "root": "0x1c8a1927ae56730b3cc92d385ef893830904c726c858ddcf99edff666d0a035a"
+          },
+          "NOTE_HASH_TREE": {
+            "depth": 42,
+            "size": "4",
+            "root": "0x12ec9b028e2bb489d98ff2ec3582a9101e7b613d4aa57f5bbe0127b24580b6dc"
+          },
+          "PUBLIC_DATA_TREE": {
+            "depth": 40,
+            "size": "130",
+            "root": "0x071ca556eaa59951067aa3251141cef9ace970c952352995068269e42c7e2d16"
+          },
+          "L1_TO_L2_MESSAGE_TREE": {
+            "depth": 36,
+            "size": "1",
+            "root": "0x22c6f7877092ecea5b313b22515e31f2e1e37349b787da10eff298800e3c7c0c"
+          },
+          "ARCHIVE": {
+            "depth": 30,
+            "size": "1",
+            "root": "0x177a4955b31ecaafad999753938a44e526b54c5ba5d536688227f85f15cfbdf5"
+          }
+        }
+      },
+      {
+        "step": 7,
+        "name": "public data insert, interleaved",
+        "what": "slot 300, between 145 and 500 — the public-data mirror of step 4: the insert must rewrite an existing low leaf rather than append past the tail",
+        "upstreamAnchored": false,
+        "trees": {
+          "NULLIFIER_TREE": {
+            "depth": 42,
+            "size": "132",
+            "root": "0x1c8a1927ae56730b3cc92d385ef893830904c726c858ddcf99edff666d0a035a"
+          },
+          "NOTE_HASH_TREE": {
+            "depth": 42,
+            "size": "4",
+            "root": "0x12ec9b028e2bb489d98ff2ec3582a9101e7b613d4aa57f5bbe0127b24580b6dc"
+          },
+          "PUBLIC_DATA_TREE": {
+            "depth": 40,
+            "size": "131",
+            "root": "0x183b37ceb5cd820acccd3d1f9ab726159114827f03e4c1f271f3996737a9c8b7"
+          },
+          "L1_TO_L2_MESSAGE_TREE": {
+            "depth": 36,
+            "size": "1",
+            "root": "0x22c6f7877092ecea5b313b22515e31f2e1e37349b787da10eff298800e3c7c0c"
+          },
+          "ARCHIVE": {
+            "depth": 30,
+            "size": "1",
+            "root": "0x177a4955b31ecaafad999753938a44e526b54c5ba5d536688227f85f15cfbdf5"
+          }
+        }
+      },
+      {
+        "step": 8,
+        "name": "l1-to-l2 batch",
+        "what": "two L1->L2 messages, so the fourth tree moves more than once in the sequence",
+        "upstreamAnchored": false,
+        "trees": {
+          "NULLIFIER_TREE": {
+            "depth": 42,
+            "size": "132",
+            "root": "0x1c8a1927ae56730b3cc92d385ef893830904c726c858ddcf99edff666d0a035a"
+          },
+          "NOTE_HASH_TREE": {
+            "depth": 42,
+            "size": "4",
+            "root": "0x12ec9b028e2bb489d98ff2ec3582a9101e7b613d4aa57f5bbe0127b24580b6dc"
+          },
+          "PUBLIC_DATA_TREE": {
+            "depth": 40,
+            "size": "131",
+            "root": "0x183b37ceb5cd820acccd3d1f9ab726159114827f03e4c1f271f3996737a9c8b7"
+          },
+          "L1_TO_L2_MESSAGE_TREE": {
+            "depth": 36,
+            "size": "3",
+            "root": "0x21b2d22b186717ff02f5577ded68c78b432a876b95fd9f845a0f35560194b9f2"
+          },
+          "ARCHIVE": {
+            "depth": 30,
+            "size": "1",
+            "root": "0x177a4955b31ecaafad999753938a44e526b54c5ba5d536688227f85f15cfbdf5"
+          }
+        }
+      }
+    ],
+    "checkpoint": {
+      "what": "create a checkpoint, mutate the note-hash and nullifier trees inside it, revert, and require every root to return exactly",
+      "beforeCheckpoint": {
+        "NULLIFIER_TREE": {
+          "depth": 42,
+          "size": "132",
+          "root": "0x1c8a1927ae56730b3cc92d385ef893830904c726c858ddcf99edff666d0a035a"
+        },
+        "NOTE_HASH_TREE": {
+          "depth": 42,
+          "size": "4",
+          "root": "0x12ec9b028e2bb489d98ff2ec3582a9101e7b613d4aa57f5bbe0127b24580b6dc"
+        },
+        "PUBLIC_DATA_TREE": {
+          "depth": 40,
+          "size": "131",
+          "root": "0x183b37ceb5cd820acccd3d1f9ab726159114827f03e4c1f271f3996737a9c8b7"
+        },
+        "L1_TO_L2_MESSAGE_TREE": {
+          "depth": 36,
+          "size": "3",
+          "root": "0x21b2d22b186717ff02f5577ded68c78b432a876b95fd9f845a0f35560194b9f2"
+        },
+        "ARCHIVE": {
+          "depth": 30,
+          "size": "1",
+          "root": "0x177a4955b31ecaafad999753938a44e526b54c5ba5d536688227f85f15cfbdf5"
+        }
+      },
+      "insideCheckpoint": {
+        "NULLIFIER_TREE": {
+          "depth": 42,
+          "size": "133",
+          "root": "0x178957829a2fd091a62e92992aafa7fe2935ccd44dcf74fe8b374d2913abe334"
+        },
+        "NOTE_HASH_TREE": {
+          "depth": 42,
+          "size": "5",
+          "root": "0x116c013c9a9f1d71047e74ff1077b32b473097c5456e3eef33a203ac28a23590"
+        },
+        "PUBLIC_DATA_TREE": {
+          "depth": 40,
+          "size": "131",
+          "root": "0x183b37ceb5cd820acccd3d1f9ab726159114827f03e4c1f271f3996737a9c8b7"
+        },
+        "L1_TO_L2_MESSAGE_TREE": {
+          "depth": 36,
+          "size": "3",
+          "root": "0x21b2d22b186717ff02f5577ded68c78b432a876b95fd9f845a0f35560194b9f2"
+        },
+        "ARCHIVE": {
+          "depth": 30,
+          "size": "1",
+          "root": "0x177a4955b31ecaafad999753938a44e526b54c5ba5d536688227f85f15cfbdf5"
+        }
+      },
+      "afterRevert": {
+        "NULLIFIER_TREE": {
+          "depth": 42,
+          "size": "132",
+          "root": "0x1c8a1927ae56730b3cc92d385ef893830904c726c858ddcf99edff666d0a035a"
+        },
+        "NOTE_HASH_TREE": {
+          "depth": 42,
+          "size": "4",
+          "root": "0x12ec9b028e2bb489d98ff2ec3582a9101e7b613d4aa57f5bbe0127b24580b6dc"
+        },
+        "PUBLIC_DATA_TREE": {
+          "depth": 40,
+          "size": "131",
+          "root": "0x183b37ceb5cd820acccd3d1f9ab726159114827f03e4c1f271f3996737a9c8b7"
+        },
+        "L1_TO_L2_MESSAGE_TREE": {
+          "depth": 36,
+          "size": "3",
+          "root": "0x21b2d22b186717ff02f5577ded68c78b432a876b95fd9f845a0f35560194b9f2"
+        },
+        "ARCHIVE": {
+          "depth": 30,
+          "size": "1",
+          "root": "0x177a4955b31ecaafad999753938a44e526b54c5ba5d536688227f85f15cfbdf5"
+        }
+      }
+    },
+    "noteHashZeroSiblingPath": [
+      "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "0x19f1a0c09db4cd026f686e9c8fb45501a9fefb4eb1b4c6c328a51343a0094eeb",
+      "0x14e4b977b2203b70e6ee1c2456eb7114d090fe4b907f631eecd0919fed432e7d",
+      "0x30105bad22ddcc508b739b7c9ad87a561c569ff5cb0098a853c1c4ac21b7a037",
+      "0x1e20ad4181460cbfdc74ca773502c59b890f184efe300ebad895956d318422da",
+      "0x1434e6e2d5db1053ab8a3be58704509c799ee17e109c77f441f7bf1755400249",
+      "0x119f56a2e8423a7feaab49b9b5dcbadec0648dfa4096b61b6774ea33ae29dc7f",
+      "0x221cf368938c74e4fced9dfb2a8e37cd8a6c57d21385c249f0b5c2412341287f",
+      "0x2c5214dfc4d70d2619fce2a7e02ddcf380576dca42b66c9215c7d8d1ec154116",
+      "0x13abc9bba431e6930c169f5daeb60aedbb27d7618c7ff88b3b4ec1c6de1d6bb8",
+      "0x0d04c63f36bd168215c9b09a227c7e8d3ad48e2f11b8202fd07c524bd30ee88f",
+      "0x042c72d0ca208f0631ed947050258333518c26059f0a2ef041e933b1b2a6d8ad",
+      "0x00c21235cdc5d4241fab782680421cdd99c088a3b48a740d8289d0e67b2ee5da",
+      "0x1077e8e59029b12e321c47a8a2a25283e50664b6ca1dd766a83828ddc6a22bb9",
+      "0x15b7bb46f75a6826da53df52c290eda3ddea8924becad6e9a3c08e4eb9a6f604",
+      "0x0f092097aaee3e41e55706add0701d0eff7a0c972a909dcbc915a478cbc8f122",
+      "0x2cf33c7d57e1ff8f3d98aabae3092befa8e92274da5e6d324ba0b8839889d27c",
+      "0x137e350aaf8bab893d768cb6e14bc5464877833efbb8c7091da9ecc7a96bc7b7",
+      "0x016505cc51b09b257b8c96b5fb20e90bd9e68416286a904d9f86b805e5a89e13",
+      "0x04d6e1009a70843f5bad89c59765d09421aad04e3276fc90f2a459565057978a",
+      "0x093a8215cd7e725a45949f4d6d4faec9d078221f09d26a27d61e4f0bf670a580",
+      "0x1704545cd66b0aa172d2c355fac161d17d7ea42f0132d24708762b544fa17357",
+      "0x2db6ed73abe6fc42bde50d4422c3e0c81def268d702b9256b7e67cafbbd0325c",
+      "0x21868e4f8cdcbcb9754d297edc2a361754517465c469017e784a4347f9eb6644",
+      "0x1adbb821ee5346b1979da8ddbb58789f5ef90c31ece8f0c543c221a3ef0f0aed",
+      "0x2058aa06a8e23bc53a625831ce1df1aa8d8f01924ad840607f33805aee179d90",
+      "0x1002be9f0852a234617c837e49555e328bb19a71fcea0ff34368901cee52c85e",
+      "0x2b238a0d25b834a061e45d817289ab221d13fd0e4cc7adf72d91d54c280f1aa0",
+      "0x15fada375c113bd526097e297b422ffb59f54a5451e5b70d4a4b028dc65208d1",
+      "0x2aad701e57c7069cb4e148d971c0eae9ac7429d7d833c51d87875ead0c5aca3c",
+      "0x2403f18ba27f090c40c95fc6724d67b4b7d537b967ee15656c79e55284df9d6b",
+      "0x13404ebc0eed291ffb14cad19114bad8df35bae99793ea99e4dde966cb4e53ad",
+      "0x006a1008132293c19aafbe7130eda035bd1b90065032894071b1f390f4946844",
+      "0x03ff3b6c066342b657a8583acef6fadbc8e390be6e1fff8dc1526a05f16f2005",
+      "0x294aa2b063a035c26fe57d58d15931cdc79a6a94edf097d5347277f6e4b0f9da",
+      "0x0aced6fe68143f4c7acd16345a8c1bb50c51a0692b760eb48728feb923d90757",
+      "0x0fef6d80d31109ddb56d6b3f607cbc9c0af0bff3ea0d43e8f278983c64c11f7a",
+      "0x0fb1190957c4847e5412ba94686b56e557f269293217c86ccc09e53ea7406520",
+      "0x2cd78d5270883d39def01e317fa0aef1d0d406764b321d15241da9da7472bf6d",
+      "0x1488a5903b335b86e24f9ce4bee10b41643b84a3fa1fe4307573c6b48b45f056",
+      "0x1f50c6ba9ab4231d03e023e84aed1ee53f9570a85b0c3d27dce4732012bacb2f",
+      "0x08c286d5f8584ac20b64b63f763d4ec37d3fa13244234a3280f34bbc70a32d53"
+    ],
+    "genesisPrefill": {
+      "NULLIFIER_TREE": [
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000001",
+          "nextIndex": "1"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000001"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000002",
+          "nextIndex": "2"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000002"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000003",
+          "nextIndex": "3"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000003"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000004",
+          "nextIndex": "4"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000004"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000005",
+          "nextIndex": "5"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000005"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000006",
+          "nextIndex": "6"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000006"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000007",
+          "nextIndex": "7"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000007"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000008",
+          "nextIndex": "8"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000008"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000009",
+          "nextIndex": "9"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000009"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000000a",
+          "nextIndex": "10"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000000a"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000000b",
+          "nextIndex": "11"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000000b"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000000c",
+          "nextIndex": "12"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000000c"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000000d",
+          "nextIndex": "13"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000000d"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000000e",
+          "nextIndex": "14"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000000e"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000000f",
+          "nextIndex": "15"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000000f"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000010",
+          "nextIndex": "16"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000010"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000011",
+          "nextIndex": "17"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000011"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000012",
+          "nextIndex": "18"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000012"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000013",
+          "nextIndex": "19"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000013"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000014",
+          "nextIndex": "20"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000014"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000015",
+          "nextIndex": "21"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000015"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000016",
+          "nextIndex": "22"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000016"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000017",
+          "nextIndex": "23"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000017"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000018",
+          "nextIndex": "24"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000018"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000019",
+          "nextIndex": "25"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000019"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000001a",
+          "nextIndex": "26"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000001a"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000001b",
+          "nextIndex": "27"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000001b"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000001c",
+          "nextIndex": "28"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000001c"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000001d",
+          "nextIndex": "29"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000001d"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000001e",
+          "nextIndex": "30"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000001e"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000001f",
+          "nextIndex": "31"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000001f"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000020",
+          "nextIndex": "32"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000020"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000021",
+          "nextIndex": "33"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000021"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000022",
+          "nextIndex": "34"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000022"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000023",
+          "nextIndex": "35"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000023"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000024",
+          "nextIndex": "36"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000024"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000025",
+          "nextIndex": "37"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000025"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000026",
+          "nextIndex": "38"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000026"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000027",
+          "nextIndex": "39"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000027"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000028",
+          "nextIndex": "40"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000028"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000029",
+          "nextIndex": "41"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000029"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000002a",
+          "nextIndex": "42"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000002a"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000002b",
+          "nextIndex": "43"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000002b"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000002c",
+          "nextIndex": "44"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000002c"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000002d",
+          "nextIndex": "45"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000002d"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000002e",
+          "nextIndex": "46"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000002e"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000002f",
+          "nextIndex": "47"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000002f"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000030",
+          "nextIndex": "48"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000030"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000031",
+          "nextIndex": "49"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000031"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000032",
+          "nextIndex": "50"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000032"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000033",
+          "nextIndex": "51"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000033"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000034",
+          "nextIndex": "52"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000034"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000035",
+          "nextIndex": "53"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000035"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000036",
+          "nextIndex": "54"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000036"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000037",
+          "nextIndex": "55"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000037"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000038",
+          "nextIndex": "56"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000038"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000039",
+          "nextIndex": "57"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000039"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000003a",
+          "nextIndex": "58"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000003a"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000003b",
+          "nextIndex": "59"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000003b"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000003c",
+          "nextIndex": "60"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000003c"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000003d",
+          "nextIndex": "61"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000003d"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000003e",
+          "nextIndex": "62"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000003e"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000003f",
+          "nextIndex": "63"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000003f"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000040",
+          "nextIndex": "64"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000040"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000041",
+          "nextIndex": "65"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000041"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000042",
+          "nextIndex": "66"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000042"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000043",
+          "nextIndex": "67"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000043"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000044",
+          "nextIndex": "68"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000044"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000045",
+          "nextIndex": "69"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000045"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000046",
+          "nextIndex": "70"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000046"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000047",
+          "nextIndex": "71"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000047"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000048",
+          "nextIndex": "72"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000048"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000049",
+          "nextIndex": "73"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000049"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000004a",
+          "nextIndex": "74"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000004a"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000004b",
+          "nextIndex": "75"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000004b"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000004c",
+          "nextIndex": "76"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000004c"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000004d",
+          "nextIndex": "77"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000004d"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000004e",
+          "nextIndex": "78"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000004e"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000004f",
+          "nextIndex": "79"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000004f"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000050",
+          "nextIndex": "80"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000050"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000051",
+          "nextIndex": "81"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000051"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000052",
+          "nextIndex": "82"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000052"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000053",
+          "nextIndex": "83"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000053"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000054",
+          "nextIndex": "84"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000054"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000055",
+          "nextIndex": "85"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000055"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000056",
+          "nextIndex": "86"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000056"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000057",
+          "nextIndex": "87"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000057"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000058",
+          "nextIndex": "88"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000058"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000059",
+          "nextIndex": "89"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000059"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000005a",
+          "nextIndex": "90"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000005a"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000005b",
+          "nextIndex": "91"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000005b"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000005c",
+          "nextIndex": "92"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000005c"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000005d",
+          "nextIndex": "93"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000005d"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000005e",
+          "nextIndex": "94"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000005e"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000005f",
+          "nextIndex": "95"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000005f"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000060",
+          "nextIndex": "96"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000060"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000061",
+          "nextIndex": "97"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000061"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000062",
+          "nextIndex": "98"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000062"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000063",
+          "nextIndex": "99"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000063"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000064",
+          "nextIndex": "100"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000064"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000065",
+          "nextIndex": "101"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000065"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000066",
+          "nextIndex": "102"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000066"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000067",
+          "nextIndex": "103"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000067"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000068",
+          "nextIndex": "104"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000068"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000069",
+          "nextIndex": "105"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000069"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000006a",
+          "nextIndex": "106"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000006a"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000006b",
+          "nextIndex": "107"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000006b"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000006c",
+          "nextIndex": "108"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000006c"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000006d",
+          "nextIndex": "109"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000006d"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000006e",
+          "nextIndex": "110"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000006e"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000006f",
+          "nextIndex": "111"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000006f"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000070",
+          "nextIndex": "112"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000070"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000071",
+          "nextIndex": "113"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000071"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000072",
+          "nextIndex": "114"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000072"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000073",
+          "nextIndex": "115"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000073"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000074",
+          "nextIndex": "116"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000074"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000075",
+          "nextIndex": "117"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000075"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000076",
+          "nextIndex": "118"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000076"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000077",
+          "nextIndex": "119"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000077"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000078",
+          "nextIndex": "120"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000078"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000079",
+          "nextIndex": "121"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x0000000000000000000000000000000000000000000000000000000000000079"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000007a",
+          "nextIndex": "122"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000007a"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000007b",
+          "nextIndex": "123"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000007b"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000007c",
+          "nextIndex": "124"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000007c"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000007d",
+          "nextIndex": "125"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000007d"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000007e",
+          "nextIndex": "126"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000007e"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000007f",
+          "nextIndex": "127"
+        },
+        {
+          "leaf": {
+            "nullifier": "0x000000000000000000000000000000000000000000000000000000000000007f"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "nextIndex": "0"
+        }
+      ],
+      "PUBLIC_DATA_TREE": [
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000001",
+          "nextIndex": "1"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000001",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000002",
+          "nextIndex": "2"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000002",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000003",
+          "nextIndex": "3"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000003",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000004",
+          "nextIndex": "4"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000004",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000005",
+          "nextIndex": "5"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000005",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000006",
+          "nextIndex": "6"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000006",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000007",
+          "nextIndex": "7"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000007",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000008",
+          "nextIndex": "8"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000008",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000009",
+          "nextIndex": "9"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000009",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000000a",
+          "nextIndex": "10"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000000a",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000000b",
+          "nextIndex": "11"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000000b",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000000c",
+          "nextIndex": "12"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000000c",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000000d",
+          "nextIndex": "13"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000000d",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000000e",
+          "nextIndex": "14"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000000e",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000000f",
+          "nextIndex": "15"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000000f",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000010",
+          "nextIndex": "16"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000010",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000011",
+          "nextIndex": "17"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000011",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000012",
+          "nextIndex": "18"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000012",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000013",
+          "nextIndex": "19"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000013",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000014",
+          "nextIndex": "20"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000014",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000015",
+          "nextIndex": "21"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000015",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000016",
+          "nextIndex": "22"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000016",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000017",
+          "nextIndex": "23"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000017",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000018",
+          "nextIndex": "24"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000018",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000019",
+          "nextIndex": "25"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000019",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000001a",
+          "nextIndex": "26"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000001a",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000001b",
+          "nextIndex": "27"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000001b",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000001c",
+          "nextIndex": "28"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000001c",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000001d",
+          "nextIndex": "29"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000001d",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000001e",
+          "nextIndex": "30"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000001e",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000001f",
+          "nextIndex": "31"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000001f",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000020",
+          "nextIndex": "32"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000020",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000021",
+          "nextIndex": "33"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000021",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000022",
+          "nextIndex": "34"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000022",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000023",
+          "nextIndex": "35"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000023",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000024",
+          "nextIndex": "36"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000024",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000025",
+          "nextIndex": "37"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000025",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000026",
+          "nextIndex": "38"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000026",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000027",
+          "nextIndex": "39"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000027",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000028",
+          "nextIndex": "40"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000028",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000029",
+          "nextIndex": "41"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000029",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000002a",
+          "nextIndex": "42"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000002a",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000002b",
+          "nextIndex": "43"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000002b",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000002c",
+          "nextIndex": "44"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000002c",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000002d",
+          "nextIndex": "45"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000002d",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000002e",
+          "nextIndex": "46"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000002e",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000002f",
+          "nextIndex": "47"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000002f",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000030",
+          "nextIndex": "48"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000030",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000031",
+          "nextIndex": "49"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000031",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000032",
+          "nextIndex": "50"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000032",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000033",
+          "nextIndex": "51"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000033",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000034",
+          "nextIndex": "52"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000034",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000035",
+          "nextIndex": "53"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000035",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000036",
+          "nextIndex": "54"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000036",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000037",
+          "nextIndex": "55"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000037",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000038",
+          "nextIndex": "56"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000038",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000039",
+          "nextIndex": "57"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000039",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000003a",
+          "nextIndex": "58"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000003a",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000003b",
+          "nextIndex": "59"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000003b",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000003c",
+          "nextIndex": "60"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000003c",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000003d",
+          "nextIndex": "61"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000003d",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000003e",
+          "nextIndex": "62"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000003e",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000003f",
+          "nextIndex": "63"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000003f",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000040",
+          "nextIndex": "64"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000040",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000041",
+          "nextIndex": "65"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000041",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000042",
+          "nextIndex": "66"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000042",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000043",
+          "nextIndex": "67"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000043",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000044",
+          "nextIndex": "68"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000044",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000045",
+          "nextIndex": "69"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000045",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000046",
+          "nextIndex": "70"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000046",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000047",
+          "nextIndex": "71"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000047",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000048",
+          "nextIndex": "72"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000048",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000049",
+          "nextIndex": "73"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000049",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000004a",
+          "nextIndex": "74"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000004a",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000004b",
+          "nextIndex": "75"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000004b",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000004c",
+          "nextIndex": "76"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000004c",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000004d",
+          "nextIndex": "77"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000004d",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000004e",
+          "nextIndex": "78"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000004e",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000004f",
+          "nextIndex": "79"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000004f",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000050",
+          "nextIndex": "80"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000050",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000051",
+          "nextIndex": "81"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000051",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000052",
+          "nextIndex": "82"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000052",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000053",
+          "nextIndex": "83"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000053",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000054",
+          "nextIndex": "84"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000054",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000055",
+          "nextIndex": "85"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000055",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000056",
+          "nextIndex": "86"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000056",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000057",
+          "nextIndex": "87"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000057",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000058",
+          "nextIndex": "88"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000058",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000059",
+          "nextIndex": "89"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000059",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000005a",
+          "nextIndex": "90"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000005a",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000005b",
+          "nextIndex": "91"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000005b",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000005c",
+          "nextIndex": "92"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000005c",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000005d",
+          "nextIndex": "93"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000005d",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000005e",
+          "nextIndex": "94"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000005e",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000005f",
+          "nextIndex": "95"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000005f",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000060",
+          "nextIndex": "96"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000060",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000061",
+          "nextIndex": "97"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000061",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000062",
+          "nextIndex": "98"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000062",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000063",
+          "nextIndex": "99"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000063",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000064",
+          "nextIndex": "100"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000064",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000065",
+          "nextIndex": "101"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000065",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000066",
+          "nextIndex": "102"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000066",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000067",
+          "nextIndex": "103"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000067",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000068",
+          "nextIndex": "104"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000068",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000069",
+          "nextIndex": "105"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000069",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000006a",
+          "nextIndex": "106"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000006a",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000006b",
+          "nextIndex": "107"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000006b",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000006c",
+          "nextIndex": "108"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000006c",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000006d",
+          "nextIndex": "109"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000006d",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000006e",
+          "nextIndex": "110"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000006e",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000006f",
+          "nextIndex": "111"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000006f",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000070",
+          "nextIndex": "112"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000070",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000071",
+          "nextIndex": "113"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000071",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000072",
+          "nextIndex": "114"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000072",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000073",
+          "nextIndex": "115"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000073",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000074",
+          "nextIndex": "116"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000074",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000075",
+          "nextIndex": "117"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000075",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000076",
+          "nextIndex": "118"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000076",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000077",
+          "nextIndex": "119"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000077",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000078",
+          "nextIndex": "120"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000078",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000079",
+          "nextIndex": "121"
+        },
+        {
+          "leaf": {
+            "slot": "0x0000000000000000000000000000000000000000000000000000000000000079",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000007a",
+          "nextIndex": "122"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000007a",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000007b",
+          "nextIndex": "123"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000007b",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000007c",
+          "nextIndex": "124"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000007c",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000007d",
+          "nextIndex": "125"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000007d",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000007e",
+          "nextIndex": "126"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000007e",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x000000000000000000000000000000000000000000000000000000000000007f",
+          "nextIndex": "127"
+        },
+        {
+          "leaf": {
+            "slot": "0x000000000000000000000000000000000000000000000000000000000000007f",
+            "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "nextIndex": "0"
+        }
+      ]
+    }
+  },
+  "derived": {
+    "note": "The empty-tree-root recurrence, captured at every height so both ends can be compared against two unrelated upstream publications.",
+    "domainSeparator": 2982624097,
+    "emptyRootByHeight": {
+      "1": "0x19f1a0c09db4cd026f686e9c8fb45501a9fefb4eb1b4c6c328a51343a0094eeb",
+      "2": "0x14e4b977b2203b70e6ee1c2456eb7114d090fe4b907f631eecd0919fed432e7d",
+      "3": "0x30105bad22ddcc508b739b7c9ad87a561c569ff5cb0098a853c1c4ac21b7a037",
+      "4": "0x1e20ad4181460cbfdc74ca773502c59b890f184efe300ebad895956d318422da",
+      "5": "0x1434e6e2d5db1053ab8a3be58704509c799ee17e109c77f441f7bf1755400249",
+      "6": "0x119f56a2e8423a7feaab49b9b5dcbadec0648dfa4096b61b6774ea33ae29dc7f",
+      "7": "0x221cf368938c74e4fced9dfb2a8e37cd8a6c57d21385c249f0b5c2412341287f",
+      "8": "0x2c5214dfc4d70d2619fce2a7e02ddcf380576dca42b66c9215c7d8d1ec154116",
+      "9": "0x13abc9bba431e6930c169f5daeb60aedbb27d7618c7ff88b3b4ec1c6de1d6bb8",
+      "10": "0x0d04c63f36bd168215c9b09a227c7e8d3ad48e2f11b8202fd07c524bd30ee88f",
+      "11": "0x042c72d0ca208f0631ed947050258333518c26059f0a2ef041e933b1b2a6d8ad",
+      "12": "0x00c21235cdc5d4241fab782680421cdd99c088a3b48a740d8289d0e67b2ee5da",
+      "13": "0x1077e8e59029b12e321c47a8a2a25283e50664b6ca1dd766a83828ddc6a22bb9",
+      "14": "0x15b7bb46f75a6826da53df52c290eda3ddea8924becad6e9a3c08e4eb9a6f604",
+      "15": "0x0f092097aaee3e41e55706add0701d0eff7a0c972a909dcbc915a478cbc8f122",
+      "16": "0x2cf33c7d57e1ff8f3d98aabae3092befa8e92274da5e6d324ba0b8839889d27c",
+      "17": "0x137e350aaf8bab893d768cb6e14bc5464877833efbb8c7091da9ecc7a96bc7b7",
+      "18": "0x016505cc51b09b257b8c96b5fb20e90bd9e68416286a904d9f86b805e5a89e13",
+      "19": "0x04d6e1009a70843f5bad89c59765d09421aad04e3276fc90f2a459565057978a",
+      "20": "0x093a8215cd7e725a45949f4d6d4faec9d078221f09d26a27d61e4f0bf670a580",
+      "21": "0x1704545cd66b0aa172d2c355fac161d17d7ea42f0132d24708762b544fa17357",
+      "22": "0x2db6ed73abe6fc42bde50d4422c3e0c81def268d702b9256b7e67cafbbd0325c",
+      "23": "0x21868e4f8cdcbcb9754d297edc2a361754517465c469017e784a4347f9eb6644",
+      "24": "0x1adbb821ee5346b1979da8ddbb58789f5ef90c31ece8f0c543c221a3ef0f0aed",
+      "25": "0x2058aa06a8e23bc53a625831ce1df1aa8d8f01924ad840607f33805aee179d90",
+      "26": "0x1002be9f0852a234617c837e49555e328bb19a71fcea0ff34368901cee52c85e",
+      "27": "0x2b238a0d25b834a061e45d817289ab221d13fd0e4cc7adf72d91d54c280f1aa0",
+      "28": "0x15fada375c113bd526097e297b422ffb59f54a5451e5b70d4a4b028dc65208d1",
+      "29": "0x2aad701e57c7069cb4e148d971c0eae9ac7429d7d833c51d87875ead0c5aca3c",
+      "30": "0x2403f18ba27f090c40c95fc6724d67b4b7d537b967ee15656c79e55284df9d6b",
+      "31": "0x13404ebc0eed291ffb14cad19114bad8df35bae99793ea99e4dde966cb4e53ad",
+      "32": "0x006a1008132293c19aafbe7130eda035bd1b90065032894071b1f390f4946844",
+      "33": "0x03ff3b6c066342b657a8583acef6fadbc8e390be6e1fff8dc1526a05f16f2005",
+      "34": "0x294aa2b063a035c26fe57d58d15931cdc79a6a94edf097d5347277f6e4b0f9da",
+      "35": "0x0aced6fe68143f4c7acd16345a8c1bb50c51a0692b760eb48728feb923d90757",
+      "36": "0x0fef6d80d31109ddb56d6b3f607cbc9c0af0bff3ea0d43e8f278983c64c11f7a",
+      "37": "0x0fb1190957c4847e5412ba94686b56e557f269293217c86ccc09e53ea7406520",
+      "38": "0x2cd78d5270883d39def01e317fa0aef1d0d406764b321d15241da9da7472bf6d",
+      "39": "0x1488a5903b335b86e24f9ce4bee10b41643b84a3fa1fe4307573c6b48b45f056",
+      "40": "0x1f50c6ba9ab4231d03e023e84aed1ee53f9570a85b0c3d27dce4732012bacb2f",
+      "41": "0x08c286d5f8584ac20b64b63f763d4ec37d3fa13244234a3280f34bbc70a32d53",
+      "42": "0x2590f2aab19dd791700b4a43d3f52bb88ef2409a3731da8e848663559202e4c6"
+    }
+  }
+}
