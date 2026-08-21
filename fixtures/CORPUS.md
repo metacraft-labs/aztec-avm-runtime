@@ -436,22 +436,58 @@ Measured, both experiments run:
 | experiment | result |
 |---|---|
 | enable the `CppVsTs` arm as-is | **142 failed / 142**, 144 s |
-| …plus guard the two revert-reason asserts on "did C++ return a reason at all" | **142 passed / 142**, 145 s |
+| …plus a blanket skip of the two revert-reason asserts when C++ returns no reason | 142 passed / 142, 145 s — **withdrawn, see below** |
+| …plus the *checked* out-of-gas exemption actually shipped | **140 passed / 2 failed**, 153 s |
 
-All 142 first-round failures hit the *same* assertion
-(`cpp_vs_ts_public_tx_simulator.ts:168`, the structured revert-reason comparison) — and everything
-before it passed for every case: `revertCode`, **all four gas dimensions**, `publicTxEffect` and the
-public-inputs buffer. Root cause confirmed with `LOG_LEVEL=debug`: the C++ side returns **no revert
-reason at all** for exceptional halts, while TS returns the full structure. That is upstream's own
-documented limitation, in a comment three lines above the assert — *"Messages are still not ok for
-exceptional halts (they are not plumbed in C++)"* — and opcode spam ends in out-of-gas **by
-design**, so every case hits it. It is an artifact, not a semantic divergence.
+All 142 first-round failures hit the *same* assertion (the structured revert-reason comparison) —
+and everything before it passed for every case: `revertCode`, **all four gas dimensions**,
+`publicTxEffect` and the public-inputs buffer.
 
-**With that guard, the differential surface goes from 74 transactions to 216**, covering
+### The blanket skip was wrong, and its "142 passed" is withdrawn
+
+The first guard skipped both revert-reason asserts whenever C++ returned no reason at all, on the
+stated reasoning that C++ does not plumb revert metadata for *exceptional halts* — upstream's own
+comment three lines above the assert. **That reasoning does not survive measurement.**
+
+Probe instrumentation over `opcode_spam` + `custom_bc` + `token` + `amm` + `deployments`
+(2026-08-21) shows the C++ reason is absent only for **out-of-gas** halts. Every other exceptional
+halt in the corpus — invalid opcode, invalid tag, addressing errors, PC out of range, truncated
+instruction — **does** carry a C++ reason, and those comparisons pass in full. Upstream's comment
+is about message *text* differing, and the text is already excluded from the comparison.
+
+So the shipped guard is conditioned on out-of-gas, and it is not a skip: when C++ returns no reason
+the oracle **asserts** that the TS reason is the documented out-of-gas one
+(`OutOfGasError`, `avm/errors.ts:125`). That converts a silent exemption into a checked claim.
+
+**It immediately caught two divergences the blanket skip reported as green:**
+
+| case | TS | C++ |
+|---|---|---|
+| `SENDL2TOL1MSG` | `SENDL2TOL1MSG: Recipient address is too large` | no reason |
+| `REVERT_8` | `Assertion failed: ` — `revertReasonFromExplicitRevert`, an **explicit REVERT opcode**, not an exceptional halt at all | no reason |
+
+Neither is out-of-gas, and the second is outside upstream's documented limitation entirely. Both
+are left **failing**: they are findings, and candidates for an upstream report. 140/142 is the
+honest number.
+
+### The 216 are not 216 equally strong comparisons
+
+**The differential surface goes from 74 transactions to 216**, covering
 ADD/SUB/MUL/DIV/FDIV/EQ/LT/LTE/AND/OR/XOR/NOT/SHL/SHR/CAST/MOV/SET/JUMP/JUMPI/INTERNALCALL/
 INTERNALRETURN/SSTORE/SLOAD/EMITNOTEHASH/EMITNULLIFIER/DEBUGLOG/POSEIDON2/SHA256COMPRESSION/
-KECCAKF1600/ECADD/TORADIXBE with per-tag variants, for 145 s of wall time. Cheapest coverage
-available anywhere in the corpus. The guard is marked `EXPERIMENT` in-source.
+KECCAKF1600/ECADD/TORADIXBE with per-tag variants, for ~153 s of wall time. Still the cheapest
+coverage available anywhere in the corpus — but read the caveat.
+
+**The added 142 are blind to gas divergence.** Mutation-tested: adding +1 L2 gas to *every* opcode
+in the TS gas table is caught in `custom_bc`/`token` at the `totalGas` assertion, and is **not**
+caught anywhere in `opcode_spam`. The reason is structural — opcode-spam transactions run until
+they exhaust their gas limit, so both simulators consume exactly the limit no matter what the
+per-opcode cost is, and the gas assertions compare two identical saturated totals. Since gas is the
+single most valuable thing Tier A checks, the 142 are materially weaker than the original 74.
+
+The three mutations that *are* caught, so the arm is not vacuous: a shifted TS noir call stack
+(11 failures in `custom_bc`), a changed TS out-of-gas message (fires on every spam case), and the
+gas mutation in the non-spam suites. Both edits are marked as local deviations in-source.
 
 ---
 
