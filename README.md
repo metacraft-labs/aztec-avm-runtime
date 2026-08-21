@@ -33,7 +33,12 @@ tested with `npm install`, with no barretenberg C++ build, no Rust/wasm-bindgen 
 | `browser-probe/` | esbuild browser-bundle probe and its node-builtin shims |
 | `../aztec-packages` | the `metacraft-labs/aztec-packages` fork, branch `aztec-avm-runtime` — a **workspace-root sibling**, registered in the workspace manifests alongside this repo (it used to live at `upstream/aztec-packages`) |
 | `upstream/tsavm` | gitignored worktree of the fork at `3a68d68ac2`, the commit before the TS AVM was deleted |
-| `verification/` | the M0 verification checks; see `just --list` |
+| `verification/` | the M0 and M1 verification checks; see `just --list` |
+| `REUSE-INVENTORY.md` | **the reuse decision for every Aztec component this runtime touches**, with a reason — and a specific rejection reason wherever we build or replace |
+| `PROVENANCE.md` | the machine-checked mapping of every vendored file to its upstream path and commit; the input `just check-drift` reads |
+| `pins.json` / `PINS.md` | the single authority for every upstream pin, and the policy for moving it |
+| `DRIFT.md` | the drift ledger: every place two pinned things disagree, opened when observed rather than when fixed |
+| `tools/` | the vendoring, re-pin and constants-codegen machinery the checks drive |
 
 > Working in this checkout alongside other people or agents? Read
 > [`AGENTS.md`](AGENTS.md) first — it is short, and it exists because two agents
@@ -63,7 +68,11 @@ Every edit to the vendored tree is marked `SPIKE` in-source. There are three.
 
 `drift/` additionally carries one mechanical rename across 26 files,
 `AztecAddress.from{Field,BigInt,Number,String}` → `from…Unsafe`. That rename is the
-**entire** API drift between the deletion and upstream master eight weeks later.
+**entire** API drift between the deletion and upstream master eight weeks later — and since M1 it is
+a *recorded transformation* rather than a one-off sed: `drift/src` is regenerated from `spike/src`
+by `just regen-drift`, and `just check-drift` regenerates it into a scratch directory and requires
+byte equality. If a future nightly needs a second edit, that check fails until the second edit is
+recorded in `PROVENANCE.md`.
 
 ## Headline results
 
