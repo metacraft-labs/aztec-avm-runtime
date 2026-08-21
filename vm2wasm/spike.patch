@@ -1,11 +1,15 @@
-From ca86ff57bd17f44ff5364bac3b55de54c4d92141 Mon Sep 17 00:00:00 2001
+From 1783dfb11a4262e4948bcbb9a5bee4a95ac734e7 Mon Sep 17 00:00:00 2001
 From: vm2-wasm-spike <spike@local>
-Date: Fri, 21 Aug 2026 15:45:03 +0300
+Date: Fri, 21 Aug 2026 16:13:44 +0300
 Subject: [PATCH] spike: vm2_sim compiled and executed on wasm32-wasip1
 
-Complete spike change set against upstream 233d8e0993, as executed.
-Not an upstream submission: see codetracer-specs/upstream-bugs/aztec-* for
-the reviewable patch series this stands behind.
+Complete spike change set against upstream 233d8e0993, as executed. Includes the
+vm2_spike driver (differential transcript incl. tree-snapshot roots) and the
+vm2_sim_tests target that builds upstream's own vm2 simulation test suite --
+neither of which upstream builds in any configuration.
+
+Not an upstream submission: see codetracer-specs/upstream-bugs/aztec-* for the
+reviewable patch series this stands behind.
 ---
  barretenberg/cpp/CMakeLists.txt               |    7 +
  barretenberg/cpp/CMakePresets.json            | 1918 +++++++++--------
@@ -18,14 +22,18 @@ the reviewable patch series this stands behind.
  .../standalone/hybrid_execution.cpp           |   19 +
  .../barretenberg/vm2_reactor/CMakeLists.txt   |    7 +
  .../barretenberg/vm2_reactor/avm_reactor.cpp  |   53 +
- .../src/barretenberg/vm2_spike/CMakeLists.txt |    9 +
- .../src/barretenberg/vm2_spike/avm_run.cpp    |  273 +++
- 13 files changed, 1461 insertions(+), 930 deletions(-)
+ .../src/barretenberg/vm2_spike/CMakeLists.txt |   45 +
+ .../src/barretenberg/vm2_spike/avm_run.cpp    |  292 +++
+ .../barretenberg/vm2_spike/spike_fixtures.cpp |  233 ++
+ .../vm2_spike/spike_test_main.cpp             |   12 +
+ 15 files changed, 1761 insertions(+), 930 deletions(-)
  create mode 100644 barretenberg/cpp/src/barretenberg/vm2/simulation/interfaces/execution_observer.hpp
  create mode 100644 barretenberg/cpp/src/barretenberg/vm2_reactor/CMakeLists.txt
  create mode 100644 barretenberg/cpp/src/barretenberg/vm2_reactor/avm_reactor.cpp
  create mode 100644 barretenberg/cpp/src/barretenberg/vm2_spike/CMakeLists.txt
  create mode 100644 barretenberg/cpp/src/barretenberg/vm2_spike/avm_run.cpp
+ create mode 100644 barretenberg/cpp/src/barretenberg/vm2_spike/spike_fixtures.cpp
+ create mode 100644 barretenberg/cpp/src/barretenberg/vm2_spike/spike_test_main.cpp
 
 diff --git a/barretenberg/cpp/CMakeLists.txt b/barretenberg/cpp/CMakeLists.txt
 index 9d49e5b395..1bb077d7ca 100644
@@ -2291,10 +2299,10 @@ index 0000000000..4a4da152a7
 +}
 diff --git a/barretenberg/cpp/src/barretenberg/vm2_spike/CMakeLists.txt b/barretenberg/cpp/src/barretenberg/vm2_spike/CMakeLists.txt
 new file mode 100644
-index 0000000000..2757b9af65
+index 0000000000..74ff4b904a
 --- /dev/null
 +++ b/barretenberg/cpp/src/barretenberg/vm2_spike/CMakeLists.txt
-@@ -0,0 +1,9 @@
+@@ -0,0 +1,45 @@
 +# SPIKE: a runnable driver over vm2_sim, built identically for native and wasm.
 +file(GLOB VM2_TESTING_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/../vm2/testing/*.cpp)
 +list(FILTER VM2_TESTING_SOURCES EXCLUDE REGEX ".*\\.(test|bench|fuzzer)\\.cpp$")
@@ -2304,12 +2312,48 @@ index 0000000000..2757b9af65
 +add_executable(avm_spike_runner ${CMAKE_CURRENT_SOURCE_DIR}/avm_run.cpp ${VM2_TESTING_SOURCES})
 +target_link_libraries(avm_spike_runner PRIVATE vm2_sim world_state_reference crypto_merkle_tree env)
 +add_dependencies(avm_spike_runner msgpack-c)
++
++# SPIKE (fixtures-and-specs): upstream's OWN vm2 simulation test suite, built against vm2_sim so it
++# can run under wasm32-wasi as well as native. Upstream never builds these: vm2_sim is declared with
++# no TEST_SOURCE_FILES, and the vm2_tests binary that does carry them is gated on `if(AVM)`, which
++# drags in the whole proving stack (sumcheck, stdlib_honk_verifier, goblin_avm) that the wasm build
++# deliberately excludes. So this target is additive, not a re-enablement.
++file(GLOB_RECURSE VM2_SIM_TEST_SOURCES
++  ${CMAKE_CURRENT_SOURCE_DIR}/../vm2/simulation/*.test.cpp
++  ${CMAKE_CURRENT_SOURCE_DIR}/../vm2/common/*.test.cpp
++)
++# bytecode_manager.test.cpp reaches into the proving side; excluded with the same rationale as
++# fixtures.cpp above.
++list(FILTER VM2_SIM_TEST_SOURCES EXCLUDE REGEX ".*/bytecode_manager\\.test\\.cpp$")
++# avm_io.test.cpp is the only user of get_minimal_trace_with_pi(), which is tracegen-bound.
++list(FILTER VM2_SIM_TEST_SOURCES EXCLUDE REGEX ".*/avm_io\\.test\\.cpp$")
++
++add_executable(vm2_sim_tests ${VM2_SIM_TEST_SOURCES} ${VM2_TESTING_SOURCES}
++  ${CMAKE_CURRENT_SOURCE_DIR}/spike_fixtures.cpp
++  ${CMAKE_CURRENT_SOURCE_DIR}/spike_test_main.cpp)
++target_link_libraries(vm2_sim_tests PRIVATE
++  vm2_sim world_state_reference crypto_merkle_tree env
++  GTest::gtest GTest::gmock)
++add_dependencies(vm2_sim_tests msgpack-c)
++
++# SPIKE (fixtures-and-specs) FINDING, recorded rather than fixed:
++# 35 of the 59 suites here trap under wasm32-wasi ("memory access out of bounds" inside
++# testing::Sequence::AddExpectation, or "unreachable"). The failures correlate EXACTLY with gmock
++# usage -- every gmock-free suite passes, every suite using EXPECT_CALL/StrictMock fails. Root cause
++# is gtest's threading layer against wasi-libc's pthread *stubs*: an earlier run surfaced
++#   "Condition has_owner_ && pthread_equal(owner_, pthread_self()) failed"
++# from MutexBase::AssertHeld() inside gmock's global expectation registry, after which the
++# unguarded mutation corrupts linear memory. Rebuilding gtest+gmock with GTEST_HAS_PTHREAD=0 was
++# tried and did NOT help (identical 24/59 suites, 141 tests). This is a TEST-FRAMEWORK limitation,
++# not an AVM one: the AVM itself produces a byte-identical transcript native vs wasm, tree roots
++# included. Fixing it means porting gmock's synchronisation to single-threaded wasm.
++# 3 further suites are gtest DEATH tests, which fork and therefore can never run under WASI.
 diff --git a/barretenberg/cpp/src/barretenberg/vm2_spike/avm_run.cpp b/barretenberg/cpp/src/barretenberg/vm2_spike/avm_run.cpp
 new file mode 100644
-index 0000000000..9e1c9576d9
+index 0000000000..0319086bab
 --- /dev/null
 +++ b/barretenberg/cpp/src/barretenberg/vm2_spike/avm_run.cpp
-@@ -0,0 +1,273 @@
+@@ -0,0 +1,292 @@
 +// SPIKE DRIVER — runs the REAL C++ AVM (vm2_sim) over hand-built AVM bytecode and prints a
 +// deterministic transcript of the result. Built for BOTH native and wasm32-wasi from identical
 +// sources, so the two transcripts can be diffed byte for byte.
@@ -2393,6 +2437,24 @@ index 0000000000..9e1c9576d9
 +    std::cout << "  dataWrites      " << r.public_tx_effect.public_data_writes.size() << "\n";
 +    std::cout << "  publicLogs      " << r.public_tx_effect.public_logs.size() << "\n";
 +    std::cout << "  callFrames      " << r.call_stack_metadata.size() << "\n";
++    // TREE ROOTS. Everything above is an *effect*; a root is the committed state those effects
++    // produced. Two implementations can agree on every effect and still disagree on the resulting
++    // tree — a wrong merkle hash, a wrong domain separator or a wrong indexed-leaf linkage shows up
++    // here and nowhere else. Requires config.collect_public_inputs.
++    if (r.public_inputs.has_value()) {
++        const auto& pi = *r.public_inputs;
++        const auto snap = [](const char* label, const AppendOnlyTreeSnapshot& s) {
++            std::cout << "  " << label << " " << hex(s.root) << " next=" << s.next_available_leaf_index << "\n";
++        };
++        snap("startNoteHashRoot ", pi.start_tree_snapshots.note_hash_tree);
++        snap("startNullifierRoot", pi.start_tree_snapshots.nullifier_tree);
++        snap("startPublicDataRt ", pi.start_tree_snapshots.public_data_tree);
++        snap("startL1ToL2Root   ", pi.start_tree_snapshots.l1_to_l2_message_tree);
++        snap("endNoteHashRoot   ", pi.end_tree_snapshots.note_hash_tree);
++        snap("endNullifierRoot  ", pi.end_tree_snapshots.nullifier_tree);
++        snap("endPublicDataRoot ", pi.end_tree_snapshots.public_data_tree);
++        snap("endL1ToL2Root     ", pi.end_tree_snapshots.l1_to_l2_message_tree);
++    }
 +    for (const auto& [k, v] : std::map<std::string, std::string>(r.stats.begin(), r.stats.end())) {
 +        std::cout << "  stat " << k << " = " << v << "\n";
 +    }
@@ -2543,6 +2605,7 @@ index 0000000000..9e1c9576d9
 +        std::cout << "  address         " << hex(contract.address) << "\n";
 +        auto config = PublicTxSimulationTester::default_config();
 +        config.collect_statistics = true;
++        config.collect_public_inputs = true; // carries start/end tree snapshots — see dump()
 +        // Pass 1: no observer attached (the shipping configuration).
 +        const auto t0 = std::chrono::steady_clock::now();
 +        auto result = tester.simulate_tx({ TestEnqueuedCall{ .contract_address = contract.address } }, config);
@@ -2582,6 +2645,263 @@ index 0000000000..9e1c9576d9
 +#endif
 +    std::cout << "avm-spike-runner: done\n";
 +    return 0;
++}
+diff --git a/barretenberg/cpp/src/barretenberg/vm2_spike/spike_fixtures.cpp b/barretenberg/cpp/src/barretenberg/vm2_spike/spike_fixtures.cpp
+new file mode 100644
+index 0000000000..276ccb7642
+--- /dev/null
++++ b/barretenberg/cpp/src/barretenberg/vm2_spike/spike_fixtures.cpp
+@@ -0,0 +1,233 @@
++// SPIKE (fixtures-and-specs): verbatim copy of vm2/testing/fixtures.cpp with the TWO
++// tracegen-dependent definitions removed (empty_trace, get_minimal_trace_with_pi), so the
++// upstream simulation tests can link against vm2_sim alone -- i.e. without the proving stack
++// that the wasm build excludes. Everything else is byte-for-byte upstream. Apache-2.0.
++#include "barretenberg/vm2/testing/fixtures.hpp"
++
++#include <utility>
++#include <vector>
++
++#include "barretenberg/vm2/common/aztec_types.hpp"
++#include "barretenberg/vm2/common/instruction_spec.hpp"
++#include "barretenberg/vm2/common/memory_types.hpp"
++#include "barretenberg/vm2/common/opcodes.hpp"
++#include "barretenberg/vm2/simulation/events/alu_event.hpp"
++#include "barretenberg/vm2/simulation/lib/contract_crypto.hpp"
++#include "barretenberg/vm2/simulation_helper.hpp"
++#include "barretenberg/vm2/testing/bytecode_builder.hpp"
++#include "barretenberg/vm2/testing/instruction_builder.hpp"
++#include "barretenberg/vm2/testing/public_tx_simulation_tester.hpp"
++
++
++namespace bb::avm2::testing {
++
++using simulation::Instruction;
++using simulation::Operand;
++using simulation::OperandType;
++
++std::vector<FF> random_fields(size_t n)
++{
++    std::vector<FF> fields;
++    fields.reserve(n);
++    for (size_t i = 0; i < n; ++i) {
++        fields.push_back(FF::random_element());
++    }
++    return fields;
++}
++
++std::vector<uint8_t> random_bytes(size_t n)
++{
++    std::vector<uint8_t> bytes;
++    bytes.reserve(n);
++    for (size_t i = 0; i < n; ++i) {
++        bytes.push_back(static_cast<uint8_t>(rand() % 256));
++    }
++    return bytes;
++}
++
++std::vector<ScopedL2ToL1Message> random_l2_to_l1_messages(size_t n)
++{
++    std::vector<ScopedL2ToL1Message> messages;
++    messages.reserve(n);
++    for (size_t i = 0; i < n; ++i) {
++        messages.push_back(ScopedL2ToL1Message{
++            .message =
++                L2ToL1Message{
++                    .recipient = FF::random_element(),
++                    .content = FF::random_element(),
++                },
++            .contract_address = FF::random_element(),
++        });
++    }
++    return messages;
++}
++
++std::vector<PublicCallRequestWithCalldata> random_enqueued_calls(size_t n)
++{
++    std::vector<PublicCallRequestWithCalldata> calls;
++    calls.reserve(n);
++    for (size_t i = 0; i < n; ++i) {
++        calls.push_back(PublicCallRequestWithCalldata{
++            .request{
++                .msg_sender = FF::random_element(),
++                .contract_address = FF::random_element(),
++                .is_static_call = rand() % 2 == 0,
++            },
++            .calldata = random_fields(5),
++        });
++    }
++    return calls;
++}
++
++Operand random_operand(OperandType operand_type)
++{
++    const auto rand_bytes = random_bytes(simulation::testonly::get_operand_type_sizes().at(operand_type));
++    const uint8_t* pos_ptr = &rand_bytes.at(0);
++
++    switch (operand_type) {
++    case OperandType::INDIRECT8: // Irrelevant bits might be toggled but they are ignored during address resolution.
++    case OperandType::UINT8: {
++        uint8_t operand_u8 = 0;
++        serialize::read(pos_ptr, operand_u8);
++        return Operand::from<uint8_t>(operand_u8);
++    }
++    case OperandType::TAG: {
++        uint8_t operand_u8 = 0;
++        serialize::read(pos_ptr, operand_u8);
++        return Operand::from<uint8_t>(operand_u8 % static_cast<uint8_t>(MemoryTag::MAX) +
++                                      1); // Insecure bias but it is fine for testing purposes.
++    }
++    case OperandType::INDIRECT16: // Irrelevant bits might be toggled but they are ignored during address resolution.
++    case OperandType::UINT16: {
++        uint16_t operand_u16 = 0;
++        serialize::read(pos_ptr, operand_u16);
++        return Operand::from<uint16_t>(operand_u16);
++    }
++    case OperandType::UINT32: {
++        uint32_t operand_u32 = 0;
++        serialize::read(pos_ptr, operand_u32);
++        return Operand::from<uint32_t>(operand_u32);
++    }
++    case OperandType::UINT64: {
++        uint64_t operand_u64 = 0;
++        serialize::read(pos_ptr, operand_u64);
++        return Operand::from<uint64_t>(operand_u64);
++    }
++    case OperandType::UINT128: {
++        uint128_t operand_u128 = 0;
++        serialize::read(pos_ptr, operand_u128);
++        return Operand::from<uint128_t>(operand_u128);
++    }
++    case OperandType::FF:
++        return Operand::from<FF>(FF::random_element());
++    }
++
++    // Need this for gcc compilation even though we fully handle the switch cases.
++    // We never reach this point.
++    __builtin_unreachable();
++}
++
++Instruction random_instruction(WireOpCode w_opcode)
++{
++    const auto format = simulation::testonly::get_instruction_wire_formats().at(w_opcode);
++    std::vector<Operand> operands;
++    uint16_t addressing_mode = 0;
++    operands.reserve(format.size()); // Might be a bit larger (due to addressing_mode)
++
++    for (const auto& operand_type : format) {
++        switch (operand_type) {
++        case OperandType::INDIRECT8:
++            addressing_mode = random_operand(operand_type).as<uint8_t>();
++            break;
++        case OperandType::INDIRECT16:
++            addressing_mode = random_operand(operand_type).as<uint16_t>();
++            break;
++        default:
++            operands.emplace_back(random_operand(operand_type));
++            break;
++        }
++    }
++
++    return Instruction{
++        .opcode = w_opcode,
++        .addressing_mode = addressing_mode,
++        .operands = std::move(operands),
++    };
++}
++
++
++ContractInstance random_contract_instance()
++{
++    ContractInstance instance = { .salt = FF::random_element(),
++                                  .deployer = FF::random_element(),
++                                  .current_contract_class_id = FF::random_element(),
++                                  .original_contract_class_id = FF::random_element(),
++                                  .initialization_hash = FF::random_element(),
++                                  .immutables_hash = FF::random_element(),
++                                  .public_keys = PublicKeys{
++                                      .nullifier_key_hash = FF::random_element(),
++                                      .incoming_viewing_key = AffinePoint::random_element(),
++                                      .outgoing_viewing_key_hash = FF::random_element(),
++                                      .tagging_key_hash = FF::random_element(),
++                                      .message_signing_key_hash = FF::random_element(),
++                                      .fallback_key_hash = FF::random_element(),
++                                  } };
++    return instance;
++}
++
++ContractInstance random_protocol_contract_instance()
++{
++    ContractInstance instance = random_contract_instance();
++    instance.current_contract_class_id = instance.original_contract_class_id;
++    return instance;
++}
++
++ContractClass random_contract_class(size_t bytecode_size)
++{
++    return ContractClass{ .id = FF::random_element(),
++                          .artifact_hash = FF::random_element(),
++                          .private_functions_root = FF::random_element(),
++                          .packed_bytecode = random_bytes(bytecode_size) };
++}
++
++AvmProvingInputs get_minimal_proving_inputs()
++{
++    // Minimal program: SET 1 -> [0], SET 2 -> [1], ADD [0]+[1] -> [2], RETURN mem[0..mem[0]) from [2].
++    auto bytecode = BytecodeBuilder()
++                        .add(InstructionBuilder(WireOpCode::SET_8)
++                                 .operand<uint8_t>(0)
++                                 .operand(MemoryTag::U32)
++                                 .operand<uint8_t>(1)
++                                 .build())
++                        .add(InstructionBuilder(WireOpCode::SET_8)
++                                 .operand<uint8_t>(1)
++                                 .operand(MemoryTag::U32)
++                                 .operand<uint8_t>(2)
++                                 .build())
++                        .add(InstructionBuilder(WireOpCode::ADD_8)
++                                 .operand<uint8_t>(0)
++                                 .operand<uint8_t>(1)
++                                 .operand<uint8_t>(2)
++                                 .build())
++                        .add(InstructionBuilder(WireOpCode::RETURN).operand<uint16_t>(0).operand<uint16_t>(2).build())
++                        .build();
++
++    PublicTxSimulationTester tester;
++    const auto deployed = tester.deploy_contract(bytecode);
++
++    PublicSimulatorConfig config = PublicTxSimulationTester::default_config();
++    config.collect_hints = true;
++    config.collect_public_inputs = true;
++    const TxSimulationResult result =
++        tester.simulate_tx({ TestEnqueuedCall{ .contract_address = deployed.address } }, config);
++
++    return AvmProvingInputs{ .public_inputs = result.public_inputs.value(), .hints = result.hints.value() };
++}
++
++
++bool skip_slow_tests()
++{
++    return std::getenv("AVM_SKIP_SLOW_TESTS") != nullptr;
++}
++
++} // namespace bb::avm2::testing
+diff --git a/barretenberg/cpp/src/barretenberg/vm2_spike/spike_test_main.cpp b/barretenberg/cpp/src/barretenberg/vm2_spike/spike_test_main.cpp
+new file mode 100644
+index 0000000000..6f587d5805
+--- /dev/null
++++ b/barretenberg/cpp/src/barretenberg/vm2_spike/spike_test_main.cpp
+@@ -0,0 +1,12 @@
++// SPIKE (fixtures-and-specs): explicit gtest entry point.
++// GTest::gtest_main supplies main() from a static archive; under wasm-ld that archive member is not
++// pulled in (main resolves to an undefined-weak stub and traps at `unreachable`). Defining main in
++// an object file that is always linked fixes it. Identical behaviour to gtest_main.
++#include <gmock/gmock.h>
++#include <gtest/gtest.h>
++
++int main(int argc, char** argv)
++{
++    ::testing::InitGoogleMock(&argc, argv);
++    return RUN_ALL_TESTS();
 +}
 -- 
 2.50.1
