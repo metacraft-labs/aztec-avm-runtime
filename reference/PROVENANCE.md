@@ -1,7 +1,16 @@
 # Aztec reference material — provenance, pinning and staleness
 
+> **This file is the narrative companion for `reference/` only** — what each directory is, how
+> stale it is, and what must not be trusted. The **authoritative, machine-checked mapping** for
+> every vendored file in the repo (this directory and the vendored TypeScript trees alike) is
+> [`../PROVENANCE.md`](../PROVENANCE.md), which the tooling reads; the pins it cites live in
+> [`../pins.json`](../pins.json). Where the two disagree, the machine-checked one wins, because
+> `just check-drift` enforces it.
+
 Everything in this directory is a **vendored, pinned copy** of upstream Aztec material.
-It is reference input, not our code. Do not edit files here; re-vendor instead.
+It is reference input, not our code. Do not edit files here; re-vendor instead. The one exception
+is the generated `BEGIN VENDORED-PROVENANCE` header each file carries: it is written by
+`just vendor-headers` and stripped before any drift comparison, so it can never mask a change.
 
 **Upstream:** `https://github.com/AztecProtocol/aztec-packages`
 **Pinned at:** `233d8e099336c1773b89e939100af047ed9c4f71` (branch `next`, committed **2026-08-19**)
@@ -116,7 +125,13 @@ nobody reads it by accident.
 
 ## Re-vendoring
 
-Everything above came from the pinned clone at
-`/home/zahary/m/blocktracer/aztec-avm-runtime/upstream/aztec-packages`. To refresh, bump the pin,
-re-copy the paths in the table, and **re-check every date in it** — the point of this file is that
-the dates are true.
+Everything above came from the `metacraft-labs/aztec-packages` fork, which since M0 lives as a
+**workspace-root sibling** at `../aztec-packages` (it used to be at
+`aztec-avm-runtime/upstream/aztec-packages`; that path is gone). To refresh: bump the pin in
+`../pins.json`, re-copy the paths in the table, re-run `just vendor-headers` and `just check-drift`,
+and **re-check every date in this file** — the point of it is that the dates are true. The re-pin
+policy, including that this is done on a schedule rather than opportunistically, is `../PINS.md`.
+
+Note that `historical-protocol-specs/` is pinned to a *different* commit from everything else
+(`anchors.historical-protocol-specs`, the parent of the deletion), and that anchor cannot move —
+there is nothing to move it to.
