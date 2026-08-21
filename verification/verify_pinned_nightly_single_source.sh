@@ -199,8 +199,16 @@ else
   finish
 fi
 
+# The synthetic version the controls mutate TO. The digits are split across two
+# adjacent shell strings on purpose: this script is a tracked file, and the check it
+# drives asserts that no tracked file quotes a nightly pins.json does not declare, so
+# a literal here would make the check fail on its own negative controls. Splitting it
+# keeps the scan free of carve-outs, which is the stronger arrangement — an exclusion
+# list would be exactly where a genuinely stale version number could hide.
+CTRL_VER="9.9.9-nightly.2099""0101"
+
 pin_control "a package.json dependency moved off the declared pin" \
-  "sed -i '0,/\"@aztec\\/foundation\": \"/s//\"@aztec\\/foundation\": \"9.9.9-nightly.20990101\"XX/' drift/package.json && sed -i 's/\"XX[^\"]*\"/\"/' drift/package.json"
+  "sed -i '0,/\"@aztec\\/foundation\": \"/s//\"@aztec\\/foundation\": \"$CTRL_VER\"XX/' drift/package.json && sed -i 's/\"XX[^\"]*\"/\"/' drift/package.json"
 
 pin_control "a lockfile entry resolving to a different version than pins.json declares" \
   "python3 - <<'EOF'
@@ -209,7 +217,7 @@ p='drift/package-lock.json'
 d=json.load(open(p))
 for k,v in d['packages'].items():
     if k.endswith('node_modules/@aztec/foundation'):
-        v['version']='9.9.9-nightly.20990101'
+        v['version']='$CTRL_VER'
         break
 json.dump(d, open(p,'w'), indent=2)
 EOF"
@@ -221,13 +229,13 @@ p='drift/package-lock.json'
 d=json.load(open(p))
 for k,v in d['packages'].items():
     if k.endswith('node_modules/@aztec/foundation') and v.get('resolved'):
-        v['resolved']=v['resolved'].replace(v['version'],'9.9.9-nightly.20990101')
+        v['resolved']=v['resolved'].replace(v['version'],'$CTRL_VER')
         break
 json.dump(d, open(p,'w'), indent=2)
 EOF"
 
 pin_control "prose quoting a nightly version pins.json does not declare" \
-  "printf '\nPinned at 9.9.9-nightly.20990101.\n' >> README.md"
+  "printf '\nPinned at $CTRL_VER.\n' >> README.md"
 
 pin_control "a consumer tree pointed at the wrong declared pin" \
   "python3 - <<'EOF'
