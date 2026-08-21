@@ -25,6 +25,21 @@
 #   just verify-pinned-nightly         verify_pinned_nightly_single_source
 #   just verify-m1                     all six, in order
 #
+# The M2 verification set:
+#
+#   just verify-fixture-manifest       verify_fixture_corpus_manifest_complete
+#   just verify-arm-counts             verify_differential_arm_counts_recorded   (~3 min)
+#   just verify-tree-vectors           test_world_state_golden_vectors_regenerate
+#   just verify-contract-artifacts     test_contract_artifacts_load
+#   just verify-avm-programs           test_seven_avm_programs_assemble
+#   just verify-tier-e                 verify_tier_e_authored_fixtures_justified
+#   just verify-m2                     all six, in order
+#
+# M2's working tools:
+#
+#   just measure-differential          re-measure the per-arm COMPARISON counts
+#   just capture-tree-vectors          re-capture the Tier D world-state root vectors
+#
 # M1's working tools, which the checks drive:
 #
 #   just check-drift                   the vendored tree vs its recorded commits
@@ -141,6 +156,68 @@ verify-m1:
       echo "verify-m1: FAILED" >&2
     else
       echo "verify-m1: all checks passed"
+    fi
+    exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M2 — the upstream fixture corpus
+# ---------------------------------------------------------------------------
+
+# Every fixture family has a manifest entry with its source, capture, licence and conclusions.
+verify-fixture-manifest:
+    @verification/verify_fixture_corpus_manifest_complete.sh
+
+# The manifest's per-arm COMPARISON counts equal a fresh measurement. Takes about three minutes.
+verify-arm-counts:
+    @verification/verify_differential_arm_counts_recorded.sh
+
+# The Tier D root vectors regenerate byte-for-byte, agree with upstream, and restate nothing of it.
+verify-tree-vectors:
+    @verification/test_world_state_golden_vectors_regenerate.sh
+
+# All six contract artifacts load and expose every public function the corpus calls.
+verify-contract-artifacts:
+    @verification/test_contract_artifacts_load.sh
+
+# The seven corpus programs re-assemble to upstream's byte lengths and derived addresses.
+verify-avm-programs:
+    @verification/test_seven_avm_programs_assemble.sh
+
+# Every Tier E entry's "no upstream equivalent" claim is re-derived from the pinned fork.
+verify-tier-e:
+    @verification/verify_tier_e_authored_fixtures_justified.sh
+
+# Re-measure what the differential suite actually compares, and rewrite the record.
+measure-differential:
+    @python3 tools/measure_differential.py --out fixtures/differential-arm-counts.json
+
+# Re-capture the Tier D world-state root vectors from the real NativeWorldStateService.
+capture-tree-vectors:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd drift && node capture_world_state.mjs > ../fixtures/trees/world-state-vectors.json
+    echo "capture-tree-vectors: fixtures/trees/world-state-vectors.json regenerated"
+
+# Run the whole M2 verification set; every check runs even if an earlier one fails.
+verify-m2:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_fixture_corpus_manifest_complete \
+      verify_differential_arm_counts_recorded \
+      test_world_state_golden_vectors_regenerate \
+      test_contract_artifacts_load \
+      test_seven_avm_programs_assemble \
+      verify_tier_e_authored_fixtures_justified
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m2: FAILED" >&2
+    else
+      echo "verify-m2: all checks passed"
     fi
     exit "$rc"
 

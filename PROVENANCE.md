@@ -66,7 +66,7 @@ asserted, so a vendored file cannot be deleted without the check noticing.
 | V5 | reference/docs-extracts | docs/docs-developers/docs/foundational-topics/advanced/circuits | cpp | Apache-2.0 | RI-47 | 3 |
 | V6 | reference/historical-protocol-specs | docs/docs/protocol-specs | historical-protocol-specs | Apache-2.0 | RI-47 | 97 |
 | V7 | spike/src | yarn-project/simulator/src | ts | Apache-2.0 | RI-24 | 153 |
-| V8 | diffsim/src | yarn-project/simulator/src | ts | Apache-2.0 | RI-25 | 153 |
+| V8 | diffsim/src | yarn-project/simulator/src | ts | Apache-2.0 | RI-25 | 156 |
 | V9 | drift/src | yarn-project/simulator/src | ts | Apache-2.0 | RI-24 | 153 |
 <!-- END:trees -->
 
@@ -130,6 +130,8 @@ defined here fails the check, and so does a class defined here that no file uses
 | npm-restore | Restored from the `@aztec/simulator` npm tarball at the `deletion_era` pin. The published tarball's `src/public` differs from the anchor commit in a handful of non-AVM files; taking the published version for those files is what lets **both** simulators run in the same process, which is the whole point of `diffsim/`. |
 | npm-restore-plus-oracle | An `npm-restore` file that additionally carries our narrowing of the differential oracle's revert-reason exemption: from upstream's unconditional "C++ returned no reason" to one conditioned on the C++ result carrying **no call-stack metadata at all**, which asserts loudly when C++ has metadata but no reason where TS has one. Marked `LOCAL DEVIATION FROM UPSTREAM` in-source. Read `DRIFT.md` D3/D4 (both withdrawn as divergences) and **D7** (what the exemption costs in `opcode_spam`) before quoting what the arm compares. |
 | oracle-arm | Enables the `CppVsTs` arm of the opcode-spam matrix, which upstream ships commented out because it is slow. Marked `LOCAL DEVIATION FROM UPSTREAM` in-source. Read `DRIFT.md` D2 before quoting the coverage it adds. |
+| oracle-counters | The differential oracle emits one record per COMPARISON, so the corpus manifest can quote a comparison count instead of a test count. Added because the distinction has already been got wrong twice here (DRIFT.md D2, D7) and both times the instrumentation that found it was thrown away afterwards. Off unless `DIFFSIM_COUNTERS_DIR` is set; one `process.env` read and an early return otherwise. Read by `tools/measure_differential.py`. |
+| avm-corpus | The seven AVM corpus programs (M2), transcribed from the C++ driver's `BytecodeBuilder` sequences and re-assembled with upstream's own TypeScript encoder, plus the test that requires the derived contract address to equal the one upstream's C++ produced. Ours: upstream has no TypeScript definition of these seven programs, because upstream does not have these seven programs. |
 | spike-fixtures-trim | Upstream's `vm2/testing/fixtures.cpp` with the two tracegen-dependent definitions removed (`empty_trace`, `get_minimal_trace_with_pi`), so the upstream simulation tests link against `vm2_sim` alone — i.e. without the proving stack the wasm build excludes. Everything else is byte-for-byte upstream. |
 <!-- END:editclasses -->
 
@@ -165,6 +167,9 @@ does not exist).
 | diffsim/src/public/public_processor/apps_tests/token.test.ts | spike-pure-ts | modified |
 | diffsim/src/public/public_tx_simulator/cpp_vs_ts_public_tx_simulator.ts | npm-restore-plus-oracle | modified |
 | diffsim/src/public/public_tx_simulator/apps_tests/opcode_spam.test.ts | oracle-arm | modified |
+| diffsim/src/public/public_tx_simulator/differential_counters.ts | oracle-counters | added |
+| diffsim/src/corpus/avm_corpus_programs.ts | avm-corpus | added |
+| diffsim/src/corpus/avm_corpus_programs.test.ts | avm-corpus | added |
 <!-- END:edits -->
 
 ## Not vendored, and deliberately

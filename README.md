@@ -33,7 +33,13 @@ tested with `npm install`, with no barretenberg C++ build, no Rust/wasm-bindgen 
 | `browser-probe/` | esbuild browser-bundle probe and its node-builtin shims |
 | `../aztec-packages` | the `metacraft-labs/aztec-packages` fork, branch `aztec-avm-runtime` — a **workspace-root sibling**, registered in the workspace manifests alongside this repo (it used to live at `upstream/aztec-packages`) |
 | `upstream/tsavm` | gitignored worktree of the fork at `3a68d68ac2`, the commit before the TS AVM was deleted |
-| `verification/` | the M0 and M1 verification checks; see `just --list` |
+| `verification/` | the M0, M1 and M2 verification checks; see `just --list` |
+| `fixtures/MANIFEST.md` | **the fixture manifest** — one entry per family, with its upstream source, capture procedure, licence, and *both* what a skeptic should conclude from it passing and what they must not |
+| `fixtures/trees/world-state-vectors.json` | the Tier D root oracle: the genesis and post-genesis states upstream publishes (asserted against the fork) plus the mutation sequence, checkpoint/revert, sibling path and prefill leaves it does not |
+| `fixtures/differential-arm-counts.json` | what the differential suite actually COMPARES, measured rather than read: 216 comparisons, not 758 tests |
+| `fixtures/avm-programs/programs.json` | the seven AVM corpus programs, re-assembled in TypeScript and checked against the byte lengths and derived addresses upstream's C++ `BytecodeBuilder` produced |
+| `fixtures/contracts/artifacts.json` | the six compiled Noir contracts and the public functions the corpus actually calls, derived from the sources rather than declared |
+| `fixtures/authored/` | Tier E — the two authored fixture families, each with the upstream claims that justify it, re-derived from the fork on every run |
 | `REUSE-INVENTORY.md` | **the reuse decision for every Aztec component this runtime touches**, with a reason — and a specific rejection reason wherever we build or replace |
 | `PROVENANCE.md` | the machine-checked mapping of every vendored file to its upstream path and commit; the input `just check-drift` reads |
 | `pins.json` / `PINS.md` | the single authority for every upstream pin, and the policy for moving it |
