@@ -68,8 +68,18 @@ describeOrSkip('Opcode Spammer Benchmarks', () => {
   describe.each([
     // NOTE: Cpp vs TS simulation is very slow (because TS is slow), so we skip it by default.
     // It is useful to manually run to make sure these tests perform identically between simulators.
-    //{ useCppSimulator: false, simulatorName: 'CppVsTs' },
-    { useCppSimulator: true, simulatorName: 'Cpp' },
+    // LOCAL DEVIATION FROM UPSTREAM — aztec-avm-runtime, marked SPIKE (fixtures-and-specs).
+    // Upstream ships the two arms the other way round (`Cpp` on, `CppVsTs` commented out).
+    // We want the differential, which is the whole point of this tree: the `CppVsTs` arm takes
+    // the 142 cases from "C++ alone, no comparison" to 142 real TS-vs-C++ comparisons, raising
+    // the differential surface from 74 transactions to 216 for ~145 s of wall time. The whole
+    // suite stays env-gated behind RUN_AVM_OPCODE_SPAM, so a default run is unaffected.
+    // The `Cpp` arm is left off rather than added alongside because it doubles the runtime and
+    // produces no comparison; the C++ AVM is still executed, inside the differential.
+    // See the deviation note in cpp_vs_ts_public_tx_simulator.ts for the one assertion this
+    // needed, and why it is narrower than "skip the revert-reason check".
+    { useCppSimulator: false, simulatorName: 'CppVsTs' },
+    // { useCppSimulator: true, simulatorName: 'Cpp' },
   ])('($simulatorName) Simulator', ({ useCppSimulator, simulatorName }) => {
     const metricsPrefix = simulatorName;
 
