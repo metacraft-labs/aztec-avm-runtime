@@ -1,0 +1,106 @@
+-- program add bytes=21
+  address         0x2a81495ef1584f36d12ab02cbf89e330ee6f575d557e38b49e27d59b7922a608
+== add
+  revertCode      0
+  totalGas        540075/96
+  publicGas       75/0
+  billedGas       540075/96
+  txFee           0x0000000000000000000000000000000000000000000000000000000000083e0b
+  nullifiers      1
+    0x00000000000000000000000000000000000000000000000000000000deadbeef
+  noteHashes      0
+  dataWrites      1
+  publicLogs      0
+  callFrames      1
+  stat total_instructions_executed = 4
+-- program revert bytes=9
+  address         0x2e561545f24d98b90d516c01a32f8d7b0447b664d936ffa4c19670efc90de3fe
+== revert
+  revertCode      1
+  totalGas        540036/96
+  publicGas       36/0
+  billedGas       540036/96
+  txFee           0x0000000000000000000000000000000000000000000000000000000000083de4
+  nullifiers      1
+    0x00000000000000000000000000000000000000000000000000000000deadbeef
+  noteHashes      0
+  dataWrites      1
+  publicLogs      0
+  callFrames      1
+  stat total_instructions_executed = 2
+-- program loop bytes=661
+  address         0x158c8ace19be6b1f58650616060a89b3243ccfd04b35ee82e27d93d4c12aaed7
+== loop
+  revertCode      0
+  totalGas        542586/96
+  publicGas       2586/0
+  billedGas       542586/96
+  txFee           0x00000000000000000000000000000000000000000000000000000000000847da
+  nullifiers      1
+    0x00000000000000000000000000000000000000000000000000000000deadbeef
+  noteHashes      0
+  dataWrites      1
+  publicLogs      0
+  callFrames      1
+  stat total_instructions_executed = 132
+-- program sha256 bytes=240
+  address         0x2c64a23c5cfc2a43f9a2bded2fa9104aa3d93c7353d9983759249852dfdcda4c
+== sha256
+  revertCode      0
+  totalGas        552999/96
+  publicGas       12999/0
+  billedGas       552999/96
+  txFee           0x0000000000000000000000000000000000000000000000000000000000087087
+  nullifiers      1
+    0x00000000000000000000000000000000000000000000000000000000deadbeef
+  noteHashes      0
+  dataWrites      1
+  publicLogs      0
+  callFrames      1
+  stat total_instructions_executed = 28
+-- program poseidon2 bytes=170
+  address         0x2ad747603414d96cb21cdf65b095cf9ab52c9efbb2b5ea8f14531709440ea390
+== poseidon2
+  revertCode      0
+  totalGas        540531/96
+  publicGas       531/0
+  billedGas       540531/96
+  txFee           0x0000000000000000000000000000000000000000000000000000000000083fd3
+  nullifiers      1
+    0x00000000000000000000000000000000000000000000000000000000deadbeef
+  noteHashes      0
+  dataWrites      1
+  publicLogs      0
+  callFrames      1
+  stat total_instructions_executed = 8
+-- program storage bytes=96
+  address         0x299653095c9fcc059ee3af378c914112ee127cf00eaee96a99f4b06751d6233d
+== storage
+  revertCode      0
+  totalGas        573257/160
+  publicGas       33257/64
+  billedGas       573257/160
+  txFee           0x000000000000000000000000000000000000000000000000000000000008bfe9
+  nullifiers      1
+    0x00000000000000000000000000000000000000000000000000000000deadbeef
+  noteHashes      0
+  dataWrites      2
+  publicLogs      0
+  callFrames      1
+  stat total_instructions_executed = 6
+-- program burn bytes=95
+  address         0x21d55c7b5b27711b5770086763a3af0fa33e49364aca7ff3192c84a834aa30bb
+== burn
+  revertCode      1
+  totalGas        1000000/1000000
+  publicGas       460000/999904
+  billedGas       1000000/1000000
+  txFee           0x00000000000000000000000000000000000000000000000000000000001e8480
+  nullifiers      1
+    0x00000000000000000000000000000000000000000000000000000000deadbeef
+  noteHashes      0
+  dataWrites      1
+  publicLogs      0
+  callFrames      1
+  stat total_instructions_executed = 38903
+peakLinearMemoryPages 217 (13888 KiB)

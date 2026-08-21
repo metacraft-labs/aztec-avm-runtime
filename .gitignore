@@ -5,3 +5,10 @@ dest/
 browser-probe/*.js
 !browser-probe/shims/*.js
 !browser-probe/entry*.ts
+
+# vm2wasm: see vm2wasm/README.md for why each of these is excluded and how to
+# reconstruct it. Every source delta is captured in vm2wasm/spike.patch.
+vm2wasm/src/
+vm2wasm/wasi-sdk-33/
+vm2wasm/shims/
+vm2wasm/*.wasm.gz

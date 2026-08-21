@@ -1,0 +1,14 @@
+# Committed artefacts
+2ffcf9c00ab1a8c6bdcf002db998304ff847fa599d743a7b1e0e48ee1bbefdfb  avm.wasm
+e5a04d789c1d565a315d951a0e8a03967a1da52b73a2e1ef5f6fc4d6f6dbd6b9  probe/exc33.wasm
+f55d04d58c5201dc6e93333780454dd9cd114cc36e9506c3932fe691ba8ac581  probe/exc33b.wasm
+5e49647224bbd423675a2e4464b0071c63e87fc047f113d7748389a18ad5c184  native.results
+a687674d5faef0693c557d59d0a8cfa70758a1218c01a95933f548e088d075df  wasm.results
+a687674d5faef0693c557d59d0a8cfa70758a1218c01a95933f548e088d075df  node.results
+cb05a2f533b2828cb379e8d807f42356f6bc773c69eec987666e89c9c24896f1  spike.patch
+3e0e5639083d2f8fa3a308223a2eb795da9e97ae5dfd1defa31e497e70ac19b8  spike.diff
+
+# Excluded inputs, recorded for provenance
+8f0cf0a6266bad26eb45ce658eaf025cfe10941c05a6a2a249c2699c594c89b0  shims/lmdb.h
+a133f9db2c70b4584e1669b2ea19c5b3034a6b2a0f278165a6087aa4363fb0ce  avm.wasm.gz
+# wasi-sdk 33 release tarballs are pinned by hash in ../nix/wasi-sdk.nix

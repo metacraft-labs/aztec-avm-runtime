@@ -1,0 +1,2588 @@
+From ca86ff57bd17f44ff5364bac3b55de54c4d92141 Mon Sep 17 00:00:00 2001
+From: vm2-wasm-spike <spike@local>
+Date: Fri, 21 Aug 2026 15:45:03 +0300
+Subject: [PATCH] spike: vm2_sim compiled and executed on wasm32-wasip1
+
+Complete spike change set against upstream 233d8e0993, as executed.
+Not an upstream submission: see codetracer-specs/upstream-bugs/aztec-* for
+the reviewable patch series this stands behind.
+---
+ barretenberg/cpp/CMakeLists.txt               |    7 +
+ barretenberg/cpp/CMakePresets.json            | 1918 +++++++++--------
+ barretenberg/cpp/cmake/arch.cmake             |    7 +-
+ barretenberg/cpp/src/CMakeLists.txt           |   25 +
+ .../src/barretenberg/crypto/CMakeLists.txt    |    2 +-
+ .../crypto/merkle_tree/CMakeLists.txt         |   30 +-
+ .../interfaces/execution_observer.hpp         |   37 +
+ .../vm2/simulation/lib/contract_crypto.cpp    |    4 +-
+ .../standalone/hybrid_execution.cpp           |   19 +
+ .../barretenberg/vm2_reactor/CMakeLists.txt   |    7 +
+ .../barretenberg/vm2_reactor/avm_reactor.cpp  |   53 +
+ .../src/barretenberg/vm2_spike/CMakeLists.txt |    9 +
+ .../src/barretenberg/vm2_spike/avm_run.cpp    |  273 +++
+ 13 files changed, 1461 insertions(+), 930 deletions(-)
+ create mode 100644 barretenberg/cpp/src/barretenberg/vm2/simulation/interfaces/execution_observer.hpp
+ create mode 100644 barretenberg/cpp/src/barretenberg/vm2_reactor/CMakeLists.txt
+ create mode 100644 barretenberg/cpp/src/barretenberg/vm2_reactor/avm_reactor.cpp
+ create mode 100644 barretenberg/cpp/src/barretenberg/vm2_spike/CMakeLists.txt
+ create mode 100644 barretenberg/cpp/src/barretenberg/vm2_spike/avm_run.cpp
+
+diff --git a/barretenberg/cpp/CMakeLists.txt b/barretenberg/cpp/CMakeLists.txt
+index 9d49e5b395..1bb077d7ca 100644
+--- a/barretenberg/cpp/CMakeLists.txt
++++ b/barretenberg/cpp/CMakeLists.txt
+@@ -61,6 +61,7 @@ option(SYNTAX_ONLY "only check syntax (-fsyntax-only)" OFF)
+ option(ENABLE_WASM_BENCH "Enable BB_BENCH benchmarking support in WASM builds (dev only, not for releases)" OFF)
+ option(AVM "enable building of vm2 module and bb-avm" ON)
+ option(BB_LITE "Exclude server-side subsystems: lmdb, world_state, ipc, nodejs_module" OFF)
++option(AVM_WASM "SPIKE: build vm2_sim for WASM (no lmdb, no world_state, real exceptions)" OFF)
+ 
+ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+     message(STATUS "Compiling for ARM.")
+@@ -190,6 +191,12 @@ if (NOT WASM AND NOT BB_LITE)
+     include(cmake/lmdb.cmake)
+ endif()
+ 
++if (WASM AND AVM_WASM)
++    # SPIKE: supply lmdb.h as a HEADER ONLY (no liblmdb.a). crypto_merkle_tree/types.hpp
++    # needs MDB_stat purely to declare DBStats; nothing in vm2_sim calls LMDB.
++    set(LMDB_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/../../../shims")
++endif()
++
+ if(AVM_TRANSPILER_LIB)
+     include(cmake/avm-transpiler.cmake)
+ endif()
+diff --git a/barretenberg/cpp/CMakePresets.json b/barretenberg/cpp/CMakePresets.json
+index 0eb8e651f7..03cf25ab62 100644
+--- a/barretenberg/cpp/CMakePresets.json
++++ b/barretenberg/cpp/CMakePresets.json
+@@ -1,917 +1,1003 @@
+ {
+-  "version": 5,
+-  "cmakeMinimumRequired": {
+-    "major": 3,
+-    "minor": 24,
+-    "patch": 0
+-  },
+-  "configurePresets": [
+-    {
+-      "name": "default",
+-      "displayName": "Build with Clang",
+-      "description": "Build with globally installed Clang",
+-      "binaryDir": "build",
+-      "generator": "Ninja",
+-      "environment": {
+-        "CC": "clang",
+-        "CXX": "clang++",
+-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+-      },
+-      "cacheVariables": {
+-        "CMAKE_BUILD_TYPE": "Release",
+-        "ENABLE_PIC": "ON"
+-      }
+-    },
+-    {
+-      "name": "homebrew",
+-      "displayName": "Homebrew + Clang",
+-      "description": "Build with Clang installed via Homebrew",
+-      "inherits": "default",
+-      "environment": {
+-        "CC": "$env{BREW_PREFIX}/opt/llvm@20/bin/clang",
+-        "CXX": "$env{BREW_PREFIX}/opt/llvm@20/bin/clang++"
+-      }
+-    },
+-    {
+-      "name": "clang20",
+-      "displayName": "Build with Zig (glibc 2.35 on Linux)",
+-      "description": "Build with Zig-wrapped Clang. On Linux, pins glibc 2.35 (Ubuntu 22.04+). On macOS, uses native target.",
+-      "inherits": "default",
+-      "binaryDir": "build",
+-      "environment": {
+-        "CC": "${sourceDir}/scripts/zig-cc.sh",
+-        "CXX": "${sourceDir}/scripts/zig-c++.sh",
+-        "CFLAGS": "-g0 -fvisibility=hidden",
+-        "CXXFLAGS": "-g0 -fvisibility=hidden",
+-        "LDFLAGS": "-s"
+-      },
+-      "cacheVariables": {
+-        "CMAKE_AR": "${sourceDir}/scripts/zig-ar.sh",
+-        "CMAKE_RANLIB": "${sourceDir}/scripts/zig-ranlib.sh",
+-        "AVM_TRANSPILER_LIB": "${sourceDir}/../../avm-transpiler/target/release/libavm_transpiler.a"
+-      }
+-    },
+-    {
+-      "name": "clang20-no-avm",
+-      "displayName": "Build with Zig (no AVM, glibc 2.35)",
+-      "description": "Build with Zig-wrapped Clang targeting glibc 2.35, AVM disabled",
+-      "inherits": "clang20",
+-      "binaryDir": "build",
+-      "cacheVariables": {
+-        "AVM": "OFF"
+-      }
+-    },
+-    {
+-      "name": "clang20-assert",
+-      "displayName": "Build with Zig (assertions, glibc 2.35)",
+-      "description": "Build with Zig-wrapped Clang targeting glibc 2.35, assertions enabled",
+-      "inherits": "clang20",
+-      "binaryDir": "build",
+-      "cacheVariables": {
+-        "CMAKE_BUILD_TYPE": "RelWithAssert"
+-      }
+-    },
+-    {
+-      "name": "clang20-no-exceptions",
+-      "displayName": "Build with Zig (no exceptions, glibc 2.35)",
+-      "description": "Build with Zig-wrapped Clang targeting glibc 2.35, exceptions disabled",
+-      "inherits": "clang20",
+-      "environment": {
+-        "CMAKE_CXX_FLAGS": "-DBB_NO_EXCEPTIONS"
+-      }
+-    },
+-    {
+-      "name": "debug",
+-      "displayName": "Debugging build with Clang-20",
+-      "description": "Build with globally installed Clang-20 in debug mode",
+-      "inherits": "default",
+-      "binaryDir": "build-debug",
+-      "environment": {
+-        "CC": "clang-20",
+-        "CXX": "clang++-20",
+-        "CFLAGS": "-gdwarf-4",
+-        "CXXFLAGS": "-gdwarf-4 -D_GLIBCXX_DEBUG",
+-        "LDFLAGS": "-gdwarf-4"
+-      },
+-      "cacheVariables": {
+-        "CMAKE_BUILD_TYPE": "Debug",
+-        "ENABLE_ASAN": "OFF",
+-        "DISABLE_ASM": "OFF",
+-        "ENABLE_STACKTRACES": "ON"
+-      }
+-    },
+-    {
+-      "name": "tracy-memory",
+-      "displayName": "Release build with tracy with memory tracking",
+-      "description": "Release build with tracy with memory tracking",
+-      "inherits": "clang20",
+-      "binaryDir": "build-tracy-memory",
+-      "cacheVariables": {
+-        "ENABLE_TRACY": "ON",
+-        "TRACY_PROFILE_MEMORY": "ON",
+-        "ENABLE_TRACY_TIME_INSTRUMENTED": "ON"
+-      },
+-      "environment": {
+-        "CFLAGS": "-g -fno-omit-frame-pointer",
+-        "CXXFLAGS": "-g -fno-omit-frame-pointer",
+-        "LDFLAGS": "-g -fno-omit-frame-pointer -rdynamic"
+-      }
+-    },
+-    {
+-      "name": "tracy-time-instrumented",
+-      "displayName": "Build for tracy time profiling via instrumentation",
+-      "description": "Build for tracy time profiling via instrumentation",
+-      "binaryDir": "build-tracy-time-instrumented",
+-      "inherits": "clang20",
+-      "cacheVariables": {
+-        "ENABLE_TRACY_TIME_INSTRUMENTED": "ON"
+-      }
+-    },
+-    {
+-      "name": "tracy-time-sampled",
+-      "displayName": "Build for tracy time profiling via sampling",
+-      "description": "Build for tracy time profiling via sampling",
+-      "binaryDir": "build-tracy-time-sampled",
+-      "inherits": "clang20",
+-      "environment": {
+-        "CFLAGS": "-g -fno-omit-frame-pointer",
+-        "CXXFLAGS": "-g -fno-omit-frame-pointer",
+-        "LDFLAGS": "-g -fno-omit-frame-pointer -rdynamic"
+-      },
+-      "cacheVariables": {
+-        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+-        "ENABLE_TRACY": "ON"
+-      }
+-    },
+-    {
+-      "name": "tracy-gates",
+-      "displayName": "Release build with tracy - but hacked for gate tracking",
+-      "description": "Release build with tracy - but hacker for gate tracking",
+-      "inherits": "clang20",
+-      "binaryDir": "build-tracy-gates",
+-      "cacheVariables": {
+-        "ENABLE_TRACY": "ON",
+-        "CMAKE_CXX_FLAGS": "-DTRACY_HACK_GATES_AS_MEMORY"
+-      }
+-    },
+-    {
+-      "name": "debug-fast",
+-      "displayName": "Optimized debug build with Clang-20",
+-      "description": "Build with globally installed Clang-20 in optimized debug mode",
+-      "inherits": "debug",
+-      "binaryDir": "build-debug-fast",
+-      "environment": {
+-        "CFLAGS": "-O2 -gdwarf",
+-        "CXXFLAGS": "-O2 -gdwarf-4 -D_GLIBCXX_DEBUG",
+-        "LDFLAGS": "-O2 -gdwarf-4"
+-      },
+-      "cacheVariables": {
+-        "ENABLE_STACKTRACES": "ON"
+-      }
+-    },
+-    {
+-      "name": "asan-fast",
+-      "displayName": "Debugging build with address sanitizer on Clang-20 in optimized debug mode",
+-      "description": "Build with address sanitizer on clang20 in optimized debug mode",
+-      "inherits": "debug-fast",
+-      "binaryDir": "build-asan-fast",
+-      "cacheVariables": {
+-        "ENABLE_ASAN": "ON",
+-        "DISABLE_ASM": "ON",
+-        "ENABLE_STACKTRACES": "OFF"
+-      }
+-    },
+-    {
+-      "name": "asan",
+-      "displayName": "Debugging build with address sanitizer on Clang-20",
+-      "description": "Build with address sanitizer on clang20 with debugging information",
+-      "inherits": "debug",
+-      "binaryDir": "build-asan",
+-      "cacheVariables": {
+-        "ENABLE_ASAN": "ON",
+-        "DISABLE_ASM": "ON",
+-        "ENABLE_STACKTRACES": "OFF"
+-      }
+-    },
+-    {
+-      "name": "gcc",
+-      "displayName": "Build with GCC",
+-      "description": "Build with globally installed GCC",
+-      "inherits": "default",
+-      "binaryDir": "build-gcc",
+-      "environment": {
+-        "CC": "gcc",
+-        "CXX": "g++",
+-        "CXXFLAGS": "-Wno-missing-field-initializers"
+-      }
+-    },
+-    {
+-      "name": "bench",
+-      "displayName": "Build benchmarks",
+-      "description": "Build default preset but with a special benchmark directory",
+-      "inherits": "clang20",
+-      "binaryDir": "build-bench"
+-    },
+-    {
+-      "name": "fuzzing",
+-      "displayName": "Build with fuzzing",
+-      "description": "Build default preset but with fuzzing enabled. Uses clang-20 directly (zig does not provide libFuzzer/libclang_rt.fuzzer).",
+-      "inherits": "default",
+-      "binaryDir": "build-fuzzing",
+-      "environment": {
+-        "CC": "clang-20",
+-        "CXX": "clang++-20"
+-      },
+-      "cacheVariables": {
+-        "FUZZING": "ON",
+-        "AVM": "OFF",
+-        "AVM_TRANSPILER_LIB": "",
+-        "CMAKE_BUILD_TYPE": "RelWithAssert",
+-        "MULTITHREADING": "OFF",
+-        "FUZZER_PRESET_NAME": "${presetName}"
+-      }
+-    },
+-    {
+-      "name": "fuzzing-noasm",
+-      "displayName": "Build with fuzzing and ASM disabled",
+-      "description": "Build default preset but with fuzzing enabled and ASM disabled",
+-      "inherits": "fuzzing",
+-      "binaryDir": "build-fuzzing-noasm",
+-      "cacheVariables": {
+-        "DISABLE_ASM": "ON"
+-      }
+-    },
+-    {
+-      "name": "fuzzing-asan",
+-      "displayName": "Build with fuzzing",
+-      "description": "Build default preset but with fuzzing and asan enabled",
+-      "inherits": "debug",
+-      "binaryDir": "build-fuzzing-asan",
+-      "cacheVariables": {
+-        "FUZZING": "ON",
+-        "FUZZING_SHOW_INFORMATION": "ON",
+-        "AVM": "OFF",
+-        "AVM_TRANSPILER_LIB": "",
+-        "ENABLE_ASAN": "ON",
+-        "DISABLE_ASM": "ON",
+-        "CMAKE_BUILD_TYPE": "RelWithAssert",
+-        "MULTITHREADING": "OFF"
+-      }
+-    },
+-    {
+-      "name": "fuzzing-coverage",
+-      "displayName": "Build with coverage flags",
+-      "description": "Build default preset but with fuzzing and coverage enabled",
+-      "inherits": "fuzzing",
+-      "binaryDir": "build-fuzzing-cov",
+-      "cacheVariables": {
+-        "DISABLE_ASM": "ON"
+-      },
+-      "environment": {
+-        "CC": "clang-20",
+-        "CXX": "clang++-20",
+-        "CXXFLAGS": "-fprofile-instr-generate -fcoverage-mapping"
+-      }
+-    },
+-    {
+-      "name": "fuzzing-avm",
+-      "displayName": "Build with fuzzing and AVM",
+-      "description": "Build default preset but with fuzzing and AVM enabled",
+-      "inherits": "clang20",
+-      "binaryDir": "build-fuzzing-avm",
+-      "environment": {
+-        "CC": "clang-20",
+-        "CXX": "clang++-20"
+-      },
+-      "cacheVariables": {
+-        "FUZZING": "ON",
+-        "DISABLE_ASM": "OFF",
+-        "AVM_TRANSPILER_LIB": "",
+-        "FUZZING_AVM": "ON",
+-        "CMAKE_BUILD_TYPE": "RelWithAssert",
+-        "MULTITHREADING": "ON",
+-        "FUZZER_PRESET_NAME": "${presetName}",
+-        "CMAKE_AR": null,
+-        "CMAKE_RANLIB": null
+-      }
+-    },
+-    {
+-      "name": "fuzzing-avm-tooling",
+-      "displayName": "Build fuzzer tooling without instrumentation",
+-      "description": "Build fuzzer tests and utilities like corpus analyzer without fuzzer instrumentation",
+-      "inherits": "clang20",
+-      "binaryDir": "build-fuzzing-avm-tooling",
+-      "cacheVariables": {
+-        "FUZZING": "OFF",
+-        "DISABLE_ASM": "OFF",
+-        "AVM_TRANSPILER_LIB": "",
+-        "FUZZING_AVM": "ON",
+-        "CMAKE_BUILD_TYPE": "RelWithAssert",
+-        "MULTITHREADING": "ON"
+-      }
+-    },
+-    {
+-      "name": "smt-verification",
+-      "displayName": "Build with smt verification",
+-      "description": "Build clang20 preset but with smt library included, using clang-20 directly (cvc5 ExternalProject needs a plain compiler path)",
+-      "inherits": "clang20",
+-      "binaryDir": "build-smt",
+-      "environment": {
+-        "CC": "clang-20",
+-        "CXX": "clang++-20"
+-      },
+-      "cacheVariables": {
+-        "CMAKE_AR": null,
+-        "CMAKE_RANLIB": null,
+-        "AVM_TRANSPILER_LIB": "",
+-        "SMT": "ON"
+-      }
+-    },
+-    {
+-      "name": "tsan",
+-      "displayName": "Debugging build with thread sanitizer on Clang-20",
+-      "description": "Build with thread sanitizer on clang20 with debugging information",
+-      "inherits": "debug",
+-      "binaryDir": "build-tsan",
+-      "cacheVariables": {
+-        "HAVE_STD_REGEX": "ON"
+-      },
+-      "environment": {
+-        "CFLAGS": "-fsanitize=thread",
+-        "CXXFLAGS": "-fsanitize=thread",
+-        "LDFLAGS": "-fsanitize=thread"
+-      }
+-    },
+-    {
+-      "name": "ubsan",
+-      "displayName": "Debugging build with undefined behaviour sanitizer on Clang-20",
+-      "description": "Build with undefined behaviour sanitizer on clang20 with debugging information",
+-      "inherits": "debug",
+-      "binaryDir": "build-ubsan",
+-      "generator": "Unix Makefiles",
+-      "environment": {
+-        "CFLAGS": "-fsanitize=undefined",
+-        "CXXFLAGS": "-fsanitize=undefined",
+-        "LDFLAGS": "-fsanitize=undefined"
+-      }
+-    },
+-    {
+-      "name": "msan",
+-      "displayName": "Debugging build with memory sanitizer on Clang-20",
+-      "description": "Build with thread sanitizer on clang20 with debugging information",
+-      "inherits": "debug",
+-      "binaryDir": "build-msan",
+-      "environment": {
+-        "CFLAGS": "-fsanitize=memory",
+-        "CXXFLAGS": "-fsanitize=memory",
+-        "LDFLAGS": "-fsanitize=memory"
+-      },
+-      "cacheVariables": {
+-        "HAVE_STD_REGEX": "ON",
+-        "CMAKE_CXX_FLAGS": "$env{MSAN_CFLAGS}",
+-        "CMAKE_EXE_LINKER_FLAGS": "$env{MSAN_LFLAGS}"
+-      }
+-    },
+-    {
+-      "name": "clang20-coverage",
+-      "displayName": "Build with coverage",
+-      "description": "Build clang20 preset but with coverage enabled",
+-      "inherits": "clang20",
+-      "binaryDir": "build-coverage",
+-      "cacheVariables": {
+-        "COVERAGE": "ON",
+-        "DISABLE_ASM": "ON",
+-        "AVM_TRANSPILER_LIB": ""
+-      }
+-    },
+-    {
+-      "name": "gperftools",
+-      "displayName": "Debugging build with gperftools on Clang-20",
+-      "description": "Build with gperf",
+-      "inherits": "clang20",
+-      "binaryDir": "build-gperftools",
+-      "cacheVariables": {
+-        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+-        "AVM_TRANSPILER_LIB": "",
+-        "CMAKE_EXE_LINKER_FLAGS": "-ltcmalloc",
+-        "CXXFLAGS": "-fno-omit-frame-pointer"
+-      }
+-    },
+-    {
+-      "name": "wasm",
+-      "displayName": "Build for WASM",
+-      "description": "Build with wasi-sdk to create wasm",
+-      "binaryDir": "build-wasm",
+-      "generator": "Ninja",
+-      "toolchainFile": "cmake/toolchains/wasm32-wasi.cmake",
+-      "environment": {
+-        "WASI_SDK_PREFIX": "/opt/wasi-sdk",
+-        "CC": "$env{WASI_SDK_PREFIX}/bin/clang",
+-        "CXX": "$env{WASI_SDK_PREFIX}/bin/clang++",
+-        "CXXFLAGS": "-DBB_VERBOSE -fvisibility=hidden",
+-        "LDFLAGS": "--no-wasm-opt",
+-        "AR": "$env{WASI_SDK_PREFIX}/bin/llvm-ar",
+-        "RANLIB": "$env{WASI_SDK_PREFIX}/bin/llvm-ranlib"
+-      },
+-      "cacheVariables": {
+-        "CMAKE_SYSROOT": "$env{WASI_SDK_PREFIX}/share/wasi-sysroot",
+-        "CMAKE_FIND_ROOT_PATH_MODE_PROGRAM": "NEVER",
+-        "CMAKE_FIND_ROOT_PATH_MODE_LIBRARY": "ONLY",
+-        "CMAKE_FIND_ROOT_PATH_MODE_INCLUDE": "ONLY",
+-        "CMAKE_FIND_ROOT_PATH_MODE_PACKAGE": "ONLY",
+-        "CMAKE_C_COMPILER_WORKS": "ON",
+-        "CMAKE_CXX_COMPILER_WORKS": "ON",
+-        "MULTITHREADING": "OFF",
+-        "CMAKE_CXX_FLAGS": "-DBB_NO_EXCEPTIONS"
+-      }
+-    },
+-    {
+-      "name": "wasm-threads",
+-      "displayName": "Build for pthread enabled WASM",
+-      "description": "Build for pthread enabled WASM",
+-      "inherits": "wasm",
+-      "binaryDir": "build-wasm-threads",
+-      "cacheVariables": {
+-        "CMAKE_BUILD_TYPE": "Release",
+-        "MULTITHREADING": "ON",
+-        "ENABLE_WASM_BENCH": "OFF"
+-      }
+-    },
+-    {
+-      "name": "wasm-threads-dbg",
+-      "displayName": "Build for debug WASM",
+-      "binaryDir": "build-wasm-threads-dbg",
+-      "description": "Build with wasi-sdk to create debug wasm",
+-      "inherits": "wasm",
+-      "cacheVariables": {
+-        "CMAKE_BUILD_TYPE": "Debug",
+-        "MULTITHREADING": "ON"
+-      }
+-    },
+-    {
+-      "name": "xray",
+-      "displayName": "Build with multi-threaded XRay Profiling",
+-      "description": "Build with Clang and enable multi-threaded LLVM XRay for profiling",
+-      "generator": "Unix Makefiles",
+-      "inherits": "clang20",
+-      "environment": {
+-        "CFLAGS": "-fxray-instrument",
+-        "CXXFLAGS": "-fxray-instrument -fxray-instruction-threshold=500 -DXRAY=1",
+-        "LDFLAGS": "-fxray-instrument -fxray-instruction-threshold=500 -DXRAY=1"
+-      },
+-      "binaryDir": "build-xray"
+-    },
+-    {
+-      "name": "cross-base",
+-      "displayName": "Zig (base)",
+-      "generator": "Ninja",
+-      "binaryDir": "${sourceDir}/build-${presetName}",
+-      "environment": {
+-        "CC": "zig cc",
+-        "CXX": "zig c++",
+-        "CFLAGS": "-g0 -fvisibility=hidden",
+-        "CXXFLAGS": "-g0 -fvisibility=hidden"
+-      },
+-      "cacheVariables": {
+-        "ENABLE_PIC": "ON",
+-        "CMAKE_BUILD_TYPE": "Release",
+-        "CMAKE_AR": "${sourceDir}/scripts/zig-ar.sh",
+-        "CMAKE_RANLIB": "${sourceDir}/scripts/zig-ranlib.sh"
+-      }
+-    },
+-    {
+-      "name": "amd64-linux",
+-      "displayName": "Build for linux amd64 with Zig",
+-      "inherits": "cross-base",
+-      "environment": {
+-        "CC": "zig cc -target x86_64-linux-gnu.2.35",
+-        "CXX": "zig c++ -target x86_64-linux-gnu.2.35",
+-        "LDFLAGS": "-s"
+-      },
+-      "cacheVariables": {
+-        "CMAKE_SYSTEM_NAME": "Linux",
+-        "AVM_TRANSPILER_LIB": "${sourceDir}/../../avm-transpiler/target/x86_64-apple-darwin/release/libavm_transpiler.a"
+-      }
+-    },
+-    {
+-      "name": "arm64-linux",
+-      "inherits": "cross-base",
+-      "environment": {
+-        "CC": "zig cc -target aarch64-linux-gnu.2.35",
+-        "CXX": "zig c++ -target aarch64-linux-gnu.2.35",
+-        "LDFLAGS": "-s"
+-      },
+-      "cacheVariables": {
+-        "CMAKE_SYSTEM_NAME": "Linux",
+-        "AVM_TRANSPILER_LIB": "${sourceDir}/../../avm-transpiler/target/aarch64-unknown-linux-gnu/release/libavm_transpiler.a"
+-      }
+-    },
+-    {
+-      "name": "amd64-macos",
+-      "displayName": "Build for macOS amd64 with Zig",
+-      "description": "Cross-compile for intel macOS using Zig",
+-      "inherits": "cross-base",
+-      "environment": {
+-        "CC": "zig cc -target x86_64-macos -mcpu=baseline",
+-        "CXX": "zig c++ -target x86_64-macos -mcpu=baseline",
+-        "LDFLAGS": "-s"
+-      },
+-      "cacheVariables": {
+-        "CMAKE_SYSTEM_NAME": "Darwin",
+-        "CMAKE_SYSTEM_PROCESSOR": "x86_64",
+-        "AVM_TRANSPILER_LIB": "${sourceDir}/../../avm-transpiler/target/x86_64-apple-darwin/release/libavm_transpiler.a",
+-        "HAVE_STD_REGEX": "ON"
+-      }
+-    },
+-    {
+-      "name": "arm64-macos",
+-      "displayName": "Build for macOS arm64 with Zig",
+-      "description": "Cross-compile for macOS arm64 (Apple Silicon) using Zig",
+-      "inherits": "cross-base",
+-      "environment": {
+-        "CC": "zig cc -target aarch64-macos -mcpu=apple_a14",
+-        "CXX": "zig c++ -target aarch64-macos -mcpu=apple_a14",
+-        "LDFLAGS": "-s"
+-      },
+-      "cacheVariables": {
+-        "CMAKE_SYSTEM_NAME": "Darwin",
+-        "CMAKE_SYSTEM_PROCESSOR": "aarch64",
+-        "AVM_TRANSPILER_LIB": "${sourceDir}/../../avm-transpiler/target/aarch64-apple-darwin/release/libavm_transpiler.a",
+-        "HAVE_STD_REGEX": "ON"
+-      }
+-    },
+-    {
+-      "name": "amd64-windows",
+-      "displayName": "Build for Windows amd64 with Zig",
+-      "description": "Cross-compile for Windows x86_64 using Zig (MinGW). Excludes ipc/lmdb/world_state/nodejs_module (no Windows support).",
+-      "inherits": "cross-base",
+-      "environment": {
+-        "CC": "zig cc -target x86_64-windows-gnu",
+-        "CXX": "zig c++ -target x86_64-windows-gnu",
+-        "LDFLAGS": "-s"
+-      },
+-      "cacheVariables": {
+-        "CMAKE_SYSTEM_NAME": "Windows",
+-        "CMAKE_SYSTEM_PROCESSOR": "x86_64",
+-        "BB_LITE": "ON",
+-        "AVM_TRANSPILER_LIB": ""
+-      }
+-    },
+-    {
+-      "name": "arm64-ios",
+-      "displayName": "iOS arm64 static library (Zig)",
+-      "description": "Cross-compile static libraries for iOS arm64 devices using Zig. Only supports static library targets (no linking) — Zig lacks iOS TBD/dylib support.",
+-      "inherits": "cross-base",
+-      "environment": {
+-        "CC": "zig cc -target aarch64-ios -mios-version-min=16.3 -isystem ${sourceDir}/ios-sdk/iPhoneOS26.2.sdk/usr/include",
+-        "CXX": "zig c++ -target aarch64-ios -mios-version-min=16.3 -isystem ${sourceDir}/ios-sdk/iPhoneOS26.2.sdk/usr/include"
+-      },
+-      "cacheVariables": {
+-        "CMAKE_SYSTEM_NAME": "Generic",
+-        "CMAKE_TRY_COMPILE_TARGET_TYPE": "STATIC_LIBRARY",
+-        "HAVE_STD_REGEX": "ON",
+-        "BB_LITE": "ON"
+-      }
+-    },
+-    {
+-      "name": "arm64-ios-sim",
+-      "displayName": "iOS Simulator arm64 static library (Zig)",
+-      "description": "Cross-compile static libraries for iOS Simulator on ARM64 using Zig. Only supports static library targets (no linking) — Zig lacks iOS TBD/dylib support.",
+-      "inherits": "cross-base",
+-      "environment": {
+-        "CC": "zig cc -target aarch64-ios-simulator -mios-version-min=16.3 -isystem ${sourceDir}/ios-sdk/iPhoneOS26.2.sdk/usr/include",
+-        "CXX": "zig c++ -target aarch64-ios-simulator -mios-version-min=16.3 -isystem ${sourceDir}/ios-sdk/iPhoneOS26.2.sdk/usr/include"
+-      },
+-      "cacheVariables": {
+-        "CMAKE_SYSTEM_NAME": "Generic",
+-        "CMAKE_TRY_COMPILE_TARGET_TYPE": "STATIC_LIBRARY",
+-        "HAVE_STD_REGEX": "ON",
+-        "BB_LITE": "ON"
+-      }
+-    },
+-    {
+-      "name": "arm64-android",
+-      "displayName": "Android arm64 static library (Zig)",
+-      "description": "Cross-compile static libraries for Android arm64 devices using Zig. Only supports static library targets (no linking).",
+-      "inherits": "cross-base",
+-      "environment": {
+-        "CC": "zig cc -target aarch64-linux-android -isystem ${sourceDir}/android-sysroot/usr/include -isystem ${sourceDir}/android-sysroot/usr/include/aarch64-linux-android",
+-        "CXX": "zig c++ -target aarch64-linux-android -isystem ${sourceDir}/android-sysroot/usr/include -isystem ${sourceDir}/android-sysroot/usr/include/aarch64-linux-android"
+-      },
+-      "cacheVariables": {
+-        "CMAKE_SYSTEM_NAME": "Generic",
+-        "CMAKE_TRY_COMPILE_TARGET_TYPE": "STATIC_LIBRARY",
+-        "HAVE_STD_REGEX": "ON",
+-        "BB_LITE": "ON"
+-      }
+-    },
+-    {
+-      "name": "x86_64-android",
+-      "displayName": "Android x86_64 static library (Zig)",
+-      "description": "Cross-compile static libraries for Android x86_64 emulator using Zig. Only supports static library targets (no linking).",
+-      "inherits": "cross-base",
+-      "environment": {
+-        "CC": "zig cc -target x86_64-linux-android -isystem ${sourceDir}/android-sysroot/usr/include -isystem ${sourceDir}/android-sysroot/usr/include/x86_64-linux-android",
+-        "CXX": "zig c++ -target x86_64-linux-android -isystem ${sourceDir}/android-sysroot/usr/include -isystem ${sourceDir}/android-sysroot/usr/include/x86_64-linux-android"
+-      },
+-      "cacheVariables": {
+-        "CMAKE_SYSTEM_NAME": "Generic",
+-        "CMAKE_TRY_COMPILE_TARGET_TYPE": "STATIC_LIBRARY",
+-        "HAVE_STD_REGEX": "ON",
+-        "BB_LITE": "ON"
+-      }
+-    }
+-  ],
+-  "buildPresets": [
+-    {
+-      "name": "default",
+-      "configurePreset": "default",
+-      "inheritConfigureEnvironment": true,
+-      "jobs": 0
+-    },
+-    {
+-      "name": "homebrew",
+-      "inherits": "default",
+-      "configurePreset": "homebrew"
+-    },
+-    {
+-      "name": "clang20",
+-      "inherits": "default",
+-      "configurePreset": "clang20"
+-    },
+-    {
+-      "name": "clang20-assert",
+-      "inherits": "default",
+-      "configurePreset": "clang20-assert"
+-    },
+-    {
+-      "name": "clang20-no-avm",
+-      "inherits": "default",
+-      "configurePreset": "clang20-no-avm"
+-    },
+-    {
+-      "name": "debug",
+-      "inherits": "default",
+-      "configurePreset": "debug"
+-    },
+-    {
+-      "name": "tracy-memory",
+-      "inherits": "default",
+-      "configurePreset": "tracy-memory"
+-    },
+-    {
+-      "name": "tracy-time-instrumented",
+-      "inherits": "default",
+-      "configurePreset": "tracy-time-instrumented"
+-    },
+-    {
+-      "name": "tracy-time-sampled",
+-      "inherits": "default",
+-      "configurePreset": "tracy-time-sampled"
+-    },
+-    {
+-      "name": "tracy-gates",
+-      "inherits": "default",
+-      "configurePreset": "tracy-gates"
+-    },
+-    {
+-      "name": "debug-fast",
+-      "inherits": "default",
+-      "configurePreset": "debug-fast"
+-    },
+-    {
+-      "name": "asan",
+-      "inherits": "default",
+-      "configurePreset": "asan"
+-    },
+-    {
+-      "name": "asan-fast",
+-      "inherits": "default",
+-      "configurePreset": "asan-fast",
+-      "targets": [
+-        "commitment_schemes_recursion_tests",
+-        "chonk_tests",
+-        "ultra_honk_tests",
+-        "dsl_tests"
+-      ]
+-    },
+-    {
+-      "name": "gcc",
+-      "inherits": "default",
+-      "configurePreset": "gcc"
+-    },
+-    {
+-      "name": "bench",
+-      "inherits": "clang20",
+-      "configurePreset": "bench"
+-    },
+-    {
+-      "name": "fuzzing",
+-      "inherits": "clang20",
+-      "configurePreset": "fuzzing"
+-    },
+-    {
+-      "name": "fuzzing-asan",
+-      "inherits": "debug",
+-      "configurePreset": "fuzzing-asan"
+-    },
+-    {
+-      "name": "fuzzing-coverage",
+-      "inherits": "clang20",
+-      "configurePreset": "fuzzing-coverage"
+-    },
+-    {
+-      "name": "fuzzing-avm",
+-      "inherits": "clang20",
+-      "configurePreset": "fuzzing-avm"
+-    },
+-    {
+-      "name": "fuzzing-avm-tooling",
+-      "inherits": "clang20",
+-      "configurePreset": "fuzzing-avm-tooling"
+-    },
+-    {
+-      "name": "gperftools",
+-      "inherits": "clang20",
+-      "configurePreset": "gperftools"
+-    },
+-    {
+-      "name": "smt-verification",
+-      "inherits": "clang20",
+-      "configurePreset": "smt-verification"
+-    },
+-    {
+-      "name": "msan",
+-      "inherits": "default",
+-      "configurePreset": "msan"
+-    },
+-    {
+-      "name": "tsan",
+-      "inherits": "default",
+-      "configurePreset": "tsan"
+-    },
+-    {
+-      "name": "ubsan",
+-      "inherits": "default",
+-      "configurePreset": "ubsan"
+-    },
+-    {
+-      "name": "clang20-coverage",
+-      "inherits": "debug-fast",
+-      "configurePreset": "clang20-coverage"
+-    },
+-    {
+-      "name": "wasm",
+-      "configurePreset": "wasm",
+-      "inheritConfigureEnvironment": true,
+-      "jobs": 0,
+-      "targets": [
+-        "barretenberg.wasm",
+-        "barretenberg.wasm.gz",
+-        "barretenberg-debug.wasm"
+-      ]
+-    },
+-    {
+-      "name": "wasm-threads-dbg",
+-      "configurePreset": "wasm-threads-dbg",
+-      "inheritConfigureEnvironment": true,
+-      "jobs": 0,
+-      "targets": ["barretenberg.wasm", "bb"]
+-    },
+-    {
+-      "name": "wasm-threads",
+-      "configurePreset": "wasm-threads",
+-      "inheritConfigureEnvironment": true,
+-      "jobs": 0,
+-      "targets": [
+-        "barretenberg.wasm",
+-        "barretenberg.wasm.gz",
+-        "barretenberg-debug.wasm",
+-        "ecc_tests",
+-        "ultra_honk_bench",
+-        "bb"
+-      ]
+-    },
+-    {
+-      "name": "xray",
+-      "configurePreset": "xray",
+-      "inherits": "default"
+-    },
+-    {
+-      "name": "amd64-linux",
+-      "configurePreset": "amd64-linux",
+-      "inheritConfigureEnvironment": true,
+-      "targets": ["bb", "nodejs_module", "bb-external", "aztec-wsdb", "bb-avm-sim"]
+-    },
+-    {
+-      "name": "arm64-linux",
+-      "configurePreset": "arm64-linux",
+-      "inheritConfigureEnvironment": true,
+-      "targets": ["bb", "bb-avm", "nodejs_module", "bb-external", "aztec-wsdb", "bb-avm-sim"]
+-    },
+-    {
+-      "name": "amd64-macos",
+-      "configurePreset": "amd64-macos",
+-      "inheritConfigureEnvironment": true,
+-      "targets": ["bb", "nodejs_module", "bb-external", "aztec-wsdb", "bb-avm-sim"]
+-    },
+-    {
+-      "name": "arm64-macos",
+-      "configurePreset": "arm64-macos",
+-      "inheritConfigureEnvironment": true,
+-      "targets": ["bb", "nodejs_module", "bb-external", "aztec-wsdb", "bb-avm-sim"]
+-    },
+-    {
+-      "name": "amd64-windows",
+-      "configurePreset": "amd64-windows",
+-      "inheritConfigureEnvironment": true,
+-      "targets": ["bb", "bb-external"]
+-    },
+-    {
+-      "name": "arm64-ios",
+-      "configurePreset": "arm64-ios",
+-      "inheritConfigureEnvironment": true,
+-      "targets": ["bb-external"]
+-    },
+-    {
+-      "name": "arm64-ios-sim",
+-      "configurePreset": "arm64-ios-sim",
+-      "inheritConfigureEnvironment": true,
+-      "targets": ["bb-external"]
+-    },
+-    {
+-      "name": "arm64-android",
+-      "configurePreset": "arm64-android",
+-      "inheritConfigureEnvironment": true,
+-      "targets": ["bb-external"]
+-    },
+-    {
+-      "name": "x86_64-android",
+-      "configurePreset": "x86_64-android",
+-      "inheritConfigureEnvironment": true,
+-      "targets": ["bb-external"]
+-    }
+-  ],
+-  "testPresets": [
+-    {
+-      "name": "default",
+-      "configurePreset": "default",
+-      "inheritConfigureEnvironment": true
+-    },
+-    {
+-      "name": "homebrew",
+-      "inherits": "default",
+-      "configurePreset": "homebrew"
+-    },
+-    {
+-      "name": "clang20",
+-      "inherits": "default",
+-      "configurePreset": "clang20"
+-    },
+-    {
+-      "name": "debug",
+-      "inherits": "default",
+-      "configurePreset": "debug"
+-    },
+-    {
+-      "name": "asan",
+-      "inherits": "default",
+-      "configurePreset": "asan"
+-    },
+-    {
+-      "name": "gcc",
+-      "inherits": "default",
+-      "configurePreset": "gcc"
+-    },
+-    {
+-      "name": "bench",
+-      "inherits": "clang20",
+-      "configurePreset": "bench"
+-    },
+-    {
+-      "name": "fuzzing",
+-      "inherits": "clang20",
+-      "configurePreset": "fuzzing"
+-    },
+-    {
+-      "name": "fuzzing-asan",
+-      "inherits": "debug",
+-      "configurePreset": "fuzzing-asan"
+-    },
+-    {
+-      "name": "smt-verification",
+-      "inherits": "clang20",
+-      "configurePreset": "smt-verification"
+-    },
+-    {
+-      "name": "clang20-coverage",
+-      "inherits": "default",
+-      "configurePreset": "clang20-coverage"
+-    },
+-    {
+-      "name": "wasm",
+-      "configurePreset": "wasm",
+-      "inheritConfigureEnvironment": true
+-    }
+-  ]
+-}
++    "version": 5,
++    "cmakeMinimumRequired": {
++        "major": 3,
++        "minor": 24,
++        "patch": 0
++    },
++    "configurePresets": [
++        {
++            "name": "default",
++            "displayName": "Build with Clang",
++            "description": "Build with globally installed Clang",
++            "binaryDir": "build",
++            "generator": "Ninja",
++            "environment": {
++                "CC": "clang",
++                "CXX": "clang++",
++                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
++            },
++            "cacheVariables": {
++                "CMAKE_BUILD_TYPE": "Release",
++                "ENABLE_PIC": "ON"
++            }
++        },
++        {
++            "name": "homebrew",
++            "displayName": "Homebrew + Clang",
++            "description": "Build with Clang installed via Homebrew",
++            "inherits": "default",
++            "environment": {
++                "CC": "$env{BREW_PREFIX}/opt/llvm@20/bin/clang",
++                "CXX": "$env{BREW_PREFIX}/opt/llvm@20/bin/clang++"
++            }
++        },
++        {
++            "name": "clang20",
++            "displayName": "Build with Zig (glibc 2.35 on Linux)",
++            "description": "Build with Zig-wrapped Clang. On Linux, pins glibc 2.35 (Ubuntu 22.04+). On macOS, uses native target.",
++            "inherits": "default",
++            "binaryDir": "build",
++            "environment": {
++                "CC": "${sourceDir}/scripts/zig-cc.sh",
++                "CXX": "${sourceDir}/scripts/zig-c++.sh",
++                "CFLAGS": "-g0 -fvisibility=hidden",
++                "CXXFLAGS": "-g0 -fvisibility=hidden",
++                "LDFLAGS": "-s"
++            },
++            "cacheVariables": {
++                "CMAKE_AR": "${sourceDir}/scripts/zig-ar.sh",
++                "CMAKE_RANLIB": "${sourceDir}/scripts/zig-ranlib.sh",
++                "AVM_TRANSPILER_LIB": "${sourceDir}/../../avm-transpiler/target/release/libavm_transpiler.a"
++            }
++        },
++        {
++            "name": "clang20-no-avm",
++            "displayName": "Build with Zig (no AVM, glibc 2.35)",
++            "description": "Build with Zig-wrapped Clang targeting glibc 2.35, AVM disabled",
++            "inherits": "clang20",
++            "binaryDir": "build",
++            "cacheVariables": {
++                "AVM": "OFF"
++            }
++        },
++        {
++            "name": "clang20-assert",
++            "displayName": "Build with Zig (assertions, glibc 2.35)",
++            "description": "Build with Zig-wrapped Clang targeting glibc 2.35, assertions enabled",
++            "inherits": "clang20",
++            "binaryDir": "build",
++            "cacheVariables": {
++                "CMAKE_BUILD_TYPE": "RelWithAssert"
++            }
++        },
++        {
++            "name": "clang20-no-exceptions",
++            "displayName": "Build with Zig (no exceptions, glibc 2.35)",
++            "description": "Build with Zig-wrapped Clang targeting glibc 2.35, exceptions disabled",
++            "inherits": "clang20",
++            "environment": {
++                "CMAKE_CXX_FLAGS": "-DBB_NO_EXCEPTIONS"
++            }
++        },
++        {
++            "name": "debug",
++            "displayName": "Debugging build with Clang-20",
++            "description": "Build with globally installed Clang-20 in debug mode",
++            "inherits": "default",
++            "binaryDir": "build-debug",
++            "environment": {
++                "CC": "clang-20",
++                "CXX": "clang++-20",
++                "CFLAGS": "-gdwarf-4",
++                "CXXFLAGS": "-gdwarf-4 -D_GLIBCXX_DEBUG",
++                "LDFLAGS": "-gdwarf-4"
++            },
++            "cacheVariables": {
++                "CMAKE_BUILD_TYPE": "Debug",
++                "ENABLE_ASAN": "OFF",
++                "DISABLE_ASM": "OFF",
++                "ENABLE_STACKTRACES": "ON"
++            }
++        },
++        {
++            "name": "tracy-memory",
++            "displayName": "Release build with tracy with memory tracking",
++            "description": "Release build with tracy with memory tracking",
++            "inherits": "clang20",
++            "binaryDir": "build-tracy-memory",
++            "cacheVariables": {
++                "ENABLE_TRACY": "ON",
++                "TRACY_PROFILE_MEMORY": "ON",
++                "ENABLE_TRACY_TIME_INSTRUMENTED": "ON"
++            },
++            "environment": {
++                "CFLAGS": "-g -fno-omit-frame-pointer",
++                "CXXFLAGS": "-g -fno-omit-frame-pointer",
++                "LDFLAGS": "-g -fno-omit-frame-pointer -rdynamic"
++            }
++        },
++        {
++            "name": "tracy-time-instrumented",
++            "displayName": "Build for tracy time profiling via instrumentation",
++            "description": "Build for tracy time profiling via instrumentation",
++            "binaryDir": "build-tracy-time-instrumented",
++            "inherits": "clang20",
++            "cacheVariables": {
++                "ENABLE_TRACY_TIME_INSTRUMENTED": "ON"
++            }
++        },
++        {
++            "name": "tracy-time-sampled",
++            "displayName": "Build for tracy time profiling via sampling",
++            "description": "Build for tracy time profiling via sampling",
++            "binaryDir": "build-tracy-time-sampled",
++            "inherits": "clang20",
++            "environment": {
++                "CFLAGS": "-g -fno-omit-frame-pointer",
++                "CXXFLAGS": "-g -fno-omit-frame-pointer",
++                "LDFLAGS": "-g -fno-omit-frame-pointer -rdynamic"
++            },
++            "cacheVariables": {
++                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
++                "ENABLE_TRACY": "ON"
++            }
++        },
++        {
++            "name": "tracy-gates",
++            "displayName": "Release build with tracy - but hacked for gate tracking",
++            "description": "Release build with tracy - but hacker for gate tracking",
++            "inherits": "clang20",
++            "binaryDir": "build-tracy-gates",
++            "cacheVariables": {
++                "ENABLE_TRACY": "ON",
++                "CMAKE_CXX_FLAGS": "-DTRACY_HACK_GATES_AS_MEMORY"
++            }
++        },
++        {
++            "name": "debug-fast",
++            "displayName": "Optimized debug build with Clang-20",
++            "description": "Build with globally installed Clang-20 in optimized debug mode",
++            "inherits": "debug",
++            "binaryDir": "build-debug-fast",
++            "environment": {
++                "CFLAGS": "-O2 -gdwarf",
++                "CXXFLAGS": "-O2 -gdwarf-4 -D_GLIBCXX_DEBUG",
++                "LDFLAGS": "-O2 -gdwarf-4"
++            },
++            "cacheVariables": {
++                "ENABLE_STACKTRACES": "ON"
++            }
++        },
++        {
++            "name": "asan-fast",
++            "displayName": "Debugging build with address sanitizer on Clang-20 in optimized debug mode",
++            "description": "Build with address sanitizer on clang20 in optimized debug mode",
++            "inherits": "debug-fast",
++            "binaryDir": "build-asan-fast",
++            "cacheVariables": {
++                "ENABLE_ASAN": "ON",
++                "DISABLE_ASM": "ON",
++                "ENABLE_STACKTRACES": "OFF"
++            }
++        },
++        {
++            "name": "asan",
++            "displayName": "Debugging build with address sanitizer on Clang-20",
++            "description": "Build with address sanitizer on clang20 with debugging information",
++            "inherits": "debug",
++            "binaryDir": "build-asan",
++            "cacheVariables": {
++                "ENABLE_ASAN": "ON",
++                "DISABLE_ASM": "ON",
++                "ENABLE_STACKTRACES": "OFF"
++            }
++        },
++        {
++            "name": "gcc",
++            "displayName": "Build with GCC",
++            "description": "Build with globally installed GCC",
++            "inherits": "default",
++            "binaryDir": "build-gcc",
++            "environment": {
++                "CC": "gcc",
++                "CXX": "g++",
++                "CXXFLAGS": "-Wno-missing-field-initializers"
++            }
++        },
++        {
++            "name": "bench",
++            "displayName": "Build benchmarks",
++            "description": "Build default preset but with a special benchmark directory",
++            "inherits": "clang20",
++            "binaryDir": "build-bench"
++        },
++        {
++            "name": "fuzzing",
++            "displayName": "Build with fuzzing",
++            "description": "Build default preset but with fuzzing enabled. Uses clang-20 directly (zig does not provide libFuzzer/libclang_rt.fuzzer).",
++            "inherits": "default",
++            "binaryDir": "build-fuzzing",
++            "environment": {
++                "CC": "clang-20",
++                "CXX": "clang++-20"
++            },
++            "cacheVariables": {
++                "FUZZING": "ON",
++                "AVM": "OFF",
++                "AVM_TRANSPILER_LIB": "",
++                "CMAKE_BUILD_TYPE": "RelWithAssert",
++                "MULTITHREADING": "OFF",
++                "FUZZER_PRESET_NAME": "${presetName}"
++            }
++        },
++        {
++            "name": "fuzzing-noasm",
++            "displayName": "Build with fuzzing and ASM disabled",
++            "description": "Build default preset but with fuzzing enabled and ASM disabled",
++            "inherits": "fuzzing",
++            "binaryDir": "build-fuzzing-noasm",
++            "cacheVariables": {
++                "DISABLE_ASM": "ON"
++            }
++        },
++        {
++            "name": "fuzzing-asan",
++            "displayName": "Build with fuzzing",
++            "description": "Build default preset but with fuzzing and asan enabled",
++            "inherits": "debug",
++            "binaryDir": "build-fuzzing-asan",
++            "cacheVariables": {
++                "FUZZING": "ON",
++                "FUZZING_SHOW_INFORMATION": "ON",
++                "AVM": "OFF",
++                "AVM_TRANSPILER_LIB": "",
++                "ENABLE_ASAN": "ON",
++                "DISABLE_ASM": "ON",
++                "CMAKE_BUILD_TYPE": "RelWithAssert",
++                "MULTITHREADING": "OFF"
++            }
++        },
++        {
++            "name": "fuzzing-coverage",
++            "displayName": "Build with coverage flags",
++            "description": "Build default preset but with fuzzing and coverage enabled",
++            "inherits": "fuzzing",
++            "binaryDir": "build-fuzzing-cov",
++            "cacheVariables": {
++                "DISABLE_ASM": "ON"
++            },
++            "environment": {
++                "CC": "clang-20",
++                "CXX": "clang++-20",
++                "CXXFLAGS": "-fprofile-instr-generate -fcoverage-mapping"
++            }
++        },
++        {
++            "name": "fuzzing-avm",
++            "displayName": "Build with fuzzing and AVM",
++            "description": "Build default preset but with fuzzing and AVM enabled",
++            "inherits": "clang20",
++            "binaryDir": "build-fuzzing-avm",
++            "environment": {
++                "CC": "clang-20",
++                "CXX": "clang++-20"
++            },
++            "cacheVariables": {
++                "FUZZING": "ON",
++                "DISABLE_ASM": "OFF",
++                "AVM_TRANSPILER_LIB": "",
++                "FUZZING_AVM": "ON",
++                "CMAKE_BUILD_TYPE": "RelWithAssert",
++                "MULTITHREADING": "ON",
++                "FUZZER_PRESET_NAME": "${presetName}",
++                "CMAKE_AR": null,
++                "CMAKE_RANLIB": null
++            }
++        },
++        {
++            "name": "fuzzing-avm-tooling",
++            "displayName": "Build fuzzer tooling without instrumentation",
++            "description": "Build fuzzer tests and utilities like corpus analyzer without fuzzer instrumentation",
++            "inherits": "clang20",
++            "binaryDir": "build-fuzzing-avm-tooling",
++            "cacheVariables": {
++                "FUZZING": "OFF",
++                "DISABLE_ASM": "OFF",
++                "AVM_TRANSPILER_LIB": "",
++                "FUZZING_AVM": "ON",
++                "CMAKE_BUILD_TYPE": "RelWithAssert",
++                "MULTITHREADING": "ON"
++            }
++        },
++        {
++            "name": "smt-verification",
++            "displayName": "Build with smt verification",
++            "description": "Build clang20 preset but with smt library included, using clang-20 directly (cvc5 ExternalProject needs a plain compiler path)",
++            "inherits": "clang20",
++            "binaryDir": "build-smt",
++            "environment": {
++                "CC": "clang-20",
++                "CXX": "clang++-20"
++            },
++            "cacheVariables": {
++                "CMAKE_AR": null,
++                "CMAKE_RANLIB": null,
++                "AVM_TRANSPILER_LIB": "",
++                "SMT": "ON"
++            }
++        },
++        {
++            "name": "tsan",
++            "displayName": "Debugging build with thread sanitizer on Clang-20",
++            "description": "Build with thread sanitizer on clang20 with debugging information",
++            "inherits": "debug",
++            "binaryDir": "build-tsan",
++            "cacheVariables": {
++                "HAVE_STD_REGEX": "ON"
++            },
++            "environment": {
++                "CFLAGS": "-fsanitize=thread",
++                "CXXFLAGS": "-fsanitize=thread",
++                "LDFLAGS": "-fsanitize=thread"
++            }
++        },
++        {
++            "name": "ubsan",
++            "displayName": "Debugging build with undefined behaviour sanitizer on Clang-20",
++            "description": "Build with undefined behaviour sanitizer on clang20 with debugging information",
++            "inherits": "debug",
++            "binaryDir": "build-ubsan",
++            "generator": "Unix Makefiles",
++            "environment": {
++                "CFLAGS": "-fsanitize=undefined",
++                "CXXFLAGS": "-fsanitize=undefined",
++                "LDFLAGS": "-fsanitize=undefined"
++            }
++        },
++        {
++            "name": "msan",
++            "displayName": "Debugging build with memory sanitizer on Clang-20",
++            "description": "Build with thread sanitizer on clang20 with debugging information",
++            "inherits": "debug",
++            "binaryDir": "build-msan",
++            "environment": {
++                "CFLAGS": "-fsanitize=memory",
++                "CXXFLAGS": "-fsanitize=memory",
++                "LDFLAGS": "-fsanitize=memory"
++            },
++            "cacheVariables": {
++                "HAVE_STD_REGEX": "ON",
++                "CMAKE_CXX_FLAGS": "$env{MSAN_CFLAGS}",
++                "CMAKE_EXE_LINKER_FLAGS": "$env{MSAN_LFLAGS}"
++            }
++        },
++        {
++            "name": "clang20-coverage",
++            "displayName": "Build with coverage",
++            "description": "Build clang20 preset but with coverage enabled",
++            "inherits": "clang20",
++            "binaryDir": "build-coverage",
++            "cacheVariables": {
++                "COVERAGE": "ON",
++                "DISABLE_ASM": "ON",
++                "AVM_TRANSPILER_LIB": ""
++            }
++        },
++        {
++            "name": "gperftools",
++            "displayName": "Debugging build with gperftools on Clang-20",
++            "description": "Build with gperf",
++            "inherits": "clang20",
++            "binaryDir": "build-gperftools",
++            "cacheVariables": {
++                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
++                "AVM_TRANSPILER_LIB": "",
++                "CMAKE_EXE_LINKER_FLAGS": "-ltcmalloc",
++                "CXXFLAGS": "-fno-omit-frame-pointer"
++            }
++        },
++        {
++            "name": "wasm",
++            "displayName": "Build for WASM",
++            "description": "Build with wasi-sdk to create wasm",
++            "binaryDir": "build-wasm",
++            "generator": "Ninja",
++            "toolchainFile": "cmake/toolchains/wasm32-wasi.cmake",
++            "environment": {
++                "WASI_SDK_PREFIX": "/opt/wasi-sdk",
++                "CC": "$env{WASI_SDK_PREFIX}/bin/clang",
++                "CXX": "$env{WASI_SDK_PREFIX}/bin/clang++",
++                "CXXFLAGS": "-DBB_VERBOSE -fvisibility=hidden",
++                "LDFLAGS": "--no-wasm-opt",
++                "AR": "$env{WASI_SDK_PREFIX}/bin/llvm-ar",
++                "RANLIB": "$env{WASI_SDK_PREFIX}/bin/llvm-ranlib"
++            },
++            "cacheVariables": {
++                "CMAKE_SYSROOT": "$env{WASI_SDK_PREFIX}/share/wasi-sysroot",
++                "CMAKE_FIND_ROOT_PATH_MODE_PROGRAM": "NEVER",
++                "CMAKE_FIND_ROOT_PATH_MODE_LIBRARY": "ONLY",
++                "CMAKE_FIND_ROOT_PATH_MODE_INCLUDE": "ONLY",
++                "CMAKE_FIND_ROOT_PATH_MODE_PACKAGE": "ONLY",
++                "CMAKE_C_COMPILER_WORKS": "ON",
++                "CMAKE_CXX_COMPILER_WORKS": "ON",
++                "MULTITHREADING": "OFF",
++                "CMAKE_CXX_FLAGS": "-DBB_NO_EXCEPTIONS"
++            }
++        },
++        {
++            "name": "wasm-threads",
++            "displayName": "Build for pthread enabled WASM",
++            "description": "Build for pthread enabled WASM",
++            "inherits": "wasm",
++            "binaryDir": "build-wasm-threads",
++            "cacheVariables": {
++                "CMAKE_BUILD_TYPE": "Release",
++                "MULTITHREADING": "ON",
++                "ENABLE_WASM_BENCH": "OFF"
++            }
++        },
++        {
++            "name": "wasm-threads-dbg",
++            "displayName": "Build for debug WASM",
++            "binaryDir": "build-wasm-threads-dbg",
++            "description": "Build with wasi-sdk to create debug wasm",
++            "inherits": "wasm",
++            "cacheVariables": {
++                "CMAKE_BUILD_TYPE": "Debug",
++                "MULTITHREADING": "ON"
++            }
++        },
++        {
++            "name": "xray",
++            "displayName": "Build with multi-threaded XRay Profiling",
++            "description": "Build with Clang and enable multi-threaded LLVM XRay for profiling",
++            "generator": "Unix Makefiles",
++            "inherits": "clang20",
++            "environment": {
++                "CFLAGS": "-fxray-instrument",
++                "CXXFLAGS": "-fxray-instrument -fxray-instruction-threshold=500 -DXRAY=1",
++                "LDFLAGS": "-fxray-instrument -fxray-instruction-threshold=500 -DXRAY=1"
++            },
++            "binaryDir": "build-xray"
++        },
++        {
++            "name": "cross-base",
++            "displayName": "Zig (base)",
++            "generator": "Ninja",
++            "binaryDir": "${sourceDir}/build-${presetName}",
++            "environment": {
++                "CC": "zig cc",
++                "CXX": "zig c++",
++                "CFLAGS": "-g0 -fvisibility=hidden",
++                "CXXFLAGS": "-g0 -fvisibility=hidden"
++            },
++            "cacheVariables": {
++                "ENABLE_PIC": "ON",
++                "CMAKE_BUILD_TYPE": "Release",
++                "CMAKE_AR": "${sourceDir}/scripts/zig-ar.sh",
++                "CMAKE_RANLIB": "${sourceDir}/scripts/zig-ranlib.sh"
++            }
++        },
++        {
++            "name": "amd64-linux",
++            "displayName": "Build for linux amd64 with Zig",
++            "inherits": "cross-base",
++            "environment": {
++                "CC": "zig cc -target x86_64-linux-gnu.2.35",
++                "CXX": "zig c++ -target x86_64-linux-gnu.2.35",
++                "LDFLAGS": "-s"
++            },
++            "cacheVariables": {
++                "CMAKE_SYSTEM_NAME": "Linux",
++                "AVM_TRANSPILER_LIB": "${sourceDir}/../../avm-transpiler/target/x86_64-apple-darwin/release/libavm_transpiler.a"
++            }
++        },
++        {
++            "name": "arm64-linux",
++            "inherits": "cross-base",
++            "environment": {
++                "CC": "zig cc -target aarch64-linux-gnu.2.35",
++                "CXX": "zig c++ -target aarch64-linux-gnu.2.35",
++                "LDFLAGS": "-s"
++            },
++            "cacheVariables": {
++                "CMAKE_SYSTEM_NAME": "Linux",
++                "AVM_TRANSPILER_LIB": "${sourceDir}/../../avm-transpiler/target/aarch64-unknown-linux-gnu/release/libavm_transpiler.a"
++            }
++        },
++        {
++            "name": "amd64-macos",
++            "displayName": "Build for macOS amd64 with Zig",
++            "description": "Cross-compile for intel macOS using Zig",
++            "inherits": "cross-base",
++            "environment": {
++                "CC": "zig cc -target x86_64-macos -mcpu=baseline",
++                "CXX": "zig c++ -target x86_64-macos -mcpu=baseline",
++                "LDFLAGS": "-s"
++            },
++            "cacheVariables": {
++                "CMAKE_SYSTEM_NAME": "Darwin",
++                "CMAKE_SYSTEM_PROCESSOR": "x86_64",
++                "AVM_TRANSPILER_LIB": "${sourceDir}/../../avm-transpiler/target/x86_64-apple-darwin/release/libavm_transpiler.a",
++                "HAVE_STD_REGEX": "ON"
++            }
++        },
++        {
++            "name": "arm64-macos",
++            "displayName": "Build for macOS arm64 with Zig",
++            "description": "Cross-compile for macOS arm64 (Apple Silicon) using Zig",
++            "inherits": "cross-base",
++            "environment": {
++                "CC": "zig cc -target aarch64-macos -mcpu=apple_a14",
++                "CXX": "zig c++ -target aarch64-macos -mcpu=apple_a14",
++                "LDFLAGS": "-s"
++            },
++            "cacheVariables": {
++                "CMAKE_SYSTEM_NAME": "Darwin",
++                "CMAKE_SYSTEM_PROCESSOR": "aarch64",
++                "AVM_TRANSPILER_LIB": "${sourceDir}/../../avm-transpiler/target/aarch64-apple-darwin/release/libavm_transpiler.a",
++                "HAVE_STD_REGEX": "ON"
++            }
++        },
++        {
++            "name": "amd64-windows",
++            "displayName": "Build for Windows amd64 with Zig",
++            "description": "Cross-compile for Windows x86_64 using Zig (MinGW). Excludes ipc/lmdb/world_state/nodejs_module (no Windows support).",
++            "inherits": "cross-base",
++            "environment": {
++                "CC": "zig cc -target x86_64-windows-gnu",
++                "CXX": "zig c++ -target x86_64-windows-gnu",
++                "LDFLAGS": "-s"
++            },
++            "cacheVariables": {
++                "CMAKE_SYSTEM_NAME": "Windows",
++                "CMAKE_SYSTEM_PROCESSOR": "x86_64",
++                "BB_LITE": "ON",
++                "AVM_TRANSPILER_LIB": ""
++            }
++        },
++        {
++            "name": "arm64-ios",
++            "displayName": "iOS arm64 static library (Zig)",
++            "description": "Cross-compile static libraries for iOS arm64 devices using Zig. Only supports static library targets (no linking) \u2014 Zig lacks iOS TBD/dylib support.",
++            "inherits": "cross-base",
++            "environment": {
++                "CC": "zig cc -target aarch64-ios -mios-version-min=16.3 -isystem ${sourceDir}/ios-sdk/iPhoneOS26.2.sdk/usr/include",
++                "CXX": "zig c++ -target aarch64-ios -mios-version-min=16.3 -isystem ${sourceDir}/ios-sdk/iPhoneOS26.2.sdk/usr/include"
++            },
++            "cacheVariables": {
++                "CMAKE_SYSTEM_NAME": "Generic",
++                "CMAKE_TRY_COMPILE_TARGET_TYPE": "STATIC_LIBRARY",
++                "HAVE_STD_REGEX": "ON",
++                "BB_LITE": "ON"
++            }
++        },
++        {
++            "name": "arm64-ios-sim",
++            "displayName": "iOS Simulator arm64 static library (Zig)",
++            "description": "Cross-compile static libraries for iOS Simulator on ARM64 using Zig. Only supports static library targets (no linking) \u2014 Zig lacks iOS TBD/dylib support.",
++            "inherits": "cross-base",
++            "environment": {
++                "CC": "zig cc -target aarch64-ios-simulator -mios-version-min=16.3 -isystem ${sourceDir}/ios-sdk/iPhoneOS26.2.sdk/usr/include",
++                "CXX": "zig c++ -target aarch64-ios-simulator -mios-version-min=16.3 -isystem ${sourceDir}/ios-sdk/iPhoneOS26.2.sdk/usr/include"
++            },
++            "cacheVariables": {
++                "CMAKE_SYSTEM_NAME": "Generic",
++                "CMAKE_TRY_COMPILE_TARGET_TYPE": "STATIC_LIBRARY",
++                "HAVE_STD_REGEX": "ON",
++                "BB_LITE": "ON"
++            }
++        },
++        {
++            "name": "arm64-android",
++            "displayName": "Android arm64 static library (Zig)",
++            "description": "Cross-compile static libraries for Android arm64 devices using Zig. Only supports static library targets (no linking).",
++            "inherits": "cross-base",
++            "environment": {
++                "CC": "zig cc -target aarch64-linux-android -isystem ${sourceDir}/android-sysroot/usr/include -isystem ${sourceDir}/android-sysroot/usr/include/aarch64-linux-android",
++                "CXX": "zig c++ -target aarch64-linux-android -isystem ${sourceDir}/android-sysroot/usr/include -isystem ${sourceDir}/android-sysroot/usr/include/aarch64-linux-android"
++            },
++            "cacheVariables": {
++                "CMAKE_SYSTEM_NAME": "Generic",
++                "CMAKE_TRY_COMPILE_TARGET_TYPE": "STATIC_LIBRARY",
++                "HAVE_STD_REGEX": "ON",
++                "BB_LITE": "ON"
++            }
++        },
++        {
++            "name": "x86_64-android",
++            "displayName": "Android x86_64 static library (Zig)",
++            "description": "Cross-compile static libraries for Android x86_64 emulator using Zig. Only supports static library targets (no linking).",
++            "inherits": "cross-base",
++            "environment": {
++                "CC": "zig cc -target x86_64-linux-android -isystem ${sourceDir}/android-sysroot/usr/include -isystem ${sourceDir}/android-sysroot/usr/include/x86_64-linux-android",
++                "CXX": "zig c++ -target x86_64-linux-android -isystem ${sourceDir}/android-sysroot/usr/include -isystem ${sourceDir}/android-sysroot/usr/include/x86_64-linux-android"
++            },
++            "cacheVariables": {
++                "CMAKE_SYSTEM_NAME": "Generic",
++                "CMAKE_TRY_COMPILE_TARGET_TYPE": "STATIC_LIBRARY",
++                "HAVE_STD_REGEX": "ON",
++                "BB_LITE": "ON"
++            }
++        },
++        {
++            "name": "wasm-avm",
++            "displayName": "SPIKE: WASM build including vm2_sim, with real C++ exceptions",
++            "description": "wasi-sdk 33 + -fwasm-exceptions; vm2_sim/world_state_reference/aztec enabled",
++            "binaryDir": "build-wasm-avm",
++            "generator": "Ninja",
++            "toolchainFile": "cmake/toolchains/wasm32-wasi.cmake",
++            "environment": {
++                "WASI_SDK_PREFIX": "/home/zahary/m/blocktracer/aztec-avm-runtime/vm2wasm/wasi-sdk-33",
++                "CC": "$env{WASI_SDK_PREFIX}/bin/clang",
++                "CXX": "$env{WASI_SDK_PREFIX}/bin/clang++",
++                "AR": "$env{WASI_SDK_PREFIX}/bin/llvm-ar",
++                "RANLIB": "$env{WASI_SDK_PREFIX}/bin/llvm-ranlib"
++            },
++            "cacheVariables": {
++                "CMAKE_BUILD_TYPE": "Release",
++                "CMAKE_SYSROOT": "/home/zahary/m/blocktracer/aztec-avm-runtime/vm2wasm/wasi-sdk-33/share/wasi-sysroot",
++                "CMAKE_FIND_ROOT_PATH_MODE_PROGRAM": "NEVER",
++                "CMAKE_FIND_ROOT_PATH_MODE_LIBRARY": "ONLY",
++                "CMAKE_FIND_ROOT_PATH_MODE_INCLUDE": "ONLY",
++                "CMAKE_FIND_ROOT_PATH_MODE_PACKAGE": "ONLY",
++                "CMAKE_C_COMPILER_WORKS": "ON",
++                "CMAKE_CXX_COMPILER_WORKS": "ON",
++                "MULTITHREADING": "OFF",
++                "AVM": "OFF",
++                "AVM_WASM": "ON",
++                "AVM_TRANSPILER_LIB": "",
++                "CMAKE_CXX_FLAGS": "-fvisibility=hidden -Wno-error -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false",
++                "CMAKE_C_FLAGS": "-fvisibility=hidden -Wno-error",
++                "CMAKE_EXE_LINKER_FLAGS": "-fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -lunwind"
++            }
++        },
++        {
++            "name": "native-avm-spike",
++            "displayName": "SPIKE: native reference build of the same vm2_sim driver",
++            "inherits": "default",
++            "binaryDir": "build-native-avm-spike",
++            "cacheVariables": {
++                "CMAKE_BUILD_TYPE": "Release",
++                "AVM": "OFF",
++                "AVM_TRANSPILER_LIB": ""
++            }
++        }
++    ],
++    "buildPresets": [
++        {
++            "name": "default",
++            "configurePreset": "default",
++            "inheritConfigureEnvironment": true,
++            "jobs": 0
++        },
++        {
++            "name": "homebrew",
++            "inherits": "default",
++            "configurePreset": "homebrew"
++        },
++        {
++            "name": "clang20",
++            "inherits": "default",
++            "configurePreset": "clang20"
++        },
++        {
++            "name": "clang20-assert",
++            "inherits": "default",
++            "configurePreset": "clang20-assert"
++        },
++        {
++            "name": "clang20-no-avm",
++            "inherits": "default",
++            "configurePreset": "clang20-no-avm"
++        },
++        {
++            "name": "debug",
++            "inherits": "default",
++            "configurePreset": "debug"
++        },
++        {
++            "name": "tracy-memory",
++            "inherits": "default",
++            "configurePreset": "tracy-memory"
++        },
++        {
++            "name": "tracy-time-instrumented",
++            "inherits": "default",
++            "configurePreset": "tracy-time-instrumented"
++        },
++        {
++            "name": "tracy-time-sampled",
++            "inherits": "default",
++            "configurePreset": "tracy-time-sampled"
++        },
++        {
++            "name": "tracy-gates",
++            "inherits": "default",
++            "configurePreset": "tracy-gates"
++        },
++        {
++            "name": "debug-fast",
++            "inherits": "default",
++            "configurePreset": "debug-fast"
++        },
++        {
++            "name": "asan",
++            "inherits": "default",
++            "configurePreset": "asan"
++        },
++        {
++            "name": "asan-fast",
++            "inherits": "default",
++            "configurePreset": "asan-fast",
++            "targets": [
++                "commitment_schemes_recursion_tests",
++                "chonk_tests",
++                "ultra_honk_tests",
++                "dsl_tests"
++            ]
++        },
++        {
++            "name": "gcc",
++            "inherits": "default",
++            "configurePreset": "gcc"
++        },
++        {
++            "name": "bench",
++            "inherits": "clang20",
++            "configurePreset": "bench"
++        },
++        {
++            "name": "fuzzing",
++            "inherits": "clang20",
++            "configurePreset": "fuzzing"
++        },
++        {
++            "name": "fuzzing-asan",
++            "inherits": "debug",
++            "configurePreset": "fuzzing-asan"
++        },
++        {
++            "name": "fuzzing-coverage",
++            "inherits": "clang20",
++            "configurePreset": "fuzzing-coverage"
++        },
++        {
++            "name": "fuzzing-avm",
++            "inherits": "clang20",
++            "configurePreset": "fuzzing-avm"
++        },
++        {
++            "name": "fuzzing-avm-tooling",
++            "inherits": "clang20",
++            "configurePreset": "fuzzing-avm-tooling"
++        },
++        {
++            "name": "gperftools",
++            "inherits": "clang20",
++            "configurePreset": "gperftools"
++        },
++        {
++            "name": "smt-verification",
++            "inherits": "clang20",
++            "configurePreset": "smt-verification"
++        },
++        {
++            "name": "msan",
++            "inherits": "default",
++            "configurePreset": "msan"
++        },
++        {
++            "name": "tsan",
++            "inherits": "default",
++            "configurePreset": "tsan"
++        },
++        {
++            "name": "ubsan",
++            "inherits": "default",
++            "configurePreset": "ubsan"
++        },
++        {
++            "name": "clang20-coverage",
++            "inherits": "debug-fast",
++            "configurePreset": "clang20-coverage"
++        },
++        {
++            "name": "wasm",
++            "configurePreset": "wasm",
++            "inheritConfigureEnvironment": true,
++            "jobs": 0,
++            "targets": [
++                "barretenberg.wasm",
++                "barretenberg.wasm.gz",
++                "barretenberg-debug.wasm"
++            ]
++        },
++        {
++            "name": "wasm-threads-dbg",
++            "configurePreset": "wasm-threads-dbg",
++            "inheritConfigureEnvironment": true,
++            "jobs": 0,
++            "targets": [
++                "barretenberg.wasm",
++                "bb"
++            ]
++        },
++        {
++            "name": "wasm-threads",
++            "configurePreset": "wasm-threads",
++            "inheritConfigureEnvironment": true,
++            "jobs": 0,
++            "targets": [
++                "barretenberg.wasm",
++                "barretenberg.wasm.gz",
++                "barretenberg-debug.wasm",
++                "ecc_tests",
++                "ultra_honk_bench",
++                "bb"
++            ]
++        },
++        {
++            "name": "xray",
++            "configurePreset": "xray",
++            "inherits": "default"
++        },
++        {
++            "name": "amd64-linux",
++            "configurePreset": "amd64-linux",
++            "inheritConfigureEnvironment": true,
++            "targets": [
++                "bb",
++                "nodejs_module",
++                "bb-external",
++                "aztec-wsdb",
++                "bb-avm-sim"
++            ]
++        },
++        {
++            "name": "arm64-linux",
++            "configurePreset": "arm64-linux",
++            "inheritConfigureEnvironment": true,
++            "targets": [
++                "bb",
++                "bb-avm",
++                "nodejs_module",
++                "bb-external",
++                "aztec-wsdb",
++                "bb-avm-sim"
++            ]
++        },
++        {
++            "name": "amd64-macos",
++            "configurePreset": "amd64-macos",
++            "inheritConfigureEnvironment": true,
++            "targets": [
++                "bb",
++                "nodejs_module",
++                "bb-external",
++                "aztec-wsdb",
++                "bb-avm-sim"
++            ]
++        },
++        {
++            "name": "arm64-macos",
++            "configurePreset": "arm64-macos",
++            "inheritConfigureEnvironment": true,
++            "targets": [
++                "bb",
++                "nodejs_module",
++                "bb-external",
++                "aztec-wsdb",
++                "bb-avm-sim"
++            ]
++        },
++        {
++            "name": "amd64-windows",
++            "configurePreset": "amd64-windows",
++            "inheritConfigureEnvironment": true,
++            "targets": [
++                "bb",
++                "bb-external"
++            ]
++        },
++        {
++            "name": "arm64-ios",
++            "configurePreset": "arm64-ios",
++            "inheritConfigureEnvironment": true,
++            "targets": [
++                "bb-external"
++            ]
++        },
++        {
++            "name": "arm64-ios-sim",
++            "configurePreset": "arm64-ios-sim",
++            "inheritConfigureEnvironment": true,
++            "targets": [
++                "bb-external"
++            ]
++        },
++        {
++            "name": "arm64-android",
++            "configurePreset": "arm64-android",
++            "inheritConfigureEnvironment": true,
++            "targets": [
++                "bb-external"
++            ]
++        },
++        {
++            "name": "x86_64-android",
++            "configurePreset": "x86_64-android",
++            "inheritConfigureEnvironment": true,
++            "targets": [
++                "bb-external"
++            ]
++        },
++        {
++            "name": "wasm-avm",
++            "configurePreset": "wasm-avm"
++        }
++    ],
++    "testPresets": [
++        {
++            "name": "default",
++            "configurePreset": "default",
++            "inheritConfigureEnvironment": true
++        },
++        {
++            "name": "homebrew",
++            "inherits": "default",
++            "configurePreset": "homebrew"
++        },
++        {
++            "name": "clang20",
++            "inherits": "default",
++            "configurePreset": "clang20"
++        },
++        {
++            "name": "debug",
++            "inherits": "default",
++            "configurePreset": "debug"
++        },
++        {
++            "name": "asan",
++            "inherits": "default",
++            "configurePreset": "asan"
++        },
++        {
++            "name": "gcc",
++            "inherits": "default",
++            "configurePreset": "gcc"
++        },
++        {
++            "name": "bench",
++            "inherits": "clang20",
++            "configurePreset": "bench"
++        },
++        {
++            "name": "fuzzing",
++            "inherits": "clang20",
++            "configurePreset": "fuzzing"
++        },
++        {
++            "name": "fuzzing-asan",
++            "inherits": "debug",
++            "configurePreset": "fuzzing-asan"
++        },
++        {
++            "name": "smt-verification",
++            "inherits": "clang20",
++            "configurePreset": "smt-verification"
++        },
++        {
++            "name": "clang20-coverage",
++            "inherits": "default",
++            "configurePreset": "clang20-coverage"
++        },
++        {
++            "name": "wasm",
++            "configurePreset": "wasm",
++            "inheritConfigureEnvironment": true
++        }
++    ]
++}
+\ No newline at end of file
+diff --git a/barretenberg/cpp/cmake/arch.cmake b/barretenberg/cpp/cmake/arch.cmake
+index c8158dfb8c..099af59d5a 100644
+--- a/barretenberg/cpp/cmake/arch.cmake
++++ b/barretenberg/cpp/cmake/arch.cmake
+@@ -2,7 +2,12 @@ if(WASM)
+     # Disable SLP vectorization on WASM as it's brokenly slow. To give an idea, with this off it still takes
+     # 2m:18s to compile scalar_multiplication.cpp, and with it on I estimate it's 50-100 times longer. I never
+     # had the patience to wait it out...
+-    add_compile_options(-fno-exceptions -fno-slp-vectorize)
++    if(AVM_WASM)
++        # SPIKE: the AVM signals reverts by throwing; keep real exceptions.
++        add_compile_options(-fno-slp-vectorize)
++    else()
++        add_compile_options(-fno-exceptions -fno-slp-vectorize)
++    endif()
+ endif()
+ 
+ # Target skylake on x86 for AVX2 etc. ARM is handled by the zig wrapper scripts
+diff --git a/barretenberg/cpp/src/CMakeLists.txt b/barretenberg/cpp/src/CMakeLists.txt
+index 2a3fb4ae09..e6af2b21fd 100644
+--- a/barretenberg/cpp/src/CMakeLists.txt
++++ b/barretenberg/cpp/src/CMakeLists.txt
+@@ -17,6 +17,13 @@ add_compile_options(-Werror -Wall -Wextra -Wconversion -Wsign-conversion -Wfatal
+ # Needed until https://github.com/codeinred/tuplet/issues/37 is solved.
+ add_compile_options(-Wno-missing-braces)
+ 
++if(AVM_WASM)
++    # SPIKE: on wasm32, size_t is 32-bit and merkle_tree's index_t is uint64_t, so tree-index
++    # arithmetic trips -Wshorten-64-to-32. Four sites, all benign for in-memory trees.
++    # Demote to warnings so the build proceeds; upstream would add explicit casts.
++    add_compile_options(-Wno-error)
++endif()
++
+ # For MessagePack.
+ add_definitions(-DMSGPACK_NO_BOOST -DMSGPACK_USE_STD_VARIANT_ADAPTOR)
+ 
+@@ -49,7 +56,13 @@ if(WASM)
+     set(CMAKE_C_FLAGS_DEBUG "-O1 -g")
+     set(CMAKE_CXX_FLAGS_RELEASE "-Oz -DNDEBUG")
+     set(CMAKE_C_FLAGS_RELEASE "-Oz -DNDEBUG")
++    if(AVM_WASM)
++        # SPIKE: standalone wasi command — export our own memory (no JS host to import from),
++        # and give the AVM's recursive call machinery a real stack.
++        add_link_options(-Wl,--export-memory,--stack-first,-z,stack-size=8388608,--max-memory=4294967296)
++    else()
+     add_link_options(-Wl,--export-memory,--import-memory,--stack-first,-z,stack-size=1048576,--max-memory=4294967296)
++    endif()
+ endif()
+ 
+ include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${MSGPACK_INCLUDE} ${TRACY_INCLUDE} ${LMDB_INCLUDE} ${LIBDEFLATE_INCLUDE} ${HTTPLIB_INCLUDE} ${BACKWARD_INCLUDE} ${NLOHMANN_JSON_INCLUDE} ${CMAKE_CURRENT_SOURCE_DIR}/../../../ipc-runtime/cpp)
+@@ -134,6 +147,8 @@ if(NOT FUZZING AND NOT WASM AND NOT BB_LITE)
+     add_subdirectory(barretenberg/cdb)
+     add_subdirectory(barretenberg/avm)
+     add_subdirectory(barretenberg/nodejs_module)
++    # SPIKE: same driver, native, for the differential.
++    add_subdirectory(barretenberg/vm2_spike)
+ endif()
+ 
+ # Pull in ipc-runtime as a C++ dependency. Provides the `ipc_runtime`
+@@ -144,6 +159,16 @@ if(NOT FUZZING AND NOT BB_LITE)
+     add_subdirectory(${CMAKE_SOURCE_DIR}/../../ipc-runtime/cpp ${CMAKE_BINARY_DIR}/ipc-runtime)
+ endif()
+ 
++if(WASM AND AVM_WASM)
++    # SPIKE: vm2_sim for wasm. Note we add ONLY aztec + world_state_reference + vm2 —
++    # NOT world_state, ipc, wsdb, cdb, nodejs_module (those are genuinely server-side).
++    add_subdirectory(barretenberg/aztec)
++    add_subdirectory(barretenberg/world_state_reference)
++    add_subdirectory(barretenberg/vm2)
++    add_subdirectory(barretenberg/vm2_spike)
++    add_subdirectory(barretenberg/vm2_reactor)
++endif()
++
+ if(FUZZING_AVM)
+     if(FUZZING)
+         # Only add these if they weren't added above (when NOT FUZZING AND NOT WASM)
+diff --git a/barretenberg/cpp/src/barretenberg/crypto/CMakeLists.txt b/barretenberg/cpp/src/barretenberg/crypto/CMakeLists.txt
+index a2911b6b68..5692a8a6d8 100644
+--- a/barretenberg/cpp/src/barretenberg/crypto/CMakeLists.txt
++++ b/barretenberg/cpp/src/barretenberg/crypto/CMakeLists.txt
+@@ -12,6 +12,6 @@ add_subdirectory(ecdsa)
+ add_subdirectory(aes128)
+ add_subdirectory(poseidon2)
+ 
+-if (NOT WASM)
++if (NOT WASM OR AVM_WASM)
+     add_subdirectory(merkle_tree)
+ endif()
+diff --git a/barretenberg/cpp/src/barretenberg/crypto/merkle_tree/CMakeLists.txt b/barretenberg/cpp/src/barretenberg/crypto/merkle_tree/CMakeLists.txt
+index 55272c0b51..00b52dae7f 100644
+--- a/barretenberg/cpp/src/barretenberg/crypto/merkle_tree/CMakeLists.txt
++++ b/barretenberg/cpp/src/barretenberg/crypto/merkle_tree/CMakeLists.txt
+@@ -1,13 +1,21 @@
+ # merkle tree is agnostic to hash function
+-barretenberg_module(
+-    crypto_merkle_tree
+-    lmdblib
+-)
+-# Need -fPIC because it's linked into the nodejs_module shared library
+-set_target_properties(crypto_merkle_tree_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+-
+-if (NOT FUZZING)
+-    # but the tests use poseidon
+-    target_link_libraries(crypto_merkle_tree_tests PRIVATE stdlib_poseidon2)
++if(WASM AND AVM_WASM)
++    # SPIKE: the module's ONLY non-test .cpp is lmdb_store/lmdb_tree_store.cpp.
++    # Drop it and the module becomes header-only, so the lmdblib link edge vanishes.
++    barretenberg_module_with_sources(crypto_merkle_tree DEPENDENCIES ecc numeric)
++else()
++# merkle tree is agnostic to hash function
++    barretenberg_module(
++        crypto_merkle_tree
++        lmdblib
++    )
++    # Need -fPIC because it's linked into the nodejs_module shared library
++    set_target_properties(crypto_merkle_tree_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
++    
++    if (NOT FUZZING)
++        # but the tests use poseidon
++        target_link_libraries(crypto_merkle_tree_tests PRIVATE stdlib_poseidon2)
++    endif()
++    
++    
+ endif()
+-
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/simulation/interfaces/execution_observer.hpp b/barretenberg/cpp/src/barretenberg/vm2/simulation/interfaces/execution_observer.hpp
+new file mode 100644
+index 0000000000..765eabf210
+--- /dev/null
++++ b/barretenberg/cpp/src/barretenberg/vm2/simulation/interfaces/execution_observer.hpp
+@@ -0,0 +1,37 @@
++#pragma once
++
++// SPIKE — per-instruction observation hook.
++//
++// The fast simulation loop (HybridExecution::execute) deliberately emits no ExecutionEvents, so
++// there is currently no step-level seam in the path a browser would use. This interface adds one:
++// a single virtual call per instruction, at the one place in the one file where the loop lives.
++//
++// Shape deliberately mirrors CallStackMetadataCollectorInterface, which upstream already injects
++// through the same constructor and gates behind PublicSimulatorConfig::collect_call_metadata.
++
++#include "barretenberg/vm2/common/aztec_types.hpp"
++#include "barretenberg/vm2/common/opcodes.hpp"
++#include "barretenberg/vm2/simulation/lib/serialization.hpp"
++
++namespace bb::avm2::simulation {
++
++class ExecutionObserverInterface {
++  public:
++    virtual ~ExecutionObserverInterface() = default;
++
++    // Called once per executed instruction, AFTER dispatch, with the state needed to build a
++    // CodeTracer step record: which frame, where, what ran, and what it cost.
++    virtual void on_instruction(uint32_t context_id,
++                                const AztecAddress& contract_address,
++                                PC pc,
++                                const Instruction& instruction,
++                                const Gas& gas_used) = 0;
++};
++
++// SPIKE SHORTCUT: a process-global so the driver can attach an observer without threading a new
++// parameter through simulate_fast_internal -> AvmSimulationHelper -> Execution's 20-argument
++// constructor. Upstream would inject it exactly like CallStackMetadataCollectorInterface.
++// Used ONLY to measure the per-instruction cost of the hook.
++extern ExecutionObserverInterface* g_execution_observer;
++
++} // namespace bb::avm2::simulation
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/contract_crypto.cpp b/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/contract_crypto.cpp
+index 346620b84e..b15061dae3 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/contract_crypto.cpp
++++ b/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/contract_crypto.cpp
+@@ -58,7 +58,9 @@ FF compute_public_bytecode_first_field(size_t bytecode_size)
+     // Fr<0x00000000000000000000000000000000000000000000000000016b480f8411f1> From: max fields in bytes = 3000 * 31 =
+     // 16b48, Dom sep = f8411f1
+     static_assert(DOM_SEP__PUBLIC_BYTECODE <= UINT32_MAX, "Public bytecode domain separator must fit in 32 bits");
+-    return FF(uint256_t(DOM_SEP__PUBLIC_BYTECODE) + uint256_t(bytecode_size << 32));
++    // SPIKE FIX: `bytecode_size << 32` is UB on wasm32 (size_t is 32-bit; wasm i32.shl masks the
++    // shift count to 5 bits, so this silently evaluates to `bytecode_size << 0`). Widen first.
++    return FF((uint256_t(bytecode_size) << 32) + uint256_t(DOM_SEP__PUBLIC_BYTECODE));
+ }
+ 
+ FF compute_public_bytecode_commitment(std::span<const uint8_t> bytecode)
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/hybrid_execution.cpp b/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/hybrid_execution.cpp
+index 55a4fa9443..ebf3935e9f 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/hybrid_execution.cpp
++++ b/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/hybrid_execution.cpp
+@@ -9,10 +9,14 @@
+ #include "barretenberg/vm2/simulation/interfaces/context.hpp"
+ #include "barretenberg/vm2/simulation/interfaces/execution_components.hpp"
+ #include "barretenberg/vm2/simulation/interfaces/gas_tracker.hpp"
++#include "barretenberg/vm2/simulation/interfaces/execution_observer.hpp"
+ #include "barretenberg/vm2/simulation/lib/call_stack_metadata_collector.hpp"
+ 
+ namespace bb::avm2::simulation {
+ 
++// SPIKE: see execution_observer.hpp.
++ExecutionObserverInterface* g_execution_observer = nullptr;
++
+ // This context interface is a top-level enqueued one.
+ // NOTE: For the moment this trace is not returning the context back.
+ EnqueuedCallResult HybridExecution::execute(std::unique_ptr<ContextInterface> enqueued_call_context)
+@@ -35,8 +39,12 @@ EnqueuedCallResult HybridExecution::execute(std::unique_ptr<ContextInterface> en
+         // we'll always use this in the loop.
+         auto& context = *external_call_stack.top();
+ 
++        PC observed_pc = 0;
++        Instruction observed_instruction;
++
+         try {
+             auto pc = context.get_pc();
++            observed_pc = pc;
+ 
+             //// Temporality group 1 starts ////
+ 
+@@ -49,6 +57,7 @@ EnqueuedCallResult HybridExecution::execute(std::unique_ptr<ContextInterface> en
+ 
+             // We try to fetch an instruction.
+             Instruction instruction = context.get_bytecode_manager().read_instruction(pc);
++            observed_instruction = instruction;
+ 
+             debug("@", pc, " ", instruction.to_string());
+             context.set_next_pc(pc + static_cast<PC>(instruction.size_in_bytes()));
+@@ -91,6 +100,16 @@ EnqueuedCallResult HybridExecution::execute(std::unique_ptr<ContextInterface> en
+             throw;
+         }
+ 
++        // SPIKE: per-instruction observation hook. One predictable-branch null check per
++        // instruction when disabled; one virtual call when enabled.
++        if (g_execution_observer != nullptr) [[unlikely]] {
++            g_execution_observer->on_instruction(context.get_context_id(),
++                                                 context.get_address(),
++                                                 observed_pc,
++                                                 observed_instruction,
++                                                 context.get_gas_used());
++        }
++
+         // We always do what follows. "Finally".
+         // Move on to the next pc.
+         context.set_pc(context.get_next_pc());
+diff --git a/barretenberg/cpp/src/barretenberg/vm2_reactor/CMakeLists.txt b/barretenberg/cpp/src/barretenberg/vm2_reactor/CMakeLists.txt
+new file mode 100644
+index 0000000000..8d5b8fd2ff
+--- /dev/null
++++ b/barretenberg/cpp/src/barretenberg/vm2_reactor/CMakeLists.txt
+@@ -0,0 +1,7 @@
++# SPIKE: standalone vm2_sim-only wasm reactor, for artefact-size measurement.
++if(WASM AND AVM_WASM)
++    add_executable(avm.wasm ${CMAKE_CURRENT_SOURCE_DIR}/avm_reactor.cpp)
++    target_link_libraries(avm.wasm PRIVATE vm2_sim world_state_reference crypto_merkle_tree)
++    add_dependencies(avm.wasm msgpack-c)
++    target_link_options(avm.wasm PRIVATE -nostartfiles -Wl,--no-entry,--gc-sections,--export=avm_simulate_with_hints,--export=avm_alloc,--export=avm_free)
++endif()
+diff --git a/barretenberg/cpp/src/barretenberg/vm2_reactor/avm_reactor.cpp b/barretenberg/cpp/src/barretenberg/vm2_reactor/avm_reactor.cpp
+new file mode 100644
+index 0000000000..4a4da152a7
+--- /dev/null
++++ b/barretenberg/cpp/src/barretenberg/vm2_reactor/avm_reactor.cpp
+@@ -0,0 +1,53 @@
++// SPIKE — the SHAPE OF THE SHIPPABLE ARTEFACT.
++//
++// A wasi "reactor" (no main) exporting a minimal AVM entry point, linking ONLY vm2_sim and its
++// declared dependencies. Nothing from honk/proving/srs/polynomials is reachable from here, so the
++// resulting module measures what a browser would actually download for public execution alone —
++// as opposed to sourcing the AVM from the full ~10 MB barretenberg.wasm.
++
++#include <cstdint>
++#include <cstdlib>
++#include <cstring>
++#include <vector>
++
++#include "barretenberg/common/wasm_export.hpp"
++#include "barretenberg/serialize/msgpack_impl.hpp"
++#include "barretenberg/vm2/avm_sim_api.hpp"
++#include "barretenberg/vm2/common/avm_io.hpp"
++
++namespace {
++std::vector<uint8_t> g_out;
++}
++
++// Simulate a public tx from a msgpack-encoded AvmProvingInputs blob (hinted DBs: fully
++// self-contained, no host callbacks needed). Returns a pointer to msgpack-encoded
++// TxSimulationResult; length is written through out_len. Buffer valid until the next call.
++WASM_EXPORT const uint8_t* avm_simulate_with_hints(const uint8_t* data, uint32_t len, uint32_t* out_len)
++{
++    using namespace bb::avm2;
++    try {
++        auto inputs = AvmProvingInputs::from(std::vector<uint8_t>(data, data + len));
++        AvmSimAPI api;
++        auto result = api.simulate_with_hinted_dbs(inputs);
++        msgpack::sbuffer buffer;
++        msgpack::pack(buffer, result);
++        g_out.assign(buffer.data(), buffer.data() + buffer.size());
++    } catch (const std::exception& e) {
++        const char* w = e.what();
++        g_out.assign(w, w + strlen(w));
++        *out_len = 0;
++        return reinterpret_cast<const uint8_t*>(g_out.data());
++    }
++    *out_len = static_cast<uint32_t>(g_out.size());
++    return g_out.data();
++}
++
++WASM_EXPORT uint8_t* avm_alloc(uint32_t len)
++{
++    return static_cast<uint8_t*>(malloc(len));
++}
++
++WASM_EXPORT void avm_free(uint8_t* p)
++{
++    free(p);
++}
+diff --git a/barretenberg/cpp/src/barretenberg/vm2_spike/CMakeLists.txt b/barretenberg/cpp/src/barretenberg/vm2_spike/CMakeLists.txt
+new file mode 100644
+index 0000000000..2757b9af65
+--- /dev/null
++++ b/barretenberg/cpp/src/barretenberg/vm2_spike/CMakeLists.txt
+@@ -0,0 +1,9 @@
++# SPIKE: a runnable driver over vm2_sim, built identically for native and wasm.
++file(GLOB VM2_TESTING_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/../vm2/testing/*.cpp)
++list(FILTER VM2_TESTING_SOURCES EXCLUDE REGEX ".*\\.(test|bench|fuzzer)\\.cpp$")
++# fixtures.cpp pulls in tracegen (proving side), which vm2_sim deliberately excludes.
++list(FILTER VM2_TESTING_SOURCES EXCLUDE REGEX ".*/fixtures\\.cpp$")
++
++add_executable(avm_spike_runner ${CMAKE_CURRENT_SOURCE_DIR}/avm_run.cpp ${VM2_TESTING_SOURCES})
++target_link_libraries(avm_spike_runner PRIVATE vm2_sim world_state_reference crypto_merkle_tree env)
++add_dependencies(avm_spike_runner msgpack-c)
+diff --git a/barretenberg/cpp/src/barretenberg/vm2_spike/avm_run.cpp b/barretenberg/cpp/src/barretenberg/vm2_spike/avm_run.cpp
+new file mode 100644
+index 0000000000..9e1c9576d9
+--- /dev/null
++++ b/barretenberg/cpp/src/barretenberg/vm2_spike/avm_run.cpp
+@@ -0,0 +1,273 @@
++// SPIKE DRIVER — runs the REAL C++ AVM (vm2_sim) over hand-built AVM bytecode and prints a
++// deterministic transcript of the result. Built for BOTH native and wasm32-wasi from identical
++// sources, so the two transcripts can be diffed byte for byte.
++//
++// No mocks: PublicTxSimulationTester is upstream's own in-memory harness (in-process world state,
++// in-memory contract DB) and drives AvmSimAPI exactly as the node's simulator does.
++
++#include <cstdint>
++#include <iomanip>
++#include <chrono>
++#include <iostream>
++#include <map>
++#include <string>
++#include <vector>
++
++#include "barretenberg/vm2/common/avm_io.hpp"
++#include "barretenberg/vm2/common/memory_types.hpp"
++#include "barretenberg/vm2/common/opcodes.hpp"
++#include "barretenberg/vm2/simulation/interfaces/execution_observer.hpp"
++#include "barretenberg/vm2/simulation/lib/serialization.hpp"
++#include "barretenberg/vm2/testing/bytecode_builder.hpp"
++#include "barretenberg/vm2/testing/instruction_builder.hpp"
++#include "barretenberg/vm2/testing/public_tx_simulation_tester.hpp"
++
++namespace {
++
++using namespace bb::avm2;
++using bb::avm2::simulation::Instruction;
++using bb::avm2::testing::BytecodeBuilder;
++using bb::avm2::testing::InstructionBuilder;
++using bb::avm2::testing::PublicTxSimulationTester;
++using bb::avm2::testing::TestEnqueuedCall;
++
++Instruction set8(uint8_t dst, MemoryTag tag, uint8_t value)
++{
++    return InstructionBuilder(WireOpCode::SET_8).operand(dst).operand(tag).operand(value).build();
++}
++Instruction set32(uint16_t dst, MemoryTag tag, uint32_t value)
++{
++    return InstructionBuilder(WireOpCode::SET_32).operand(dst).operand(tag).operand(value).build();
++}
++Instruction setff(uint16_t dst, MemoryTag tag, const FF& value)
++{
++    return InstructionBuilder(WireOpCode::SET_FF).operand(dst).operand(tag).operand(value).build();
++}
++Instruction ret(uint16_t copy_size_offset, uint16_t return_offset)
++{
++    return InstructionBuilder(WireOpCode::RETURN).operand(copy_size_offset).operand(return_offset).build();
++}
++
++std::string hex(const FF& f)
++{
++    const auto v = static_cast<bb::numeric::uint256_t>(f);
++    static const char* D = "0123456789abcdef";
++    std::string out = "0x";
++    for (int limb = 3; limb >= 0; --limb) {
++        const uint64_t w = v.data[limb];
++        for (int nib = 15; nib >= 0; --nib) {
++            out += D[(w >> (nib * 4)) & 0xF];
++        }
++    }
++    return out;
++}
++
++void dump(const std::string& label, const TxSimulationResult& r)
++{
++    std::cout << "== " << label << "\n";
++    std::cout << "  revertCode      " << static_cast<int>(r.revert_code) << "\n";
++    std::cout << "  totalGas        " << r.gas_used.total_gas.l2_gas << "/" << r.gas_used.total_gas.da_gas << "\n";
++    std::cout << "  publicGas       " << r.gas_used.public_gas.l2_gas << "/" << r.gas_used.public_gas.da_gas << "\n";
++    std::cout << "  billedGas       " << r.gas_used.billed_gas.l2_gas << "/" << r.gas_used.billed_gas.da_gas << "\n";
++    std::cout << "  txFee           " << hex(r.public_tx_effect.transaction_fee) << "\n";
++    std::cout << "  nullifiers      " << r.public_tx_effect.nullifiers.size() << "\n";
++    for (const auto& n : r.public_tx_effect.nullifiers) {
++        std::cout << "    " << hex(n) << "\n";
++    }
++    std::cout << "  noteHashes      " << r.public_tx_effect.note_hashes.size() << "\n";
++    for (const auto& n : r.public_tx_effect.note_hashes) {
++        std::cout << "    " << hex(n) << "\n";
++    }
++    std::cout << "  dataWrites      " << r.public_tx_effect.public_data_writes.size() << "\n";
++    std::cout << "  publicLogs      " << r.public_tx_effect.public_logs.size() << "\n";
++    std::cout << "  callFrames      " << r.call_stack_metadata.size() << "\n";
++    for (const auto& [k, v] : std::map<std::string, std::string>(r.stats.begin(), r.stats.end())) {
++        std::cout << "  stat " << k << " = " << v << "\n";
++    }
++}
++
++// (1) ADD two U32s and RETURN the result. The canonical smoke program.
++std::vector<uint8_t> program_add()
++{
++    return BytecodeBuilder()
++        .add(set8(0, MemoryTag::U32, 1))
++        .add(set8(1, MemoryTag::U32, 2))
++        .add(InstructionBuilder(WireOpCode::ADD_8).operand<uint8_t>(0).operand<uint8_t>(1).operand<uint8_t>(2).build())
++        .add(ret(0, 2))
++        .build();
++}
++
++// (2) A deliberate revert: exercises the throw/catch revert path that -fwasm-exceptions must carry.
++std::vector<uint8_t> program_revert()
++{
++    return BytecodeBuilder()
++        .add(set8(0, MemoryTag::U32, 0))
++        .add(InstructionBuilder(WireOpCode::REVERT_8).operand<uint8_t>(0).operand<uint8_t>(0).build())
++        .build();
++}
++
++// (3) Field arithmetic + a loop: 64 iterations of MUL/ADD over U64, ending in RETURN.
++//     Exercises the interpreter loop, jumps, tag checking and gas accounting for real.
++std::vector<uint8_t> program_loop()
++{
++    BytecodeBuilder b;
++    b.add(set8(0, MemoryTag::U32, 0));      // return copy size
++    b.add(set8(1, MemoryTag::U64, 1));      // acc
++    b.add(set8(2, MemoryTag::U64, 3));      // k
++    for (int i = 0; i < 64; ++i) {
++        b.add(InstructionBuilder(WireOpCode::MUL_8).operand<uint8_t>(1).operand<uint8_t>(2).operand<uint8_t>(1).build());
++        b.add(InstructionBuilder(WireOpCode::ADD_8).operand<uint8_t>(1).operand<uint8_t>(2).operand<uint8_t>(1).build());
++    }
++    b.add(ret(0, 1));
++    return b.build();
++}
++
++// (4) SHA256COMPRESSION: 8 U32 state words + 16 U32 input words -> 8 U32 digest words.
++//     Pulls the real crypto gadget into the executed path.
++std::vector<uint8_t> program_sha256()
++{
++    BytecodeBuilder b;
++    b.add(set8(0, MemoryTag::U32, 0)); // return copy size
++    for (uint8_t i = 0; i < 8; ++i) {
++        b.add(set32(static_cast<uint16_t>(10 + i), MemoryTag::U32, 0x6a09e667u + i));
++    }
++    for (uint8_t i = 0; i < 16; ++i) {
++        b.add(set32(static_cast<uint16_t>(26 + i), MemoryTag::U32, 0x01020304u * (i + 1)));
++    }
++    b.add(InstructionBuilder(WireOpCode::SHA256COMPRESSION)
++              .operand<uint16_t>(200)
++              .operand<uint16_t>(10)
++              .operand<uint16_t>(26)
++              .build());
++    b.add(set8(1, MemoryTag::U32, 8));
++    b.add(ret(1, 200));
++    return b.build();
++}
++
++// (5) POSEIDON2PERM: the hash the protocol itself is built on.
++std::vector<uint8_t> program_poseidon2()
++{
++    BytecodeBuilder b;
++    b.add(set8(0, MemoryTag::U32, 0));
++    for (uint8_t i = 0; i < 4; ++i) {
++        b.add(setff(static_cast<uint16_t>(10 + i), MemoryTag::FF, FF(i + 1)));
++    }
++    b.add(InstructionBuilder(WireOpCode::POSEIDON2PERM).operand<uint16_t>(10).operand<uint16_t>(20).build());
++    b.add(set8(1, MemoryTag::U32, 4));
++    b.add(ret(1, 20));
++    return b.build();
++}
++
++// (6) Public storage write then read-back: exercises the merkle DB and public data tree.
++std::vector<uint8_t> program_storage()
++{
++    BytecodeBuilder b;
++    b.add(set8(0, MemoryTag::U32, 0));
++    b.add(setff(1, MemoryTag::FF, FF(7)));    // slot
++    b.add(setff(2, MemoryTag::FF, FF(1234)));  // value
++    b.add(InstructionBuilder(WireOpCode::SSTORE).operand<uint16_t>(2).operand<uint16_t>(1).build());
++    b.add(set8(4, MemoryTag::U32, 1));
++    b.add(ret(4, 2));
++    return b.build();
++}
++
++// (7) Throughput probe: a tight ADD loop that runs until it exhausts the gas limit.
++//     Gives instructions/second for native vs wasm on identical work.
++std::vector<uint8_t> program_burn()
++{
++    BytecodeBuilder b;
++    b.add(set8(0, MemoryTag::U64, 1));
++    b.add(set8(1, MemoryTag::U64, 1));
++    const size_t loop_start = b.size();
++    for (int i = 0; i < 16; ++i) {
++        b.add(InstructionBuilder(WireOpCode::ADD_8).operand<uint8_t>(0).operand<uint8_t>(1).operand<uint8_t>(0).build());
++    }
++    b.add(InstructionBuilder(WireOpCode::JUMP_32).operand(static_cast<uint32_t>(loop_start)).build());
++    return b.build();
++}
++
++// A CodeTracer-shaped step recorder: one record per executed AVM instruction.
++class StepRecorder : public bb::avm2::simulation::ExecutionObserverInterface {
++  public:
++    struct Step {
++        uint32_t context_id;
++        uint32_t pc;
++        uint8_t opcode;
++        uint32_t l2_gas_used;
++    };
++
++    void on_instruction(uint32_t context_id,
++                        const AztecAddress& /*contract_address*/,
++                        PC pc,
++                        const Instruction& instruction,
++                        const Gas& gas_used) override
++    {
++        steps.push_back({ context_id, pc, static_cast<uint8_t>(instruction.opcode), gas_used.l2_gas });
++    }
++
++    std::vector<Step> steps;
++};
++
++} // namespace
++
++int main()
++{
++    std::cout << "avm-spike-runner: pointer=" << (sizeof(void*) * 8) << "bit\n";
++
++    const std::vector<std::pair<std::string, std::vector<uint8_t>>> programs = {
++        { "add", program_add() },
++        { "revert", program_revert() },
++        { "loop", program_loop() },
++        { "sha256", program_sha256() },
++        { "poseidon2", program_poseidon2() },
++        { "storage", program_storage() },
++        { "burn", program_burn() },
++    };
++
++    for (const auto& [name, bytecode] : programs) {
++        std::cout << "-- program " << name << " bytes=" << bytecode.size() << "\n";
++        PublicTxSimulationTester tester;
++        auto contract = tester.deploy_contract(bytecode);
++        std::cout << "  address         " << hex(contract.address) << "\n";
++        auto config = PublicTxSimulationTester::default_config();
++        config.collect_statistics = true;
++        // Pass 1: no observer attached (the shipping configuration).
++        const auto t0 = std::chrono::steady_clock::now();
++        auto result = tester.simulate_tx({ TestEnqueuedCall{ .contract_address = contract.address } }, config);
++        const auto t1 = std::chrono::steady_clock::now();
++        dump(name, result);
++        // Timing is intentionally NOT part of the diffed transcript.
++        std::cerr << "TIMING " << name << " simulate_us="
++                  << std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() << "\n";
++
++        // Pass 2: identical simulation with a per-instruction step recorder attached.
++        StepRecorder recorder;
++        PublicTxSimulationTester tester2;
++        auto contract2 = tester2.deploy_contract(bytecode);
++        bb::avm2::simulation::g_execution_observer = &recorder;
++        const auto t2 = std::chrono::steady_clock::now();
++        auto traced = tester2.simulate_tx({ TestEnqueuedCall{ .contract_address = contract2.address } }, config);
++        const auto t3 = std::chrono::steady_clock::now();
++        bb::avm2::simulation::g_execution_observer = nullptr;
++        std::cerr << "TRACED " << name << " simulate_us="
++                  << std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count()
++                  << " steps=" << recorder.steps.size() << " sameResult=" << (traced == result ? 1 : 0) << "\n";
++        if (!recorder.steps.empty()) {
++            std::cerr << "  first steps:";
++            for (size_t i = 0; i < recorder.steps.size() && i < 6; ++i) {
++                std::cerr << " (ctx" << recorder.steps[i].context_id << " pc" << recorder.steps[i].pc << " op"
++                          << static_cast<int>(recorder.steps[i].opcode) << " gas" << recorder.steps[i].l2_gas_used
++                          << ")";
++            }
++            std::cerr << "\n";
++        }
++    }
++
++#ifdef __wasm__
++    // Peak linear memory actually touched, against the 4 GiB wasm32 ceiling.
++    std::cout << "peakLinearMemoryPages " << __builtin_wasm_memory_size(0) << " ("
++              << (__builtin_wasm_memory_size(0) * 64) << " KiB)\n";
++#endif
++    std::cout << "avm-spike-runner: done\n";
++    return 0;
++}
+-- 
+2.50.1
+
