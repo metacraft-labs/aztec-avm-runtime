@@ -437,7 +437,8 @@ Measured, both experiments run:
 |---|---|
 | enable the `CppVsTs` arm as-is | **142 failed / 142**, 144 s |
 | …plus a blanket skip of the two revert-reason asserts when C++ returns no reason | 142 passed / 142, 145 s — **withdrawn, see below** |
-| …plus the *checked* out-of-gas exemption actually shipped | **140 passed / 2 failed**, 153 s |
+| …plus a *checked out-of-gas* exemption | 140 passed / 2 failed, 153 s — **also withdrawn; its stated cause was wrong** |
+| …plus the *no-C++-metadata* exemption actually shipped (M1) | **142 passed / 142**, 147 s |
 
 All 142 first-round failures hit the *same* assertion (the structured revert-reason comparison) —
 and everything before it passed for every case: `revertCode`, **all four gas dimensions**,
@@ -459,16 +460,54 @@ So the shipped guard is conditioned on out-of-gas, and it is not a skip: when C+
 the oracle **asserts** that the TS reason is the documented out-of-gas one
 (`OutOfGasError`, `avm/errors.ts:125`). That converts a silent exemption into a checked claim.
 
-**It immediately caught two divergences the blanket skip reported as green:**
+**It immediately caught two cases the blanket skip reported as green:**
 
 | case | TS | C++ |
 |---|---|---|
 | `SENDL2TOL1MSG` | `SENDL2TOL1MSG: Recipient address is too large` | no reason |
 | `REVERT_8` | `Assertion failed: ` — `revertReasonFromExplicitRevert`, an **explicit REVERT opcode**, not an exceptional halt at all | no reason |
 
-Neither is out-of-gas, and the second is outside upstream's documented limitation entirely. Both
-are left **failing**: they are findings, and candidates for an upstream report. 140/142 is the
-honest number.
+### …and then the out-of-gas attribution turned out to be wrong too (M1, 2026-08-21)
+
+Both cases are now **withdrawn as C++/TS divergences**, and the exemption has been re-conditioned.
+Full evidence is in [`DRIFT.md`](../DRIFT.md) D3 and D4; the short version:
+
+`PublicTxResult.findRevertReason()` derives the **C++** reason only from `callStackMetadata`, while
+the **TS** result carries `revertReason` directly on its call-stack object via the legacy
+`TODO(fcarreiro): Remove this after migration to the C++ simulator` branch of the same function.
+`opcode_spam.test.ts` ships `COLLECT_META_CHECK_RET = false` — upstream's own constant — so
+`collectCallMetadata` is **off** and the C++ side reports no reason **for any halt in this suite**,
+out-of-gas included. The asymmetry was structural, not semantic.
+
+Flipping the constant to `true` makes `REVERT_8` pass the reason comparison outright, and makes
+`SENDL2TOL1MSG` pass it and fail later, in upstream's *own* `testSideEffectOpcodeSpam` expectation
+(`fixtures/opcode_spammer.ts`), whose `allowedReasons` list — `['assertion failed', 'out of gas',
+'not enough l2gas']` — does not contain the address-bound error that case produces. Measured, inner
+reason `"sendl2tol1msg: recipient address is too large"`, outer C++ halting message
+`"Out of gas: total L2 used 6549936 of 6540000, total DA used 786432 of 786432"`. That fixture gap
+is a genuine upstream finding and stays open as `DRIFT.md` D4; it is unreachable in a default run
+because `expectToBeTrue` is a no-op while the constant is false.
+
+The shipped exemption is therefore conditioned on **the C++ result having no call-stack metadata at
+all** — the real cause — rather than on the halt kind. That is strictly tighter where it matters:
+in `custom_bc`, `token`, `amm` and `deployments`, which all collect metadata, the exemption can no
+longer fire, so a C++ AVM that genuinely dropped a reason fails loudly instead of being excused by a
+plausible-looking out-of-gas message. Measured in M1 review rather than reasoned: across those four
+suites the exemption fired **0 times in 38 transactions**, and three injected divergences — C++
+drops the reason, C++ reports a *different* reason, C++ reports one where TS reports none — produce
+12, 12 and 7 failures respectively. Negative control: forcing the exemption's condition false makes
+the arm fail with the new message.
+
+**But say plainly what 142/142 costs in this suite, because the number invites the wrong reading.**
+The same measurement shows the exemption fires on **142 of 142** opcode-spam cases, so the arm
+contributes **zero** revert-reason comparisons; forcing the condition false fails all 142, which is
+what proves every one of them depends on it. 142/142 is honest only about revert code, the four gas
+dimensions, `publicTxEffect`, the public-inputs buffer and the tree roots. It is *not* "the revert
+reason genuinely compared" — that phrasing was a review finding and is withdrawn. Recorded as
+[`DRIFT.md`](../DRIFT.md) D7, alongside D2's gas blindness. The measured alternative, left open for
+M2: flipping `COLLECT_META_CHECK_RET` to `true` makes the exemption unreachable here and yields
+**141 real reason comparisons** in 165 s, with the single failure being D4 — upstream's own
+`allowedReasons` gap, not a divergence of ours.
 
 ### The 216 are not 216 equally strong comparisons
 
@@ -478,7 +517,8 @@ INTERNALRETURN/SSTORE/SLOAD/EMITNOTEHASH/EMITNULLIFIER/DEBUGLOG/POSEIDON2/SHA256
 KECCAKF1600/ECADD/TORADIXBE with per-tag variants, for ~153 s of wall time. Still the cheapest
 coverage available anywhere in the corpus — but read the caveat.
 
-**The added 142 are blind to gas divergence.** Mutation-tested: adding +1 L2 gas to *every* opcode
+**The added 142 are blind to gas divergence** — recorded as [`DRIFT.md`](../DRIFT.md) D2, because
+this is the caveat most likely to be dropped when the number is quoted. Mutation-tested: adding +1 L2 gas to *every* opcode
 in the TS gas table is caught in `custom_bc`/`token` at the `totalGas` assertion, and is **not**
 caught anywhere in `opcode_spam`. The reason is structural — opcode-spam transactions run until
 they exhaust their gas limit, so both simulators consume exactly the limit no matter what the
