@@ -2,6 +2,13 @@ upstream/
 node_modules/
 dest/
 .tsbuildinfo
+
+# nix / direnv working state. flake.nix, flake.lock, nix/ and .envrc ARE
+# tracked; what direnv and nix-build leave behind is not.
+.direnv/
+/result
+/result-*
+
 browser-probe/*.js
 !browser-probe/shims/*.js
 !browser-probe/entry*.ts

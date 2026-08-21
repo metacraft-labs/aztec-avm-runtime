@@ -31,7 +31,13 @@ tested with `npm install`, with no barretenberg C++ build, no Rust/wasm-bindgen 
 | `diffsim/` | `spike/` with the 7 files that differ from master restored from the npm tarball, so **both** simulators run in-process and the TS↔C++ differential harness works |
 | `probe-mt/` | merkle-tree probes: native world-state roots vs. the deleted `@aztec/merkle-tree` |
 | `browser-probe/` | esbuild browser-bundle probe and its node-builtin shims |
-| `upstream/aztec-packages` | git clone (gitignored); `upstream/tsavm` is a worktree at `3a68d68ac2` |
+| `../aztec-packages` | the `metacraft-labs/aztec-packages` fork, branch `aztec-avm-runtime` — a **workspace-root sibling**, registered in the workspace manifests alongside this repo (it used to live at `upstream/aztec-packages`) |
+| `upstream/tsavm` | gitignored worktree of the fork at `3a68d68ac2`, the commit before the TS AVM was deleted |
+| `verification/` | the M0 verification checks; see `just --list` |
+
+> Working in this checkout alongside other people or agents? Read
+> [`AGENTS.md`](AGENTS.md) first — it is short, and it exists because two agents
+> already lost work to whole-tree git commands here.
 
 ## Reproducing
 
