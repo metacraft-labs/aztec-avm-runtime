@@ -1,0 +1,59 @@
+FAIL AvmSimulationEccDeathTest
+PASS PublicLogsTest 19
+PASS InstructionSpecTest 4
+PASS StandardAffinePointTest 7
+PASS TaggedValueTest 13
+PASS ToRadixTest 1
+PASS Uint1Test 7
+FAIL AvmSimulationAddressDerivationTest
+FAIL AvmSimulationAddressingTest
+FAIL AvmSimulationAluTest
+PASS BitwiseSimulationTest 2
+FAIL BytecodeHashingTest
+FAIL CalldataHashingTest
+PASS AvmSimulationClassIdDerivationTest 1
+FAIL ContractInstanceManagerTest
+FAIL NestedCdCopySimulationTest
+FAIL RdCopySimulationTest
+FAIL SrcOutOfRangeCdCopySimulationTest
+FAIL SrcOutOfRangeRdCopySimulationTest
+FAIL AvmSimulationEccTest
+FAIL EmitPublicLogTest
+FAIL ExecutionSimulationTest
+FAIL AvmSimulationFieldGreaterThanTest
+FAIL GasTrackerTest
+FAIL AvmSimulationGTTest
+FAIL AvmSimulationIndexedTreeCheck
+PASS KeccakSimulationTest 5
+FAIL AvmSimulationL1ToL2MessageTree
+PASS MerkleCheckSimulationTest 7
+FAIL AvmSimulationNoteHashTree
+FAIL Poseidon2SimulationTest
+FAIL AvmSimulationPublicDataTree
+PASS RangeCheckSimulationTest 1
+FAIL AvmSimulationRetrievedBytecodesTreeCheck
+FAIL Sha256CompressionSimulationTest
+FAIL AvmSimulationToRadixTest
+FAIL AvmSimulationToRadixMemoryTest
+FAIL TxExecutionTest
+FAIL AvmSimulationUpdateCheck
+FAIL AvmSimulationWrittenPublicDataSlotsTreeCheck
+PASS CallStackMetadataCollectorTest 6
+FAIL MakeProviderTest
+PASS HintingDBsRandomInputTest 5
+PASS HintingDBsMinimalTest 2
+FAIL MockedHintingDBsTest
+PASS IndexedMemoryTree 5
+FAIL PublicInputsBuilderExtractOutputsTest
+PASS AvmRetrievedBytecodesTree 1
+PASS SerializationTest 14
+PASS SideEffectTrackerTest 10
+FAIL SideEffectTrackingDBTest
+PASS AvmWrittenSlotsTree 1
+FAIL DebugLogSimulationTest
+PASS PureKeccakSimulationTest 6
+PASS PureSha256Test 6
+PASS SimpleTestSuite/BitwiseAndSimulationTest 6
+PASS SimpleTestSuite/BitwiseOrSimulationTest 6
+PASS SimpleTestSuite/BitwiseXorSimulationTest 6
+FAIL AvmSimulationUpdateCheck/UpdateCheckHashNonzeroTest

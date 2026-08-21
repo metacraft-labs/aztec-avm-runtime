@@ -1,0 +1,163 @@
+avm-spike-runner: pointer=64bit
+-- program add bytes=21
+  address         0x2a81495ef1584f36d12ab02cbf89e330ee6f575d557e38b49e27d59b7922a608
+== add
+  revertCode      0
+  totalGas        540075/96
+  publicGas       75/0
+  billedGas       540075/96
+  txFee           0x0000000000000000000000000000000000000000000000000000000000083e0b
+  nullifiers      1
+    0x00000000000000000000000000000000000000000000000000000000deadbeef
+  noteHashes      0
+  dataWrites      1
+  publicLogs      0
+  callFrames      1
+  startNoteHashRoot  0x2590f2aab19dd791700b4a43d3f52bb88ef2409a3731da8e848663559202e4c6 next=0
+  startNullifierRoot 0x112ad83ffd3f2a31d5174f54de162c04e31c7e7dac62383bd53f82ce342c6a22 next=129
+  startPublicDataRt  0x178ac3f052604a439535c3f89ce38c11bc3b7c134db898d7e76555722040e44d next=129
+  startL1ToL2Root    0x0fef6d80d31109ddb56d6b3f607cbc9c0af0bff3ea0d43e8f278983c64c11f7a next=0
+  endNoteHashRoot    0x2590f2aab19dd791700b4a43d3f52bb88ef2409a3731da8e848663559202e4c6 next=64
+  endNullifierRoot   0x10a95896b28644b3d065409c595d47b0d1d61ecea4ac4f1d8bf95e40450cf4e3 next=193
+  endPublicDataRoot  0x2108f4804a99c099d4e65841e05151599cda125143c22227510fd20afd821b6e next=129
+  endL1ToL2Root      0x0fef6d80d31109ddb56d6b3f607cbc9c0af0bff3ea0d43e8f278983c64c11f7a next=0
+  stat total_instructions_executed = 4
+-- program revert bytes=9
+  address         0x2e561545f24d98b90d516c01a32f8d7b0447b664d936ffa4c19670efc90de3fe
+== revert
+  revertCode      1
+  totalGas        540036/96
+  publicGas       36/0
+  billedGas       540036/96
+  txFee           0x0000000000000000000000000000000000000000000000000000000000083de4
+  nullifiers      1
+    0x00000000000000000000000000000000000000000000000000000000deadbeef
+  noteHashes      0
+  dataWrites      1
+  publicLogs      0
+  callFrames      1
+  startNoteHashRoot  0x2590f2aab19dd791700b4a43d3f52bb88ef2409a3731da8e848663559202e4c6 next=0
+  startNullifierRoot 0x25c86420926304f9ec0329a509ad134b30e383510723f0a347c1b043b4d4495b next=129
+  startPublicDataRt  0x178ac3f052604a439535c3f89ce38c11bc3b7c134db898d7e76555722040e44d next=129
+  startL1ToL2Root    0x0fef6d80d31109ddb56d6b3f607cbc9c0af0bff3ea0d43e8f278983c64c11f7a next=0
+  endNoteHashRoot    0x2590f2aab19dd791700b4a43d3f52bb88ef2409a3731da8e848663559202e4c6 next=64
+  endNullifierRoot   0x1da1e3f33edc70ed1fd110347ff05bc984d6af81afd3360530965d3803806317 next=193
+  endPublicDataRoot  0x077d648353208c8d023280e46903b8161870ff5deff8e80f29ef5f42c3c51723 next=129
+  endL1ToL2Root      0x0fef6d80d31109ddb56d6b3f607cbc9c0af0bff3ea0d43e8f278983c64c11f7a next=0
+  stat total_instructions_executed = 2
+-- program loop bytes=661
+  address         0x158c8ace19be6b1f58650616060a89b3243ccfd04b35ee82e27d93d4c12aaed7
+== loop
+  revertCode      0
+  totalGas        542586/96
+  publicGas       2586/0
+  billedGas       542586/96
+  txFee           0x00000000000000000000000000000000000000000000000000000000000847da
+  nullifiers      1
+    0x00000000000000000000000000000000000000000000000000000000deadbeef
+  noteHashes      0
+  dataWrites      1
+  publicLogs      0
+  callFrames      1
+  startNoteHashRoot  0x2590f2aab19dd791700b4a43d3f52bb88ef2409a3731da8e848663559202e4c6 next=0
+  startNullifierRoot 0x07de191d339166e090d12c8290a05e4f7640cf4e135fe452cc1387956af81a85 next=129
+  startPublicDataRt  0x178ac3f052604a439535c3f89ce38c11bc3b7c134db898d7e76555722040e44d next=129
+  startL1ToL2Root    0x0fef6d80d31109ddb56d6b3f607cbc9c0af0bff3ea0d43e8f278983c64c11f7a next=0
+  endNoteHashRoot    0x2590f2aab19dd791700b4a43d3f52bb88ef2409a3731da8e848663559202e4c6 next=64
+  endNullifierRoot   0x1631981d3e4616e0079a3e312cc0c3256a856c8593c7169076d1ec3b31215b31 next=193
+  endPublicDataRoot  0x049f1fe0ab7f0ac013f9b2d707a168bb16d8ff2802abff2b6632fb0927e499c8 next=129
+  endL1ToL2Root      0x0fef6d80d31109ddb56d6b3f607cbc9c0af0bff3ea0d43e8f278983c64c11f7a next=0
+  stat total_instructions_executed = 132
+-- program sha256 bytes=240
+  address         0x2c64a23c5cfc2a43f9a2bded2fa9104aa3d93c7353d9983759249852dfdcda4c
+== sha256
+  revertCode      0
+  totalGas        552999/96
+  publicGas       12999/0
+  billedGas       552999/96
+  txFee           0x0000000000000000000000000000000000000000000000000000000000087087
+  nullifiers      1
+    0x00000000000000000000000000000000000000000000000000000000deadbeef
+  noteHashes      0
+  dataWrites      1
+  publicLogs      0
+  callFrames      1
+  startNoteHashRoot  0x2590f2aab19dd791700b4a43d3f52bb88ef2409a3731da8e848663559202e4c6 next=0
+  startNullifierRoot 0x2fbbdfea3a4b521c7046c2067311b310e6cc9d405b5a514b0f3ef07d3b13717a next=129
+  startPublicDataRt  0x178ac3f052604a439535c3f89ce38c11bc3b7c134db898d7e76555722040e44d next=129
+  startL1ToL2Root    0x0fef6d80d31109ddb56d6b3f607cbc9c0af0bff3ea0d43e8f278983c64c11f7a next=0
+  endNoteHashRoot    0x2590f2aab19dd791700b4a43d3f52bb88ef2409a3731da8e848663559202e4c6 next=64
+  endNullifierRoot   0x01f630285d9179169a5868add736620622284aa707deb278bca980b2208fdecf next=193
+  endPublicDataRoot  0x217ac9082826dc25036d9db9d5a76426255822d2d228600c6fb52fb4c65ee713 next=129
+  endL1ToL2Root      0x0fef6d80d31109ddb56d6b3f607cbc9c0af0bff3ea0d43e8f278983c64c11f7a next=0
+  stat total_instructions_executed = 28
+-- program poseidon2 bytes=170
+  address         0x2ad747603414d96cb21cdf65b095cf9ab52c9efbb2b5ea8f14531709440ea390
+== poseidon2
+  revertCode      0
+  totalGas        540531/96
+  publicGas       531/0
+  billedGas       540531/96
+  txFee           0x0000000000000000000000000000000000000000000000000000000000083fd3
+  nullifiers      1
+    0x00000000000000000000000000000000000000000000000000000000deadbeef
+  noteHashes      0
+  dataWrites      1
+  publicLogs      0
+  callFrames      1
+  startNoteHashRoot  0x2590f2aab19dd791700b4a43d3f52bb88ef2409a3731da8e848663559202e4c6 next=0
+  startNullifierRoot 0x0e94da7e833561420eb0dd9e9d965367c4c4383f938c027919bb425f6d88f64d next=129
+  startPublicDataRt  0x178ac3f052604a439535c3f89ce38c11bc3b7c134db898d7e76555722040e44d next=129
+  startL1ToL2Root    0x0fef6d80d31109ddb56d6b3f607cbc9c0af0bff3ea0d43e8f278983c64c11f7a next=0
+  endNoteHashRoot    0x2590f2aab19dd791700b4a43d3f52bb88ef2409a3731da8e848663559202e4c6 next=64
+  endNullifierRoot   0x123f885a8e0315339f76a508393b7dc4c2237e86e758c63d5d48b8c451e0bb0a next=193
+  endPublicDataRoot  0x2506414903c1989775884a3b72023483e5f5075c14bf99229beb5a3d317ffd94 next=129
+  endL1ToL2Root      0x0fef6d80d31109ddb56d6b3f607cbc9c0af0bff3ea0d43e8f278983c64c11f7a next=0
+  stat total_instructions_executed = 8
+-- program storage bytes=96
+  address         0x299653095c9fcc059ee3af378c914112ee127cf00eaee96a99f4b06751d6233d
+== storage
+  revertCode      0
+  totalGas        573257/160
+  publicGas       33257/64
+  billedGas       573257/160
+  txFee           0x000000000000000000000000000000000000000000000000000000000008bfe9
+  nullifiers      1
+    0x00000000000000000000000000000000000000000000000000000000deadbeef
+  noteHashes      0
+  dataWrites      2
+  publicLogs      0
+  callFrames      1
+  startNoteHashRoot  0x2590f2aab19dd791700b4a43d3f52bb88ef2409a3731da8e848663559202e4c6 next=0
+  startNullifierRoot 0x1401692ef4404266e9267e796d09d8f6f7ce400bfc3b91de10b9c811e76eb94e next=129
+  startPublicDataRt  0x178ac3f052604a439535c3f89ce38c11bc3b7c134db898d7e76555722040e44d next=129
+  startL1ToL2Root    0x0fef6d80d31109ddb56d6b3f607cbc9c0af0bff3ea0d43e8f278983c64c11f7a next=0
+  endNoteHashRoot    0x2590f2aab19dd791700b4a43d3f52bb88ef2409a3731da8e848663559202e4c6 next=64
+  endNullifierRoot   0x2319db9ac90c090669a2e93f319e1717b6d94df0394553d8fecf0d0e8ed2b0ec next=193
+  endPublicDataRoot  0x03146b08737f3d5f0f814ed7fbbb01416f44af4c1be5241f9c0643473941fbd1 next=130
+  endL1ToL2Root      0x0fef6d80d31109ddb56d6b3f607cbc9c0af0bff3ea0d43e8f278983c64c11f7a next=0
+  stat total_instructions_executed = 6
+-- program burn bytes=95
+  address         0x21d55c7b5b27711b5770086763a3af0fa33e49364aca7ff3192c84a834aa30bb
+== burn
+  revertCode      1
+  totalGas        1000000/1000000
+  publicGas       460000/999904
+  billedGas       1000000/1000000
+  txFee           0x00000000000000000000000000000000000000000000000000000000001e8480
+  nullifiers      1
+    0x00000000000000000000000000000000000000000000000000000000deadbeef
+  noteHashes      0
+  dataWrites      1
+  publicLogs      0
+  callFrames      1
+  startNoteHashRoot  0x2590f2aab19dd791700b4a43d3f52bb88ef2409a3731da8e848663559202e4c6 next=0
+  startNullifierRoot 0x0695c427ca6e81ad7dcd37b1bf0ca131dad700a85e255cad0a1ec9a47e420a22 next=129
+  startPublicDataRt  0x178ac3f052604a439535c3f89ce38c11bc3b7c134db898d7e76555722040e44d next=129
+  startL1ToL2Root    0x0fef6d80d31109ddb56d6b3f607cbc9c0af0bff3ea0d43e8f278983c64c11f7a next=0
+  endNoteHashRoot    0x2590f2aab19dd791700b4a43d3f52bb88ef2409a3731da8e848663559202e4c6 next=64
+  endNullifierRoot   0x29ab420711671d24f58e938c52867a91d0a8ae24df964c6320caf2ac1e6e1698 next=193
+  endPublicDataRoot  0x201e55b32ee7241f398f9dc2fa407161b3d01c92398a8d2f97e92ee2de16686f next=129
+  endL1ToL2Root      0x0fef6d80d31109ddb56d6b3f607cbc9c0af0bff3ea0d43e8f278983c64c11f7a next=0
+  stat total_instructions_executed = 38903
+avm-spike-runner: done

@@ -1,0 +1,143 @@
+(node:764416) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+Note: Google Test filter = -*DeathTest*
+[==========] Running 386 tests from 58 test suites.
+[----------] Global test environment set-up.
+[----------] 19 tests from PublicLogsTest
+[ RUN      ] PublicLogsTest.DefaultConstructor
+[       OK ] PublicLogsTest.DefaultConstructor (0 ms)
+[ RUN      ] PublicLogsTest.ConstructorWithLengthAndPayload
+[       OK ] PublicLogsTest.ConstructorWithLengthAndPayload (0 ms)
+[ RUN      ] PublicLogsTest.ConstructorFromEmptyVector
+[       OK ] PublicLogsTest.ConstructorFromEmptyVector (0 ms)
+[ RUN      ] PublicLogsTest.ConstructorFromSingleLog
+[       OK ] PublicLogsTest.ConstructorFromSingleLog (0 ms)
+[ RUN      ] PublicLogsTest.ConstructorFromMultipleLogs
+[       OK ] PublicLogsTest.ConstructorFromMultipleLogs (0 ms)
+[ RUN      ] PublicLogsTest.AddLogToEmpty
+[       OK ] PublicLogsTest.AddLogToEmpty (0 ms)
+[ RUN      ] PublicLogsTest.AddMultipleLogs
+[       OK ] PublicLogsTest.AddMultipleLogs (0 ms)
+[ RUN      ] PublicLogsTest.AddLogWithEmptyFields
+[       OK ] PublicLogsTest.AddLogWithEmptyFields (0 ms)
+[ RUN      ] PublicLogsTest.FromLogsStaticMethod
+[       OK ] PublicLogsTest.FromLogsStaticMethod (0 ms)
+[ RUN      ] PublicLogsTest.ToLogsEmpty
+[       OK ] PublicLogsTest.ToLogsEmpty (0 ms)
+[ RUN      ] PublicLogsTest.ToLogsSingle
+[       OK ] PublicLogsTest.ToLogsSingle (0 ms)
+[ RUN      ] PublicLogsTest.ToLogsMultiple
+[       OK ] PublicLogsTest.ToLogsMultiple (0 ms)
+[ RUN      ] PublicLogsTest.RoundTripConversion
+[       OK ] PublicLogsTest.RoundTripConversion (0 ms)
+[ RUN      ] PublicLogsTest.EqualityOperator
+[       OK ] PublicLogsTest.EqualityOperator (0 ms)
+[ RUN      ] PublicLogsTest.EqualityOperatorDifferentLength
+[       OK ] PublicLogsTest.EqualityOperatorDifferentLength (0 ms)
+[ RUN      ] PublicLogsTest.EqualityOperatorDifferentPayload
+[       OK ] PublicLogsTest.EqualityOperatorDifferentPayload (0 ms)
+[ RUN      ] PublicLogsTest.EqualityOperatorDifferentContractAddress
+[       OK ] PublicLogsTest.EqualityOperatorDifferentContractAddress (0 ms)
+[ RUN      ] PublicLogsTest.LargeLog
+[       OK ] PublicLogsTest.LargeLog (0 ms)
+[ RUN      ] PublicLogsTest.ManySmallLogs
+[       OK ] PublicLogsTest.ManySmallLogs (0 ms)
+[----------] 19 tests from PublicLogsTest (2 ms total)
+
+[----------] 4 tests from InstructionSpecTest
+[ RUN      ] InstructionSpecTest.CheckAllInstructionSizes
+[       OK ] InstructionSpecTest.CheckAllInstructionSizes (0 ms)
+[ RUN      ] InstructionSpecTest.CheckAllInstructionsTagInformation
+[       OK ] InstructionSpecTest.CheckAllInstructionsTagInformation (0 ms)
+[ RUN      ] InstructionSpecTest.CheckWireOpCodeAndExecOpcodeConsistency
+[       OK ] InstructionSpecTest.CheckWireOpCodeAndExecOpcodeConsistency (0 ms)
+[ RUN      ] InstructionSpecTest.CheckDecomposeWindowSize
+[       OK ] InstructionSpecTest.CheckDecomposeWindowSize (0 ms)
+[----------] 4 tests from InstructionSpecTest (1 ms total)
+
+[----------] 7 tests from StandardAffinePointTest
+[ RUN      ] StandardAffinePointTest.ConstructingInfinityNormalized
+[       OK ] StandardAffinePointTest.ConstructingInfinityNormalized (0 ms)
+[ RUN      ] StandardAffinePointTest.NormalPointCoordinates
+[       OK ] StandardAffinePointTest.NormalPointCoordinates (0 ms)
+[ RUN      ] StandardAffinePointTest.AdditionResultingInInfinityNormalized
+[       OK ] StandardAffinePointTest.AdditionResultingInInfinityNormalized (0 ms)
+[ RUN      ] StandardAffinePointTest.SubtractingInfinityNormalized
+[       OK ] StandardAffinePointTest.SubtractingInfinityNormalized (0 ms)
+[ RUN      ] StandardAffinePointTest.ScalarMultiplicationResultingInInfinityNormalized
+[       OK ] StandardAffinePointTest.ScalarMultiplicationResultingInInfinityNormalized (0 ms)
+[ RUN      ] StandardAffinePointTest.StaticInfinityHasZeroCoordinates
+[       OK ] StandardAffinePointTest.StaticInfinityHasZeroCoordinates (0 ms)
+[ RUN      ] StandardAffinePointTest.NegatingInfinity
+[       OK ] StandardAffinePointTest.NegatingInfinity (0 ms)
+[----------] 7 tests from StandardAffinePointTest (0 ms total)
+
+[----------] 13 tests from TaggedValueTest
+[ RUN      ] TaggedValueTest.ConstructorAndTypeProperties
+[       OK ] TaggedValueTest.ConstructorAndTypeProperties (0 ms)
+[ RUN      ] TaggedValueTest.FromTag
+[       OK ] TaggedValueTest.FromTag (0 ms)
+[ RUN      ] TaggedValueTest.FromTagTruncating
+[       OK ] TaggedValueTest.FromTagTruncating (0 ms)
+[ RUN      ] TaggedValueTest.FromTagOutOfBounds
+[       OK ] TaggedValueTest.FromTagOutOfBounds (0 ms)
+[ RUN      ] TaggedValueTest.AsFF
+[       OK ] TaggedValueTest.AsFF (0 ms)
+[ RUN      ] TaggedValueTest.ArithmeticOperations
+[       OK ] TaggedValueTest.ArithmeticOperations (0 ms)
+[ RUN      ] TaggedValueTest.BitwiseOperations
+[       OK ] TaggedValueTest.BitwiseOperations (0 ms)
+[ RUN      ] TaggedValueTest.UnaryOperations
+[       OK ] TaggedValueTest.UnaryOperations (0 ms)
+[ RUN      ] TaggedValueTest.Uint1EdgeCases
+[       OK ] TaggedValueTest.Uint1EdgeCases (0 ms)
+[ RUN      ] TaggedValueTest.ErrorCases
+[       OK ] TaggedValueTest.ErrorCases (1 ms)
+[ RUN      ] TaggedValueTest.ShiftOperations
+[       OK ] TaggedValueTest.ShiftOperations (0 ms)
+[ RUN      ] TaggedValueTest.BoundaryCases
+[       OK ] TaggedValueTest.BoundaryCases (0 ms)
+[ RUN      ] TaggedValueTest.ComparisonOperations
+[       OK ] TaggedValueTest.ComparisonOperations (0 ms)
+[----------] 13 tests from TaggedValueTest (5 ms total)
+
+[----------] 1 test from ToRadixTest
+[ RUN      ] ToRadixTest.CheckPlimbsPerRadixSize
+[       OK ] ToRadixTest.CheckPlimbsPerRadixSize (36 ms)
+[----------] 1 test from ToRadixTest (36 ms total)
+
+[----------] 7 tests from Uint1Test
+[ RUN      ] Uint1Test.Constructors
+[       OK ] Uint1Test.Constructors (0 ms)
+[ RUN      ] Uint1Test.ArithmeticOperators
+[       OK ] Uint1Test.ArithmeticOperators (0 ms)
+[ RUN      ] Uint1Test.BitwiseOperators
+[       OK ] Uint1Test.BitwiseOperators (0 ms)
+[ RUN      ] Uint1Test.ShiftOperators
+[       OK ] Uint1Test.ShiftOperators (0 ms)
+[ RUN      ] Uint1Test.ComparisonOperators
+[       OK ] Uint1Test.ComparisonOperators (0 ms)
+[ RUN      ] Uint1Test.Conversion
+[       OK ] Uint1Test.Conversion (0 ms)
+[ RUN      ] Uint1Test.ComplexExpressions
+[       OK ] Uint1Test.ComplexExpressions (0 ms)
+[----------] 7 tests from Uint1Test (0 ms total)
+
+[----------] 2 tests from AvmSimulationAddressDerivationTest
+[ RUN      ] AvmSimulationAddressDerivationTest.Positive
+wasm://wasm/vm2_sim_tests-04245c12:1
+
+
+RuntimeError: memory access out of bounds
+    at vm2_sim_tests.testing::Sequence::AddExpectation(testing::Expectation const&) const (wasm://wasm/vm2_sim_tests-04245c12:wasm-function[22067]:0x3d975d)
+    at vm2_sim_tests.testing::internal::FunctionMocker<bb::avm2::StandardAffinePoint<bb::group_elements::affine_element<bb::field<bb::Bn254FrParams>, bb::field<bb::Bn254FqParams>, bb::grumpkin::G1Params>> (bb::avm2::StandardAffinePoint<bb::group_elements::affine_element<bb::field<bb::Bn254FrParams>, bb::field<bb::Bn254FqParams>, bb::grumpkin::G1Params>> const&, bb::avm2::StandardAffinePoint<bb::group_elements::affine_element<bb::field<bb::Bn254FrParams>, bb::field<bb::Bn254FqParams>, bb::grumpkin::G1Params>> const&)>::AddNewExpectation(char const*, int, std::__2::basic_string<char, std::__2::char_traits<char>, std::__2::allocator<char>> const&, std::__2::tuple<testing::Matcher<bb::avm2::StandardAffinePoint<bb::group_elements::affine_element<bb::field<bb::Bn254FrParams>, bb::field<bb::Bn254FqParams>, bb::grumpkin::G1Params>> const&>, testing::Matcher<bb::avm2::StandardAffinePoint<bb::group_elements::affine_element<bb::field<bb::Bn254FrParams>, bb::field<bb::Bn254FqParams>, bb::grumpkin::G1Params>> const&>> const&) (wasm://wasm/vm2_sim_tests-04245c12:wasm-function[801]:0x67e5f)
+    at vm2_sim_tests.testing::internal::MockSpec<bb::avm2::StandardAffinePoint<bb::group_elements::affine_element<bb::field<bb::Bn254FrParams>, bb::field<bb::Bn254FqParams>, bb::grumpkin::G1Params>> (bb::avm2::StandardAffinePoint<bb::group_elements::affine_element<bb::field<bb::Bn254FrParams>, bb::field<bb::Bn254FqParams>, bb::grumpkin::G1Params>> const&, bb::avm2::StandardAffinePoint<bb::group_elements::affine_element<bb::field<bb::Bn254FrParams>, bb::field<bb::Bn254FqParams>, bb::grumpkin::G1Params>> const&)>::InternalExpectedAt(char const*, int, char const*, char const*) (wasm://wasm/vm2_sim_tests-04245c12:wasm-function[771]:0x66f01)
+    at vm2_sim_tests.bb::avm2::simulation::(anonymous namespace)::AvmSimulationAddressDerivationTest_Positive_Test::TestBody() (wasm://wasm/vm2_sim_tests-04245c12:wasm-function[758]:0x64ebb)
+    at vm2_sim_tests.testing::Test::Run() (wasm://wasm/vm2_sim_tests-04245c12:wasm-function[21784]:0x3b2f4e)
+    at vm2_sim_tests.testing::TestInfo::Run() (wasm://wasm/vm2_sim_tests-04245c12:wasm-function[21793]:0x3b4732)
+    at vm2_sim_tests.testing::TestSuite::Run() (wasm://wasm/vm2_sim_tests-04245c12:wasm-function[21798]:0x3b4f5f)
+    at vm2_sim_tests.testing::internal::UnitTestImpl::RunAllTests() (wasm://wasm/vm2_sim_tests-04245c12:wasm-function[21881]:0x3ca417)
+    at vm2_sim_tests.testing::UnitTest::Run() (wasm://wasm/vm2_sim_tests-04245c12:wasm-function[21880]:0x3c9ba5)
+    at vm2_sim_tests.RUN_ALL_TESTS() (wasm://wasm/vm2_sim_tests-04245c12:wasm-function[18355]:0x2fa128)
+
+Node.js v25.9.0
