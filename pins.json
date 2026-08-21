@@ -1,0 +1,98 @@
+{
+  "_comment": [
+    "SINGLE SOURCE OF TRUTH for every upstream pin this repo depends on.",
+    "Nothing else in the tree may DECLARE a pin value. package.json and package-lock.json",
+    "files CONTAIN pin values, but they are derived: `tools/repin.py --check` fails if any of",
+    "them disagrees with this file, and `tools/repin.py --apply` rewrites them from it.",
+    "Prose that mentions a version must mention one of the versions declared here; the same",
+    "check enforces that, so a stale number in a README fails rather than misleads.",
+    "Verified by verification/verify_pinned_nightly_single_source.sh.",
+    "The re-pin POLICY (when to bump, what a bump must record) is PINS.md."
+  ],
+
+  "anchors": {
+    "cpp": {
+      "repo": "AztecProtocol/aztec-packages",
+      "commit": "233d8e099336c1773b89e939100af047ed9c4f71",
+      "short": "233d8e0993",
+      "date": "2026-08-19",
+      "branch_at_pin": "next",
+      "what": "The C++ anchor. Base for every prepared upstream patch (M3, M4, M5, M9, M10), for the AVM_WASM build (M6), and for all reference material under reference/ except historical-protocol-specs/."
+    },
+    "ts": {
+      "repo": "AztecProtocol/aztec-packages",
+      "commit": "3a68d68ac29aaf04fc6251c80a8eb874043cb260",
+      "short": "3a68d68ac2",
+      "date": "2026-06-25",
+      "identity": "4377ddf64c^ — the parent of 'refactor: remove the TS AVM simulator'",
+      "what": "The TypeScript anchor. The last commit at which yarn-project/simulator/src still contained the TS AVM and the public orchestration we reuse. Vendored into spike/src, diffsim/src and drift/src, and checked out as the worktree upstream/tsavm."
+    },
+    "historical-protocol-specs": {
+      "repo": "AztecProtocol/aztec-packages",
+      "commit": "9fe19ba7a19d76a819f1ee3dd968697170eebf7b",
+      "short": "9fe19ba7a1",
+      "date": "2025-10-23",
+      "identity": "0285bb092b^ — the parent of 'chore(docs): Remove protocol specs from next'",
+      "what": "The only commit at which docs/docs/protocol-specs/ still exists. Vendored into reference/historical-protocol-specs/. ABANDONED upstream on purpose; see reference/PROVENANCE.md before trusting anything from it."
+    }
+  },
+
+  "npm": {
+    "_comment": [
+      "Two @aztec/* nightly lines are in the tree at once, deliberately, and they are not",
+      "interchangeable. `current` is THE pin: new work uses it. `deletion_era` is frozen",
+      "evidence — the published line whose src/public tree is byte-comparable with the `ts`",
+      "anchor, which is what lets the deleted TS AVM run at all, and which still ships the",
+      "in-process NAPI AVM the differential oracle needs. Bumping `deletion_era` would destroy",
+      "the artefact rather than update it."
+    ],
+    "current": {
+      "version": "5.3.0-nightly.20260819",
+      "corresponds_to_anchor": "cpp",
+      "role": "The pinned @aztec/* nightly. All new work uses this.",
+      "consumers": ["drift"]
+    },
+    "deletion_era": {
+      "version": "5.0.0-nightly.20260626",
+      "corresponds_to_anchor": "ts",
+      "role": "Frozen evidence. Do not bump; see PINS.md.",
+      "consumers": ["spike", "diffsim"]
+    }
+  },
+
+  "npm_exceptions": {
+    "_comment": "@aztec-scoped packages that are NOT on the nightly line and must not be moved onto it. Each needs a reason; the check refuses any other exception.",
+    "@aztec/viem": {
+      "version": "2.38.2",
+      "why": "A fork of viem republished under the @aztec scope, aliased in as `viem`. It follows viem's own versioning, not the monorepo nightly line, and no nightly of it exists."
+    },
+    "@aztec/merkle-tree": {
+      "version": "5.0.0-nightly.20260316",
+      "why": "The deleted TypeScript merkle trees (REUSE-INVENTORY.md RI-28). Upstream removed the package in e264dd4893 (2026-03-16), so this is the LAST nightly that ships it and no later one exists. Consumed only by probe-mt/, the probe that measured the undomained-hash defect. Pinning it forward is impossible, not merely undesirable."
+    }
+  },
+
+  "npm_consumers": {
+    "_comment": "Which declared npm pin each package.json/package-lock.json tree must use. Every @aztec/* dependency in these trees is checked against it.",
+    "spike": "deletion_era",
+    "diffsim": "deletion_era",
+    "drift": "current",
+    "probe-mt": "deletion_era"
+  },
+
+  "toolchain": {
+    "_comment": "Not upstream-Aztec pins, but pinned all the same; recorded here so there is one place to look. The authoritative declaration for each is the file named.",
+    "wasi-sdk": { "version": "33", "declared_in": "nix/wasi-sdk.nix" },
+    "nixpkgs": { "declared_in": "flake.lock" }
+  },
+
+  "history": [
+    {
+      "date": "2026-08-21",
+      "milestone": "M1",
+      "change": "Initial pin. cpp=233d8e0993, ts=3a68d68ac2, historical-protocol-specs=9fe19ba7a1, npm.current=5.3.0-nightly.20260819, npm.deletion_era=5.0.0-nightly.20260626.",
+      "reason": "M1 records the anchors the campaign had been using informally since the spike. No value changed; this entry establishes the baseline every later bump is measured from.",
+      "drift_entries_opened": ["D1"]
+    }
+  ]
+}
