@@ -28,6 +28,7 @@ tested with `npm install`, with no barretenberg C++ build, no Rust/wasm-bindgen 
 |---|---|
 | `spike/` | `yarn-project/simulator/src` verbatim from `3a68d68ac2`, pinned to `@aztec/*@5.0.0-nightly.20260626` |
 | `drift/` | the same sources against `@aztec/*@5.3.0-nightly.20260819` (upstream master `233d8e0993`) |
+| `diffsim/` | `spike/` with the 7 files that differ from master restored from the npm tarball, so **both** simulators run in-process and the TS↔C++ differential harness works |
 | `probe-mt/` | merkle-tree probes: native world-state roots vs. the deleted `@aztec/merkle-tree` |
 | `browser-probe/` | esbuild browser-bundle probe and its node-builtin shims |
 | `upstream/aztec-packages` | git clone (gitignored); `upstream/tsavm` is a worktree at `3a68d68ac2` |
@@ -38,6 +39,7 @@ tested with `npm install`, with no barretenberg C++ build, no Rust/wasm-bindgen 
 cd spike  && npm install && SPIKE_PURE_TS=1 npx jest    # 676 pass, 0 non-C++ failures
 cd drift  && npm install && SPIKE_PURE_TS=1 npx jest    # identical numbers on today's deps
 cd spike  && npx tsc --noEmit                           # 5 errors, all in C++-only files
+cd diffsim && npm install && npx jest                   # 756 pass / 1 fail, incl. the TS-vs-C++ oracle
 ```
 
 ## Spike-only source edits
@@ -75,3 +77,10 @@ Every edit to the vendored tree is marked `SPIKE` in-source. There are three.
   and would produce wrong roots.
 - The whole execution path, `PublicProcessor` included, **bundles for the browser**:
   10.56 MB minified / 6.84 MB gzipped, of which the AVM itself is **115 KB**.
+- **The deleted TS↔C++ differential harness runs, and it is green.** `diffsim/` gets
+  **756 passed / 1 failed** in 11 s from a plain `npm install`, no barretenberg build —
+  `@aztec/bb.js`'s npm tarball ships the prebuilt NAPI AVM for four architectures, and the
+  published nightly still carries the older in-process adapter. Per transaction the harness
+  asserts equal revert code, all four gas dimensions, the full public tx effect, the AVM
+  circuit public-inputs buffer, every return value **and the resulting tree roots**. The one
+  failure is a fixture generator asserting a repo-root path, not a simulator failure.
