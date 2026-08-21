@@ -40,6 +40,21 @@
 #   just measure-differential          re-measure the per-arm COMPARISON counts
 #   just capture-tree-vectors          re-capture the Tier D world-state root vectors
 #
+# The M3 verification set (the prepared crypto_merkle_tree / LMDB split):
+#
+#   just verify-merkle-neutral         verify_merkle_lmdb_split_native_neutral   (~5 min)
+#   just verify-merkle-link-edge       verify_merkle_lmdb_split_removes_link_edge
+#   just verify-merkle-patch-applies   verify_merkle_lmdb_patch_applies_to_upstream
+#   just verify-merkle-reproduce       reproduce_aztec_merkle_tree_lmdb_coupling (~3 min)
+#   just verify-merkle-pr-md           verify_merkle_lmdb_issue_md_complete
+#   just verify-m3                     all five, in order
+#
+# They build barretenberg twice — once at the patch's base commit and once with
+# the patch applied — under $M3_WORK (default $TMPDIR/aztec-m3-merkle-lmdb).
+# From an empty work directory that was measured at 7m18s and 1.3 GB with a warm
+# ccache; afterwards ninja has nothing to do and the cost is the test binaries.
+# Set M3_WORK to keep the trees somewhere persistent.
+#
 # M1's working tools, which the checks drive:
 #
 #   just check-drift                   the vendored tree vs its recorded commits
@@ -218,6 +233,52 @@ verify-m2:
       echo "verify-m2: FAILED" >&2
     else
       echo "verify-m2: all checks passed"
+    fi
+    exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M3 — the prepared upstream patch splitting crypto_merkle_tree from LMDB
+# ---------------------------------------------------------------------------
+
+# The same targets and test binaries before and after the split: 132 -> 36 + 96, same names.
+verify-merkle-neutral:
+    @verification/verify_merkle_lmdb_split_native_neutral.sh
+
+# crypto_merkle_tree no longer depends on lmdblib, and its test binary links no LMDB object.
+verify-merkle-link-edge:
+    @verification/verify_merkle_lmdb_split_removes_link_edge.sh
+
+# The format-patch applies cleanly to 233d8e0993 and the result configures and builds.
+verify-merkle-patch-applies:
+    @verification/verify_merkle_lmdb_patch_applies_to_upstream.sh
+
+# The contribution's own verify.sh discriminates: non-zero unpatched, zero patched.
+verify-merkle-reproduce:
+    @verification/reproduce_aztec_merkle_tree_lmdb_coupling.sh
+
+# PR.md carries what the convention requires, and every claim in it is re-derived.
+verify-merkle-pr-md:
+    @verification/verify_merkle_lmdb_issue_md_complete.sh
+
+# Run the whole M3 verification set; every check runs even if an earlier one fails.
+verify-m3:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_merkle_lmdb_split_native_neutral \
+      verify_merkle_lmdb_split_removes_link_edge \
+      verify_merkle_lmdb_patch_applies_to_upstream \
+      reproduce_aztec_merkle_tree_lmdb_coupling \
+      verify_merkle_lmdb_issue_md_complete
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m3: FAILED" >&2
+    else
+      echo "verify-m3: all checks passed"
     fi
     exit "$rc"
 
