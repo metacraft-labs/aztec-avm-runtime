@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "lib": ["dom", "esnext", "es2017.object"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "rootDir": "src",
+    "outDir": "dest",
+    "noEmit": true,
+    "declaration": false,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "downlevelIteration": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noImplicitOverride": true,
+    "allowArbitraryExtensions": true,
+    "verbatimModuleSyntax": true,
+    "types": ["node", "jest"]
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,94 @@
+{
+  "name": "@spike/ts-avm-differential",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "comment": [
+    "Spike harness: the TypeScript AVM as it existed at aztec-packages 3a68d68ac2 (= 4377ddf64c^,",
+    "the parent of 'refactor: remove the TS AVM simulator').",
+    "src/ is a verbatim copy of yarn-project/simulator/src at that commit.",
+    "The monorepo's workspace:/portal: dependencies are replaced with the published npm",
+    "packages at 5.0.0-nightly.20260626, whose shipped src/public tree is byte-identical to",
+    "this commit's for all AVM files (8 non-AVM files / 86 lines differ; see spike log)."
+  ],
+  "scripts": {
+    "test": "NODE_NO_WARNINGS=1 node --experimental-vm-modules ./node_modules/.bin/jest --passWithNoTests"
+  },
+  "dependencies": {
+    "@aztec/bb.js": "5.0.0-nightly.20260626",
+    "@aztec/constants": "5.0.0-nightly.20260626",
+    "@aztec/foundation": "5.0.0-nightly.20260626",
+    "@aztec/native": "5.0.0-nightly.20260626",
+    "@aztec/noir-acvm_js": "5.0.0-nightly.20260626",
+    "@aztec/noir-noirc_abi": "5.0.0-nightly.20260626",
+    "@aztec/noir-protocol-circuits-types": "5.0.0-nightly.20260626",
+    "@aztec/noir-types": "5.0.0-nightly.20260626",
+    "@aztec/protocol-contracts": "5.0.0-nightly.20260626",
+    "@aztec/standard-contracts": "5.0.0-nightly.20260626",
+    "@aztec/stdlib": "5.0.0-nightly.20260626",
+    "@aztec/telemetry-client": "5.0.0-nightly.20260626",
+    "@aztec/world-state": "5.0.0-nightly.20260626",
+    "lodash.clonedeep": "^4.5.0",
+    "lodash.merge": "^4.6.2",
+    "tslib": "^2.4.0"
+  },
+  "devDependencies": {
+    "@aztec/kv-store": "5.0.0-nightly.20260626",
+    "@aztec/noir-contracts.js": "5.0.0-nightly.20260626",
+    "@aztec/noir-test-contracts.js": "5.0.0-nightly.20260626",
+    "@jest/globals": "^30.0.0",
+    "@swc/core": "^1.10.12",
+    "@swc/jest": "^0.2.36",
+    "@types/jest": "^30.0.0",
+    "@types/lodash.clonedeep": "^4.5.7",
+    "@types/lodash.merge": "^4.6.9",
+    "@types/node": "^22.15.17",
+    "esbuild": "^0.28.2",
+    "jest": "^30.0.0",
+    "jest-mock-extended": "^4.0.0",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.3.3",
+    "viem": "npm:@aztec/viem@2.38.2"
+  },
+  "jest": {
+    "moduleNameMapper": {
+      "^@aztec/simulator/public/fixtures$": "<rootDir>/public/fixtures/index.ts",
+      "^(\\.{1,2}/.*)\\.[cm]?js$": "$1"
+    },
+    "testRegex": "./src/.*\\.test\\.(js|mjs|ts)$",
+    "rootDir": "./src",
+    "transform": {
+      "^.+\\.tsx?$": [
+        "@swc/jest",
+        {
+          "jsc": {
+            "parser": {
+              "syntax": "typescript",
+              "decorators": true
+            },
+            "transform": {
+              "decoratorVersion": "2022-03"
+            }
+          }
+        }
+      ]
+    },
+    "extensionsToTreatAsEsm": [
+      ".ts"
+    ],
+    "reporters": [
+      "default"
+    ],
+    "testTimeout": 120000,
+    "setupFiles": [
+      "<rootDir>/../node_modules/@aztec/foundation/src/jest/setup.mjs"
+    ],
+    "testEnvironment": "<rootDir>/../node_modules/@aztec/foundation/src/jest/env.mjs",
+    "setupFilesAfterEnv": [
+      "<rootDir>/../node_modules/@aztec/foundation/src/jest/setupAfterEnv.mjs"
+    ]
+  },
+  "engines": {
+    "node": ">=20.10"
+  }
+}
