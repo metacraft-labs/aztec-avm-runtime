@@ -21,7 +21,7 @@ Everything here is against `AztecProtocol/aztec-packages` commit **`233d8e0993`*
 | `spike.diff` | yes | The original spike-produced diff, kept for provenance. Not `git`-format (no `diff --git` headers) — use `spike.patch` to apply. |
 | `avm.wasm` | yes | Standalone AVM reactor, `-Oz`, stripped. 1,259,737 bytes raw; `gzip -9 -c avm.wasm \| wc -c` → 272,661 (the "266 KiB gzipped" number). |
 | `native.results`, `wasm.results`, `node.results` | yes | The three transcripts that match. `diff` any pair. |
-| `probe/exc.cpp`, `probe/exc33.wasm`, `probe/exc33b.wasm`, `probe/run_node.mjs` | yes | The C++-exceptions-on-wasm probe and the V8 runner. `exc33.wasm` uses LLVM's default *legacy* EH encoding (V8 rejects it); `exc33b.wasm` adds `-mllvm -wasm-use-legacy-eh=false` (V8 accepts it). The pair is the evidence for that flag. |
+| `probe/exc.cpp`, `probe/exc33.wasm`, `probe/exc33b.wasm`, `probe/run_node.mjs` | yes | The C++-exceptions-on-wasm probe and the V8 runner. `exc33.wasm` uses LLVM's default *legacy* EH encoding (wasmtime 47 rejects it; V8 at node 24.19 still accepts it); `exc33b.wasm` adds `-mllvm -wasm-use-legacy-eh=false`, emitting the standardised `try_table`, which **both** runtimes accept. The pair is the evidence for that flag. |
 | `SHA256SUMS` | yes | Hashes of the committed binaries and of the excluded inputs, so provenance survives. |
 | `src/barretenberg`, `src/ipc-runtime` | **no** | Full copies of the upstream trees (365 MiB incl. two build directories). Every delta is in `spike.patch`; see "Reconstructing" below. |
 | `src/barretenberg/cpp/build-{wasm-avm,native-avm-spike}` | **no** | 311 MiB of CMake/Ninja build output, fully regenerable. |
@@ -62,7 +62,9 @@ The `.results` sections of those three outputs are what is committed here.
 ```sh
 wasmtime run probe/exc33b.wasm       # prints "reverted: out of gas" then "survived"
 node   --experimental-wasi-unstable-preview1 probe/run_node.mjs probe/exc33b.wasm
-wasmtime run probe/exc33.wasm        # runs, but V8 rejects the legacy try/catch encoding
+wasmtime run probe/exc33.wasm        # fails: wasmtime rejects the legacy try/catch
+                                     # encoding ("legacy_exceptions feature required
+                                     # for try instruction"); V8 at node 24.19 runs it
 ```
 
 `probe/exc.cpp` is 544 bytes and rebuilds in one command:
