@@ -1,0 +1,14 @@
+{
+  "name": "@spike/mt-probe",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@aztec/merkle-tree": "5.0.0-nightly.20260316",
+    "@aztec/kv-store": "5.0.0-nightly.20260626",
+    "@aztec/foundation": "5.0.0-nightly.20260626",
+    "@aztec/stdlib": "5.0.0-nightly.20260626",
+    "@aztec/constants": "5.0.0-nightly.20260626",
+    "@aztec/world-state": "5.0.0-nightly.20260626"
+  }
+}

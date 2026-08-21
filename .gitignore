@@ -1,2 +1,7 @@
 upstream/
 node_modules/
+dest/
+.tsbuildinfo
+browser-probe/*.js
+!browser-probe/shims/*.js
+!browser-probe/entry*.ts
