@@ -146,6 +146,25 @@ were absorbed silently.
   and this is a test-expectation gap behind a disabled constant rather than a product defect, so it
   ranks below the five prepared patches. Recorded here so it cannot be lost, with the exact strings
   a reproduction needs.
+- **reachable in OUR tree since M2, and turned into a tripwire.** M2 set
+  `COLLECT_META_CHECK_RET = true` (see D7), which makes `expectToBeTrue` a real assertion and this
+  gap a real failure. It is not skipped and upstream's `allowedReasons` list is not widened — that
+  would weaken an upstream assertion. Instead `opcode_spam.test.ts` asserts the known-wrong
+  behaviour exactly: the inner halt reason must be `sendl2tol1msg: recipient address is too large`,
+  upstream's three-item list must not contain it, and upstream's three assertions for this case must
+  come out exactly `[true, false, true]` — reverted, wrong reason, outer frame out of gas. So the
+  arm is 142/142 green *and* the divergence cannot be resolved by accident: if upstream fixes the
+  list, or the opcode's message changes, or the outer frame stops running out of gas, the test fails
+  and this entry has to be re-decided. That is the D1 discipline applied to a fixture gap.
+- **and the tripwire is now wired into the verification set, which it was not when it was written.**
+  Found in M2 review by mutation rather than by reading: the comparison counter emits its record
+  from inside the simulator, *before* the suite's own post-hoc expectations run, and
+  `tools/measure_differential.py` does not fail on a red suite. So breaking the tripwire — the exact
+  simulation of "upstream fixed it" — left the measured counts at 142 / 142 / 0 and
+  `verify_differential_arm_counts_recorded` still reported *26 assertions, 0 failures, PASS*. A
+  tripwire nothing runs as a gate is a note. The check now asserts `totalFailed == 0` for **both**
+  arms and pins D4's four constants and the not-contained assertion textually, with two negative
+  controls, so a red arm and a weakened pin both go red.
 
 ## D5 — the cross-language golden `minimal_tx.testdata.bin` is a one-way pin
 
@@ -190,12 +209,13 @@ were absorbed silently.
   needs no C++ AVM at all, so it does not expire. Building `bb-avm-sim` IPC infrastructure for the
   differential is explicitly rejected (OQ-15).
 
-## D7 — the opcode-spam arm compares no revert reasons at all: 142 of 142 are exempted
+## D7 — the opcode-spam arm compared no revert reasons at all: 142 of 142 were exempted. CLOSED in M2
 
 - id: D7
-- status: accepted
+- status: closed
 - opened: 2026-08-21 (M1 review)
-- milestone: M1 (recorded), M2 (Tier A accounting), M19 (comparison-count reporting)
+- closed: 2026-08-21 (M2)
+- milestone: M1 (recorded), M2 (decided and closed), M19 (comparison-count reporting)
 - design-question: —
 - sides: what the `opcode_spam` differential arm is quoted as comparing versus what it compares
 - what: The differential oracle's revert-reason exemption fires when the C++ result carries no
@@ -213,15 +233,40 @@ were absorbed silently.
   none) are all caught there. But "narrow" is a statement about the other four suites, not about
   this one. In `opcode_spam` the comparison is switched off completely, and the 142 green results
   must never be read as 142 revert-reason agreements.
-- decision: Accepted, and the accounting recorded wherever the number is quoted. The arm is kept for
-  the same reason as D2 — it still compares revert code, all four gas dimensions, `publicTxEffect`,
-  the public-inputs buffer and the tree roots on all 142 — but it is quoted as **74 reason
-  comparisons, not 216**. The alternative was measured rather than assumed and is left open for M2:
-  flipping `COLLECT_META_CHECK_RET` to `true` makes the exemption unreachable in the suite and gives
-  **141 real reason comparisons**, at 165 s instead of 156 s, with exactly one failure — and that
-  failure is D4, upstream's own `allowedReasons` gap, not a C++/TS divergence. That trade (a
-  recorded local deviation and one expected-fail, in exchange for 141 genuine comparisons) is a
-  better bargain than it looks and M2 should take it or record why not.
+- decision: **M2 took the flip.** `COLLECT_META_CHECK_RET` is `true` in this tree, the exemption is
+  unreachable in the suite, and the arm now contributes **142 genuine revert-reason comparisons**.
+  Recorded here rather than in a commit message because the reasoning is what a later reader needs:
+
+  1. It turns 142 vacuous exemptions into 142 real comparisons. That alone is the trade M1 costed.
+  2. It makes our **only assertion-relaxing deviation to the oracle dead across the whole corpus**.
+     The exemption already fired 0 times in the four metadata-collecting suites; with this flip it
+     fires 0 times in the fifth as well, so all **216** differential transactions now run with the
+     revert reason asserted. `verify_differential_arm_counts_recorded` asserts the measured
+     exemption count is **0**, so a future edit that reintroduces one goes red.
+  3. It revives two dimensions this arm did not compare at all. `MAX_CALL_STACK_ITEMS` and
+     `MAX_CALL_STACK_DEPTH` go from 0 to 10000, so call-stack metadata is collected and compared;
+     and the app-logic RETURN-VALUE comparison in `cpp_vs_ts_public_tx_simulator.ts`, guarded by
+     `if (this.config?.collectCallMetadata)`, becomes live for all 142.
+  4. It makes upstream's own `expectToBeTrue` assertions real rather than the no-op they are while
+     the constant is false — two or three per case, on 142 cases.
+
+- correction to this entry's own numbers, made by re-measuring rather than by re-reading: the
+  figure above said "141 real reason comparisons". **It is 142.** 141 was the passing *test* count;
+  `SENDL2TOL1MSG` does pass the reason comparison and then fails later, in upstream's own
+  `allowedReasons` expectation. The distinction is the same test-count-versus-comparison-count
+  confusion this entry exists to stop, so it is corrected here rather than quietly. Runtime is also
+  not the predicted +9 s: measured 142.0 s flipped versus 141.6 s unflipped, i.e. inside the noise.
+
+- what the one failure cost, and how it is handled: not with a skip and not by widening upstream's
+  list. `opcode_spam.test.ts` now asserts the D4 case's known-wrong behaviour **exactly** — the
+  inner reason must be `sendl2tol1msg: recipient address is too large`, upstream's `allowedReasons`
+  must NOT contain it, and upstream's three assertions must come out exactly `[true, false, true]`.
+  If upstream fixes the list, or the opcode's error text changes, or the outer frame stops running
+  out of gas, that goes red and D4 has to be re-decided. Same discipline as D1.
+
+- measured after the flip, 2026-08-21, by `tools/measure_differential.py`:
+  `opcode_spam` 142 comparisons / 142 revert-reason comparisons / 0 exemptions, 142/142 tests
+  passing; whole corpus 216 / 216 / 0. Recorded in `fixtures/differential-arm-counts.json`.
 - evidence: Measured 2026-08-21 in review. Tripwire instrumentation of `cppReasonExemptNoMetadata`
   in `cpp_vs_ts_public_tx_simulator.ts`: `opcode_spam` 142/142 exempt; `custom_bc`+`amm`+`token`+
   `deployments` 0/38 exempt with `cfgMeta=true` and `cppMetaLen>=1` throughout. Negative control:

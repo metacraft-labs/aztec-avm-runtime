@@ -1,0 +1,75 @@
+{
+  "note": "MEASURED, not read. `comparisons` counts transactions that went through CppVsTsPublicTxSimulator.simulate() and passed every assertion; a jest test may drive several, one, or none. `revertReasonComparisons` counts the subset whose structured revert reason was actually asserted rather than excused by the no-C++-metadata exemption (DRIFT.md D3/D7). Regenerate with tools/measure_differential.py.",
+  "generator": "tools/measure_differential.py",
+  "defaultSuite": {
+    "command": "cd diffsim && npm test",
+    "testCounts": {
+      "tsSimulatorLabelled": 77,
+      "cppSimulatorLabelled": 78,
+      "unlabelled": 602,
+      "addedHere": 1,
+      "totalPassed": 758,
+      "totalFailed": 0,
+      "totalSkippedOrOther": 153
+    },
+    "comparisons": 74,
+    "revertReasonComparisons": 74,
+    "revertReasonExemptions": 0,
+    "byFile": {
+      "public/public_processor/apps_tests/deployments.test.ts": {
+        "comparisons": 5,
+        "revertReasonCompared": 5
+      },
+      "public/public_processor/apps_tests/token.test.ts": {
+        "comparisons": 12,
+        "revertReasonCompared": 12
+      },
+      "public/public_tx_simulator/apps_tests/amm.test.ts": {
+        "comparisons": 8,
+        "revertReasonCompared": 8
+      },
+      "public/public_tx_simulator/apps_tests/avm_gadgets.test.ts": {
+        "comparisons": 27,
+        "revertReasonCompared": 27
+      },
+      "public/public_tx_simulator/apps_tests/avm_test.test.ts": {
+        "comparisons": 1,
+        "revertReasonCompared": 1
+      },
+      "public/public_tx_simulator/apps_tests/custom_bc.test.ts": {
+        "comparisons": 13,
+        "revertReasonCompared": 13
+      },
+      "public/public_tx_simulator/apps_tests/token.test.ts": {
+        "comparisons": 8,
+        "revertReasonCompared": 8
+      }
+    }
+  },
+  "opcodeSpamArm": {
+    "command": "cd diffsim && RUN_AVM_OPCODE_SPAM=1 node --experimental-vm-modules ./node_modules/.bin/jest src/public/public_tx_simulator/apps_tests/opcode_spam.test.ts",
+    "testCounts": {
+      "tsSimulatorLabelled": 0,
+      "cppSimulatorLabelled": 0,
+      "unlabelled": 142,
+      "addedHere": 0,
+      "totalPassed": 142,
+      "totalFailed": 0,
+      "totalSkippedOrOther": 0
+    },
+    "comparisons": 142,
+    "revertReasonComparisons": 142,
+    "revertReasonExemptions": 0,
+    "byFile": {
+      "public/public_tx_simulator/apps_tests/opcode_spam.test.ts": {
+        "comparisons": 142,
+        "revertReasonCompared": 142
+      }
+    }
+  },
+  "totals": {
+    "comparisons": 216,
+    "revertReasonComparisons": 216,
+    "revertReasonExemptions": 0
+  }
+}

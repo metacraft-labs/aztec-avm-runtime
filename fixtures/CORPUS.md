@@ -6,6 +6,13 @@ Everything here is either **taken from upstream** (Apache-2.0, see licensing bel
 Every count in this document was produced by running the suite, not by reading it. Commands are
 given so any claim can be re-checked.
 
+> **Read [`MANIFEST.md`](MANIFEST.md) first.** M2 added a machine-readable fixture manifest with one
+> entry per family, each carrying its upstream source, its capture procedure, its licence, and — in
+> two separate fields — what a skeptic should conclude from it passing *and what they must not*.
+> That file is checked (`just verify-fixture-manifest`); this one is prose and is not. The tier
+> letters also differ: the manifest uses the milestone's tiers A–E (plus H for the harness), this
+> document uses the older spike-era A–J. The mapping between them is at the foot of the manifest.
+
 ## Licensing — one answer for the whole corpus
 
 | source | licence | evidence |
@@ -498,7 +505,31 @@ drops the reason, C++ reports a *different* reason, C++ reports one where TS rep
 12, 12 and 7 failures respectively. Negative control: forcing the exemption's condition false makes
 the arm fail with the new message.
 
-**But say plainly what 142/142 costs in this suite, because the number invites the wrong reading.**
+### M2 took the flip: the arm now makes 142 REAL revert-reason comparisons
+
+`COLLECT_META_CHECK_RET` is `true` in this tree as of M2. Measured by
+`tools/measure_differential.py`, recorded in [`differential-arm-counts.json`](differential-arm-counts.json):
+**142 comparisons, 142 revert-reason comparisons, 0 exemptions**, 142 s — and across the whole
+corpus **216 / 216 / 0**, so the oracle's one assertion-relaxing local deviation now fires nowhere
+at all. It also revives two dimensions the arm did not compare while the constant was false: the
+call-stack metadata (`MAX_CALL_STACK_ITEMS`/`_DEPTH` go from 0 to 10000) and the app-logic
+return-value comparison, which is guarded by `if (this.config?.collectCallMetadata)`.
+
+The single case that fails upstream's own `allowedReasons` expectation — `SENDL2TOL1MSG`, D4 — is
+neither skipped nor excused by widening upstream's list. `opcode_spam.test.ts` asserts the
+known-wrong behaviour exactly: the inner reason must be
+`sendl2tol1msg: recipient address is too large`, upstream's list must not contain it, and upstream's
+three assertions must come out exactly `[true, false, true]`. If upstream fixes the list, that goes
+red and D4 is re-decided. Full reasoning in [`DRIFT.md`](../DRIFT.md) D7, which is now `closed`.
+
+One correction D7 carries and this section repeats, because it is the same mistake in miniature:
+the "141 real reason comparisons" figure quoted before the decision was the passing **test** count.
+The **comparison** count is 142 — `SENDL2TOL1MSG` passes the reason comparison and fails later.
+
+**The paragraph below describes the state BEFORE that flip, and is kept because the measurement is
+the evidence for taking it.**
+
+**Say plainly what the old 142/142 cost in this suite, because the number invited the wrong reading.**
 The same measurement shows the exemption fires on **142 of 142** opcode-spam cases, so the arm
 contributes **zero** revert-reason comparisons; forcing the condition false fails all 142, which is
 what proves every one of them depends on it. 142/142 is honest only about revert code, the four gas

@@ -28,6 +28,7 @@ import { strict as assert } from 'assert';
 import type { ExecutorMetricsInterface } from '../executor_metrics_interface.js';
 import type { PublicContractsDB } from '../public_db_sources.js';
 import { ContractProviderForCpp } from './contract_provider_for_cpp.js';
+import { recordDifferentialComparison } from './differential_counters.js';
 import { PublicTxSimulator } from './public_tx_simulator.js';
 import type {
   MeasuredPublicTxSimulatorInterface,
@@ -219,18 +220,31 @@ export class CppVsTsPublicTxSimulator extends PublicTxSimulator implements Publi
     // loudly instead of being excused by a plausible-looking out-of-gas message. The
     // both-sides-absent case still goes through the normal assertion, exactly as upstream.
     //
-    // MEASURED, and say the cost out loud (M1 review, 2026-08-21). Instrumenting this branch:
-    //   custom_bc + amm + token + deployments : exemption fired 0 / 38 transactions
-    //                                           (cfgMeta=true, cppMetaLen>=1 throughout);
-    //                                           injected divergences caught 12 / 12 / 7.
-    //   opcode_spam                           : exemption fired 142 / 142.
-    // So this suite's "142 passed" contains ZERO revert-reason comparisons. It still compares
-    // revert code, four gas dimensions, publicTxEffect, the public-inputs buffer and tree roots
-    // on all 142 — but do not quote it as 142 reason agreements. Negative control: forcing
-    // cppMetadataUnavailable false fails 142/142, which is what proves every one depends on it.
-    // Recorded as DRIFT.md D7. The measured alternative (M2's call): setting
-    // COLLECT_META_CHECK_RET = true makes this branch unreachable here and gives 141 REAL reason
-    // comparisons in 165 s, the one failure being D4 — upstream's own allowedReasons gap.
+    // MEASURED, in two states, because the first measurement is what motivated changing the second.
+    //
+    //   M1 review, 2026-08-21, with opcode_spam.test.ts on upstream's COLLECT_META_CHECK_RET =
+    //   false. Instrumenting this branch:
+    //     custom_bc + amm + token + deployments : exemption fired 0 / 38 transactions
+    //                                             (cfgMeta=true, cppMetaLen>=1 throughout);
+    //                                             injected divergences caught 12 / 12 / 7.
+    //     opcode_spam                           : exemption fired 142 / 142, so that suite's
+    //                                             "142 passed" contained ZERO revert-reason
+    //                                             comparisons.
+    //
+    //   M2, 2026-08-21, after flipping COLLECT_META_CHECK_RET to true (DRIFT.md D7, now closed).
+    //   This branch is UNREACHABLE in every suite in the corpus: measured by
+    //   `tools/measure_differential.py`, 216 comparisons / 216 revert-reason comparisons /
+    //   **0 exemptions**, and `verify_differential_arm_counts_recorded` asserts that zero. Two
+    //   figures quoted here before the flip were wrong and are corrected rather than left: it is
+    //   142 real reason comparisons, not 141 — 141 was the passing TEST count — and the cost is
+    //   142.0 s against 141.6 s, not the +9 s an earlier estimate predicted.
+    //
+    // Re-measured in M2 review by injecting divergences into the C++ result with the flip on, all
+    // over the 142-case arm: a dropped C++ revert reason with metadata still present fails 142/142
+    // on the assert below (so the exemption cannot excuse it), an emptied callStackMetadata fails
+    // 142/142 on the app-logic return-value assert above, a perturbed return value fails 142/142,
+    // a perturbed gas total fails 142/142, and a cleared halting message fails 142/142 on
+    // upstream's own expectToBeTrue — the assertion the flip turns from a no-op into a check.
     const cppReasonAbsent = Object.keys(cppRevertReasonAsObject).length === 0;
     const tsReasonPresent = Object.keys(tsRevertReasonAsObject).length > 0;
     const cppMetadataUnavailable = (cppResult.callStackMetadata?.length ?? 0) === 0;
@@ -281,6 +295,14 @@ export class CppVsTsPublicTxSimulator extends PublicTxSimulator implements Publi
       cppStateRef.equals(tsStateRef),
       `Tree roots mismatch between TS and C++ public simulations for tx ${txHash}`,
     );
+
+    // ---- LOCAL ADDITION — aztec-avm-runtime, edit class `oracle-counters`.
+    // Every assertion above has passed for this transaction, so this is one completed differential
+    // COMPARISON — which is the unit the corpus manifest quotes, and is not the same thing as one
+    // jest test. `revertReasonCompared` separates the transactions whose revert reason was actually
+    // asserted from the ones the metadata exemption excused (DRIFT.md D7). Off unless
+    // DIFFSIM_COUNTERS_DIR is set; see differential_counters.ts.
+    recordDifferentialComparison(!cppReasonExemptNoMetadata);
 
     this.log.debug(`C++ simulation completed for tx ${txHash}`, {
       txHash,
