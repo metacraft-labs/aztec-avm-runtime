@@ -24,6 +24,19 @@
 #      other M1 entries the milestone requires (the opcode-spam gas blindness,
 #      and the disposition of the two surfaced divergences) are present.
 #
+#   4. EVERY entry is inside the parsed block. This is not a formality. The
+#      structural parser only ever sees what lies between <!-- BEGIN:drift -->
+#      and <!-- END:drift -->, and D8 was authored BELOW the END marker — so for
+#      the whole of M4 it was never validated at all, while the check reported
+#      green and printed a list of ids that silently omitted it. M5's review
+#      confirmed the class was still open after D8 was moved: an entry with
+#      `status: banana`, `decision: TBD` and three missing keys, planted one line
+#      after the END marker, passed 31/31; the identical entry one line ABOVE it
+#      produced six failures. A validator whose scope silently excludes part of
+#      what it is believed to cover is worse than no validator, so the scope is
+#      now asserted rather than assumed: the number of `## D<n> —` headings in
+#      the file must equal the number the parser found.
+#
 # Run: just verify-drift-ledger
 
 TEST_NAME="test_drift_ledger_has_bitwise_gas_entry"
@@ -142,7 +155,17 @@ ids = [e[0] for e in entries]
 if len(ids) != len(set(ids)):
     problems.append("duplicate ids: %s" % sorted({i for i in ids if ids.count(i) > 1}))
 
+# Scope. Everything above judged only what is INSIDE the block; an entry written
+# outside it is invisible to every one of those rules. D8 was authored below the
+# END marker and went unvalidated for a whole milestone while this check reported
+# green, so the parser's reach is now compared against the document.
+all_ids = re.findall(r"^## (D\d+) — ", text, re.M)
+outside = [i for i in all_ids if i not in ids]
+for i in outside:
+    problems.append("%s: written OUTSIDE the <!-- BEGIN:drift --> block, so nothing validates it" % i)
+
 print("ENTRIES %d" % len(entries))
+print("HEADINGS %d" % len(all_ids))
 print("IDS %s" % " ".join(ids))
 for p in problems:
     print("PROBLEM %s" % p)
@@ -150,12 +173,17 @@ PY
 )" || die "could not parse DRIFT.md"
 
 n_entries="$(printf '%s\n' "$report" | sed -n 's/^ENTRIES //p')"
+n_headings="$(printf '%s\n' "$report" | sed -n 's/^HEADINGS //p')"
 ids="$(printf '%s\n' "$report" | sed -n 's/^IDS //p')"
 problems="$(printf '%s\n' "$report" | sed -n 's/^PROBLEM //p')"
 
 note "ledger entries: $ids"
 assert_ge "the ledger carries several entries" 4 "$n_entries"
 assert_contains "the ledger carries D1, the seeded bitwise-gas entry" "D1" "$ids"
+# The scope assertion. Everything else here judges what the parser can see; this
+# is what makes "what the parser can see" equal to "what the document contains".
+assert_eq "every D-entry in DRIFT.md is inside the parsed block (D8 once was not)" \
+  "$n_headings" "$n_entries"
 
 if [ -z "$problems" ]; then
   pass "every ledger entry has an id, a status, a decision and evidence"
@@ -202,5 +230,33 @@ PY
   fi
 fi
 rm -f "$ctl"
+
+# The scope negative control. The mutation that motivated the assertion above:
+# a malformed entry planted one line BELOW the END marker used to pass 31/31,
+# because the parser never saw it. It must now be counted and named.
+scope_ctl="$(mktemp)"
+python3 - "$LEDGER" "$scope_ctl" <<'PY'
+import sys
+text = open(sys.argv[1], encoding="utf-8").read()
+planted = "\n## D99 — planted outside the block\n\n- id: D99\n- status: banana\n- decision: TBD\n\n"
+assert text.count("<!-- END:drift -->") == 1
+open(sys.argv[2], "w", encoding="utf-8").write(
+    text.replace("<!-- END:drift -->", "<!-- END:drift -->\n" + planted))
+PY
+scope_out="$(python3 - "$scope_ctl" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+block = re.search(r"<!--\s*BEGIN:drift\s*-->(.*?)<!--\s*END:drift\s*-->", text, re.S)
+inside = re.findall(r"^## (D\d+) — ", block.group(1), re.M)
+allids = re.findall(r"^## (D\d+) — ", text, re.M)
+print(" ".join(i for i in allids if i not in inside))
+PY
+)"
+# assert_contains, not assert_eq: if the ledger ITSELF has an out-of-scope entry
+# the assertion above is what reports it, and this control should keep saying only
+# whether the detector works.
+assert_contains "an entry planted below the END marker is detected as out of scope" \
+  "D99" "$scope_out"
+rm -f "$scope_ctl"
 
 finish

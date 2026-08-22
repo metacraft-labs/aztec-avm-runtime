@@ -136,6 +136,20 @@ def check(manifest: Path, repo: Path) -> tuple[int, int, list[str]]:
     entries = parse(text)
     assert_(len(entries) >= 15, f"manifest: only {len(entries)} entries; expected at least 15")
 
+    # SCOPE. `parse` only looks between the markers, so an entry written outside
+    # them is invisible to every rule below while this checker still reports green.
+    # That is not hypothetical: DRIFT.md's D8 was authored below its END marker and
+    # went unvalidated for a whole milestone. Measured here too during M5's review —
+    # an `### FX-99` planted one line after END:manifest passed 37/37. So the
+    # parser's reach is compared against the document rather than assumed.
+    headings = re.findall(r"^### (FX-\d{2}) — ", text, re.M)
+    outside = [h for h in headings if h not in {e["id"] for e in entries}]
+    assert_(
+        not outside,
+        f"manifest: {', '.join(outside)} written OUTSIDE the <!-- BEGIN:manifest --> "
+        "block, so nothing validates them",
+    )
+
     inventory_text = (repo / "REUSE-INVENTORY.md").read_text()
     known_ri = set(re.findall(r"^### (RI-\d{2}) ", inventory_text, re.M))
     assert_(len(known_ri) >= 40, f"manifest: only {len(known_ri)} inventory ids found to check against")
