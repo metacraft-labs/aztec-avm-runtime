@@ -99,6 +99,33 @@
 # wasm32 twice, which is most of its six minutes and is what backs the claim that
 # contract_crypto.cpp:61 is the only place in vm2 that shifts before widening.
 #
+# The M6 verification set (the AVM_WASM build itself):
+#
+#   just build-avm-wasm                the reproducible entry point
+#   just verify-avm-wasm-build         verify_avm_wasm_build                            (~4 min)
+#   just verify-avm-wasm-prefix        verify_avm_wasm_preset_uses_ambient_wasi_prefix  (~2 min)
+#   just verify-avm-wasm-default-off   verify_avm_wasm_default_off                      (~25 min)
+#   just verify-avm-wasm-gate          test_wasm_exceptions_configure_gate              (~2 min)
+#   just verify-avm-wasm-closure       verify_wasm_link_closure_excludes_proving        (~2 min)
+#   just verify-avm-wasm-interpreter   verify_no_interpreter_source_change              (~10 s)
+#   just verify-avm-wasm-no-hack       verify_wasm_build_uses_module_split_not_hack     (~30 s)
+#   just verify-m6                     all seven, in order
+#
+# They prepare EIGHT worktrees of 233d8e0993 under $M6_WORK (default
+# $TMPDIR/aztec-m6-avm-wasm), each differing only by which prepared patches are
+# applied: `base` (none), `stack3` (patches 1,2,3), `avm` (+ the AVM_WASM one),
+# `hardcoded` (1,3,4 — patch 2 omitted, so its `wasm` preset still hardcodes
+# /opt/wasi-sdk), `spike` (the vm2-wasm spike's own change set, which carries the
+# three hacks this milestone must not reinstate), `nocast` (the AVM_WASM tree
+# with the three narrowing corrections reverted, which must FAIL to build) and
+# `nogate` (the gate's FATAL_ERROR removed, which must then configure under
+# wasi-sdk 27). The last four are negative controls; three of them are meant to
+# fail, and a check goes red if one of them succeeds.
+#
+# The expensive part is verify-avm-wasm-default-off: it builds barretenberg.wasm
+# twice, from the `wasm` preset with and without the patch, and compares the
+# artefacts byte for byte. Budget about 5 GB under $M6_WORK.
+#
 # M1's working tools, which the checks drive:
 #
 #   just check-drift                   the vendored tree vs its recorded commits
@@ -434,5 +461,65 @@ verify-m5:
       echo "verify-m5: FAILED" >&2
     else
       echo "verify-m5: all checks passed"
+    fi
+    exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M6 — the AVM_WASM build: vm2_sim and world_state_reference for wasm32-wasip1
+# ---------------------------------------------------------------------------
+
+# The reproducible entry point: build the AVM and its in-memory world state for wasm.
+build-avm-wasm *TARGETS:
+    @verification/build_avm_wasm.sh {{TARGETS}}
+
+# cmake --preset wasm-avm && ninja, from the M0 shell, with the -Werror claim measured.
+verify-avm-wasm-build:
+    @verification/verify_avm_wasm_build.sh
+
+# The preset follows the shell's WASI_SDK_PREFIX, proven against a tree that hardcodes it.
+verify-avm-wasm-prefix:
+    @verification/verify_avm_wasm_preset_uses_ambient_wasi_prefix.sh
+
+# Default OFF: identical wasm build and a byte-identical barretenberg.wasm, and what ON adds.
+verify-avm-wasm-default-off:
+    @verification/verify_avm_wasm_default_off.sh
+
+# wasi-sdk 27 stops at configure naming 33.0; removing only the FATAL_ERROR lets it through.
+verify-avm-wasm-gate:
+    @verification/test_wasm_exceptions_configure_gate.sh
+
+# vm2_sim's link closure, two ways, with the proving stack present in the same tree.
+verify-avm-wasm-closure:
+    @verification/verify_wasm_link_closure_excludes_proving.sh
+
+# vm2/simulation/** differs by three named files, and no throw or catch line moves.
+verify-avm-wasm-interpreter:
+    @verification/verify_no_interpreter_source_change.sh
+
+# No header-only crypto_merkle_tree, no stray lmdb.h, no -Wno-error — against the spike.
+verify-avm-wasm-no-hack:
+    @verification/verify_wasm_build_uses_module_split_not_hack.sh
+
+# Run the whole M6 verification set; every check runs even if an earlier one fails.
+verify-m6:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_avm_wasm_build \
+      verify_avm_wasm_preset_uses_ambient_wasi_prefix \
+      verify_avm_wasm_default_off \
+      test_wasm_exceptions_configure_gate \
+      verify_wasm_link_closure_excludes_proving \
+      verify_no_interpreter_source_change \
+      verify_wasm_build_uses_module_split_not_hack
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m6: FAILED" >&2
+    else
+      echo "verify-m6: all checks passed"
     fi
     exit "$rc"
