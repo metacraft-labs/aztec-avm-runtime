@@ -429,6 +429,57 @@ were absorbed silently.
   (the `cmake/gtest.cmake` hunk and its reasoning);
   `aztec-avm-runtime/fixtures/wasm-parity/EXCLUSIONS.md` ("Supersedes").
 
+## D11 — the wasm AVM logs at VERBOSE and the native AVM at INFO, unconditionally
+
+- id: D11
+- status: open
+- opened: 2026-08-22
+- milestone: M8 (found while separating the differential's streams), M9
+  (`test_observer_fires_on_exceptional_halt`, where it is established by moving it), M10 (the
+  AVM_WASM CMake patch, if a fix ever rides upstream)
+- design-question: should a wasm build of barretenberg narrate its own progress by default, when
+  the equivalent native build does not?
+- sides: upstream at anchor `cpp` (`barretenberg/cpp/src/barretenberg/common/log.cpp`) versus
+  itself — this is an inconsistency *inside* upstream, not between upstream and this project. No
+  patch of ours touches it and none is proposed.
+- what: `common/log.cpp` initialises the global log level in two arms. Under `#ifndef __wasm__` it
+  reads `BB_VERBOSE` from the environment and defaults to `LogLevel::INFO`; under `#else` it is
+  `LogLevel::VERBOSE`, with no environment check and no way to turn it down. So every `vinfo` call
+  in the AVM — `vm2/simulation/gadgets/tx_execution.cpp`'s "Simulating tx …", "[APP_LOGIC]
+  Executing enqueued call to …", "halted via RETURN", the exception handlers' "Out of gas
+  exception" and "Instruction fetching error" — fires in a wasm build and is compiled past in a
+  native one. Measured, on the same driver built for both targets from the same translation unit:
+  the native run's stderr is **0 bytes** and the wasm run's carries 45 lines on the M8 transcript
+  and several hundred on M9's. Re-run natively with `BB_VERBOSE=1`, the **same lines appear**, and
+  the stdout transcript is byte-identical either way — so the difference is the log level and not
+  the target, and it touches no result. A **second** asymmetry falls out of the same run and is
+  recorded here rather than left to be rediscovered: the native lines carry a real resident-set
+  figure (`(mem: 6.29 MiB)`) and every wasm line says `(mem: N/A)`, because the memory probe has
+  no wasm implementation. Two differences on fd 2; neither is a difference in a value.
+- why it matters: it is a trap for exactly the kind of comparison this project is built out of. M8
+  reused M7's runners, which capture `2>&1`, and the differential came back reporting 229 differing
+  lines — a real difference in the artefacts and a completely uninteresting one. Measured properly,
+  a merged comparison mismatches on **231 of 1,308** positions against wasmtime and on **all
+  1,308** against node, whose host also prints two `ExperimentalWarning` lines before the guest
+  starts. Anyone who compares a native and a wasm barretenberg run on a merged stream will meet
+  this, and the failure looks like a divergence rather than like a log level. It also means a
+  browser embedding the AVM gets VERBOSE logging it did not ask for and cannot switch off.
+- decision: Open, and deliberately **not** patched. The fix is one line — give the `__wasm__` arm
+  the same `BB_VERBOSE` check the native arm has — but changing it would alter the observable
+  behaviour of every existing wasm build of barretenberg, and M4's, M6's, M7's and M8's
+  measurements were all taken with it in place and must stay reproducible. What this project does
+  instead is *never merge the two streams*: M8's and M9's runners keep the transcript on stdout
+  exactly and stderr in its own file, where the checks that want the AVM's own account of an
+  exceptional halt read it. This entry closes when upstream's `log.cpp` treats the two targets
+  alike, and not before. If M10's CMake patch grows a wasm-facing logging change, it is the natural
+  place for the one line.
+- evidence: `aztec-avm-runtime/verification/test_observer_fires_on_exceptional_halt.sh` (the
+  `BB_VERBOSE=1` run, the byte-identical transcript, and the `(mem: N/A)` versus `(mem: 6.29 MiB)`
+  assertions); `aztec-avm-runtime/verification/lib_m8_differential.sh` and
+  `lib_m9_observer.sh` (the runners' header comments, and `m9_run_native_verbose`);
+  `aztec-avm-runtime/verification/verify_observation_hook_step_records_identical.sh` (no AVM log
+  line in either transcript, at least twenty in the wasm stderr).
+
 <!-- END:drift -->
 
 ---
