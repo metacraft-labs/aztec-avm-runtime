@@ -276,19 +276,6 @@ were absorbed silently.
   failures. Flip control: `COLLECT_META_CHECK_RET = true` → 141 passed / 1 failed, the failure at
   `opcode_spammer.ts:1698` (`expectToBeTrue` on `allowedReasons`), i.e. D4.
 
-<!-- END:drift -->
-
----
-
-## What is deliberately not here
-
-**Gaps are not drift.** A component upstream does not have (CodeTracer trace output, the timer-driven
-block loop) belongs in `REUSE-INVENTORY.md` with a rejection reason, and its missing fixtures belong
-in `fixtures/CORPUS.md`'s Gaps section. Drift is disagreement between two things that both exist.
-
-**Staleness of reference material is not drift either.** How old each vendored document is, and which
-ones must not be trusted, is `reference/PROVENANCE.md`'s job.
-
 ## D8 — we build wasm with wasi-sdk 33; upstream pins 27, and 27's binaries do not terminate
 
 - id: D8
@@ -332,3 +319,54 @@ ones must not be trusted, is `reference/PROVENANCE.md`'s job.
   compile commands) and artefact-neutral (identical imports and C-ABI exports, 1.02% smaller). It is
   **not filed**; M11 owns submission. This entry closes when upstream's pin moves, and not before —
   the downstream carry (our own preset and nix shell) is the fallback, not the resolution.
+
+## D9 — the public bytecode commitment is a different number on a 32-bit target
+
+- id: D9
+- status: open
+- opened: 2026-08-22
+- milestone: M5 (`test_bytecode_commitment_correct_on_32bit`), M6 (the wasm AVM build), M11 (submission)
+- design-question: —
+- sides: upstream at anchor `cpp`
+  (`vm2/simulation/lib/contract_crypto.cpp:61`, `bytecode_size << 32` evaluated in `size_t`)
+  versus the prepared patch this project builds with
+  (`codetracer-specs/upstream-bugs/aztec-bytecode-size-shift-32bit/`, `(uint256_t(bytecode_size) << 32)`)
+- what: `compute_public_bytecode_first_field` shifts a `size_t` by 32 before widening it to
+  `uint256_t`. On x86_64 and arm64, where `size_t` is 64 bits, that is well defined and the
+  commitment is correct — so **upstream has no live defect**, and their
+  `if(NOT FUZZING AND NOT WASM AND NOT BB_LITE)` means they never build the AVM anywhere else.
+  Our runtime is that "anywhere else": for `wasm32-wasip1`, `size_t` is 32 bits and the expression
+  is undefined behaviour. Executed on wasmtime with barretenberg's own `uint256_t`, the current
+  form agrees with x86_64 on **0 of 13** bytecode sizes and the widened form on **13 of 13**.
+- and "undefined" is three different numbers, measured rather than predicted: with the shift count
+  in a `volatile`, so a real `i32.shl` is emitted, wasm masks the count to its low five bits and
+  the field becomes `DOM_SEP + bytecode_size`; with the literal 32 at `-O0`, `0x0f8411f1`, the bare
+  domain separator; with the literal 32 at the `default` preset's `-O3`, LLVM folds the poisoned
+  shift and the field collapses to **`0`**, the domain separator folding away with it.
+- why it matters: this is the first field of the **public bytecode commitment**, a
+  consensus-critical hash — `compute_public_bytecode_commitment` is poseidon2 over it and the
+  packed bytecode, and `compute_contract_class_id` hashes that. A wasm AVM built from unpatched
+  sources would derive different contract class IDs from the same bytecode, silently, with no
+  crash and no assertion. It is also the divergence M8's native-versus-wasm differential would
+  otherwise attribute to something else.
+- decision: Open, with the fix prepared rather than only described: a one-line `git format-patch`
+  against `233d8e0993`, demonstrated to change no native value — upstream's own
+  `compute_public_bytecode_first_field` and `compute_public_bytecode_commitment` called from a
+  patched and an unpatched build of `vm2_sim` give identical transcripts over nine sizes — at a
+  measured cost of one instruction and 16 bytes of `.text`. It is **not filed**; M11 owns
+  submission. This entry closes when upstream takes the patch; carrying it downstream is the
+  fallback, not the resolution. Until then, every wasm result in this tree is produced from a
+  source line upstream does not have.
+
+<!-- END:drift -->
+
+---
+
+## What is deliberately not here
+
+**Gaps are not drift.** A component upstream does not have (CodeTracer trace output, the timer-driven
+block loop) belongs in `REUSE-INVENTORY.md` with a rejection reason, and its missing fixtures belong
+in `fixtures/CORPUS.md`'s Gaps section. Drift is disagreement between two things that both exist.
+
+**Staleness of reference material is not drift either.** How old each vendored document is, and which
+ones must not be trusted, is `reference/PROVENANCE.md`'s job.
