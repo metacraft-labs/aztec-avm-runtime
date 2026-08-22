@@ -235,8 +235,28 @@ checker rejects it.
 - milestone: M8, M12
 - why: The differential between native and wasm needs a program whose entire output is a deterministic text transcript, so two builds can be diffed byte for byte.
 - rejection-reason: does-not-exist: upstream's equivalents were read and none is a program whose **entire output** is a deterministic transcript — the gtest suites assert internally and print pass/fail, the AVM fuzzer compares three in-process C++ `TxSimulationResult`s structurally (`avm_fuzzer/fuzzer_lib.cpp:195`) and is `if(FUZZING_AVM)`-gated and native, `bb-avm-sim` (`barretenberg/avm/cli.cpp`) has exactly one leaf subcommand, `msgpack run`, requiring an IPC socket path and no `--dump`/`--trace`/`--print`, and `bb avm_simulate` only times the run. A per-instruction *line* does exist — `execution.cpp:1764` and `hybrid_execution.cpp:53` both `debug("@", pc, " ", instruction.to_string())` — but it is `#ifndef NDEBUG`, interleaved with other log output, carries no gas or memory, and is not the program's entire output, so it cannot be diffed between two builds. What we build is ~290 lines of driver over upstream's own harness; every simulation primitive underneath it is RI-14's.
-- confidence: settled
+- confidence: measured
+- experiment: n/a — done, and the entry is now about a driver that exists in this tree rather than about the spike's. M8 built it: `barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp`, added by `verification/m8/0001-test-vm2-AVM_DIFFERENTIAL-…patch` behind a default-off `AVM_DIFFERENTIAL` option, compiled by the same CMake code for x86-64 and for `wasm32-wasip1`. The rejection reason survived contact with the work: nothing upstream prints a deterministic whole-program transcript. Two things about the SPIKE's driver did not survive and are not carried: its `StepRecorder` and the `g_execution_observer` process global it hangs off belong to M9 and are absent here, and its `avm_run.cpp` was built inside `vm2wasm/` from `spike.patch` with `-Wno-error` and two other hacks M6 removed. Measured 2026-08-22: **1,308 non-diagnostic transcript lines byte-identical** native versus wasm, 200 root+size lines, 622 sibling-path fields, 256 leaf preimages; the whole difference is **ten** enumerated `diag` lines (corrected on review from "three", which counted kinds: one key whose value differs and nine that exist only under wasm).
+
+### RI-50 — Upstream's own reference-versus-real world-state fidelity gate
+- upstream: `barretenberg/cpp/src/barretenberg/world_state/memory_merkle_db.test.cpp` @ anchor `cpp` — seven `TEST_F(MemoryMerkleDBEquivalenceTest, …)` cases, in the `world_state_tests` target
+- covers: world-state
+- decision: depend
+- milestone: M8
+- why: **The reuse audit's answer to "how do we know the in-memory world state is faithful to the real one" is: upstream already asks that question, in seven cases, and maintains the answer.** The file's own header says it "is the canonical-fidelity gate for MemoryMerkleDB": it drives an ephemeral, file-backed `world_state::WorldState` and an in-memory `MemoryMerkleDB` through the same sequence and compares, after every step, roots, sibling paths, low-leaf lookups, indexed-leaf preimages and leaf values — `GenesisMatches`, `AppendNoteHashes`, `PadNoteHashTree`, `InsertNullifiers`, `InsertAndUpdatePublicData`, `Checkpoints`, `MixedSequence`. M8's deliverable asked for exactly this "rather than a dual-run harness of ours", and it is consumed as upstream publishes it: `verify_upstream_world_state_reference_gate_green.sh` asserts the source is byte-identical to the anchor, that no patch in our series touches it, that it really constructs a real `WorldState` (a reference-versus-reference comparison would be the one shape that makes the gate worthless), then runs it and asserts the seven **by name**. Measured 2026-08-22: 7 ran, 7 passed, exit 0. It runs NATIVELY and cannot run under wasm — `world_state` is LMDB-backed and `src/CMakeLists.txt` adds that subdirectory only under `if(NOT FUZZING AND NOT WASM AND NOT BB_LITE)`, asserted both ways — which is also why these seven are outside M7's 391.
+- rejection-reason: n/a
+- confidence: measured
 - experiment: n/a
+
+### RI-51 — `PublicTxSimulationTester::merkle_db()`
+- upstream: `barretenberg/cpp/src/barretenberg/vm2/testing/public_tx_simulation_tester.hpp` @ anchor `cpp` — the class exposes `contract_db()` and holds `simulation::MemoryMerkleDB merkle_db_` privately
+- covers: world-state
+- decision: extend
+- milestone: M8, M11
+- why: The differential has to emit tree roots after every mutating operation, and the tester's own mutating helpers (`deploy_contract`, `set_public_storage`, `insert_siloed_nullifier`, `append_note_hash`, `append_l1_to_l2_message`) all write to a database no caller can read. Two lines beside the existing `contract_db()` accessor. It is an asymmetry rather than a safety property: the two databases carry independent `create`/`commit`/`revert` and the simulator requires them to stay in lockstep, which is M13's whole risk, so exposing one half and not the other is the thing that needs justifying. Prepared as part of M8's overlay patch; M10 owns the final shape of what goes upstream and M11 owns submission.
+- rejection-reason: n/a
+- confidence: measured
+- experiment: n/a — the accessor is used by `avm_differential.cpp` and the roots it exposes are compared against Tier D's capture from the real world state, so it is exercised rather than merely added.
 
 ---
 
