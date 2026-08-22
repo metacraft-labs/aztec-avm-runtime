@@ -288,3 +288,47 @@ in `fixtures/CORPUS.md`'s Gaps section. Drift is disagreement between two things
 
 **Staleness of reference material is not drift either.** How old each vendored document is, and which
 ones must not be trusted, is `reference/PROVENANCE.md`'s job.
+
+## D8 — we build wasm with wasi-sdk 33; upstream pins 27, and 27's binaries do not terminate
+
+- id: D8
+- status: open
+- opened: 2026-08-22
+- milestone: M4 (`verify_wasi_33_existing_wasm_targets_unchanged`), M11 (submission)
+- design-question: —
+- sides: our `nix/wasi-sdk.nix` (33.0) versus current upstream at anchor `cpp`
+  (`bootstrap.sh`: `expected_abs_wasi_version=27.0`, and the same version in
+  `build-images/src/Dockerfile` and `scripts/setup-container.sh`)
+- what: Every wasm artefact in this project is built with wasi-sdk **33**, because 27's sysroot
+  ships a libc++abi with `cxa_noexception.cpp.o` and neither `cxa_exception.cpp.o` nor
+  `cxa_personality.cpp.o`, no `libunwind*` at all and no `eh/` multilib — a C++ program that throws
+  cannot be linked. The AVM signals reverts by throwing. Upstream still pins 27 and works around it
+  with `BB_NO_EXCEPTIONS` and `common/try_catch_shim.hpp`'s `#define try if (true)` /
+  `#define catch(...) if (false)`.
+- and, found while measuring the bump: **the 27-built `wasm`-preset `ecc_tests` never terminates.**
+  After an identical, complete, green `[  PASSED  ] 924 tests.` summary it spins in the guest —
+  measured at 458 CPU ticks over 5 s wall (CLK_TCK=100), i.e. ~92% of one core — and was still
+  spinning when SIGKILLed at **20 minutes**; the 33-built binary from the same sources returns from
+  `main` and exits 0 in under a second. Not a host artefact: it reproduces on wasmtime as well as on
+  V8, on copies whose memory import was satisfied statically with `wasm-merge`, where no host code
+  of ours runs.
+- and it is the **exit path**, not a test: with `--gtest_filter=-*` — *zero* tests executed — both
+  binaries print the same empty-but-complete summary, 33 exits 0 and 27 still hangs. So nothing a
+  test leaves behind explains it.
+- and its blast radius is **the single-threaded `wasm` preset only**: the `wasm-threads` `ecc_tests`
+  built with wasi-sdk 27 runs 1,104 tests from 78 suites and **exits 0**, identically to the 33
+  build. Root cause not chased.
+- why it matters: while the two disagree, *every* wasm result in this tree is produced by a
+  toolchain upstream does not use, so a green run here says nothing about upstream's own wasm CI —
+  and, in the other direction, upstream's wasm builds silently compile every `catch` block to
+  `if (false)`, including in header-only third-party code that was never audited for it. The one
+  place the two toolchains have now been compared on upstream's *own* CI binary — the
+  `wasm-threads` `ecc_tests`, run under wasmtime 21 (`nix shell nixpkgs/nixos-24.05#wasmtime`,
+  the last release with `-Sthreads`) — they agree exactly: 1,104 tests from 78 suites, 1,010
+  passed, exit 0, transcripts identical line for line on both toolchains.
+- decision: Open, with the fix prepared rather than only described:
+  `codetracer-specs/upstream-bugs/aztec-wasi-sdk-33/` is a `git format-patch` against `233d8e0993`
+  that moves the pin, demonstrated native-neutral (1,009 native translation units, byte-identical
+  compile commands) and artefact-neutral (identical imports and C-ABI exports, 1.02% smaller). It is
+  **not filed**; M11 owns submission. This entry closes when upstream's pin moves, and not before —
+  the downstream carry (our own preset and nix shell) is the fallback, not the resolution.
