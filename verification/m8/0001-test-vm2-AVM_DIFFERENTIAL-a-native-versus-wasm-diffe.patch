@@ -1,0 +1,712 @@
+From faeab8af2c744dacc44e338418615af49a654fc4 Mon Sep 17 00:00:00 2001
+From: Zahary Karadjov <zahary@agent-harbor.com>
+Date: Sat, 22 Aug 2026 13:30:47 +0300
+Subject: [PATCH] test(vm2): AVM_DIFFERENTIAL, a native-versus-wasm
+ differential driver
+
+Adds `avm_differential`: one translation unit, built by the same CMake code for
+x86-64 and for wasm32-wasip1, printing one deterministic transcript so the two
+targets can be compared line for line.
+
+The transcript covers the AVM's simulation results over seven hand-assembled
+programs -- revert codes, gas, fees, nullifiers, note hashes, data writes,
+public logs, call frames and instruction counts -- and, in addition, the world
+state directly: the genesis root and size of all four AVM trees, the full
+sibling path of note-hash leaf 0, every genesis prefill indexed-leaf preimage
+with its low-leaf linkage, an eight-step mutation sequence with all four roots
+after every step, a checkpoint/mutate/revert cycle, and sampled sibling paths,
+leaf values and low-leaf lookups.
+
+Everything allowed to differ between the two targets is printed with a `diag `
+prefix, so the comparison can enumerate it rather than filter by a pattern:
+today that is the pointer width and, under wasm only, peak linear memory.
+
+`differential/` is deliberately outside every directory the `vm2_sim` and `vm2`
+module globs collect, and is excluded from the recursive glob explicitly, so a
+translation unit carrying `main()` can never end up inside a library archive.
+
+`PublicTxSimulationTester` gains a `merkle_db()` accessor beside the existing
+`contract_db()`. The two databases carry independent create/commit/revert and
+the simulator requires them to stay in lockstep, so exposing only one of them
+was an asymmetry rather than a safety property.
+
+Default OFF and additive: with `AVM_DIFFERENTIAL` unset, no target moves in any
+configuration.
+---
+ barretenberg/cpp/CMakeLists.txt               |   1 +
+ .../cpp/src/barretenberg/vm2/CMakeLists.txt   |  34 +
+ .../vm2/differential/avm_differential.cpp     | 579 ++++++++++++++++++
+ .../testing/public_tx_simulation_tester.hpp   |   7 +
+ 4 files changed, 621 insertions(+)
+ create mode 100644 barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp
+
+diff --git a/barretenberg/cpp/CMakeLists.txt b/barretenberg/cpp/CMakeLists.txt
+index e219487ec3..f002e0a673 100644
+--- a/barretenberg/cpp/CMakeLists.txt
++++ b/barretenberg/cpp/CMakeLists.txt
+@@ -66,6 +66,7 @@ option(AVM "enable building of vm2 module and bb-avm" ON)
+ option(BB_LITE "Exclude server-side subsystems: lmdb, world_state, ipc, nodejs_module" OFF)
+ option(AVM_WASM "Build the AVM simulator (vm2_sim) for wasm. Additive; implies real C++ exceptions." OFF)
+ option(AVM_SIM_TESTS "Build vm2_sim_tests: the simulation-side subset of vm2_tests, without the proving stack. Additive." OFF)
++option(AVM_DIFFERENTIAL "Build avm_differential: the native-versus-wasm differential driver. Additive." OFF)
+ 
+ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+     message(STATUS "Compiling for ARM.")
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt b/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt
+index b47c763e9e..e8622cbdd4 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt
++++ b/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt
+@@ -69,6 +69,37 @@ else()
+   )
+ endif()
+ 
++# AVM_DIFFERENTIAL: the native-versus-wasm differential driver. ONE translation unit, built by
++# the same CMake code for x86-64 and for wasm32-wasip1, printing one deterministic transcript that
++# the two targets are then compared on line for line.
++#
++# It lives in `differential/`, which is deliberately NOT one of the directories vm2_sim globs
++# (`simulation/`, `common/`, `tooling/`) and not one AVM_SIM_TESTS globs either: it carries a
++# `main()` and must never end up inside a library archive. The `if(AVM)` block below globs *.cpp
++# recursively over the whole of vm2/, so it is excluded there explicitly.
++#
++# The test-support translation units come from the same `testing/*.cpp` set AVM_SIM_TESTS uses,
++# with the same AVM_SIM_TESTS_WITHOUT_TRACEGEN definition, because that is the set already known
++# to compile and link without the proving stack. Nothing here needs gtest: none of those five
++# files includes gtest or gmock.
++#
++# Default OFF and additive: with the option off, not one target moves in any configuration.
++if(AVM_DIFFERENTIAL)
++  file(GLOB VM2_DIFFERENTIAL_SUPPORT_FILES testing/*.cpp)
++  list(FILTER VM2_DIFFERENTIAL_SUPPORT_FILES EXCLUDE REGEX ".*\\.(test|bench|fuzzer)\\.cpp$")
++  add_executable(avm_differential
++    ${CMAKE_CURRENT_SOURCE_DIR}/differential/avm_differential.cpp
++    ${VM2_DIFFERENTIAL_SUPPORT_FILES}
++  )
++  target_compile_definitions(avm_differential PRIVATE AVM_SIM_TESTS_WITHOUT_TRACEGEN)
++  target_link_libraries(avm_differential PRIVATE vm2_sim)
++  if(WASM)
++    # The same stack size barretenberg's own module machinery gives its wasm test binaries. The
++    # AVM recurses through call frames and 64 KiB of default wasm stack is not enough.
++    target_link_options(avm_differential PRIVATE -Wl,-z,stack-size=8388608)
++  endif()
++endif()
++
+ # vm2_sim needs -fPIC because it's linked into the nodejs_module shared library
+ set_target_properties(vm2_sim_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+ 
+@@ -83,6 +114,9 @@ if(AVM)
+   # Start with all sources, then exclude test/bench/fuzzer files
+   set(VM2_SOURCE_FILES ${ALL_SOURCE_FILES})
+   list(FILTER VM2_SOURCE_FILES EXCLUDE REGEX ".*\\.(test|bench|fuzzer)\\.cpp$")
++  # The differential driver is a standalone executable with its own main(); it is never part of a
++  # library module, in any configuration.
++  list(FILTER VM2_SOURCE_FILES EXCLUDE REGEX ".*/differential/.*\\.cpp$")
+ 
+   # Make vm2 and vm2_sim sources mutually exclusive
+   foreach(SIM_FILE ${VM2_SIM_SOURCE_FILES})
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp b/barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp
+new file mode 100644
+index 0000000000..9e6945a8a7
+--- /dev/null
++++ b/barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp
+@@ -0,0 +1,579 @@
++// The native-versus-wasm differential driver.
++//
++// ONE source, built for x86-64 and for wasm32-wasip1 from the SAME translation unit by the same
++// CMake code, printing ONE deterministic transcript. The two transcripts are then compared line for
++// line. Everything that is allowed to differ is emitted with a `diag ` prefix and is enumerated and
++// asserted individually by the comparator; nothing is filtered by a wildcard.
++//
++// WHAT THIS DRIVER ADDS OVER THE ONE THE vm2-wasm SPIKE BUILT.
++//
++// The spike's transcript compared revert codes, gas, fees, nullifiers, note hashes, data writes,
++// public logs, call frames and instruction counts, and its later revision added the eight
++// start/end tree-snapshot lines per program. All of that is here. What is new is everything that
++// looks at the trees DIRECTLY rather than at the effects a transaction leaves behind:
++//
++//   * the genesis state of the reference world state, root and size, for all four AVM trees;
++//   * the full 42-level sibling path of note-hash leaf 0 at genesis;
++//   * all 256 genesis prefill indexed-leaf preimages with their low-leaf linkage;
++//   * a replay of Tier D's eight-step mutation sequence -- the same sequence, with the same leaf
++//     values, that `drift/capture_world_state.mjs` drove through Aztec's REAL LMDB world state --
++//     with all four roots and sizes after EVERY step;
++//   * the checkpoint / mutate / revert cycle from that same capture;
++//   * sampled sibling paths, leaf values and low-leaf lookups at the end of that sequence.
++//
++// The point of the Tier D replay is that its expected values are not ours. They were captured from
++// `NativeWorldStateService`, the production world state, so agreeing with them is agreement with
++// Aztec's own implementation and not merely native-versus-wasm self-consistency.
++//
++// No mocks. `PublicTxSimulationTester` is upstream's own in-memory harness and it drives
++// `AvmSimAPI` exactly as the node's simulator does; `simulation::MemoryMerkleDB` is upstream's own
++// vm2 adapter over upstream's own `world_state_reference`.
++//
++// COVERAGE, STATED HERE BECAUSE IT IS QUOTED FROM HERE. The program half of this transcript is
++// SEVEN hand-assembled programs, compared field for field. That is an integration check across two
++// targets. It is NOT a breadth claim: breadth is M7's 391 upstream tests, and semantics is M19's
++// 77-comparison differential oracle. Each of the three states its own coverage.
++
++#include <cstddef>
++#include <cstdint>
++#include <iostream>
++#include <map>
++#include <span>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "barretenberg/vm2/common/avm_io.hpp"
++#include "barretenberg/vm2/common/aztec_types.hpp"
++#include "barretenberg/vm2/common/field.hpp"
++#include "barretenberg/vm2/common/memory_types.hpp"
++#include "barretenberg/vm2/common/opcodes.hpp"
++#include "barretenberg/vm2/simulation/lib/memory_merkle_db.hpp"
++#include "barretenberg/vm2/simulation/lib/serialization.hpp"
++#include "barretenberg/vm2/testing/bytecode_builder.hpp"
++#include "barretenberg/vm2/testing/instruction_builder.hpp"
++#include "barretenberg/vm2/testing/public_tx_simulation_tester.hpp"
++
++namespace {
++
++using namespace bb::avm2;
++using bb::avm2::simulation::Instruction;
++using bb::avm2::simulation::MemoryMerkleDB;
++using bb::avm2::testing::BytecodeBuilder;
++using bb::avm2::testing::InstructionBuilder;
++using bb::avm2::testing::PublicTxSimulationTester;
++using bb::avm2::testing::TestEnqueuedCall;
++using bb::crypto::merkle_tree::NullifierLeafValue;
++using bb::crypto::merkle_tree::PublicDataLeafValue;
++using bb::world_state::MerkleTreeId;
++
++using index_t = bb::crypto::merkle_tree::index_t;
++
++// ---------------------------------------------------------------------------
++// Formatting. Every field is printed through the SAME routine on both targets, from the same
++// 4x64-bit limb representation, so a divergence in the transcript is a divergence in the value and
++// never in how it was rendered. `std::hex`/`iostream` formatting flags are deliberately not used:
++// they carry locale and flag state that is easy to get subtly different.
++// ---------------------------------------------------------------------------
++std::string hex(const FF& f)
++{
++    const auto v = static_cast<bb::numeric::uint256_t>(f);
++    static const char* D = "0123456789abcdef";
++    std::string out = "0x";
++    for (int limb = 3; limb >= 0; --limb) {
++        const uint64_t w = v.data[limb];
++        for (int nib = 15; nib >= 0; --nib) {
++            out += D[(w >> (nib * 4)) & 0xF];
++        }
++    }
++    return out;
++}
++
++std::string dec(uint64_t v)
++{
++    if (v == 0) {
++        return "0";
++    }
++    std::string out;
++    while (v != 0) {
++        out.insert(out.begin(), static_cast<char>('0' + static_cast<int>(v % 10)));
++        v /= 10;
++    }
++    return out;
++}
++
++void line(const std::string& key, const std::string& value)
++{
++    std::cout << key << " " << value << "\n";
++}
++
++// A `diag ` line is one whose value is ALLOWED to differ between the two targets, or which exists
++// on one target only. Every one of them is enumerated by key in the comparator and asserted there
++// individually. Emitting one whose key the comparator does not know about is a failure, not a
++// line that gets skipped.
++void diag(const std::string& key, const std::string& value)
++{
++    std::cout << "diag " << key << " " << value << "\n";
++}
++
++const char* tree_name(MerkleTreeId id)
++{
++    switch (id) {
++    case MerkleTreeId::NULLIFIER_TREE:
++        return "NULLIFIER_TREE";
++    case MerkleTreeId::NOTE_HASH_TREE:
++        return "NOTE_HASH_TREE";
++    case MerkleTreeId::PUBLIC_DATA_TREE:
++        return "PUBLIC_DATA_TREE";
++    case MerkleTreeId::L1_TO_L2_MESSAGE_TREE:
++        return "L1_TO_L2_MESSAGE_TREE";
++    case MerkleTreeId::ARCHIVE:
++        return "ARCHIVE";
++    }
++    return "UNKNOWN";
++}
++
++void snapshot_line(const std::string& prefix, const char* name, const AppendOnlyTreeSnapshot& s)
++{
++    line(prefix + "." + name, hex(s.root) + " size=" + dec(s.next_available_leaf_index));
++}
++
++// All four AVM trees, root and size, in a fixed order. `MemoryMerkleDB` carries no ARCHIVE tree --
++// advancing the archive needs a whole BlockHeader and is block-level rather than tree-level, which
++// is why Tier D's capture leaves it untouched too and why M14 rather than M8 owns it. That absence
++// is stated here rather than left to be noticed.
++void roots(const std::string& prefix, const MemoryMerkleDB& db)
++{
++    const TreeSnapshots t = db.get_tree_roots();
++    snapshot_line(prefix, "NOTE_HASH_TREE", t.note_hash_tree);
++    snapshot_line(prefix, "NULLIFIER_TREE", t.nullifier_tree);
++    snapshot_line(prefix, "PUBLIC_DATA_TREE", t.public_data_tree);
++    snapshot_line(prefix, "L1_TO_L2_MESSAGE_TREE", t.l1_to_l2_message_tree);
++}
++
++void sibling_path(const std::string& prefix, const MemoryMerkleDB& db, MerkleTreeId id, index_t leaf)
++{
++    const auto path = db.get_sibling_path(id, leaf);
++    const std::string base = prefix + "." + tree_name(id) + "." + dec(leaf);
++    line(base + ".depth", dec(static_cast<uint64_t>(path.size())));
++    for (size_t i = 0; i < path.size(); ++i) {
++        line(base + "." + dec(static_cast<uint64_t>(i)), hex(path[i]));
++    }
++}
++
++void nullifier_preimage(const std::string& prefix, const MemoryMerkleDB& db, index_t leaf)
++{
++    const auto p = db.get_leaf_preimage_nullifier_tree(leaf);
++    line(prefix + ".NULLIFIER_TREE." + dec(leaf),
++         "nullifier=" + hex(p.leaf.nullifier) + " nextKey=" + hex(p.nextKey) + " nextIndex=" + dec(p.nextIndex));
++}
++
++void public_data_preimage(const std::string& prefix, const MemoryMerkleDB& db, index_t leaf)
++{
++    const auto p = db.get_leaf_preimage_public_data_tree(leaf);
++    line(prefix + ".PUBLIC_DATA_TREE." + dec(leaf),
++         "slot=" + hex(p.leaf.slot) + " value=" + hex(p.leaf.value) + " nextKey=" + hex(p.nextKey) +
++             " nextIndex=" + dec(p.nextIndex));
++}
++
++void low_leaf(const std::string& prefix, const MemoryMerkleDB& db, MerkleTreeId id, const FF& key)
++{
++    const auto r = db.get_low_indexed_leaf(id, key);
++    line(prefix + "." + tree_name(id) + "." + hex(key),
++         std::string("present=") + (r.is_already_present ? "1" : "0") + " index=" + dec(r.index));
++}
++
++void leaf_value(const std::string& prefix, const MemoryMerkleDB& db, MerkleTreeId id, index_t leaf)
++{
++    line(prefix + "." + tree_name(id) + "." + dec(leaf), hex(db.get_leaf_value(id, leaf)));
++}
++
++// ---------------------------------------------------------------------------
++// The seven corpus programs. Byte-for-byte the ones `fixtures/avm-programs/programs.json` records,
++// which is itself asserted against upstream's own `BytecodeBuilder` output.
++// ---------------------------------------------------------------------------
++Instruction set8(uint8_t dst, MemoryTag tag, uint8_t value)
++{
++    return InstructionBuilder(WireOpCode::SET_8).operand(dst).operand(tag).operand(value).build();
++}
++Instruction set32(uint16_t dst, MemoryTag tag, uint32_t value)
++{
++    return InstructionBuilder(WireOpCode::SET_32).operand(dst).operand(tag).operand(value).build();
++}
++Instruction setff(uint16_t dst, MemoryTag tag, const FF& value)
++{
++    return InstructionBuilder(WireOpCode::SET_FF).operand(dst).operand(tag).operand(value).build();
++}
++Instruction ret(uint16_t copy_size_offset, uint16_t return_offset)
++{
++    return InstructionBuilder(WireOpCode::RETURN).operand(copy_size_offset).operand(return_offset).build();
++}
++
++std::vector<uint8_t> program_add()
++{
++    return BytecodeBuilder()
++        .add(set8(0, MemoryTag::U32, 1))
++        .add(set8(1, MemoryTag::U32, 2))
++        .add(InstructionBuilder(WireOpCode::ADD_8).operand<uint8_t>(0).operand<uint8_t>(1).operand<uint8_t>(2).build())
++        .add(ret(0, 2))
++        .build();
++}
++
++std::vector<uint8_t> program_revert()
++{
++    return BytecodeBuilder()
++        .add(set8(0, MemoryTag::U32, 0))
++        .add(InstructionBuilder(WireOpCode::REVERT_8).operand<uint8_t>(0).operand<uint8_t>(0).build())
++        .build();
++}
++
++std::vector<uint8_t> program_loop()
++{
++    BytecodeBuilder b;
++    b.add(set8(0, MemoryTag::U32, 0));
++    b.add(set8(1, MemoryTag::U64, 1));
++    b.add(set8(2, MemoryTag::U64, 3));
++    for (int i = 0; i < 64; ++i) {
++        b.add(
++            InstructionBuilder(WireOpCode::MUL_8).operand<uint8_t>(1).operand<uint8_t>(2).operand<uint8_t>(1).build());
++        b.add(
++            InstructionBuilder(WireOpCode::ADD_8).operand<uint8_t>(1).operand<uint8_t>(2).operand<uint8_t>(1).build());
++    }
++    b.add(ret(0, 1));
++    return b.build();
++}
++
++std::vector<uint8_t> program_sha256()
++{
++    BytecodeBuilder b;
++    b.add(set8(0, MemoryTag::U32, 0));
++    for (uint8_t i = 0; i < 8; ++i) {
++        b.add(set32(static_cast<uint16_t>(10 + i), MemoryTag::U32, 0x6a09e667u + i));
++    }
++    for (uint8_t i = 0; i < 16; ++i) {
++        b.add(set32(static_cast<uint16_t>(26 + i), MemoryTag::U32, 0x01020304u * (i + 1)));
++    }
++    b.add(InstructionBuilder(WireOpCode::SHA256COMPRESSION)
++              .operand<uint16_t>(200)
++              .operand<uint16_t>(10)
++              .operand<uint16_t>(26)
++              .build());
++    b.add(set8(1, MemoryTag::U32, 8));
++    b.add(ret(1, 200));
++    return b.build();
++}
++
++std::vector<uint8_t> program_poseidon2()
++{
++    BytecodeBuilder b;
++    b.add(set8(0, MemoryTag::U32, 0));
++    for (uint8_t i = 0; i < 4; ++i) {
++        b.add(setff(static_cast<uint16_t>(10 + i), MemoryTag::FF, FF(i + 1)));
++    }
++    b.add(InstructionBuilder(WireOpCode::POSEIDON2PERM).operand<uint16_t>(10).operand<uint16_t>(20).build());
++    b.add(set8(1, MemoryTag::U32, 4));
++    b.add(ret(1, 20));
++    return b.build();
++}
++
++std::vector<uint8_t> program_storage()
++{
++    BytecodeBuilder b;
++    b.add(set8(0, MemoryTag::U32, 0));
++    b.add(setff(1, MemoryTag::FF, FF(7)));
++    b.add(setff(2, MemoryTag::FF, FF(1234)));
++    b.add(InstructionBuilder(WireOpCode::SSTORE).operand<uint16_t>(2).operand<uint16_t>(1).build());
++    b.add(set8(4, MemoryTag::U32, 1));
++    b.add(ret(4, 2));
++    return b.build();
++}
++
++std::vector<uint8_t> program_burn()
++{
++    BytecodeBuilder b;
++    b.add(set8(0, MemoryTag::U64, 1));
++    b.add(set8(1, MemoryTag::U64, 1));
++    const size_t loop_start = b.size();
++    for (int i = 0; i < 16; ++i) {
++        b.add(
++            InstructionBuilder(WireOpCode::ADD_8).operand<uint8_t>(0).operand<uint8_t>(1).operand<uint8_t>(0).build());
++    }
++    b.add(InstructionBuilder(WireOpCode::JUMP_32).operand(static_cast<uint32_t>(loop_start)).build());
++    return b.build();
++}
++
++void dump_result(const std::string& name, const TxSimulationResult& r)
++{
++    const std::string p = "program." + name;
++    line(p + ".revertCode", dec(static_cast<uint64_t>(r.revert_code)));
++    line(p + ".totalGas", dec(r.gas_used.total_gas.l2_gas) + "/" + dec(r.gas_used.total_gas.da_gas));
++    line(p + ".publicGas", dec(r.gas_used.public_gas.l2_gas) + "/" + dec(r.gas_used.public_gas.da_gas));
++    line(p + ".billedGas", dec(r.gas_used.billed_gas.l2_gas) + "/" + dec(r.gas_used.billed_gas.da_gas));
++    line(p + ".txFee", hex(r.public_tx_effect.transaction_fee));
++    line(p + ".nullifiers.count", dec(static_cast<uint64_t>(r.public_tx_effect.nullifiers.size())));
++    for (size_t i = 0; i < r.public_tx_effect.nullifiers.size(); ++i) {
++        line(p + ".nullifiers." + dec(static_cast<uint64_t>(i)), hex(r.public_tx_effect.nullifiers[i]));
++    }
++    line(p + ".noteHashes.count", dec(static_cast<uint64_t>(r.public_tx_effect.note_hashes.size())));
++    for (size_t i = 0; i < r.public_tx_effect.note_hashes.size(); ++i) {
++        line(p + ".noteHashes." + dec(static_cast<uint64_t>(i)), hex(r.public_tx_effect.note_hashes[i]));
++    }
++    line(p + ".dataWrites.count", dec(static_cast<uint64_t>(r.public_tx_effect.public_data_writes.size())));
++    line(p + ".publicLogs.count", dec(static_cast<uint64_t>(r.public_tx_effect.public_logs.size())));
++    line(p + ".callFrames.count", dec(static_cast<uint64_t>(r.call_stack_metadata.size())));
++
++    // THE TREE ROOTS. Everything above is an EFFECT; a root is the committed state those effects
++    // produced. Two implementations can agree on every effect and still disagree on the resulting
++    // tree -- a wrong merkle hash, a wrong domain separator or a wrong indexed-leaf linkage shows
++    // up here and nowhere else. Requires config.collect_public_inputs.
++    if (r.public_inputs.has_value()) {
++        const auto& pi = *r.public_inputs;
++        snapshot_line(p + ".start", "NOTE_HASH_TREE", pi.start_tree_snapshots.note_hash_tree);
++        snapshot_line(p + ".start", "NULLIFIER_TREE", pi.start_tree_snapshots.nullifier_tree);
++        snapshot_line(p + ".start", "PUBLIC_DATA_TREE", pi.start_tree_snapshots.public_data_tree);
++        snapshot_line(p + ".start", "L1_TO_L2_MESSAGE_TREE", pi.start_tree_snapshots.l1_to_l2_message_tree);
++        snapshot_line(p + ".end", "NOTE_HASH_TREE", pi.end_tree_snapshots.note_hash_tree);
++        snapshot_line(p + ".end", "NULLIFIER_TREE", pi.end_tree_snapshots.nullifier_tree);
++        snapshot_line(p + ".end", "PUBLIC_DATA_TREE", pi.end_tree_snapshots.public_data_tree);
++        snapshot_line(p + ".end", "L1_TO_L2_MESSAGE_TREE", pi.end_tree_snapshots.l1_to_l2_message_tree);
++    } else {
++        line(p + ".publicInputs", "ABSENT");
++    }
++    for (const auto& [k, v] : std::map<std::string, std::string>(r.stats.begin(), r.stats.end())) {
++        line(p + ".stat." + k, v);
++    }
++}
++
++// ---------------------------------------------------------------------------
++// Section 1 -- genesis, the sibling path, and the prefill preimages.
++// ---------------------------------------------------------------------------
++void section_genesis()
++{
++    MemoryMerkleDB db;
++    roots("genesis", db);
++
++    // The 42-level sibling path of note-hash leaf 0 in the empty tree. Tier D captured exactly this
++    // path from the real world state; nothing upstream publishes it.
++    sibling_path("genesis.siblingPath", db, MerkleTreeId::NOTE_HASH_TREE, 0);
++
++    // All 256 genesis prefill preimages with their low-leaf linkage. A tree whose ROOT is right can
++    // still have its linkage wrong if the hashing happens to collide on the prefill; the preimages
++    // are what makes that unrepresentable.
++    for (index_t i = 0; i < 128; ++i) {
++        nullifier_preimage("genesis.prefill", db, i);
++    }
++    for (index_t i = 0; i < 128; ++i) {
++        public_data_preimage("genesis.prefill", db, i);
++    }
++}
++
++// ---------------------------------------------------------------------------
++// Section 2 -- Tier D's mutation sequence, replayed.
++//
++// Step for step, value for value, the sequence `drift/capture_world_state.mjs` drove through
++// Aztec's production `NativeWorldStateService`. Step 1 is upstream's own
++// `WorldStateTest.SyncExternalBlockFromEmpty` (note hash 42, L1->L2 message 43, nullifier 144,
++// public data write (145, 1)), whose four resulting roots are hardcoded in upstream's C++ test.
++// Steps 2..8 go past anything upstream publishes.
++// ---------------------------------------------------------------------------
++void section_tier_d(MemoryMerkleDB& db)
++{
++    const auto append = [&db](MerkleTreeId id, const std::vector<FF>& leaves) {
++        db.append_leaves(id, std::span<const FF>(leaves.data(), leaves.size()));
++    };
++
++    // Step 1 -- upstream SyncExternalBlockFromEmpty.
++    append(MerkleTreeId::NOTE_HASH_TREE, { FF(42) });
++    append(MerkleTreeId::L1_TO_L2_MESSAGE_TREE, { FF(43) });
++    db.insert_indexed_leaves_nullifier_tree(NullifierLeafValue(FF(144)));
++    db.insert_indexed_leaves_public_data_tree(PublicDataLeafValue(FF(145), FF(1)));
++    roots("tierD.step1", db);
++
++    // Step 2 -- append-only batch.
++    append(MerkleTreeId::NOTE_HASH_TREE, { FF(1), FF(2), FF(3) });
++    roots("tierD.step2", db);
++
++    // Step 3 -- indexed insert, ascending.
++    db.insert_indexed_leaves_nullifier_tree(NullifierLeafValue(FF(200)));
++    db.insert_indexed_leaves_nullifier_tree(NullifierLeafValue(FF(201)));
++    roots("tierD.step3", db);
++
++    // Step 4 -- indexed insert, interleaved. The case that rewrites an existing low leaf rather
++    // than appending past it, and the one an implementation with correct hashing but wrong linkage
++    // gets wrong.
++    db.insert_indexed_leaves_nullifier_tree(NullifierLeafValue(FF(150)));
++    roots("tierD.step4", db);
++
++    // Step 5 -- public data update in place. The tree must NOT grow.
++    db.insert_indexed_leaves_public_data_tree(PublicDataLeafValue(FF(145), FF(999)));
++    roots("tierD.step5", db);
++
++    // Step 6 -- public data insert past the tail. The tree must grow.
++    db.insert_indexed_leaves_public_data_tree(PublicDataLeafValue(FF(500), FF(1234)));
++    roots("tierD.step6", db);
++
++    // Step 7 -- public data insert, interleaved.
++    db.insert_indexed_leaves_public_data_tree(PublicDataLeafValue(FF(300), FF(5678)));
++    roots("tierD.step7", db);
++
++    // Step 8 -- l1-to-l2 batch.
++    append(MerkleTreeId::L1_TO_L2_MESSAGE_TREE, { FF(50), FF(51) });
++    roots("tierD.step8", db);
++}
++
++// ---------------------------------------------------------------------------
++// Section 3 -- the checkpoint / revert cycle, from the same capture.
++// ---------------------------------------------------------------------------
++void section_checkpoint(MemoryMerkleDB& db)
++{
++    roots("tierD.checkpoint.before", db);
++    line("tierD.checkpoint.id.before", dec(db.get_checkpoint_id()));
++    db.create_checkpoint();
++    const std::vector<FF> note_hash{ FF(0xdead) };
++    db.append_leaves(MerkleTreeId::NOTE_HASH_TREE, std::span<const FF>(note_hash.data(), note_hash.size()));
++    db.insert_indexed_leaves_nullifier_tree(NullifierLeafValue(FF(0xbeef)));
++    roots("tierD.checkpoint.inside", db);
++    line("tierD.checkpoint.id.inside", dec(db.get_checkpoint_id()));
++    db.revert_checkpoint();
++    roots("tierD.checkpoint.afterRevert", db);
++    line("tierD.checkpoint.id.afterRevert", dec(db.get_checkpoint_id()));
++}
++
++// ---------------------------------------------------------------------------
++// Section 4 -- sampled sibling paths, leaf values and low-leaf lookups.
++//
++// A root can match while a sibling path does not only in constructions we do not have. The check is
++// cheap and the failure mode it excludes -- a tree that hashes to the right root through the wrong
++// interior nodes, so every WITNESS it produces is wrong -- is the expensive one.
++//
++// The sample is chosen rather than random, and each index is chosen for a reason: 0 and 1 (the
++// prefill head), the last prefill index and the first index past it (the boundary the genesis
++// prefill ends at), the leaves the mutation sequence wrote, and one index past the end of the
++// written region (an untouched subtree).
++// ---------------------------------------------------------------------------
++void section_samples(const MemoryMerkleDB& db)
++{
++    const std::vector<std::pair<MerkleTreeId, index_t>> samples = {
++        { MerkleTreeId::NOTE_HASH_TREE, 0 },        { MerkleTreeId::NOTE_HASH_TREE, 1 },
++        { MerkleTreeId::NOTE_HASH_TREE, 3 },        { MerkleTreeId::NOTE_HASH_TREE, 4 },
++        { MerkleTreeId::NULLIFIER_TREE, 0 },        { MerkleTreeId::NULLIFIER_TREE, 1 },
++        { MerkleTreeId::NULLIFIER_TREE, 127 },      { MerkleTreeId::NULLIFIER_TREE, 128 },
++        { MerkleTreeId::NULLIFIER_TREE, 131 },      { MerkleTreeId::NULLIFIER_TREE, 4096 },
++        { MerkleTreeId::PUBLIC_DATA_TREE, 0 },      { MerkleTreeId::PUBLIC_DATA_TREE, 127 },
++        { MerkleTreeId::PUBLIC_DATA_TREE, 128 },    { MerkleTreeId::PUBLIC_DATA_TREE, 130 },
++        { MerkleTreeId::L1_TO_L2_MESSAGE_TREE, 0 }, { MerkleTreeId::L1_TO_L2_MESSAGE_TREE, 2 },
++    };
++    for (const auto& [id, leaf] : samples) {
++        sibling_path("samples.siblingPath", db, id, leaf);
++        leaf_value("samples.leafValue", db, id, leaf);
++    }
++
++    // Low-leaf lookups: a key present, a key absent below the tail, a key absent above the tail,
++    // and zero.
++    for (const FF& key : { FF(0), FF(144), FF(150), FF(151), FF(201), FF(1 << 20) }) {
++        low_leaf("samples.lowLeaf", db, MerkleTreeId::NULLIFIER_TREE, key);
++    }
++    for (const FF& key : { FF(0), FF(127), FF(145), FF(300), FF(499), FF(500), FF(1 << 20) }) {
++        low_leaf("samples.lowLeaf", db, MerkleTreeId::PUBLIC_DATA_TREE, key);
++    }
++
++    // The leaves the mutation sequence wrote, as preimages.
++    for (index_t i : { index_t(128), index_t(129), index_t(130), index_t(131) }) {
++        nullifier_preimage("samples.preimage", db, i);
++    }
++    for (index_t i : { index_t(128), index_t(129), index_t(130) }) {
++        public_data_preimage("samples.preimage", db, i);
++    }
++}
++
++// ---------------------------------------------------------------------------
++// Section 5 -- padding. `pad_tree` is on the interface and Tier D does not reach it; upstream's own
++// `MemoryMerkleDBEquivalenceTest.PadNoteHashTree` does, which is why it is here as well: the roots
++// this produces are covered by upstream's fidelity gate on the native side.
++// ---------------------------------------------------------------------------
++void section_padding()
++{
++    MemoryMerkleDB db;
++    roots("padding.before", db);
++    db.pad_tree(MerkleTreeId::NOTE_HASH_TREE, 5);
++    roots("padding.afterNoteHashPad5", db);
++    db.pad_tree(MerkleTreeId::NULLIFIER_TREE, 3);
++    roots("padding.afterNullifierPad3", db);
++}
++
++// ---------------------------------------------------------------------------
++// Section 6 -- the seven corpus programs through the real AVM.
++// ---------------------------------------------------------------------------
++void section_programs()
++{
++    const std::vector<std::pair<std::string, std::vector<uint8_t>>> programs = {
++        { "add", program_add() },       { "revert", program_revert() },       { "loop", program_loop() },
++        { "sha256", program_sha256() }, { "poseidon2", program_poseidon2() }, { "storage", program_storage() },
++        { "burn", program_burn() },
++    };
++    line("programs.count", dec(static_cast<uint64_t>(programs.size())));
++
++    for (const auto& [name, bytecode] : programs) {
++        const std::string p = "program." + name;
++        line(p + ".bytes", dec(static_cast<uint64_t>(bytecode.size())));
++
++        PublicTxSimulationTester tester;
++        // Roots BEFORE the deployment: the tester's own world state at genesis. Asserting this
++        // equals section 1's genesis is what ties the tester's DB to the one Tier D is compared
++        // against, rather than assuming they are the same object.
++        roots(p + ".beforeDeploy", tester.merkle_db());
++        auto contract = tester.deploy_contract(bytecode);
++        line(p + ".address", hex(contract.address));
++        // deploy_contract inserts the deployment nullifier: a MUTATING operation, and the roots
++        // after it are emitted rather than inferred.
++        roots(p + ".afterDeploy", tester.merkle_db());
++
++        auto config = PublicTxSimulationTester::default_config();
++        config.collect_statistics = true;
++        config.collect_public_inputs = true; // carries the start/end tree snapshots
++        auto result = tester.simulate_tx({ TestEnqueuedCall{ .contract_address = contract.address } }, config);
++        dump_result(name, result);
++        // simulate_tx runs on a fresh checkpoint that is reverted afterwards, so the tester's DB is
++        // back where it was. That is a claim about checkpoint behaviour, so it is printed and
++        // compared rather than asserted in prose.
++        roots(p + ".afterSimulate", tester.merkle_db());
++#ifdef __wasm__
++        // Linear memory after this program, so "the heaviest corpus program" is a measurement
++        // rather than a guess. wasm memory never shrinks, so the sequence is monotone and the
++        // program after which it last increases is the heaviest.
++        diag("wasm.peakLinearMemoryPages.after." + name, dec(static_cast<uint64_t>(__builtin_wasm_memory_size(0))));
++#endif
++    }
++}
++
++} // namespace
++
++int main()
++{
++    line("avmDifferential.version", "1");
++    line("avmDifferential.coverage", "seven-hand-assembled-corpus-programs-field-for-field");
++
++    // The ONE value in this transcript that is expected to differ, and the reason the whole
++    // exercise exists: this is a 64-bit and a 32-bit target running the same source.
++    diag("target.pointerBits", dec(static_cast<uint64_t>(sizeof(void*) * 8)));
++
++    section_genesis();
++
++    MemoryMerkleDB db;
++    section_tier_d(db);
++    section_checkpoint(db);
++    section_samples(db);
++    section_padding();
++    section_programs();
++
++#ifdef __wasm__
++    // Peak linear memory, reported from INSIDE the module. wasm linear memory never shrinks, so the
++    // current size at the end of the run IS the peak. There is no native counterpart, so this is
++    // the second and last enumerated wasm-only diagnostic.
++    diag("wasm.peakLinearMemoryPages", dec(static_cast<uint64_t>(__builtin_wasm_memory_size(0))));
++    diag("wasm.peakLinearMemoryKiB", dec(static_cast<uint64_t>(__builtin_wasm_memory_size(0)) * 64));
++#endif
++
++    line("avmDifferential.done", "1");
++    return 0;
++}
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/testing/public_tx_simulation_tester.hpp b/barretenberg/cpp/src/barretenberg/vm2/testing/public_tx_simulation_tester.hpp
+index 6d60199555..a77e077055 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/testing/public_tx_simulation_tester.hpp
++++ b/barretenberg/cpp/src/barretenberg/vm2/testing/public_tx_simulation_tester.hpp
+@@ -98,6 +98,13 @@ class PublicTxSimulationTester {
+ 
+     TestContractDB& contract_db() { return contract_db_; }
+ 
++    // The in-memory world state behind the simulation, so a caller can read tree roots, sibling
++    // paths and leaf preimages directly. `contract_db()` above already exposes the other half of
++    // the pair; the two DBs carry independent create/commit/revert and the AVM requires them to
++    // stay in lockstep, so exposing only one of them was the asymmetry rather than the safety.
++    simulation::MemoryMerkleDB& merkle_db() { return merkle_db_; }
++    const simulation::MemoryMerkleDB& merkle_db() const { return merkle_db_; }
++
+   private:
+     void fund_fee_payer(const AztecAddress& fee_payer);
+ 
+-- 
+2.50.1
+
