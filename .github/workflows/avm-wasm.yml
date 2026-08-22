@@ -1,0 +1,137 @@
+name: AVM_WASM
+
+# Nothing in either repository builds `AVM_WASM=ON` on a schedule, so it rots the
+# moment upstream moves. This job is M6's recorded risk and M7's answer to it: it
+# builds the AVM and its in-memory world state for `wasm32-wasip1` from the
+# prepared patch series and then RUNS upstream's own vm2 simulation suite against
+# the result, on both runtimes, comparing native and wasm per test.
+#
+# It runs on every change to anything that can move the AVM_WASM build: the
+# verification harness, the M7 overlay, the prepared patches carried in
+# codetracer-specs (which the job checks out), the flakes and the pins.
+#
+# There is no green path that skips: every step below either does its work or
+# fails the job. `just verify-m7` runs all six checks even if an earlier one
+# fails, and exits non-zero if any did, so one run reports everything that broke.
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+  # Upstream moves under us; a weekly run is what turns "it rotted" from a
+  # surprise at the next milestone into a dated failure.
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: avm-wasm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vm2-suite-under-wasm:
+    name: vm2 suite under wasm32-wasip1
+    runs-on: eph-linux-x64
+    # A cold run is ~35 min (two full barretenberg configures, the native
+    # proving-stack build behind upstream's own vm2_tests, three wasm builds and
+    # two deliberate build failures). The cap is generous rather than tight so a
+    # slow runner reports a real failure instead of a timeout.
+    timeout-minutes: 120
+    steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      # The harness assumes the workspace layout: aztec-packages and
+      # codetracer-specs are SIBLINGS of aztec-avm-runtime (verification/lib.sh
+      # resolves FORK_ROOT that way and fails if it is not there). Reproduce it
+      # inside the runner's workspace rather than teaching the checks a second
+      # layout.
+      - name: Checkout aztec-avm-runtime
+        uses: actions/checkout@v4
+        with:
+          path: aztec-avm-runtime
+
+      - name: Clone the aztec-packages fork
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/aztec-packages
+          ref: aztec-avm-runtime
+          path: aztec-packages
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      # The four prepared patches and M7's overlay reference is here; the checks
+      # apply them with `git am` and refuse to run without them.
+      - name: Clone codetracer-specs (the prepared patch series)
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-specs
+          ref: main
+          path: codetracer-specs
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup Dev Environment
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      # The base commit the whole series applies to. A shallow clone does not
+      # have it, and `git am` onto a missing base is the failure mode that reads
+      # like a broken patch.
+      - name: Assert the series base commit is present
+        working-directory: aztec-packages
+        run: |
+          set -euo pipefail
+          git fetch --unshallow 2>/dev/null || true
+          git rev-parse --verify 233d8e0993^{commit}
+
+      - name: Assert the prepared patches are present
+        run: |
+          set -euo pipefail
+          for p in \
+            codetracer-specs/upstream-bugs/aztec-merkle-tree-lmdb-split/0001-refactor-crypto-split-crypto_merkle_tree-from-its-LMD.patch \
+            codetracer-specs/upstream-bugs/aztec-wasi-sdk-33/0001-build-move-the-wasm-toolchain-from-wasi-sdk-27-to-33.patch \
+            codetracer-specs/upstream-bugs/aztec-bytecode-size-shift-32bit/0001-fix-vm2-widen-before-shifting-in-compute_public_bytec.patch \
+            codetracer-specs/upstream-bugs/aztec-avm-wasm-cmake/0001-build-wasm-optional-AVM_WASM-and-separate-the-AVM-mod.patch \
+            aztec-avm-runtime/verification/m7/0001-test-vm2-AVM_SIM_TESTS-the-simulation-side-test-suit.patch ; do
+            test -f "$p" || { echo "::error::missing prepared patch: $p" >&2; exit 1; }
+          done
+
+      - name: Build AVM_WASM and run upstream's vm2 suite
+        working-directory: aztec-avm-runtime
+        env:
+          # Not $TMPDIR: the builds are several gigabytes and a tmpfs /tmp is the
+          # wrong place for them.
+          M7_WORK: ${{ github.workspace }}/m7-work
+        run: dev-exec just verify-m7 2>&1 | tee verify-m7.log
+
+      # The transcripts are the evidence, and a failure is exactly when they are
+      # wanted; `if: always()`.
+      - name: Collect transcripts
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p artifacts
+          cp aztec-avm-runtime/verify-m7.log artifacts/ 2>/dev/null || true
+          for f in "${{ github.workspace }}"/m7-work/*.log \
+                   "${{ github.workspace }}"/m7-work/*.txt \
+                   "${{ github.workspace }}"/m7-work/*.list \
+                   "${{ github.workspace }}"/m7-work/*.run \
+                   "${{ github.workspace }}"/m7-work/measured.env ; do
+            [ -f "$f" ] && cp "$f" artifacts/ || true
+          done
+          ls -la artifacts
+
+      - name: Upload transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: avm-wasm-vm2-suite-transcripts
+          path: artifacts
+          retention-days: 30
