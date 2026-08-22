@@ -47,11 +47,23 @@ assert_eq "and every one of them is under barretenberg/cpp/src/barretenberg/vm2/
   "$(printf '%s\n' "$files" | grep -c '^barretenberg/cpp/src/barretenberg/vm2/')"
 assert_eq "three files are created" "3" "$(grep -c '^new file mode' "$M9_OBSERVER_PATCH")"
 assert_eq "and none is deleted" "0" "$(grep -c '^deleted file mode' "$M9_OBSERVER_PATCH")"
-added="$(grep -c '^+[^+]' "$M9_OBSERVER_PATCH")"
-removed="$(grep -c '^-[^-]' "$M9_OBSERVER_PATCH")"
 assert_eq "the diffstat line the patch carries is +148/-4" "1" \
   "$(grep -c '^ 7 files changed, 148 insertions(+), 4 deletions(-)$' "$M9_OBSERVER_PATCH")"
-note "counted from the hunks: +$added / -$removed"
+# And the same numbers counted from the hunks, so the diffstat line is checked against the diff
+# rather than only against itself. Three things make that counting fiddly and all three were got
+# wrong at least once: `^+[^+]` misses the 24 added BLANK lines, which are a bare `+` (it gives
+# 124, which read as a contradiction in the transcript); the `+++`/`--- a/` file headers are not
+# changes; and neither is anything in the COMMIT MESSAGE, which is prose and may wrap a line onto a
+# leading `+` or `-` at any time. So the count starts after the `---` that separates the message
+# from the diffstat.
+counts="$(awk 'seen && /^\+/ && !/^\+\+\+ / { a++ }
+               seen && /^-/  && !/^--- / && $0 != "-- " { r++ }
+               !seen && $0 == "---" { seen = 1 }
+               END { print (a + 0) " " (r + 0) }' "$M9_OBSERVER_PATCH")"
+added="${counts%% *}"
+removed="${counts##* }"
+assert_eq "and the hunks themselves add 148 lines, blank ones included" "148" "$added"
+assert_eq "and remove 4" "4" "$removed"
 assert_eq "no test source is added or changed" "0" \
   "$(printf '%s\n' "$files" | grep -c '\.test\.cpp$')"
 assert_eq "no CMake file is touched, so the patch is additive to every configuration" "0" \
@@ -80,6 +92,7 @@ assert_eq "and its file list matches the patch's" \
 # The commit message is the PR body, and M4's and M5's reviews both found an overstatement
 # surviving in it after PR.md had been corrected. It is asserted here, not only PR.md.
 msg="$(git -C "$tree" log -1 --format=%B HEAD)"
+pr="$M9_OBSERVER_DIR/PR.md"
 assert_contains "the commit message says the fast loop emits no ExecutionEvents by design" \
   "deliberately emits no" "$msg"
 assert_contains "and names the existing call-frame seam it copies" \
@@ -88,6 +101,35 @@ assert_contains "and gives the reason the hook takes a WireOpCode" "vector<Opera
 assert_not_contains "it does not claim the AVM has no observability" \
   "no way to observe" "$msg"
 assert_contains "it discloses the msgpack key the result struct gains" "msgpack" "$msg"
+
+# THE NUMBERS, not only the prose. M4's and M5's reviews each found an overstatement surviving in
+# the commit message after PR.md had been corrected, and M9's review found the same thing a third
+# time — because everything above is a grep for a WORD. A commit message is the PR body: it is the
+# text a maintainer reads, and every figure in it has to be a figure this campaign measured and
+# still stands behind. So: every percentage the message quotes must appear verbatim in PR.md, and
+# there must be several of them.
+msg_pcts="$(printf '%s\n' "$msg" | grep -oE '[+-][0-9]+(\.[0-9]+)?%' | LC_ALL=C sort -u)"
+assert_ge "the commit message quotes measurements rather than adjectives" 3 \
+  "$(printf '%s\n' "$msg_pcts" | grep -c . || true)"
+stale=""
+for p in $msg_pcts; do
+  grep -qF -- "$p" "$pr" || stale="$stale $p"
+done
+assert_eq "every percentage in the commit message also appears in PR.md — the M4/M5/M9 defect, checked on NUMBERS and not on prose" \
+  "" "$stale"
+# And the three specific figures the spike left behind, each named so a reader of a failure knows
+# which document is the stale one.
+assert_not_contains "the message no longer carries the spike's disabled point estimate" \
+  "+0.2% on the minimum" "$msg"
+assert_not_contains "nor the spike's +12% enabled figure, which measured 9-10%" "+12%" "$msg"
+assert_not_contains "nor 'the same three programs', when the harness now runs five" \
+  "three programs" "$msg"
+assert_contains "it reports the disabled cost as an interval, not as a point estimate" \
+  "95% CI" "$msg"
+assert_contains "over sessions, which is the unit of replication the measurement was fixed to use" \
+  "sessions" "$msg"
+assert_contains "and it names the wasm target, because one budget could not serve both" \
+  "wasm32" "$msg"
 
 # ---------------------------------------------------------------------------
 # The build, and upstream's OWN tests, on both sides.
@@ -244,6 +286,78 @@ assert_true "the driver refuses to report success having asserted nothing" \
 assert_true "it exercises both exceptional-halt shapes" grep -q 'program_oob' "$vcpp"
 assert_true "and compares its records against upstream's own ExecutionEvent seam" \
   grep -q 'simulate_for_witgen' "$vcpp"
+
+# ---------------------------------------------------------------------------
+# And then the part that is not a grep: RUN IT.
+#
+# Everything above asserts the SHAPE of verify.sh, and M9's review showed precisely what that is
+# worth. The shipped script carried `brc=$?brc=$?` on the line that captured part B's status — bash
+# parses that as ONE assignment setting `brc` to the string `0brc=0` — so every run, including a
+# completely successful one, printed `FAILED (part A rc=0, part B rc=0brc=0)` and exited 1.
+# `bash -n` accepts it, so `assert_true "verify.sh parses"` passed, and every other assertion this
+# check made about the script was a grep. The deliverable "43 assertions, 0 failures, exit 0" was
+# certified against a file in which exit 0 was unreachable.
+#
+# So the three exit statuses the script's own contract names are all EXERCISED: 0 when both parts
+# pass, 2 when a precondition cannot be met, 1 when an assertion fails. Both trees are already
+# built above, so this costs one compile of the harness per side plus the timing loop.
+# ---------------------------------------------------------------------------
+vsh_run() { # <log> [VAR=VAL ...] -> exit status of verify.sh
+  local log="$1"; shift
+  m6_in_devshell '
+    v="$1"; shift
+    cd "$(dirname "$v")" || exit 90
+    env "$@" ./verify.sh 2>&1
+  ' "$vsh" "$@" >"$log"
+}
+
+vwork="$M9_WORK/vshwork"; rm -rf "$vwork"; mkdir -p "$vwork"
+vlog="$M9_WORK/verifysh.log"
+note "running the prepared verify.sh end to end against the two upstream trees"
+vsh_run "$vlog" "WORK=$vwork" "AZTEC=$tree" "BUILD=$tree/barretenberg/cpp/$M9_UP_BUILD" \
+  "AZTEC_REF=$base" "BUILD_REF=$base/barretenberg/cpp/$M9_UP_BUILD"
+vrc=$?
+assert_eq "verify.sh EXITS 0 when both parts pass — the status the deliverable claims, and the one that was unreachable in the file as shipped" \
+  "0" "$vrc"
+assert_eq "part A made 43 assertions and none failed" "1" \
+  "$(grep -c '^43 assertion(s), 0 failure(s)$' "$vlog" || true)"
+assert_eq "and printed no FAIL row anywhere in either part" "0" \
+  "$(grep -c '^ *FAIL' "$vlog" || true)"
+assert_eq "it printed its success banner" "1" \
+  "$(grep -c 'own noise when disabled' "$vlog" || true)"
+assert_ge "part B reported an interval over SESSIONS rather than over one rotation" 1 \
+  "$(grep -c '^   sessions ' "$vlog" || true)"
+assert_ge "and reported the same-bytes control beside it" 1 \
+  "$(grep -c '^   same bytes ' "$vlog" || true)"
+assert_ge "part A compared its records against upstream's own seam, per program" 5 \
+  "$(grep -c 'every step record equals upstream'"'"'s own event, field for field' "$vlog" || true)"
+
+# Exit 2: the second tree is required, and a second tree that is really the first is refused.
+vlog2="$M9_WORK/verifysh-noref.log"
+vsh_run "$vlog2" "WORK=$vwork" "AZTEC=$tree" "BUILD=$tree/barretenberg/cpp/$M9_UP_BUILD"
+assert_eq "without AZTEC_REF it exits 2 — a precondition, distinct from a failed assertion" "2" "$?"
+assert_true "naming what is missing" grep -q 'set AZTEC_REF to an UNPATCHED checkout' "$vlog2"
+assert_eq "and it did not run part B against nothing" "0" \
+  "$(grep -c 'part B' "$vlog2" || true)"
+vlog3="$M9_WORK/verifysh-selfref.log"
+vsh_run "$vlog3" "WORK=$vwork" "AZTEC=$tree" "BUILD=$tree/barretenberg/cpp/$M9_UP_BUILD" \
+  "AZTEC_REF=$tree" "BUILD_REF=$tree/barretenberg/cpp/$M9_UP_BUILD"
+assert_eq "a PATCHED tree offered as the reference exits 2 rather than comparing a build with itself" \
+  "2" "$?"
+assert_true "and says so" grep -q 'DOES carry the patch' "$vlog3"
+
+# Exit 1: an assertion that fails. A budget of 0.01% cannot be met by any real measurement, so this
+# is the arm that proves a failing part B is reported as a failure — which is exactly what the
+# `brc=$?brc=$?` defect made indistinguishable from a passing one.
+vlog4="$M9_WORK/verifysh-tightbudget.log"
+vsh_run "$vlog4" "WORK=$vwork" "AZTEC=$tree" "BUILD=$tree/barretenberg/cpp/$M9_UP_BUILD" \
+  "AZTEC_REF=$base" "BUILD_REF=$base/barretenberg/cpp/$M9_UP_BUILD" "BUDGET=0.01" "SESSIONS=8"
+assert_eq "an unmeetable budget makes it exit 1 — an assertion failed, not a precondition" "1" "$?"
+assert_true "and it says which claim failed" \
+  grep -q 'FAIL the disabled path is not equivalent' "$vlog4"
+assert_true "and reports FAILED rather than its success banner" grep -q '^FAILED' "$vlog4"
+assert_eq "part A still passed in that run, so the failure is attributable to part B" "1" \
+  "$(grep -c '^43 assertion(s), 0 failure(s)$' "$vlog4" || true)"
 
 pr="$M9_OBSERVER_DIR/PR.md"
 assert_true "PR.md names all three seams the AVM already has" \
