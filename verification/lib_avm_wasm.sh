@@ -70,9 +70,11 @@ M6_SPIKE_PATCH="$REPO_ROOT/vm2wasm/spike.patch"
 # Where the eight worktrees and their build directories live. Deliberately
 # outside both repos so no build artefact can land in a git status. The two
 # `barretenberg.wasm` builds the default-off check needs are about 2 GB and a
-# full set is closer to 5 GB, so a tmpfs /tmp is usually the wrong place: set
-# M6_WORK.
-M6_WORK="${M6_WORK:-${TMPDIR:-/tmp}/aztec-m6-avm-wasm}"
+# full set is closer to 5 GB, so a tmpfs /tmp is the wrong place and this
+# defaults under $HOME; require_work_dir asserts the room is really there, and
+# really writable, before the first build rather than after it (M9's review).
+M6_WORK="${M6_WORK:-$HOME/.cache/aztec-m6-avm-wasm}"
+require_work_dir "$M6_WORK" 8
 
 # The nine archives the AVM_WASM build produces, as a sorted, space-separated
 # list. Pinned as an IDENTITY, not a minimum: a tenth archive appearing is as

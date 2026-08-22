@@ -151,6 +151,46 @@ require_nix() {
   command -v nix >/dev/null 2>&1 || die "the 'nix' command is not available"
 }
 
+# ---------------------------------------------------------------------------
+# require_work_dir <dir> <minimum-gb>
+#
+# Every milestone from M3 on builds aztec-packages into a work directory, and a work directory that
+# cannot hold the build is a PRECONDITION failure — one line naming the directory and the shortfall
+# — and not the twenty-five wrong answers it otherwise produces.
+#
+# M9's review found that the hard way: `/tmp` on that host is a quota-limited tmpfs, the quota went
+# during M5's build, and M5 through M8 then emitted more than a hundred failed assertions
+# interleaved with `write error: Disk quota exceeded` from `printf` itself. Every one of those
+# failures was a true statement about a file that could not be written and a false statement about
+# the thing the check was named for.
+#
+# Free space is checked AND a real write is attempted, because they are different questions: a
+# quota is not free space, so `df` can report gigabytes available on a filesystem that will refuse
+# the next byte this user writes. The probe is 4 MB, written and removed.
+# ---------------------------------------------------------------------------
+require_work_dir() { # <dir> <minimum-gb>
+  local dir="$1" min_gb="${2:-1}" avail_kb probe
+  mkdir -p "$dir" 2>/dev/null \
+    || die "the work directory cannot be created: $dir (set the milestone's <M>_WORK)"
+  [ -w "$dir" ] || die "the work directory is not writable: $dir"
+  avail_kb="$(df -Pk "$dir" 2>/dev/null | awk 'NR==2 { print $4 }')"
+  case "$avail_kb" in
+    ''|*[!0-9]*) die "could not read the free space of the work directory: $dir" ;;
+  esac
+  if [ "$avail_kb" -lt $((min_gb * 1024 * 1024)) ]; then
+    die "the work directory has $((avail_kb / 1024 / 1024)) GB free and this milestone needs about ${min_gb} GB: $dir
+             /tmp is usually a small tmpfs; point the milestone's <M>_WORK somewhere with room."
+  fi
+  probe="$dir/.write-probe.$$"
+  if ! dd if=/dev/zero of="$probe" bs=1M count=4 >/dev/null 2>&1; then
+    rm -f "$probe" 2>/dev/null
+    die "the work directory reports free space but refuses a 4 MB write: $dir
+             a disk quota, not a full filesystem — the checks would otherwise report this as
+             dozens of unrelated assertion failures."
+  fi
+  rm -f "$probe"
+}
+
 # in_shell <repo> <script>: run <script> under `nix develop` for <repo>.
 # stdout is the script's stdout; the dev shell's own shellHook banner goes to
 # the caller's stderr, so parsing stdout stays reliable.

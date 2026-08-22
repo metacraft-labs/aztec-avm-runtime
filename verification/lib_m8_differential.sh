@@ -38,6 +38,7 @@
 # translation units the wasm configure declares. /tmp is usually a tmpfs and is the wrong place:
 # set M8_WORK.
 M8_WORK="${M8_WORK:-$HOME/.cache/aztec-m8-differential}"
+require_work_dir "$M8_WORK" 8
 M7_WORK="$M8_WORK"
 export M8_WORK M7_WORK
 

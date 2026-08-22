@@ -48,9 +48,12 @@ M4_TOUCHED_FILES="barretenberg/cpp/CMakePresets.json barretenberg/cpp/cmake/thre
 
 # Where the two worktrees and their build directories live. Deliberately outside
 # both repos so no build artefact can land in a git status. Two full
-# `barretenberg.wasm` builds are about 3 GB, so a tmpfs /tmp is usually the wrong
-# place: set M4_WORK.
-M4_WORK="${M4_WORK:-${TMPDIR:-/tmp}/aztec-m4-wasi-sdk-33}"
+# `barretenberg.wasm` builds are about 3 GB, so a tmpfs /tmp is the wrong place
+# and this defaults under $HOME; require_work_dir makes a work directory that
+# cannot hold the build ONE precondition failure rather than a run of wrong
+# answers (M9's review, on a quota-limited /tmp).
+M4_WORK="${M4_WORK:-$HOME/.cache/aztec-m4-wasi-sdk-33}"
+require_work_dir "$M4_WORK" 4
 
 # The exception probe. The same file the prepared contribution ships, so the
 # checks and the thing a maintainer would run are not two different programs.

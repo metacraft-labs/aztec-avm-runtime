@@ -31,8 +31,12 @@
 
 # Where M7's worktree and its two build directories live. About 12 GB with the
 # native build (upstream's vm2_tests alone is 264 MB and the proving stack behind
-# it is most of the tree), so a tmpfs /tmp is the wrong place: set M7_WORK.
-M7_WORK="${M7_WORK:-${TMPDIR:-/tmp}/aztec-m7-vm2-tests}"
+# it is most of the tree), so a tmpfs /tmp is the wrong place and this defaults
+# under $HOME. require_work_dir refuses to start a 12 GB build in a directory
+# that cannot hold it, which is one line instead of the hundred-odd assertion
+# failures M9's review got out of an exhausted /tmp quota.
+M7_WORK="${M7_WORK:-$HOME/.cache/aztec-m7-vm2-tests}"
+require_work_dir "$M7_WORK" 14
 
 # M6's helpers keep their own name and their own variable; pointing that variable
 # at M7's directory is what keeps the two milestones' trees apart.

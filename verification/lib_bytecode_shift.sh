@@ -56,8 +56,12 @@ M5_PROBE_SHIFT_C="$M5_PATCH_DIR/repro/shift.c"
 M5_CONTRIB_VERIFY="$M5_PATCH_DIR/verify.sh"
 
 # Where the three worktrees and their build directories live. Deliberately outside
-# both repos so no build artefact can land in a git status.
-M5_WORK="${M5_WORK:-${TMPDIR:-/tmp}/aztec-m5-bytecode-shift}"
+# both repos so no build artefact can land in a git status, and under $HOME rather
+# than /tmp: it was M5's build that exhausted the /tmp quota in M9's review, after
+# which M5, M6, M7 and M8 produced more than a hundred assertion failures whose
+# real cause was EDQUOT. require_work_dir turns that into one precondition line.
+M5_WORK="${M5_WORK:-$HOME/.cache/aztec-m5-bytecode-shift}"
+require_work_dir "$M5_WORK" 6
 
 # The single measurement record. Written by
 # test_bytecode_commitment_identical_on_64bit and

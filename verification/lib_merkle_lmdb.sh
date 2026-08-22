@@ -31,8 +31,12 @@ M3_PATCH_DIR="$WORKSPACE_ROOT/codetracer-specs/upstream-bugs/aztec-merkle-tree-l
 M3_PATCH_FILE="$M3_PATCH_DIR/0001-refactor-crypto-split-crypto_merkle_tree-from-its-LMD.patch"
 
 # Where the two worktrees and their build directories live. Deliberately outside
-# both repos so no build artefact can land in a git status.
-M3_WORK="${M3_WORK:-${TMPDIR:-/tmp}/aztec-m3-merkle-lmdb}"
+# both repos so no build artefact can land in a git status, and under $HOME rather
+# than /tmp, which is usually a small tmpfs: M9's review exhausted a /tmp quota
+# mid-build and the checks reported it as a hundred unrelated failed assertions
+# instead of one precondition. require_work_dir turns that back into one line.
+M3_WORK="${M3_WORK:-$HOME/.cache/aztec-m3-merkle-lmdb}"
+require_work_dir "$M3_WORK" 4
 
 # Targets built in BOTH trees. `crypto_merkle_tree` itself is not in the list:
 # after the split it is an INTERFACE library and has no ninja target at all,
