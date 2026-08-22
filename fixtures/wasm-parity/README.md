@@ -8,8 +8,11 @@ Produced by agent **fixtures-and-specs**, 2026-08-21, by execution.
 |---|---|
 | `native-with-roots.results` | `avm_spike_runner` transcript, native x86-64 |
 | `wasm-with-roots.results` | the same binary built for wasm32-wasi, run under Node's WASI |
-| `vm2-sim-tests-native.txt` | upstream's vm2 simulation suite, native: **387 passed / 59 suites** |
-| `vm2-sim-tests-under-wasm.txt` | the same suite under wasm, per-suite: **24 pass / 35 fail, 141 tests passed** |
+| `vm2-sim-tests-included.txt` | **M7, current**: the 391 tests the wasm suite runs, one name per line. Native, V8 and wasmtime pass all 391 and the three name sets are identical per test |
+| `vm2-tests-wasm-exclusions.tsv` | **M7, current**: one row per excluded test — 1,412 rows of `<test>\t<file>\t<reason>` — regenerated from the tree by `just verify-vm2-tests-exclusions` |
+| `EXCLUSIONS.md` | **M7, current**: the numbers, the five reason codes, the target-level exclusion and what is linked but not exercised |
+| `vm2-sim-tests-native.txt` | **superseded (spike, 2026-08-21)**: 387 passed / 59 suites, from the spike's smaller `vm2_sim_tests` target |
+| `vm2-sim-tests-under-wasm.txt` | **superseded (spike, 2026-08-21)**: 24 pass / 35 fail, 141 tests passed. Kept as the record of what was believed; see "The gmock limitation" below |
 | `vm2-sim-tests-under-wasm-raw.txt` | the **raw** wasm gtest transcript behind that summary, kept because it is the only record of the gmock trap: the `[ FATAL ] gtest-port.h:1660` assertion and the `memory access out of bounds` in `testing::Sequence::AddExpectation` quoted below are read from it. Regenerating it costs a full wasm barretenberg build, so it is committed rather than reconstructed |
 | `vm2_spike-sources/` | **preservation copy** — see the warning below |
 
@@ -48,7 +51,9 @@ node ../fixtures/tools/run_wasm.mjs src/barretenberg/cpp/build-wasm-avm/bin/vm2_
      --gtest_filter='<OneSuite>.*'
 ```
 
-Run the wasm suite **one gtest suite per process** — see the gmock note below.
+That reproduction is the **spike's**. M7's is `just verify-m7` from `aztec-avm-runtime/`, and it
+runs the whole suite in **one process with no filter** on both runtimes; the per-suite splitting
+below was a workaround for the ODR defect and is no longer needed.
 
 ## ⚠️ `vm2_spike-sources/` is a preservation copy, not the build input
 
@@ -65,7 +70,42 @@ additions to that ignored tree and are therefore **not** yet in `spike.patch`:
 
 Whoever owns `spike.patch` must regenerate it, or these are lost on the next reconstruction.
 
-## The gmock limitation
+## The gmock limitation — SUPERSEDED by M7, 2026-08-22
+
+> **This section is kept because it is the record of what was measured and believed on
+> 2026-08-21, and because the raw transcript beside it is the only copy of that run. It is
+> wrong about the cause and about the remedy.**
+>
+> M7 re-measured it on M6's build (wasi-sdk 33, real C++ exceptions, the module split, `-Werror`)
+> and the symptom reproduces exactly — the same `gtest-port.h:1660` assertion, and
+> `gtest-port.h:1642:: pthread_mutex_lock(&mutex_) failed with error 16` once the death-named
+> suite is filtered out. **The cause is an ODR violation, not the pthread stubs as such.**
+> googletest's own CMake puts `-DGTEST_HAS_PTHREAD=1` into `cxx_base_flags` whenever
+> `find_package(Threads)` succeeds — under wasi-sdk it does, because the sysroot ships pthread
+> *stubs* — and applies it to gtest's own four translation units and to nothing else. Every
+> consumer of the headers sees `gtest-port.h`'s wasi default of **0**, so `internal::MutexBase`
+> is a different type inside `libgtest.a` and in every test object. Making the macro consistent
+> takes the suite from **0** to **391 of 391**, on V8 and on wasmtime.
+>
+> That is why "rebuilding gtest+gmock with `GTEST_HAS_PTHREAD=0` was tried and did not help", and
+> the reason is more specific than "it has to be `PUBLIC`": the compile command is
+> `$DEFINES $INCLUDES $FLAGS`, googletest puts `cxx_base_flags` in `COMPILE_FLAGS`, so its
+> `-DGTEST_HAS_PTHREAD=1` arrives **after** anything `target_compile_definitions` emits and wins on
+> gtest's own four units — `PRIVATE` or `PUBLIC` alike. The half of M7's correction that fixes
+> gtest's side is `set(gtest_disable_pthreads ON … FORCE)`; `PUBLIC` fixes only the consumers.
+> Measured on review: `PUBLIC` alone gives 4 lines at `=1` and 333 at `=0` and passes **0 of 391**,
+> while making the macro consistently `=1` on all 337 passes **391 of 391** — so the wasi pthread
+> stubs are not the defect, the disagreement is, and either consistent value works.
+>
+> The claim about death tests below is also false. There is no `EXPECT_DEATH`, `ASSERT_DEATH`,
+> `EXPECT_EXIT` or `ASSERT_EXIT` anywhere in the simulation-side sources. One suite is *named*
+> `AvmSimulationEccDeathTest` — a gtest naming convention that orders it first — and its body is
+> `ASSERT_THROW(ecc.scalar_mul(p, scalar), std::runtime_error)`, which runs and passes under wasm.
+>
+> Recorded as `DRIFT.md` **D10**. The correction lives in
+> `aztec-avm-runtime/verification/m7/0001-test-vm2-AVM_SIM_TESTS-*.patch` and is gated on
+> `WASM AND AVM_SIM_TESTS`, so no configuration M4 or M6 measured moves.
+
 
 35 of the 59 suites trap under wasm32-wasi. The correlation is exact: every gmock-free suite
 passes, every suite using `EXPECT_CALL`/`StrictMock` fails. gtest's threading layer compiles

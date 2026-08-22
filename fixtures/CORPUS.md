@@ -378,52 +378,86 @@ Files: `native-with-roots.results`, `wasm-with-roots.results`.
 
 ## Tier J — upstream's own vm2 simulation suite, built for wasm
 
-**Where:** `fixtures/wasm-parity/vm2-sim-tests-{native,under-wasm}.txt`
-**Target:** `vm2_sim_tests`, added in `vm2_spike/CMakeLists.txt`
+**Where:** `fixtures/wasm-parity/vm2-sim-tests-included.txt`, `fixtures/wasm-parity/EXCLUSIONS.md`,
+`fixtures/wasm-parity/vm2-tests-wasm-exclusions.tsv`
+**Target:** `vm2_sim_tests`, produced by barretenberg's **own** `cmake/module.cmake` from
+`vm2_sim`'s `TEST_SOURCE_FILES` under a new default-off `AVM_SIM_TESTS` option
+(`aztec-avm-runtime/verification/m7/`)
 
-Upstream **never builds these tests in any configuration**: `vm2_sim` is declared with no
+Upstream **never builds these tests for wasm in any configuration**: `vm2_sim` is declared with no
 `TEST_SOURCE_FILES`, and the `vm2_tests` binary that does carry them is gated on `if(AVM)`, which
-pulls in the proving stack (`sumcheck`, `stdlib_honk_verifier`, `goblin_avm`) that the wasm build
-excludes. So this is an additive target over 99 translation units
-(`vm2/simulation/**/*.test.cpp` + `vm2/common/*.test.cpp`), plus three small support files, all
-marked `SPIKE (fixtures-and-specs)`:
+pulls in the proving stack (`sumcheck`, `stdlib_honk_verifier`, `goblin_avm`) plus `dsl`, and
+`src/CMakeLists.txt` excludes the whole `vm2/` directory from a wasm configure. M7's answer is to
+give `vm2_sim` its own `TEST_SOURCE_FILES`, so the binary comes out of upstream's own module
+machinery — the same `add_executable`, the same gtest/gmock linkage, the same
+`-Wl,-z,stack-size=8388608` under WASM — rather than a bespoke runner.
 
-- `spike_fixtures.cpp` — upstream's `vm2/testing/fixtures.cpp` minus the two tracegen-bound
-  definitions (`empty_trace`, `get_minimal_trace_with_pi`), so it links without the proving stack.
-- `spike_test_main.cpp` — explicit gtest `main`. `GTest::gtest_main` supplies `main` from a static
-  archive that wasm-ld does not pull in; `main` resolves to an undefined-weak stub and traps.
-- 2 test files excluded, each for a stated reason.
+### Measured 2026-08-22 (M7)
 
-| | suites | tests |
-|---|---|---|
-| **native** | 59 | **387 passed, 0 failed** (291 ms) |
-| **wasm32-wasi**, per-suite | 24 passed / 35 failed | **141 passed** |
+| | tests | suites | exit |
+|---|---:|---:|---:|
+| native `vm2_sim_tests` | **391 ran, 391 passed, 0 failed** | 60 | 0 |
+| **V8** (node 24.19, shipped binary unmodified) | **391 ran, 391 passed, 0 failed** | 60 | 0 |
+| **wasmtime 47.0.3** (`env.memory` satisfied by `wasm-merge`) | **391 ran, 391 passed, 0 failed** | 60 | 0 |
 
-**The 35 wasm failures are a test-framework limitation, not an AVM one.** The correlation is exact:
-every gmock-free suite passes; every suite using `EXPECT_CALL`/`StrictMock` fails. Root cause,
-surfaced in an early run:
+The three name sets are **identical per test**, and the 391 are a subset of upstream's own 1,803
+name for name. One process each, no `--gtest_filter`, no per-suite splitting.
 
-```
-[ FATAL ] gtest-port.h:1660:: Condition has_owner_ && pthread_equal(owner_, pthread_self()) failed.
-          The current thread is not holding the mutex
-```
+**Exclusions: 1,412, each named individually** in `vm2-tests-wasm-exclusions.tsv` with the source
+file declaring its suite and a reason derived from that file's directory — `constraining/` 1,059,
+`tracegen/` 286, `integration_tests/` 59, `dsl/` 5, and `common/avm_io.test.cpp` 3 (its tests call
+the tracegen-bound `get_minimal_trace_with_pi`). **Zero** are excluded for needing threads and
+**zero** for failing under wasm. See `EXCLUSIONS.md`.
 
-gtest's threading layer compiles against wasi-libc's pthread **stubs**; `pthread_self()` never
-matches the recorded mutex owner, `MutexBase::AssertHeld()` fails inside gmock's global expectation
-registry, and the subsequent unguarded mutation corrupts linear memory (`memory access out of
-bounds` in `testing::Sequence::AddExpectation`). Rebuilding gtest+gmock with `GTEST_HAS_PTHREAD=0`
-**was tried and did not help** — identical 24/59. Three further suites are gtest **death tests**,
-which fork and can never run under WASI.
+### The three claims this Tier used to make, and what measurement did to them
 
-What does pass under wasm is the part that matters most for the tree question:
-`MerkleCheckSimulationTest` (7), `IndexedMemoryTree` (5), `AvmWrittenSlotsTree`,
-`AvmRetrievedBytecodesTree`, `HintingDBs{Minimal,RandomInput}Test` (7), `SideEffectTrackerTest` (10),
-`SerializationTest` (14), `InstructionSpecTest` (4), `PureKeccakSimulationTest` (6),
-`PureSha256Test` (6), `KeccakSimulationTest` (5), `SimpleTestSuite/Bitwise{And,Or,Xor}` (18),
-`TaggedValueTest` (13), `PublicLogsTest` (19).
+1. *"24 of 59 suites, 141 tests; the 35 gmock failures are a permanent test-framework
+   limitation."* **Superseded.** The cause was an ODR violation across the gtest library boundary,
+   not the pthread stubs as such: googletest's CMake puts `-DGTEST_HAS_PTHREAD=1` on gtest's own
+   four translation units and does not propagate it, so `internal::MutexBase` is a different type
+   inside `libgtest.a` and in every test TU. Making the macro consistent fixes it. Recorded as
+   DRIFT **D10**, and the negative control in `verify_vm2_tests_pass_under_v8.sh` reverts the
+   correction and shows the same binary reaching **0** passing tests.
+   *"Rebuilding gtest+gmock with `GTEST_HAS_PTHREAD=0` was tried and did not help"* is consistent
+   with this, for a reason narrower than "it has to be `PUBLIC`": the compile command is
+   `$DEFINES $INCLUDES $FLAGS` and googletest puts `cxx_base_flags` in `COMPILE_FLAGS`, so its
+   `=1` arrives last and wins on gtest's own units whatever `target_compile_definitions` says.
+   `set(gtest_disable_pthreads ON … FORCE)` is the half that fixes gtest's side. Measured on
+   review: `PUBLIC` alone → **0 of 391**; consistent `=1` on all 337 → **391 of 391**. The wasi
+   pthread stubs are not the defect, the disagreement is.
+2. *"Three further suites are gtest death tests, which fork and can never run under WASI."*
+   **False.** There is no `EXPECT_DEATH`, `ASSERT_DEATH`, `EXPECT_EXIT` or `ASSERT_EXIT` anywhere
+   in the simulation-side sources. One suite is *named* `AvmSimulationEccDeathTest` — a gtest
+   naming convention that orders it first — and its body is
+   `ASSERT_THROW(ecc.scalar_mul(p, scalar), std::runtime_error)`. It runs and passes under wasm,
+   which is also a direct exercise of M6's real C++ exceptions.
+3. *"`spike_fixtures.cpp` and `spike_test_main.cpp` are needed."* **Neither is.** The trimmed copy
+   of upstream's `fixtures.cpp` is replaced by two `#ifndef AVM_SIM_TESTS_WITHOUT_TRACEGEN` guards,
+   so nothing is vendored and nothing drifts; and the explicit `main` is replaced by
+   `-Wl,-u,__main_argc_argv`, which makes wasm-ld pull **gtest's own** main. The entry point is
+   `__main_argc_argv`, not `main` — wasi-sdk's clang renames it and wasi-libc's `__main_void`
+   references it weakly, which is why the archive was never searched.
+   The spike also excluded `simulation/gadgets/bytecode_manager.test.cpp` as reaching the proving
+   side; it does not — the only `constraining` mentions in it are two comments — and its four tests
+   run and pass here.
 
-**Next step for whoever picks this up:** porting gmock's synchronisation to single-threaded wasm
-converts 141 → ~384 tests. That is the single largest unclaimed coverage win in the corpus.
+### Still open
+
+No test here compares a tree **root** native versus wasm. `world_state_reference`'s own in-memory
+trees *are* exercised by the 391 — corrected on review: the chain runs through
+`vm2/testing/fixtures.cpp`, a support unit the overlay itself compiles in, whose
+`get_minimal_proving_inputs()` constructs a `PublicTxSimulationTester` (holding a
+`MemoryMerkleDB` by value) and is called from `HintingDBsMinimalTest`'s fixture constructor;
+`gdb` on the native binary of the same tree counts **164 calls** into the reference DB across the
+suite, including indexed-leaf insertion, `pad_tree`, checkpoint create/commit, roots and sibling
+paths. What is missing is the *differential*: the roots are never compared between the two builds.
+M8 owns that; Tier I already carries 56 identical root lines native versus wasm for the spike's
+build. See `fixtures/wasm-parity/EXCLUSIONS.md`.
+
+`crypto_merkle_tree_tests` is a target in an `AVM_WASM` configure and **does not build** for wasm
+(one TU, `node_store/content_addressed_cache.test.cpp`, on `ThreadPool` under `MULTITHREADING=OFF`),
+and it links `stdlib_poseidon2`. Recorded in `EXCLUSIONS.md`; the fix belongs in the `AVM_WASM`
+patch, which M10 owns.
 
 ---
 

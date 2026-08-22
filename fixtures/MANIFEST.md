@@ -378,14 +378,26 @@ are not vendored and not redistributed.
 
 ### FX-25 — Upstream's own vm2 simulation suite under wasm
 - tier: H
-- family: 99 upstream translation units of `vm2/simulation/**/*.test.cpp` and `vm2/common/*.test.cpp`, built for `wasm32-wasip1` by an additive target
-- where: fixtures/wasm-parity/vm2-sim-tests-native.txt, fixtures/wasm-parity/vm2-sim-tests-under-wasm.txt, fixtures/wasm-parity/vm2-sim-tests-under-wasm-raw.txt, fixtures/wasm-parity/vm2_spike-sources/CMakeLists.txt
-- upstream-source: `barretenberg/cpp/src/barretenberg/vm2/**/*.test.cpp` @ anchor `cpp` — 174 test files, of which 99 translation units are in scope
-- capture: `cmake --build build-wasm-avm --target vm2_sim_tests`, then `node fixtures/tools/run_wasm.mjs … --gtest_filter='<OneSuite>.*'`, one gtest suite per process
+- family: the simulation-side subset of upstream's `vm2_tests` — every `*.test.cpp` under `vm2/simulation/`, `vm2/common/` and `vm2/tooling/` plus the `vm2/testing/` support units, built for `wasm32-wasip1` and for native by the same additive `AVM_SIM_TESTS` target
+- where: fixtures/wasm-parity/vm2-sim-tests-included.txt, fixtures/wasm-parity/EXCLUSIONS.md, fixtures/wasm-parity/vm2-sim-tests-native.txt, fixtures/wasm-parity/vm2-sim-tests-under-wasm.txt, fixtures/wasm-parity/vm2-sim-tests-under-wasm-raw.txt, fixtures/wasm-parity/vm2_spike-sources/CMakeLists.txt
+- upstream-source: `barretenberg/cpp/src/barretenberg/vm2/**/*.test.cpp` @ anchor `cpp` — 174 test files declaring 1,803 tests in the native `vm2_tests` binary, of which 89 translation units and 391 tests are in scope
+- capture: `just verify-vm2-tests-build && just verify-vm2-tests-v8 && just verify-vm2-tests-wasmtime` — one process, no `--gtest_filter`, on both runtimes
 - licence: Apache-2.0
-- measured: 2026-08-21 — native 59 suites / 387 tests passed; under wasm 24 of 59 suites pass, 141 tests. The 35 failing suites correlate exactly with gmock use, and rebuilding gtest with `GTEST_HAS_PTHREAD=0` was tried and changed nothing (identical 24 of 59).
-- skeptic-concludes: The parts of upstream's own semantics suite that can run under wasm do run and do pass, including everything load-bearing for the tree question — `MerkleCheckSimulationTest`, `IndexedMemoryTree`, `HintingDBs*`, `SerializationTest`, `InstructionSpecTest` and the pure hash suites. This is upstream's breadth, not ours.
-- skeptic-cannot-conclude: That 141 of 387 is a statement about the AVM. The 246 that do not run are blocked by gtest's threading layer compiling against wasi-libc's pthread stubs, which corrupts gmock's global expectation registry — a test-framework limitation, recorded as the largest unclaimed coverage win in the corpus.
+- measured: 2026-08-22 (M7) — native 391 tests from 60 suites, 391 passed, exit 0; V8 (node 24.19, shipped binary unmodified) 391 from 60, 391 passed, exit 0; wasmtime 47.0.3 391 from 60, 391 passed, exit 0. The three name sets are identical per test, and the 391 are a subset of upstream's own 1,803 name for name. The vm2-wasm spike's earlier figure on this line was 24 of 59 suites and 141 tests, and it is superseded rather than reconciled: the cause was an ODR mismatch across the gtest boundary (`GTEST_HAS_PTHREAD` set on gtest's own four translation units and on nothing else), recorded as DRIFT D10 and corrected in M7's overlay.
+- skeptic-concludes: Upstream's own simulation-side semantics suite runs complete under wasm on two independent runtimes and agrees with the native run test by test, over 60 suites covering the tree gadgets, the indexed and written-slots trees, hinting DBs, serialization, the instruction spec, gas tracking, execution, addressing, the ECC and hash gadgets and the pure standalone implementations. This is upstream's breadth, maintained by them, not a corpus of ours.
+- skeptic-cannot-conclude: That the whole of `vm2` runs under wasm. 1,412 of upstream's 1,803 tests are outside this target and each is named individually with a derived reason in EXCLUSIONS.md — `constraining/` 1,059, `tracegen/` 286, `integration_tests/` 59, `dsl/` 5 and `common/avm_io.test.cpp` 3 — all of them proving-side. Nor that any tree **root** is compared between the two builds: `world_state_reference`'s own in-memory trees *are* exercised by the 391 (corrected on review — the chain runs through `vm2/testing/fixtures.cpp`, which the overlay compiles in, into `PublicTxSimulationTester` and out of `HintingDBsMinimalTest`'s fixture; 164 calls into the reference DB measured under `gdb` across the suite), but nothing here is a native-versus-wasm root differential. M8 owns that.
+- inventory: RI-15, RI-16, RI-17
+
+### FX-26 — The per-test exclusion ledger for the wasm suite
+- tier: H
+- family: one row per test that upstream's native `vm2_tests` declares and the wasm `vm2_sim_tests` does not, with the source file declaring its suite and a reason code derived from that file's directory
+- where: fixtures/wasm-parity/vm2-tests-wasm-exclusions.tsv, fixtures/wasm-parity/EXCLUSIONS.md, verification/wasm_host/_exclusions.py, verification/verify_vm2_tests_exclusions_enumerated.sh
+- upstream-source: derived, by execution, from `vm2_tests --gtest_list_tests` and `vm2_sim_tests --gtest_list_tests` at anchor `cpp` plus the four AVM_WASM series patches and M7's overlay
+- capture: `just verify-vm2-tests-exclusions` regenerates the file from the two binaries and the vm2 source tree and fails on any difference
+- licence: Apache-2.0 (output of Apache-2.0 code)
+- measured: 2026-08-22 — 1,412 rows across five reason codes: `proving-stack` 1,059 over 59 files, `tracegen` 286 over 24, `proving-stack+dsl` 59 over 4, `dsl` 5 over 1, `tracegen-fixture` 3 over 1. 391 + 1,412 = 1,803, the two sets do not overlap, and their union is upstream's own suite name for name. Zero tests are excluded for needing threads and zero for failing under wasm.
+- skeptic-concludes: The wasm pass rate is quoted against upstream's whole suite rather than against a target whose size we chose. Every excluded test is named, and its reason is re-derived from the tree by mapping the test back through gtest's own declaration macros to the file that declares its suite, so a test that moved category makes the check red rather than disappearing.
+- skeptic-cannot-conclude: That the excluded 1,412 pass anywhere. They are declared by the native binary and were not run; what is established is only that they are outside the wasm target and why. Nor does the ledger say anything about tests upstream has not written.
 - inventory: RI-15, RI-16, RI-17
 
 <!-- END:manifest -->
