@@ -1,0 +1,489 @@
+From 06996b43a5f9eea5816b4cf08d4f71e17e9305e4 Mon Sep 17 00:00:00 2001
+From: Zahary Karadjov <zahary@agent-harbor.com>
+Date: Sat, 22 Aug 2026 16:27:53 +0300
+Subject: [PATCH] test(vm2): step records, the upstream ExecutionEvent seam,
+ and the timing modes
+
+Extends the AVM_DIFFERENTIAL driver with four argv-selected modes so the
+per-instruction execution observer can be compared the way M8 compares tree
+roots: per record, native against wasm, rather than by count.
+
+  steps       one line per executed instruction -- context id, pc, opcode,
+              cumulative l2/da gas and contract address -- for eight programs,
+              plus the flag-off/flag-on facts the observer promises (steps
+              absent when off, the result otherwise unchanged, the count equal
+              to total_instructions_executed).
+  events      the SAME fields taken from upstream's existing per-instruction
+              seam: collect_hints = true, then
+              AvmSimulationHelper::simulate_for_witgen(hints), whose
+              EventEmitter<ExecutionEvent> is where the events actually
+              materialise. AvmSimAPI::simulate(collect_hints = true) does NOT
+              return them -- simulate_for_hint_collection_internal instantiates
+              simulate_for_witgen_internal with NoopEventEmitters -- so the
+              no-patch fallback costs hint collection AND a re-simulation.
+  bench       the untraced loop, naming nothing the observer patch adds.
+  benchsteps  traced against untraced, interleaved inside one process.
+
+`bench` names nothing new on purpose, and the whole file guards its use of the
+new API on __has_include of the interface header, so the identical source
+compiles in a tree that does not carry the observer patch. That is what makes
+the disabled-costs-nothing comparison a comparison rather than a skip.
+
+An eighth program is added for the step modes only: it jumps past the end of
+its own bytecode, so instruction fetching throws before the opcode is known and
+the observer must report LAST_OPCODE_SENTINEL. `burn` covers the other
+exceptional shape (out of gas, opcode known) and `revert` a non-exceptional
+halt.
+
+With no arguments the driver is unchanged: M8's transcript still has its 1,308
+ordinary lines and M8's seven checks still pass on this tree.
+---
+ .../vm2/differential/avm_differential.cpp     | 399 +++++++++++++++++-
+ 1 file changed, 396 insertions(+), 3 deletions(-)
+
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp b/barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp
+index 9e6945a8a7..b5cb0ef0c3 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp
++++ b/barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp
+@@ -34,8 +34,35 @@
+ // targets. It is NOT a breadth claim: breadth is M7's 391 upstream tests, and semantics is M19's
+ // 77-comparison differential oracle. Each of the three states its own coverage.
+ 
++// ---------------------------------------------------------------------------
++// M9 -- THE PER-INSTRUCTION EXECUTION OBSERVER, AND WHY THIS DRIVER COMPILES BOTH WAYS.
++//
++// `steps`, `events`, `bench` and `benchsteps` below are M9's. The default mode is M8's and is
++// byte-for-byte the transcript M8 committed: M9 adds argv dispatch and nothing that runs before
++// a mode is chosen, so `avm_differential` with no arguments still prints M8's 1,308 ordinary
++// lines and the M8 checks still pass on this tree.
++//
++// The observer patch is upstream's fourth prepared patch. It may be present or absent in the tree
++// this file is compiled in, and the whole point of `test_observer_disabled_is_free` is to compare
++// the two. `__has_include` on the interface header decides, so ONE source builds against BOTH
++// trees. The prepared `verify.sh` did this by rewriting its own driver with seven `sed`
++// expressions and, when no second tree was supplied, printed `SKIPPED` and exited 0 -- the fifth
++// such branch in this campaign, and the one this milestone owns.
++// ---------------------------------------------------------------------------
++#if defined(__has_include)
++#if __has_include("barretenberg/vm2/simulation/interfaces/execution_observer.hpp")
++#define AVM_HAS_EXECUTION_OBSERVER 1
++#endif
++#endif
++#ifndef AVM_HAS_EXECUTION_OBSERVER
++#define AVM_HAS_EXECUTION_OBSERVER 0
++#endif
++
++#include <chrono>
+ #include <cstddef>
+ #include <cstdint>
++#include <cstdlib>
++#include <cstring>
+ #include <iostream>
+ #include <map>
+ #include <span>
+@@ -48,8 +75,10 @@
+ #include "barretenberg/vm2/common/field.hpp"
+ #include "barretenberg/vm2/common/memory_types.hpp"
+ #include "barretenberg/vm2/common/opcodes.hpp"
++#include "barretenberg/vm2/simulation/events/events_container.hpp"
+ #include "barretenberg/vm2/simulation/lib/memory_merkle_db.hpp"
+ #include "barretenberg/vm2/simulation/lib/serialization.hpp"
++#include "barretenberg/vm2/simulation_helper.hpp"
+ #include "barretenberg/vm2/testing/bytecode_builder.hpp"
+ #include "barretenberg/vm2/testing/instruction_builder.hpp"
+ #include "barretenberg/vm2/testing/public_tx_simulation_tester.hpp"
+@@ -504,13 +533,20 @@ void section_padding()
+ // ---------------------------------------------------------------------------
+ // Section 6 -- the seven corpus programs through the real AVM.
+ // ---------------------------------------------------------------------------
+-void section_programs()
++// The seven M8 compares field for field. Returned from one place so that no mode can silently
++// differ from another about what "the corpus" is.
++std::vector<std::pair<std::string, std::vector<uint8_t>>> corpus()
+ {
+-    const std::vector<std::pair<std::string, std::vector<uint8_t>>> programs = {
++    return {
+         { "add", program_add() },       { "revert", program_revert() },       { "loop", program_loop() },
+         { "sha256", program_sha256() }, { "poseidon2", program_poseidon2() }, { "storage", program_storage() },
+         { "burn", program_burn() },
+     };
++}
++
++void section_programs()
++{
++    const auto programs = corpus();
+     line("programs.count", dec(static_cast<uint64_t>(programs.size())));
+ 
+     for (const auto& [name, bytecode] : programs) {
+@@ -546,10 +582,367 @@ void section_programs()
+     }
+ }
+ 
++// ===========================================================================
++// M9 -- the per-instruction execution observer.
++// ===========================================================================
++
++// An eighth program, used by the STEP modes only and deliberately not by M8's transcript.
++//
++// It jumps past the end of its own bytecode, so `read_instruction` throws InstructionFetchingError
++// BEFORE the opcode is known. That is the hardest case for the hoist the patch performs: `pc` is
++// already assigned but `opcode` never is, so the observer must still fire and must report
++// LAST_OPCODE_SENTINEL. `burn` covers the other exceptional shape -- out of gas, where the opcode
++// IS known -- and `revert` covers a NON-exceptional halt, so the three together separate
++// "fires on every halt" from "fires on the ordinary path only".
++std::vector<uint8_t> program_oob()
++{
++    BytecodeBuilder b;
++    b.add(set8(0, MemoryTag::U32, 0));
++    b.add(InstructionBuilder(WireOpCode::JUMP_32).operand(static_cast<uint32_t>(0x00ffff00U)).build());
++    return b.build();
++}
++
++// The corpus the step modes run: M8's seven, plus `oob`. The extra program is named in the printed
++// coverage line so no number from this mode can be quoted as M8's.
++std::vector<std::pair<std::string, std::vector<uint8_t>>> step_corpus()
++{
++    auto v = corpus();
++    v.emplace_back("oob", program_oob());
++    return v;
++}
++
++std::string stat_or(const TxSimulationResult& r, const std::string& key, const std::string& fallback)
++{
++    const auto it = r.stats.find(key);
++    return it == r.stats.end() ? fallback : it->second;
++}
++
++#if AVM_HAS_EXECUTION_OBSERVER
++// One step record, every field of it, in the same shape the `events` mode prints an ExecutionEvent.
++// Printing every field per record rather than a digest is deliberate: this campaign has more than
++// once had a count agree while the thing being counted did not.
++std::string step_fields(const ExecutionStep& s)
++{
++    return "ctx=" + dec(s.context_id) + " pc=" + dec(s.pc) + " op=" + dec(static_cast<uint64_t>(s.opcode)) +
++           " l2=" + dec(s.gas_used.l2_gas) + " da=" + dec(s.gas_used.da_gas) + " addr=" + hex(s.contract_address);
++}
++
++const std::vector<ExecutionStep>& empty_steps()
++{
++    static const std::vector<ExecutionStep> none;
++    return none;
++}
++#endif
++
++PublicSimulatorConfig step_config()
++{
++    auto config = PublicTxSimulationTester::default_config();
++    config.collect_statistics = true;
++    return config;
++}
++
++// One simulation of one program in a FRESH tester, so `tx_count` -- and therefore the tx's first
++// nullifier -- is the same on every run. Reusing one tester for the traced and untraced runs would
++// make the two results differ for a reason that has nothing to do with the observer.
++TxSimulationResult run_once(const std::vector<uint8_t>& bytecode, bool collect_steps, bool collect_hints)
++{
++    PublicTxSimulationTester tester;
++    auto contract = tester.deploy_contract(bytecode);
++    auto config = step_config();
++    config.collect_hints = collect_hints;
++#if AVM_HAS_EXECUTION_OBSERVER
++    config.collect_execution_steps = collect_steps;
++#else
++    (void)collect_steps;
++#endif
++    return tester.simulate_tx({ TestEnqueuedCall{ .contract_address = contract.address } }, config);
++}
++
++// ---------------------------------------------------------------------------
++// `steps` -- the step records themselves, per record, plus what the milestone's other three
++// functional checks read: absence when the flag is off, the untouched result, and the last record
++// on each of the three halting shapes.
++// ---------------------------------------------------------------------------
++void mode_steps()
++{
++    line("avmSteps.version", "1");
++    line("avmSteps.coverage", "eight-hand-assembled-programs-per-record-seven-of-them-M8s-plus-oob");
++    line("avmSteps.observerCompiledIn", dec(AVM_HAS_EXECUTION_OBSERVER));
++    diag("target.pointerBits", dec(static_cast<uint64_t>(sizeof(void*) * 8)));
++
++    const auto programs = step_corpus();
++    line("avmSteps.programs.count", dec(static_cast<uint64_t>(programs.size())));
++
++    // Every untraced result, kept so that `TxSimulationResult::operator==` can be shown to
++    // DISCRIMINATE. `resultIdenticalWithStepsRemoved` below is worth nothing if that operator
++    // returns true for everything, and this campaign has met a membership test over an empty
++    // haystack before.
++    std::vector<TxSimulationResult> untraced;
++
++    for (const auto& [name, bytecode] : programs) {
++        const std::string p = "steps." + name;
++        line(p + ".bytes", dec(static_cast<uint64_t>(bytecode.size())));
++
++        const TxSimulationResult off = run_once(bytecode, /*collect_steps=*/false, /*collect_hints=*/false);
++        const TxSimulationResult on = run_once(bytecode, /*collect_steps=*/true, /*collect_hints=*/false);
++        untraced.push_back(off);
++
++        // Two runs of the SAME program in two fresh testers, both untraced, must compare equal:
++        // otherwise `resultIdenticalWithStepsRemoved` would be measuring determinism rather than
++        // the observer, and would pass for the wrong reason.
++        const TxSimulationResult off_again = run_once(bytecode, /*collect_steps=*/false, /*collect_hints=*/false);
++        line(p + ".untracedRunsReproducible", (off_again == off) ? "1" : "0");
++
++        const std::string executed = stat_or(off, "total_instructions_executed", "MISSING");
++        line(p + ".instructionsExecuted", executed);
++        line(p + ".revertCode", dec(static_cast<uint64_t>(on.revert_code)));
++        line(p + ".totalGas", dec(on.gas_used.total_gas.l2_gas) + "/" + dec(on.gas_used.total_gas.da_gas));
++
++#if AVM_HAS_EXECUTION_OBSERVER
++        // `execution_steps` is an std::optional populated only when configured, exactly like `logs`
++        // is for collect_debug_logs. Absence with the flag off is the shape the patch promises.
++        line(p + ".absentWhenOff", off.execution_steps.has_value() ? "0" : "1");
++        line(p + ".presentWhenOn", on.execution_steps.has_value() ? "1" : "0");
++
++        // The result with the steps removed must be the SAME OBJECT as the untraced result.
++        // TxSimulationResult has a defaulted operator==, so this compares every field of every
++        // nested struct -- gas, revert code, the whole public tx effect, the call-stack metadata
++        // and the stats map -- not a hash and not a chosen subset.
++        TxSimulationResult stripped = on;
++        stripped.execution_steps = std::nullopt;
++        line(p + ".resultIdenticalWithStepsRemoved", (stripped == off) ? "1" : "0");
++
++        const std::vector<ExecutionStep>& steps = on.execution_steps ? *on.execution_steps : empty_steps();
++        line(p + ".count", dec(static_cast<uint64_t>(steps.size())));
++        line(p + ".countEqualsInstructionsExecuted", (dec(static_cast<uint64_t>(steps.size())) == executed) ? "1" : "0");
++
++        for (size_t i = 0; i < steps.size(); ++i) {
++            line(p + "." + dec(static_cast<uint64_t>(i)), step_fields(steps[i]));
++        }
++        if (!steps.empty()) {
++            // Named separately as well as being the last indexed record, so the exceptional-halt
++            // check reads a line whose key does not depend on how many instructions ran.
++            line(p + ".last", step_fields(steps.back()));
++            line(p + ".lastOpcodeIsSentinel",
++                 steps.back().opcode == static_cast<uint8_t>(WireOpCode::LAST_OPCODE_SENTINEL) ? "1" : "0");
++        } else {
++            line(p + ".last", "NONE");
++            line(p + ".lastOpcodeIsSentinel", "0");
++        }
++#else
++        // The tree this was compiled in does NOT carry the observer patch. Printed rather than
++        // omitted: a mode that silently produces fewer lines is a skip with extra steps.
++        line(p + ".absentWhenOff", "NOOBSERVER");
++        line(p + ".presentWhenOn", "NOOBSERVER");
++        line(p + ".resultIdenticalWithStepsRemoved", "NOOBSERVER");
++        line(p + ".count", "NOOBSERVER");
++        line(p + ".countEqualsInstructionsExecuted", "NOOBSERVER");
++        line(p + ".last", "NOOBSERVER");
++        line(p + ".lastOpcodeIsSentinel", "NOOBSERVER");
++#endif
++#ifdef __wasm__
++        diag("wasm.stepsLinearMemoryPages.after." + name,
++             dec(static_cast<uint64_t>(__builtin_wasm_memory_size(0))));
++#endif
++    }
++
++    // How many of the eight untraced results are pairwise distinct under the same `operator==`
++    // that `resultIdenticalWithStepsRemoved` uses. Eight means it separates every program from
++    // every other one, so "identical" above is a finding rather than a tautology.
++    size_t distinct = 0;
++    size_t equal_pairs = 0;
++    for (size_t i = 0; i < untraced.size(); ++i) {
++        bool seen = false;
++        for (size_t j = 0; j < i; ++j) {
++            if (untraced[i] == untraced[j]) {
++                seen = true;
++                ++equal_pairs;
++            }
++        }
++        if (!seen) {
++            ++distinct;
++        }
++    }
++    line("avmSteps.crossProgramDistinctResults", dec(static_cast<uint64_t>(distinct)));
++    line("avmSteps.crossProgramEqualPairs", dec(static_cast<uint64_t>(equal_pairs)));
++
++#ifdef __wasm__
++    diag("wasm.stepsPeakLinearMemoryPages", dec(static_cast<uint64_t>(__builtin_wasm_memory_size(0))));
++    diag("wasm.stepsPeakLinearMemoryKiB", dec(static_cast<uint64_t>(__builtin_wasm_memory_size(0)) * 64));
++#endif
++    line("avmSteps.done", "1");
++}
++
++// ---------------------------------------------------------------------------
++// `events` -- THE NO-PATCH FALLBACK, EXERCISED RATHER THAN ASSUMED.
++//
++// This is what the AVM can already do today, with no change to upstream at all. It is NOT what
++// `AvmSimAPI::simulate(collect_hints = true)` returns: `simulate_for_hint_collection_internal`
++// instantiates `simulate_for_witgen_internal<NoopEventEmitter, NoopEventEmitter>` -- "we don't want
++// to collect events" -- so that entry point drops every ExecutionEvent it produces. The events
++// materialise only in `AvmSimulationHelper::simulate_for_witgen(hints)`, which runs a SECOND full
++// simulation over the hinted DBs, through `Execution::execute` rather than `HybridExecution`.
++//
++// So the fallback costs hint collection AND a whole re-simulation, which is worth stating exactly.
++//
++// The lines are printed in the SAME field format the step records use, so the two seams can be
++// compared record for record rather than only by count.
++// ---------------------------------------------------------------------------
++void mode_events()
++{
++    line("avmEvents.version", "1");
++    line("avmEvents.coverage", "eight-hand-assembled-programs-per-record-the-upstream-ExecutionEvent-seam");
++    diag("target.pointerBits", dec(static_cast<uint64_t>(sizeof(void*) * 8)));
++
++    for (const auto& [name, bytecode] : step_corpus()) {
++        const std::string p = "events." + name;
++        const TxSimulationResult hinted = run_once(bytecode, /*collect_steps=*/false, /*collect_hints=*/true);
++        line(p + ".instructionsExecuted", stat_or(hinted, "total_instructions_executed", "MISSING"));
++        line(p + ".hintsPresent", hinted.hints.has_value() ? "1" : "0");
++        if (!hinted.hints.has_value()) {
++            line(p + ".count", "NOHINTS");
++            continue;
++        }
++
++        AvmSimulationHelper helper;
++        const auto events = helper.simulate_for_witgen(*hinted.hints);
++        line(p + ".count", dec(static_cast<uint64_t>(events.execution.size())));
++        for (size_t i = 0; i < events.execution.size(); ++i) {
++            const auto& e = events.execution[i];
++            line(p + "." + dec(static_cast<uint64_t>(i)),
++                 "ctx=" + dec(e.before_context_event.id) + " pc=" + dec(e.before_context_event.pc) +
++                     " op=" + dec(static_cast<uint64_t>(e.error == simulation::ExecutionError::INSTRUCTION_FETCHING ||
++                                                                e.error == simulation::ExecutionError::BYTECODE_RETRIEVAL
++                                                            ? static_cast<uint8_t>(WireOpCode::LAST_OPCODE_SENTINEL)
++                                                            : static_cast<uint8_t>(e.wire_instruction.opcode))) +
++                     " l2=" + dec(e.after_context_event.gas_used.l2_gas) +
++                     " da=" + dec(e.after_context_event.gas_used.da_gas) +
++                     " addr=" + hex(e.after_context_event.contract_addr));
++        }
++    }
++    line("avmEvents.done", "1");
++}
++
++// ---------------------------------------------------------------------------
++// `bench <program> <reps>` -- the UNTRACED loop, in a form that names nothing the observer patch
++// adds, so the identical source compiles in a tree that does not carry the patch. This is the
++// measurement behind `test_observer_disabled_is_free`: the harness interleaves this binary from a
++// patched tree with the same binary from an unpatched one.
++// ---------------------------------------------------------------------------
++// Kept alive across the whole run and printed at the end, so nothing the timed simulation produced
++// can be discarded as dead.
++volatile uint64_t bench_sink = 0;
++
++uint64_t time_one(const std::vector<uint8_t>& bytecode, bool collect_steps)
++{
++    PublicTxSimulationTester tester;
++    auto contract = tester.deploy_contract(bytecode);
++    auto config = step_config();
++#if AVM_HAS_EXECUTION_OBSERVER
++    config.collect_execution_steps = collect_steps;
++#else
++    (void)collect_steps;
++#endif
++    const auto t0 = std::chrono::steady_clock::now();
++    const auto result = tester.simulate_tx({ TestEnqueuedCall{ .contract_address = contract.address } }, config);
++    const auto t1 = std::chrono::steady_clock::now();
++    // Consume the result so no part of the simulation can be optimised away, and so a traced run
++    // is charged for the vector it materialised rather than having it elided.
++    bench_sink += static_cast<uint64_t>(result.gas_used.total_gas.l2_gas) + result.public_tx_effect.nullifiers.size();
++#if AVM_HAS_EXECUTION_OBSERVER
++    bench_sink += result.execution_steps ? result.execution_steps->size() : 0;
++#endif
++    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count());
++}
++
++const std::vector<uint8_t>& named_program(const std::string& want, const std::vector<std::pair<std::string, std::vector<uint8_t>>>& all)
++{
++    for (const auto& [name, bytecode] : all) {
++        if (name == want) {
++            return bytecode;
++        }
++    }
++    std::cerr << "avm_differential: no such program: " << want << "\n";
++    std::exit(2);
++}
++
++void mode_bench(const std::string& program, uint64_t reps)
++{
++    line("bench.version", "1");
++    line("bench.program", program);
++    line("bench.observerCompiledIn", dec(AVM_HAS_EXECUTION_OBSERVER));
++    const auto all = step_corpus();
++    const auto& bytecode = named_program(program, all);
++    // One untimed run first: the first simulation of a process pays for lazy initialisation that
++    // has nothing to do with what is being compared.
++    (void)time_one(bytecode, false);
++    for (uint64_t i = 0; i < reps; ++i) {
++        line("bench.us." + dec(i), dec(time_one(bytecode, false)));
++    }
++    line("bench.sink", dec(bench_sink));
++    line("bench.done", "1");
++}
++
++// ---------------------------------------------------------------------------
++// `benchsteps <program> <reps>` -- traced against untraced, INTERLEAVED INSIDE ONE PROCESS, which
++// is the measurement behind `verify_observation_hook_overhead_budget`. Interleaved rather than
++// blocked, because a machine that gets busier halfway through would otherwise put the whole
++// difference into whichever arm ran second.
++// ---------------------------------------------------------------------------
++void mode_benchsteps(const std::string& program, uint64_t reps)
++{
++    line("benchsteps.version", "1");
++    line("benchsteps.program", program);
++    line("benchsteps.observerCompiledIn", dec(AVM_HAS_EXECUTION_OBSERVER));
++    const auto all = step_corpus();
++    const auto& bytecode = named_program(program, all);
++    (void)time_one(bytecode, false);
++    for (uint64_t i = 0; i < reps; ++i) {
++        line("benchsteps.off.us." + dec(i), dec(time_one(bytecode, false)));
++        line("benchsteps.on.us." + dec(i), dec(time_one(bytecode, true)));
++    }
++    line("benchsteps.sink", dec(bench_sink));
++    line("benchsteps.done", "1");
++}
++
+ } // namespace
+ 
+-int main()
++int main(int argc, char** argv)
+ {
++    // M9 adds argv dispatch. With no arguments this is M8's driver, unchanged: nothing above runs
++    // before the mode is chosen, so the committed 1,308-line transcript is unaffected and M8's
++    // seven checks still pass on a tree carrying this file.
++    const std::string mode = argc > 1 ? std::string(argv[1]) : std::string();
++    if (mode == "steps") {
++        mode_steps();
++        return 0;
++    }
++    if (mode == "events") {
++        mode_events();
++        return 0;
++    }
++    if (mode == "bench" || mode == "benchsteps") {
++        if (argc < 4) {
++            std::cerr << "usage: avm_differential " << mode << " <program> <reps>\n";
++            return 2;
++        }
++        const uint64_t reps = static_cast<uint64_t>(std::atoll(argv[3]));
++        if (reps == 0) {
++            std::cerr << "avm_differential: reps must be positive\n";
++            return 2;
++        }
++        if (mode == "bench") {
++            mode_bench(argv[2], reps);
++        } else {
++            mode_benchsteps(argv[2], reps);
++        }
++        return 0;
++    }
++    if (!mode.empty()) {
++        std::cerr << "avm_differential: unknown mode: " << mode << "\n";
++        return 2;
++    }
++
+     line("avmDifferential.version", "1");
+     line("avmDifferential.coverage", "seven-hand-assembled-corpus-programs-field-for-field");
+ 
+-- 
+2.50.1
+

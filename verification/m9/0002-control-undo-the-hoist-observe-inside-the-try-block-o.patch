@@ -1,0 +1,49 @@
+From 44e3ca7d056841b0154a8f7fe16b5b0ccf99366d Mon Sep 17 00:00:00 2001
+From: m9 <m9@example.invalid>
+Date: Sat, 22 Aug 2026 16:39:47 +0300
+Subject: [PATCH] control: undo the hoist -- observe inside the try block only
+
+---
+ .../standalone/hybrid_execution.cpp           | 19 ++++++++++++-------
+ 1 file changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/hybrid_execution.cpp b/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/hybrid_execution.cpp
+index 37ac7a6eb4..f59c0899c6 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/hybrid_execution.cpp
++++ b/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/hybrid_execution.cpp
+@@ -73,6 +73,18 @@ EnqueuedCallResult HybridExecution::execute(std::unique_ptr<ContextInterface> en
+             GasEvent gas_event; // FIXME(fcarreiro): shouldn't need this.
+             gas_tracker = execution_components.make_gas_tracker(gas_event, instruction, context);
+             dispatch_opcode(instruction.get_exec_opcode(), context, resolved_operands);
++
++            // MUTATION (control for test_observer_fires_on_exceptional_halt): the observer call
++            // moved INSIDE the try block, which is what the hook would look like without the
++            // hoist the patch performs. Every ordinary instruction is still observed; an
++            // instruction that ends in an exceptional halt is not.
++            if (execution_observer_ != nullptr) [[unlikely]] {
++                execution_observer_->on_instruction(context.get_context_id(),
++                                                    context.get_address(),
++                                                    observed_pc,
++                                                    observed_opcode,
++                                                    context.get_gas_used());
++            }
+         }
+         // TODO(fcarreiro): handle this in a better way.
+         catch (const BytecodeRetrievalError& e) {
+@@ -100,13 +112,6 @@ EnqueuedCallResult HybridExecution::execute(std::unique_ptr<ContextInterface> en
+             throw;
+         }
+ 
+-        // Per-instruction observation. One predictable null check per instruction when no
+-        // observer is installed, which is the default.
+-        if (execution_observer_ != nullptr) [[unlikely]] {
+-            execution_observer_->on_instruction(
+-                context.get_context_id(), context.get_address(), observed_pc, observed_opcode, context.get_gas_used());
+-        }
+-
+         // We always do what follows. "Finally".
+         // Move on to the next pc.
+         context.set_pc(context.get_next_pc());
+-- 
+2.50.1
+
