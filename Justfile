@@ -681,3 +681,95 @@ verify-m8:
       echo "verify-m8: all checks passed"
     fi
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M9 — the per-instruction execution observer, and its upstream patch
+# ---------------------------------------------------------------------------
+# The seven checks prepare FIVE worktrees of 233d8e0993 under $M9_WORK (default
+# ~/.cache/aztec-m9-observer):
+#
+#   m9         the four AVM_WASM series patches + THE OBSERVER PATCH + M7's
+#              AVM_SIM_TESTS overlay + M8's AVM_DIFFERENTIAL overlay + M9's driver
+#              overlay. Built for x86-64 AND wasm32-wasip1.
+#   m9ref      the same MINUS the observer patch — the unpatched half of the
+#              disabled-costs-nothing comparison. The driver source is byte-identical
+#              in both: it selects the API with __has_include.
+#   m9nohoist  m9 plus ONE commit moving the observer call back inside the try block.
+#              The control: burn then records 38,902 of its 38,903 instructions and
+#              oob 2 of its 3, while every program that halts normally is unaffected.
+#   m9up       233d8e0993 + THE OBSERVER PATCH ALONE. Upstream's own `default` preset
+#              and upstream's own vm2_tests target, nothing of ours anywhere.
+#   m9upbase   pristine 233d8e0993, the same target, as the before side.
+#
+# Budget about 20 GB and 40 minutes cold, of which upstream's own native vm2_tests
+# (264 MB, and the whole proving stack behind it) built TWICE is most of both.
+# Fourteen of those tests need the bn254 CRS: run barretenberg/crs/bootstrap.sh once.
+# /tmp is usually a tmpfs and is the wrong place.
+#
+# COVERAGE, because this milestone's numbers must never be quoted as another's: the
+# step-record comparison is EIGHT hand-assembled programs — M8's seven plus `oob` —
+# compared PER RECORD, 39,086 records carrying context id, pc, opcode, cumulative l2
+# and da gas and the contract address. That is an integration check across two targets
+# plus an agreement with upstream's own ExecutionEvent seam. It is NOT a breadth claim
+# (M7's 391 upstream tests) and NOT a semantic one (M19's 77-comparison oracle).
+#
+#   just verify-step-records     verify_observation_hook_step_records_identical  (the check that BUILDS)
+#   just verify-no-perturbation  test_observer_does_not_perturb
+#   just verify-exceptional-halt test_observer_fires_on_exceptional_halt         (builds the control)
+#   just verify-overhead         verify_observation_hook_overhead_budget
+#   just verify-disabled-free    test_observer_disabled_is_free                  (builds the reference tree)
+#   just verify-event-fallback   test_existing_event_emitter_path_still_available
+#   just verify-observer-patch   verify_execution_observer_patch_applies_to_upstream (builds vm2_tests twice)
+#   just verify-m9               all seven, in order
+
+# Step records, per record, native versus wasm on two runtimes.
+verify-step-records:
+    @verification/verify_observation_hook_step_records_identical.sh
+
+# The same simulation result with and without an observer attached.
+verify-no-perturbation:
+    @verification/test_observer_does_not_perturb.sh
+
+# The instruction that throws is the LAST recorded step, not a missing one.
+verify-exceptional-halt:
+    @verification/test_observer_fires_on_exceptional_halt.sh
+
+# Traced versus untraced with all 38,903 records materialised, per target.
+verify-overhead:
+    @verification/verify_observation_hook_overhead_budget.sh
+
+# Patched versus unpatched with the flag off, against a measured noise floor.
+verify-disabled-free:
+    @verification/test_observer_disabled_is_free.sh
+
+# The no-patch fallback, run rather than assumed, and compared record for record.
+verify-event-fallback:
+    @verification/test_existing_event_emitter_path_still_available.sh
+
+# The prepared patch on the pinned anchor, and upstream's own vm2_tests on both sides.
+verify-observer-patch:
+    @verification/verify_execution_observer_patch_applies_to_upstream.sh
+
+# Run the whole M9 verification set; every check runs even if an earlier one fails.
+verify-m9:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_observation_hook_step_records_identical \
+      test_observer_does_not_perturb \
+      test_observer_fires_on_exceptional_halt \
+      verify_observation_hook_overhead_budget \
+      test_observer_disabled_is_free \
+      test_existing_event_emitter_path_still_available \
+      verify_execution_observer_patch_applies_to_upstream
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m9: FAILED" >&2
+    else
+      echo "verify-m9: all checks passed"
+    fi
+    exit "$rc"
