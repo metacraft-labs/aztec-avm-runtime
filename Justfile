@@ -76,6 +76,29 @@
 # One of the two ecc_tests runs deliberately does not terminate — that is the
 # finding, not a hang — so it is SIGKILLed after $M4_RUN_TIMEOUT (default 180s).
 #
+# The M5 verification set (the prepared widen-before-shift portability fix):
+#
+#   just verify-bytecode-64bit         test_bytecode_commitment_identical_on_64bit  (~1.5 min)
+#   just verify-bytecode-32bit         test_bytecode_commitment_correct_on_32bit    (~10 s)
+#   just verify-shift-diagnostic       test_shift_count_overflow_diagnostic         (~6 min)
+#   just verify-bytecode-shift-repro   reproduce_aztec_bytecode_size_shift_32bit    (~3 min)
+#   just verify-m5                     all four, in order (12m28s cold, 1.5 GB; 9m53s warm)
+#
+# They configure THREE worktrees of 233d8e0993 under $M5_WORK (default
+# $TMPDIR/aztec-m5-bytecode-shift) and build vm2_sim in each: the base commit, the
+# base plus the patch, and a DECOY carrying the patch's own added line with the
+# shift count changed to 31. The decoy is not decoration — a check that only shows
+# "the 64-bit results did not change" goes green for any patch that leaves them
+# alone, including one that fixes the expression to something else wrong.
+#
+# The 32-bit target is real execution: the probes are compiled for wasm32-wasip1
+# with the nix-pinned wasi-sdk 33 and RUN on wasmtime. `-m32` was tried and does
+# not work, for an unrelated reason recorded in the contribution's PR.md.
+#
+# The diagnostic check recompiles all 249 non-test vm2 translation units for
+# wasm32 twice, which is most of its six minutes and is what backs the claim that
+# contract_crypto.cpp:61 is the only place in vm2 that shifts before widening.
+#
 # M1's working tools, which the checks drive:
 #
 #   just check-drift                   the vendored tree vs its recorded commits
@@ -369,5 +392,47 @@ verify-m4:
       echo "verify-m4: FAILED" >&2
     else
       echo "verify-m4: all checks passed"
+    fi
+    exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M5 — the prepared upstream patch widening before the shift in the public
+# bytecode commitment
+# ---------------------------------------------------------------------------
+
+# Upstream's own commitment function, built and run from an unpatched and a patched tree.
+verify-bytecode-64bit:
+    @verification/test_bytecode_commitment_identical_on_64bit.sh
+
+# The two expressions in barretenberg's own uint256_t, run on x86_64 and on wasm32.
+verify-bytecode-32bit:
+    @verification/test_bytecode_commitment_correct_on_32bit.sh
+
+# -Wshift-count-overflow on the real file, and the 249-TU scan behind "the only place in vm2".
+verify-shift-diagnostic:
+    @verification/test_shift_count_overflow_diagnostic.sh
+
+# The contribution's shape, its write-up's numbers, and its own verify.sh under five mutations.
+verify-bytecode-shift-repro:
+    @verification/reproduce_aztec_bytecode_size_shift_32bit.sh
+
+# Run the whole M5 verification set; every check runs even if an earlier one fails.
+verify-m5:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      test_bytecode_commitment_identical_on_64bit \
+      test_bytecode_commitment_correct_on_32bit \
+      test_shift_count_overflow_diagnostic \
+      reproduce_aztec_bytecode_size_shift_32bit
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m5: FAILED" >&2
+    else
+      echo "verify-m5: all checks passed"
     fi
     exit "$rc"
