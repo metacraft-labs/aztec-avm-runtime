@@ -523,3 +523,70 @@ verify-m6:
       echo "verify-m6: all checks passed"
     fi
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M7 — upstream's own vm2 test suite under wasm
+# ---------------------------------------------------------------------------
+# The six checks prepare ONE worktree of 233d8e0993 under $M7_WORK (default
+# $TMPDIR/aztec-m7-vm2-tests) carrying the four AVM_WASM series patches plus M7's
+# own AVM_SIM_TESTS overlay (verification/m7/), and build TWO trees inside it:
+# the wasm-avm one, and a native one that also builds upstream's OWN vm2_tests —
+# the binary with the proving stack and dsl in it. That native binary is the
+# denominator: without it the wasm pass rate would be quoted against a suite we
+# chose the size of. Budget about 12 GB under $M7_WORK; /tmp is usually a tmpfs
+# and is the wrong place.
+#
+#   just verify-vm2-tests-build         verify_vm2_tests_build_for_wasm              (~25 min cold)
+#   just verify-vm2-tests-v8            verify_vm2_tests_pass_under_v8               (~6 min)
+#   just verify-vm2-tests-wasmtime      verify_vm2_tests_pass_under_wasmtime         (~2 min)
+#   just verify-vm2-tests-parity        verify_vm2_tests_native_wasm_per_test_parity (~1 min)
+#   just verify-vm2-tests-exclusions    verify_vm2_tests_exclusions_enumerated       (~1 min)
+#   just verify-vm2-tests-world-state   verify_world_state_reference_tests_pass_under_wasm (~2 min)
+#   just verify-m7                      all six, in order
+
+# vm2_sim's own test binary compiles and links for wasm32-wasip1, and the narrowings are measured.
+verify-vm2-tests-build:
+    @verification/verify_vm2_tests_build_for_wasm.sh
+
+# The shipped wasm binary runs on V8, with the two corrections that make it possible as controls.
+verify-vm2-tests-v8:
+    @verification/verify_vm2_tests_pass_under_v8.sh
+
+# The same suite on wasmtime, with the memory import satisfied statically.
+verify-vm2-tests-wasmtime:
+    @verification/verify_vm2_tests_pass_under_wasmtime.sh
+
+# Native versus wasm, per test rather than by count, inside upstream's own suite.
+verify-vm2-tests-parity:
+    @verification/verify_vm2_tests_native_wasm_per_test_parity.sh
+
+# Every excluded test named with a reason derived from the tree, and the partition asserted.
+verify-vm2-tests-exclusions:
+    @verification/verify_vm2_tests_exclusions_enumerated.sh
+
+# The in-memory world state and the standalone gadgets, and what is linked but not exercised.
+verify-vm2-tests-world-state:
+    @verification/verify_world_state_reference_tests_pass_under_wasm.sh
+
+# Run the whole M7 verification set; every check runs even if an earlier one fails.
+verify-m7:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_vm2_tests_build_for_wasm \
+      verify_vm2_tests_pass_under_v8 \
+      verify_vm2_tests_pass_under_wasmtime \
+      verify_vm2_tests_native_wasm_per_test_parity \
+      verify_vm2_tests_exclusions_enumerated \
+      verify_world_state_reference_tests_pass_under_wasm
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m7: FAILED" >&2
+    else
+      echo "verify-m7: all checks passed"
+    fi
+    exit "$rc"

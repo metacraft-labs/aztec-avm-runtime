@@ -1,0 +1,438 @@
+From c724ad771938912eeae5b57a7bc98f90e5cadf36 Mon Sep 17 00:00:00 2001
+From: M7 <m7@local>
+Date: Sat, 22 Aug 2026 09:53:19 +0300
+Subject: [PATCH] =?UTF-8?q?test(vm2):=20AVM=5FSIM=5FTESTS=20=E2=80=94=20th?=
+ =?UTF-8?q?e=20simulation-side=20test=20suite,=20buildable=20for=20wasm?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+`vm2_sim` is declared with no `TEST_SOURCE_FILES`, and the `vm2_tests` binary
+that carries them is created inside `if(AVM)` from a recursive glob of *every*
+`*.test.cpp` under `vm2/`, linked against `sumcheck stdlib_honk_verifier
+goblin_avm` and, one line further down, `dsl vm2`. None of that is available in
+an `AVM_WASM` build, and none of it is needed by the tests that sit beside
+`vm2_sim`'s own sources.
+
+Add `option(AVM_SIM_TESTS ... OFF)`, and under it give `vm2_sim` its own
+`TEST_SOURCE_FILES` — the `simulation/`, `common/` and `tooling/` test sources,
+plus the test-support translation units from `testing/` that upstream compiles
+into the `vm2` module. The binary is then produced by `cmake/module.cmake`'s own
+machinery: the same `add_executable`, the same gtest/gmock linkage, the same
+`-Wl,-z,stack-size=8388608` under WASM and the same `gtest_discover_tests`
+natively. Default OFF, so no existing configuration gains or loses a target.
+
+Measured at `233d8e0993` + the four AVM_WASM series patches: `vm2_tests` declares
+1,803 tests, `vm2_sim_tests` 391, and the 391 are a subset of the 1,803 name for
+name. Native and `wasm32-wasip1` both run 391 from 60 suites and pass all of
+them, with identical name sets.
+
+Four things were needed to get there, each of them a defect on its own terms:
+
+* `cmake/gtest.cmake`: googletest's own CMake puts `-DGTEST_HAS_PTHREAD=1` in
+  `cxx_base_flags` whenever `find_package(Threads)` succeeds — which it does
+  under wasi-sdk, whose sysroot carries pthread stubs — and applies it to gtest's
+  four translation units only. Consumers of the headers then see the header's own
+  default, which is 0 for wasi, so `internal::MutexBase` is a different type on
+  the two sides of the library boundary. Every wasm test binary that mixes them
+  is an ODR violation; it surfaces as `pthread_mutex_lock(&mutex_) failed with
+  error 16` or as `Condition has_owner_ && pthread_equal(owner_, pthread_self())
+  failed` out of gmock's global expectation registry. `GTEST_HAS_EXCEPTIONS=0`
+  and `GTEST_HAS_STREAM_REDIRECTION=0` were `PRIVATE` on gtest for the same
+  reason and have the same problem — and `GTEST_HAS_EXCEPTIONS=0` is simply wrong
+  for an `AVM_WASM` build, which compiles with `-fwasm-exceptions`. Turn pthread
+  support off on both sides and let the exceptions macro detect itself.
+
+* `-Wl,-u,__main_argc_argv` on the wasm test binary. wasi-sdk's clang renames
+  `int main(int, char**)` to `__main_argc_argv`, and wasi-libc's `__main_void`
+  references it weakly, so wasm-ld never searches `libgtest_main.a`; the entry
+  point resolves to an undefined-weak stub and the module traps at `unreachable`
+  before the first test. Naming the symbol as required pulls gtest's own main, so
+  the wasm binary runs the same program as the native one.
+
+* Five test translation units carry 24 narrowing conversions that are only
+  diagnosed where `size_t` is 32-bit: `indexed_tree_check.test.cpp` (5),
+  `public_data_tree_check.test.cpp` (12), `update_check.test.cpp` (1),
+  `call_stack_metadata_collector.test.cpp` (3) and `hinting_dbs.test.cpp` (3).
+  Seventeen of the 24 are `MemoryTree::update_element` / `get_sibling_path`,
+  which take `size_t`, called with a `uint64_t` or an `index_t`. They are made
+  explicit at the call sites rather than by changing `memory_tree.hpp`'s
+  signatures, which is a library API used well outside these tests.
+
+* `testing/fixtures.cpp`: `empty_trace()` and `get_minimal_trace_with_pi()` build
+  a tracegen trace, which is the proving side. They are guarded by
+  `AVM_SIM_TESTS_WITHOUT_TRACEGEN`, and `common/avm_io.test.cpp` — their only
+  caller among the simulation-side tests — is excluded from the target.
+
+The 1,412 tests outside `vm2_sim_tests` are `constraining/` (1,059), `tracegen/`
+(286), `integration_tests/` (59), `dsl/` (5) and `common/avm_io.test.cpp` (3).
+---
+ barretenberg/cpp/CMakeLists.txt               |  1 +
+ barretenberg/cpp/cmake/gtest.cmake            | 26 +++++++-
+ .../cpp/src/barretenberg/vm2/CMakeLists.txt   | 60 +++++++++++++++++--
+ .../gadgets/indexed_tree_check.test.cpp       | 10 ++--
+ .../gadgets/public_data_tree_check.test.cpp   | 26 ++++----
+ .../simulation/gadgets/update_check.test.cpp  |  2 +-
+ .../call_stack_metadata_collector.test.cpp    |  6 +-
+ .../vm2/simulation/lib/hinting_dbs.test.cpp   |  8 ++-
+ .../src/barretenberg/vm2/testing/fixtures.cpp |  4 ++
+ 9 files changed, 111 insertions(+), 32 deletions(-)
+
+diff --git a/barretenberg/cpp/CMakeLists.txt b/barretenberg/cpp/CMakeLists.txt
+index dcd9588be3..e219487ec3 100644
+--- a/barretenberg/cpp/CMakeLists.txt
++++ b/barretenberg/cpp/CMakeLists.txt
+@@ -65,6 +65,7 @@ option(ENABLE_WASM_BENCH "Enable BB_BENCH benchmarking support in WASM builds (d
+ option(AVM "enable building of vm2 module and bb-avm" ON)
+ option(BB_LITE "Exclude server-side subsystems: lmdb, world_state, ipc, nodejs_module" OFF)
+ option(AVM_WASM "Build the AVM simulator (vm2_sim) for wasm. Additive; implies real C++ exceptions." OFF)
++option(AVM_SIM_TESTS "Build vm2_sim_tests: the simulation-side subset of vm2_tests, without the proving stack. Additive." OFF)
+ 
+ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+     message(STATUS "Compiling for ARM.")
+diff --git a/barretenberg/cpp/cmake/gtest.cmake b/barretenberg/cpp/cmake/gtest.cmake
+index 0bfff9b34f..7931e2c6f4 100644
+--- a/barretenberg/cpp/cmake/gtest.cmake
++++ b/barretenberg/cpp/cmake/gtest.cmake
+@@ -4,6 +4,19 @@ include(FetchContent)
+ set(BUILD_GMOCK ON CACHE INTERNAL BOOL "Build with gMock enabled")
+ set(INSTALL_GTEST OFF CACHE BOOL "gTest installation disabled")
+ 
++if(WASM AND AVM_SIM_TESTS)
++    # googletest's own CMake compiles gtest/gmock with -DGTEST_HAS_PTHREAD=1 whenever
++    # find_package(Threads) succeeds. Under wasi-sdk it does -- the sysroot carries pthread
++    # STUBS -- and the macro is put in `cxx_base_flags`, i.e. on gtest's own translation units
++    # only. Consumers of the headers then see the header's own default, which is 0 for wasi.
++    # `MutexBase` is a DIFFERENT TYPE on the two sides of that line (a pthread_mutex_t plus an
++    # owner on one, an empty struct on the other), so every test binary that mixes them is an
++    # ODR violation; it surfaces as `pthread_mutex_lock(&mutex_) failed with error 16` or as
++    # `Condition has_owner_ && pthread_equal(owner_, pthread_self()) failed` out of gmock's
++    # global expectation registry. Turn it off on BOTH sides.
++    set(gtest_disable_pthreads ON CACHE BOOL "Disable gtest's pthread support under wasm" FORCE)
++endif()
++
+ FetchContent_Declare(
+     GTest
+     GIT_REPOSITORY https://github.com/google/googletest.git
+@@ -27,7 +40,18 @@ if (NOT GTest_FOUND)
+         -w
+     )
+ 
+-    if(WASM)
++    if(WASM AND AVM_SIM_TESTS)
++        # PUBLIC, not PRIVATE: each of these changes gtest's own class layouts and inline
++        # code, so gtest and its consumers must agree. GTEST_HAS_EXCEPTIONS is deliberately
++        # NOT forced to 0 here -- an AVM_WASM build compiles with -fwasm-exceptions and the
++        # header detects that correctly on both sides.
++        target_compile_definitions(
++            gtest
++            PUBLIC
++            GTEST_HAS_PTHREAD=0
++            GTEST_HAS_STREAM_REDIRECTION=0
++        )
++    elseif(WASM)
+         target_compile_definitions(
+             gtest
+             PRIVATE
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt b/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt
+index b83d54d01d..b47c763e9e 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt
++++ b/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt
+@@ -14,12 +14,60 @@ list(APPEND VM2_SIM_SOURCE_FILES
+ # Exclude test, bench, and fuzzer files
+ list(FILTER VM2_SIM_SOURCE_FILES EXCLUDE REGEX ".*\\.(test|bench|fuzzer)\\.cpp$")
+ 
+-# Build vm2_sim module (for nodejs bindings)
+-barretenberg_module_with_sources(
+-  vm2_sim
+-  SOURCE_FILES ${VM2_SIM_SOURCE_FILES}
+-  DEPENDENCIES crypto_merkle_tree world_state_reference
+-)
++# AVM_SIM_TESTS: give vm2_sim its own TEST_SOURCE_FILES, so `vm2_sim_tests` is built by
++# barretenberg's OWN module machinery (the same add_executable, the same gtest linkage, the
++# same WASM stack-size link option) instead of a bespoke runner. It is the simulation-side
++# subset of what the native `vm2_tests` binary carries: `vm2_tests` is created by the
++# `if(AVM)` block below out of *every* *.test.cpp under vm2/, and that binary links
++# `sumcheck stdlib_honk_verifier goblin_avm` plus `dsl` -- the proving stack an AVM_WASM
++# build deliberately excludes. The tests whose sources live beside vm2_sim's own sources do
++# not need any of it.
++#
++# Default OFF and additive: with the option off, not one target moves in any configuration.
++if(AVM_SIM_TESTS)
++  file(GLOB_RECURSE VM2_SIM_TEST_SOURCE_FILES
++    simulation/*.test.cpp
++    common/*.test.cpp
++    tooling/*.test.cpp
++  )
++  # The test-support translation units. Upstream compiles these into the `vm2` module (they
++  # are part of its ALL_SOURCE_FILES glob), which is proving-side; they are test-only, so
++  # here they go into the test objects. `keccakf1600_fixture.test.cpp` is deliberately NOT
++  # among them: it is a tracegen fixture, used only by constraining/ and tracegen/ tests.
++  file(GLOB VM2_SIM_TEST_SUPPORT_FILES testing/*.cpp)
++  list(FILTER VM2_SIM_TEST_SUPPORT_FILES EXCLUDE REGEX ".*\\.(test|bench|fuzzer)\\.cpp$")
++  list(APPEND VM2_SIM_TEST_SOURCE_FILES ${VM2_SIM_TEST_SUPPORT_FILES})
++  # common/avm_io.test.cpp is the only test here that calls a tracegen-bound fixture
++  # (testing::get_minimal_trace_with_pi), which AVM_SIM_TESTS_WITHOUT_TRACEGEN compiles out.
++  list(FILTER VM2_SIM_TEST_SOURCE_FILES EXCLUDE REGEX ".*/avm_io\\.test\\.cpp$")
++
++  barretenberg_module_with_sources(
++    vm2_sim
++    SOURCE_FILES ${VM2_SIM_SOURCE_FILES}
++    TEST_SOURCE_FILES ${VM2_SIM_TEST_SOURCE_FILES}
++    DEPENDENCIES crypto_merkle_tree world_state_reference
++  )
++  # The two fixtures in testing/fixtures.cpp that build a tracegen trace.
++  target_compile_definitions(vm2_sim_test_objects PRIVATE AVM_SIM_TESTS_WITHOUT_TRACEGEN)
++  if(WASM)
++    # wasi-libc's `_start` reaches the program through `__main_void`, which references the
++    # entry point WEAKLY -- and wasi-sdk's clang renames `int main(int, char**)` to
++    # `__main_argc_argv`, which is what libgtest_main.a actually defines. wasm-ld therefore
++    # never searches that archive, the entry resolves to an undefined-weak stub, and the
++    # module traps at `unreachable` before the first test runs (`llvm-nm` on such a binary
++    # shows `__main_void` and no entry point at all). Naming the symbol as required makes the
++    # linker pull gtest's OWN main, so the wasm binary runs the same program as the native
++    # one instead of a bespoke runner.
++    target_link_options(vm2_sim_tests PRIVATE -Wl,-u,__main_argc_argv)
++  endif()
++else()
++  # Build vm2_sim module (for nodejs bindings)
++  barretenberg_module_with_sources(
++    vm2_sim
++    SOURCE_FILES ${VM2_SIM_SOURCE_FILES}
++    DEPENDENCIES crypto_merkle_tree world_state_reference
++  )
++endif()
+ 
+ # vm2_sim needs -fPIC because it's linked into the nodejs_module shared library
+ set_target_properties(vm2_sim_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/simulation/gadgets/indexed_tree_check.test.cpp b/barretenberg/cpp/src/barretenberg/vm2/simulation/gadgets/indexed_tree_check.test.cpp
+index cfbc5e4b13..a67199b88d 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/simulation/gadgets/indexed_tree_check.test.cpp
++++ b/barretenberg/cpp/src/barretenberg/vm2/simulation/gadgets/indexed_tree_check.test.cpp
+@@ -304,10 +304,10 @@ TEST(AvmSimulationIndexedTreeCheck, WriteAppend)
+     IndexedTreeLeafData low_leaf = { .value = low_value, .next_value = value + 1, .next_index = 10 };
+     FF low_leaf_hash = RawPoseidon2::hash(low_leaf.get_hash_inputs());
+     uint64_t low_leaf_index = 0;
+-    tree.update_element(low_leaf_index, low_leaf_hash);
++    tree.update_element(static_cast<size_t>(low_leaf_index), low_leaf_hash);
+ 
+     AppendOnlyTreeSnapshot prev_snapshot = { .root = tree.root(), .next_available_leaf_index = 128 };
+-    std::vector<FF> low_leaf_sibling_path = tree.get_sibling_path(low_leaf_index);
++    std::vector<FF> low_leaf_sibling_path = tree.get_sibling_path(static_cast<size_t>(low_leaf_index));
+ 
+     IndexedTreeLeafData updated_low_leaf = {
+         .value = low_leaf.value,
+@@ -315,17 +315,17 @@ TEST(AvmSimulationIndexedTreeCheck, WriteAppend)
+         .next_index = prev_snapshot.next_available_leaf_index,
+     };
+     FF updated_low_leaf_hash = RawPoseidon2::hash(updated_low_leaf.get_hash_inputs());
+-    tree.update_element(low_leaf_index, updated_low_leaf_hash);
++    tree.update_element(static_cast<size_t>(low_leaf_index), updated_low_leaf_hash);
+ 
+     FF intermediate_root = tree.root();
+-    std::vector<FF> insertion_sibling_path = tree.get_sibling_path(prev_snapshot.next_available_leaf_index);
++    std::vector<FF> insertion_sibling_path = tree.get_sibling_path(static_cast<size_t>(prev_snapshot.next_available_leaf_index));
+ 
+     // The new leaf gets the old low leaf's next pointer.
+     IndexedTreeLeafData new_leaf = { .value = value,
+                                      .next_value = low_leaf.next_value,
+                                      .next_index = low_leaf.next_index };
+     FF new_leaf_hash = RawPoseidon2::hash(new_leaf.get_hash_inputs());
+-    tree.update_element(prev_snapshot.next_available_leaf_index, new_leaf_hash);
++    tree.update_element(static_cast<size_t>(prev_snapshot.next_available_leaf_index), new_leaf_hash);
+ 
+     AppendOnlyTreeSnapshot next_snapshot = {
+         .root = tree.root(),
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/simulation/gadgets/public_data_tree_check.test.cpp b/barretenberg/cpp/src/barretenberg/vm2/simulation/gadgets/public_data_tree_check.test.cpp
+index de34918aa0..6246ff66a7 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/simulation/gadgets/public_data_tree_check.test.cpp
++++ b/barretenberg/cpp/src/barretenberg/vm2/simulation/gadgets/public_data_tree_check.test.cpp
+@@ -221,19 +221,19 @@ TEST(AvmSimulationPublicDataTree, WriteExists)
+     PublicDataTreeLeafPreimage low_leaf = PublicDataTreeLeafPreimage(PublicDataLeafValue(leaf_slot, 1), 0, 0);
+     FF low_leaf_hash = RawPoseidon2::hash(low_leaf.get_hash_inputs());
+     uint64_t low_leaf_index = 30;
+-    public_data_tree.update_element(low_leaf_index, low_leaf_hash);
++    public_data_tree.update_element(static_cast<size_t>(low_leaf_index), low_leaf_hash);
+ 
+     AppendOnlyTreeSnapshot prev_snapshot =
+         AppendOnlyTreeSnapshot{ .root = public_data_tree.root(), .next_available_leaf_index = 128 };
+-    std::vector<FF> low_leaf_sibling_path = public_data_tree.get_sibling_path(low_leaf_index);
++    std::vector<FF> low_leaf_sibling_path = public_data_tree.get_sibling_path(static_cast<size_t>(low_leaf_index));
+ 
+     PublicDataTreeLeafPreimage updated_low_leaf = low_leaf;
+     updated_low_leaf.leaf.value = new_value;
+     FF updated_low_leaf_hash = RawPoseidon2::hash(updated_low_leaf.get_hash_inputs());
+-    public_data_tree.update_element(low_leaf_index, updated_low_leaf_hash);
++    public_data_tree.update_element(static_cast<size_t>(low_leaf_index), updated_low_leaf_hash);
+ 
+     FF intermediate_root = public_data_tree.root();
+-    std::vector<FF> insertion_sibling_path = public_data_tree.get_sibling_path(prev_snapshot.next_available_leaf_index);
++    std::vector<FF> insertion_sibling_path = public_data_tree.get_sibling_path(static_cast<size_t>(prev_snapshot.next_available_leaf_index));
+ 
+     // No insertion happens
+     AppendOnlyTreeSnapshot next_snapshot =
+@@ -302,25 +302,25 @@ TEST(AvmSimulationPublicDataTree, WriteAndUpdate)
+     PublicDataTreeLeafPreimage low_leaf = PublicDataTreeLeafPreimage(PublicDataLeafValue(low_leaf_slot, 1), 0, 0);
+     FF low_leaf_hash = RawPoseidon2::hash(low_leaf.get_hash_inputs());
+     uint64_t low_leaf_index = 30;
+-    public_data_tree.update_element(low_leaf_index, low_leaf_hash);
++    public_data_tree.update_element(static_cast<size_t>(low_leaf_index), low_leaf_hash);
+ 
+     AppendOnlyTreeSnapshot prev_snapshot =
+         AppendOnlyTreeSnapshot{ .root = public_data_tree.root(), .next_available_leaf_index = 128 };
+-    std::vector<FF> low_leaf_sibling_path = public_data_tree.get_sibling_path(low_leaf_index);
++    std::vector<FF> low_leaf_sibling_path = public_data_tree.get_sibling_path(static_cast<size_t>(low_leaf_index));
+ 
+     PublicDataTreeLeafPreimage updated_low_leaf = low_leaf;
+     updated_low_leaf.nextIndex = prev_snapshot.next_available_leaf_index;
+     updated_low_leaf.nextKey = leaf_slot;
+     FF updated_low_leaf_hash = RawPoseidon2::hash(updated_low_leaf.get_hash_inputs());
+-    public_data_tree.update_element(low_leaf_index, updated_low_leaf_hash);
++    public_data_tree.update_element(static_cast<size_t>(low_leaf_index), updated_low_leaf_hash);
+ 
+     FF intermediate_root = public_data_tree.root();
+-    std::vector<FF> insertion_sibling_path = public_data_tree.get_sibling_path(prev_snapshot.next_available_leaf_index);
++    std::vector<FF> insertion_sibling_path = public_data_tree.get_sibling_path(static_cast<size_t>(prev_snapshot.next_available_leaf_index));
+ 
+     PublicDataTreeLeafPreimage new_leaf =
+         PublicDataTreeLeafPreimage(PublicDataLeafValue(leaf_slot, new_value), low_leaf.nextIndex, low_leaf.nextKey);
+     FF new_leaf_hash = RawPoseidon2::hash(new_leaf.get_hash_inputs());
+-    public_data_tree.update_element(prev_snapshot.next_available_leaf_index, new_leaf_hash);
++    public_data_tree.update_element(static_cast<size_t>(prev_snapshot.next_available_leaf_index), new_leaf_hash);
+ 
+     AppendOnlyTreeSnapshot next_snapshot =
+         AppendOnlyTreeSnapshot{ .root = public_data_tree.root(),
+@@ -380,18 +380,18 @@ TEST(AvmSimulationPublicDataTree, WriteAndUpdate)
+ 
+     low_leaf = PublicDataTreeLeafPreimage(PublicDataLeafValue(leaf_slot, new_value), 0, 0);
+     low_leaf_hash = RawPoseidon2::hash(low_leaf.get_hash_inputs());
+-    public_data_tree.update_element(low_leaf_index, low_leaf_hash);
+-    low_leaf_sibling_path = public_data_tree.get_sibling_path(low_leaf_index);
++    public_data_tree.update_element(static_cast<size_t>(low_leaf_index), low_leaf_hash);
++    low_leaf_sibling_path = public_data_tree.get_sibling_path(static_cast<size_t>(low_leaf_index));
+ 
+     new_value = 28;
+ 
+     updated_low_leaf = low_leaf;
+     updated_low_leaf.leaf.value = new_value;
+     updated_low_leaf_hash = RawPoseidon2::hash(updated_low_leaf.get_hash_inputs());
+-    public_data_tree.update_element(low_leaf_index, updated_low_leaf_hash);
++    public_data_tree.update_element(static_cast<size_t>(low_leaf_index), updated_low_leaf_hash);
+ 
+     intermediate_root = public_data_tree.root();
+-    insertion_sibling_path = public_data_tree.get_sibling_path(prev_snapshot.next_available_leaf_index);
++    insertion_sibling_path = public_data_tree.get_sibling_path(static_cast<size_t>(prev_snapshot.next_available_leaf_index));
+ 
+     // No insertion happens
+     next_snapshot = AppendOnlyTreeSnapshot{ .root = intermediate_root,
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/simulation/gadgets/update_check.test.cpp b/barretenberg/cpp/src/barretenberg/vm2/simulation/gadgets/update_check.test.cpp
+index 9a8693fd9f..773d437ff3 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/simulation/gadgets/update_check.test.cpp
++++ b/barretenberg/cpp/src/barretenberg/vm2/simulation/gadgets/update_check.test.cpp
+@@ -225,7 +225,7 @@ TEST_P(UpdateCheckHashNonzeroTest, WithHash)
+     EXPECT_CALL(mock_low_level_merkle_db, get_leaf_preimage_public_data_tree(_))
+         .WillRepeatedly([&](const uint64_t& index) {
+             return PublicDataTreeLeafPreimage(
+-                PublicDataLeafValue(FF(index) + delayed_public_mutable_leaf_slot, update_preimage[index]), 0, 0);
++                PublicDataLeafValue(FF(index) + delayed_public_mutable_leaf_slot, update_preimage[static_cast<size_t>(index)]), 0, 0);
+         });
+ 
+     EXPECT_CALL(poseidon2, hash(_)).WillRepeatedly([](const std::vector<FF>& input) { return poseidon2::hash(input); });
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/call_stack_metadata_collector.test.cpp b/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/call_stack_metadata_collector.test.cpp
+index 92e65c9e7b..043cda6f78 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/call_stack_metadata_collector.test.cpp
++++ b/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/call_stack_metadata_collector.test.cpp
+@@ -230,7 +230,7 @@ TEST(CallStackMetadataCollectorTest, CalldataSizeLimit)
+     CalldataProvider calldata_provider = [&large_calldata](uint32_t max_size) -> std::vector<FF> {
+         // Provider should respect max_size
+         if (large_calldata.size() > max_size) {
+-            return std::vector<FF>(large_calldata.begin(), large_calldata.begin() + max_size);
++            return std::vector<FF>(large_calldata.begin(), large_calldata.begin() + static_cast<std::ptrdiff_t>(max_size));
+         }
+         return large_calldata;
+     };
+@@ -265,7 +265,7 @@ TEST(CallStackMetadataCollectorTest, ReturnDataSizeLimit)
+     ReturnDataProvider return_data_provider = [&large_return_data](uint32_t max_size) -> std::vector<FF> {
+         // Provider should respect max_size
+         if (large_return_data.size() > max_size) {
+-            return std::vector<FF>(large_return_data.begin(), large_return_data.begin() + max_size);
++            return std::vector<FF>(large_return_data.begin(), large_return_data.begin() + static_cast<std::ptrdiff_t>(max_size));
+         }
+         return large_return_data;
+     };
+@@ -381,7 +381,7 @@ TEST_F(MakeProviderTest, MakeCalldataProviderRespectsMaxSize)
+ 
+     // This is called when invoking the provider
+     EXPECT_CALL(mock_context, get_calldata(0, max_size)).WillOnce([&calldata_values, max_size](uint32_t, uint32_t) {
+-        return std::vector<MemoryValue>(calldata_values.begin(), calldata_values.begin() + max_size);
++        return std::vector<MemoryValue>(calldata_values.begin(), calldata_values.begin() + static_cast<std::ptrdiff_t>(max_size));
+     });
+ 
+     auto result = provider(max_size);
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/hinting_dbs.test.cpp b/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/hinting_dbs.test.cpp
+index d3e96fe2da..76ffc5d104 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/hinting_dbs.test.cpp
++++ b/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/hinting_dbs.test.cpp
+@@ -306,7 +306,9 @@ TEST_F(MockedHintingDBsTest, GetLeafValue)
+     EXPECT_CALL(base_merkle_db, get_leaf_value(world_state::MerkleTreeId::NOTE_HASH_TREE, ::testing::_))
+         .WillRepeatedly([&](world_state::MerkleTreeId, index_t index) {
+             if (index < note_hash_leaf_values.size()) {
+-                return note_hash_leaf_values[index];
++                // index_t is 64-bit; std::vector::size_type is 32-bit on wasm32. The bound
++                // check above is what makes the narrowing safe, so it is spelled out.
++                return note_hash_leaf_values[static_cast<size_t>(index)];
+             }
+             throw std::runtime_error("Leaf not found");
+         });
+@@ -352,7 +354,7 @@ TEST_F(MockedHintingDBsTest, GetLeafPreimagePublicDataTree)
+     EXPECT_CALL(base_merkle_db, get_tree_roots).Times(static_cast<int>(public_leaf_preimages.size()));
+     EXPECT_CALL(base_merkle_db, get_leaf_preimage_public_data_tree(::testing::_)).WillRepeatedly([&](index_t index) {
+         if (index < public_leaf_preimages.size()) {
+-            return public_leaf_preimages[index];
++            return public_leaf_preimages[static_cast<size_t>(index)];
+         }
+         throw std::runtime_error("Leaf preimage not found");
+     });
+@@ -389,7 +391,7 @@ TEST_F(MockedHintingDBsTest, GetLeafPreimageNullifierTree)
+     EXPECT_CALL(base_merkle_db, get_tree_roots).Times(static_cast<int>(nullifier_leaf_preimages.size()));
+     EXPECT_CALL(base_merkle_db, get_leaf_preimage_nullifier_tree(::testing::_)).WillRepeatedly([&](index_t index) {
+         if (index < nullifier_leaf_preimages.size()) {
+-            return nullifier_leaf_preimages[index];
++            return nullifier_leaf_preimages[static_cast<size_t>(index)];
+         }
+         throw std::runtime_error("Leaf preimage not found");
+     });
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/testing/fixtures.cpp b/barretenberg/cpp/src/barretenberg/vm2/testing/fixtures.cpp
+index 6e63453d42..4f9d336a2e 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/testing/fixtures.cpp
++++ b/barretenberg/cpp/src/barretenberg/vm2/testing/fixtures.cpp
+@@ -153,11 +153,13 @@ Instruction random_instruction(WireOpCode w_opcode)
+     };
+ }
+ 
++#ifndef AVM_SIM_TESTS_WITHOUT_TRACEGEN
+ TestTraceContainer empty_trace()
+ {
+     using C = Column;
+     return TestTraceContainer({ { { C::precomputed_first_row, 1 } }, { { C::precomputed_idx, 1 } } });
+ }
++#endif
+ 
+ ContractInstance random_contract_instance()
+ {
+@@ -227,6 +229,7 @@ AvmProvingInputs get_minimal_proving_inputs()
+     return AvmProvingInputs{ .public_inputs = result.public_inputs.value(), .hints = result.hints.value() };
+ }
+ 
++#ifndef AVM_SIM_TESTS_WITHOUT_TRACEGEN
+ std::pair<tracegen::TraceContainer, PublicInputs> get_minimal_trace_with_pi()
+ {
+     AvmProvingInputs inputs = get_minimal_proving_inputs();
+@@ -240,6 +243,7 @@ std::pair<tracegen::TraceContainer, PublicInputs> get_minimal_trace_with_pi()
+ 
+     return { std::move(trace), inputs.public_inputs };
+ }
++#endif
+ 
+ bool skip_slow_tests()
+ {
