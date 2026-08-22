@@ -701,10 +701,13 @@ verify-m8:
 #              and upstream's own vm2_tests target, nothing of ours anywhere.
 #   m9upbase   pristine 233d8e0993, the same target, as the before side.
 #
-# Budget about 20 GB and 40 minutes cold, of which upstream's own native vm2_tests
+# Budget about 20 GB and 45 minutes cold, of which upstream's own native vm2_tests
 # (264 MB, and the whole proving stack behind it) built TWICE is most of both.
 # Fourteen of those tests need the bn254 CRS: run barretenberg/crs/bootstrap.sh once.
-# /tmp is usually a tmpfs and is the wrong place.
+# The work directory defaults under $HOME/.cache and lib.sh's require_work_dir refuses
+# to start a build in one that cannot hold it: /tmp is usually a small tmpfs, and a
+# quota exhausted mid-build otherwise reports itself as dozens of unrelated failed
+# assertions rather than as one precondition.
 #
 # COVERAGE, because this milestone's numbers must never be quoted as another's: the
 # step-record comparison is EIGHT hand-assembled programs — M8's seven plus `oob` —
