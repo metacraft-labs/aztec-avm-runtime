@@ -28,6 +28,12 @@
         {
           packages.wasi-sdk = wasi-sdk;
 
+          # The version barretenberg currently pins. Not in any dev shell and not
+          # used by any build here — it is the negative control the M4 checks
+          # execute against (it cannot link C++ exceptions) and the toolchain the
+          # "before" half of the barretenberg.wasm comparison is built with.
+          packages.wasi-sdk-27 = pkgs.callPackage ./nix/wasi-sdk.nix { version = "27.0"; };
+
           devShells.default = pkgs.mkShell {
             packages = [
               # TypeScript orchestration and the test suites. aztec-packages'
