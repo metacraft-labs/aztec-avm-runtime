@@ -55,6 +55,27 @@
 # ccache; afterwards ninja has nothing to do and the cost is the test binaries.
 # Set M3_WORK to keep the trees somewhere persistent.
 #
+# The M4 verification set (the prepared wasi-sdk 27 -> 33 toolchain bump):
+#
+#   just verify-wasi27-cannot-link     test_wasi_sdk_27_cannot_link_exceptions
+#   just verify-wasi33-catches         test_wasi_sdk_33_catches_inside_wasm
+#   just verify-wasi33-targets         verify_wasi_33_existing_wasm_targets_unchanged  (~35 min)
+#   just verify-wasi33-native-neutral  verify_wasi_33_native_builds_unaffected         (~4 min)
+#   just verify-wasi33-reproduce       reproduce_aztec_wasi_sdk_33_exceptions
+#   just verify-m4                     all five, in order
+#
+# They build barretenberg for wasm FOUR times under $M4_WORK (default
+# $TMPDIR/aztec-m4-wasi-sdk-33): the `wasm` preset with wasi-sdk 27 and with 33,
+# and the `wasm-threads` preset with 33 both without and with the patch (the
+# first of those is a negative control and is meant to fail). Measured at 2.1 GB
+# and about 35 minutes cold on 32 cores; afterwards ninja has nothing to do and
+# the cost is the test runs. Both toolchains are realised from
+# ../aztec-packages#wasi-sdk and #wasi-sdk-27, so neither is "whatever is
+# installed", and one of the four builds is a NEGATIVE CONTROL that must fail.
+#
+# One of the two ecc_tests runs deliberately does not terminate — that is the
+# finding, not a hang — so it is SIGKILLed after $M4_RUN_TIMEOUT (default 180s).
+#
 # M1's working tools, which the checks drive:
 #
 #   just check-drift                   the vendored tree vs its recorded commits
@@ -302,5 +323,51 @@ verify-m0:
       echo "verify-m0: FAILED" >&2
     else
       echo "verify-m0: all checks passed"
+    fi
+    exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M4 — the prepared upstream patch moving the wasm toolchain from wasi-sdk 27 to 33
+# ---------------------------------------------------------------------------
+
+# wasi-sdk 27 cannot link a C++ program that throws, and the same program without a throw links.
+verify-wasi27-cannot-link:
+    @verification/test_wasi_sdk_27_cannot_link_exceptions.sh
+
+# wasi-sdk 33 + the three flags throws, unwinds and catches inside wasm, on wasmtime and V8.
+verify-wasi33-catches:
+    @verification/test_wasi_sdk_33_catches_inside_wasm.sh
+
+# barretenberg.wasm and ecc_tests, built and RUN with each toolchain and compared.
+verify-wasi33-targets:
+    @verification/verify_wasi_33_existing_wasm_targets_unchanged.sh
+
+# No native compile command moves: 1009 translation units, byte-identical before and after.
+verify-wasi33-native-neutral:
+    @verification/verify_wasi_33_native_builds_unaffected.sh
+
+# The contribution's own verify.sh discriminates, and rejects four mutations by name.
+verify-wasi33-reproduce:
+    @verification/reproduce_aztec_wasi_sdk_33_exceptions.sh
+
+# Run the whole M4 verification set; every check runs even if an earlier one fails.
+verify-m4:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      test_wasi_sdk_27_cannot_link_exceptions \
+      test_wasi_sdk_33_catches_inside_wasm \
+      verify_wasi_33_existing_wasm_targets_unchanged \
+      verify_wasi_33_native_builds_unaffected \
+      reproduce_aztec_wasi_sdk_33_exceptions
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m4: FAILED" >&2
+    else
+      echo "verify-m4: all checks passed"
     fi
     exit "$rc"
