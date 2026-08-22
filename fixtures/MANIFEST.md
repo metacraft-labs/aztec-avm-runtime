@@ -364,7 +364,7 @@ are not vendored and not redistributed.
 - skeptic-cannot-conclude: That seven programs are broad coverage. They are integration evidence and a native-versus-wasm diff target; the breadth argument is upstream's own suite under wasm (FX-25), which is why that sits near the front of the plan rather than behind these.
 - inventory: RI-46, RI-14
 
-### FX-24 — Native-versus-wasm transcripts, including tree roots
+### FX-24 — Native-versus-wasm transcripts, including tree roots — the vm2-wasm SPIKE's, superseded by FX-27
 - tier: H
 - family: The same C++ AVM built for x86-64 and for `wasm32-wasip1`, run over the seven programs, and diffed line for line
 - where: fixtures/wasm-parity/native-with-roots.results, fixtures/wasm-parity/wasm-with-roots.results, fixtures/tools/run_wasm.mjs
@@ -373,7 +373,7 @@ are not vendored and not redistributed.
 - licence: Apache-2.0 (output of Apache-2.0 code)
 - measured: 2026-08-21 — the whole-transcript diff is exactly 2 lines, the pointer-width banner and the wasm-only `peakLinearMemoryPages`. All 56 tree-root lines identical, with 7 distinct end-nullifier roots and 7 distinct end-public-data roots across the programs.
 - skeptic-concludes: The AVM produces identical results under wasm and native across revert codes, all gas dimensions, fees, nullifiers, note hashes, data writes, public logs, call frames, instruction counts and — the part the earlier transcript did not cover — the world-state roots, which is the only line that catches a wrong merkle hash, a wrong domain separator or a wrong indexed-leaf linkage.
-- skeptic-cannot-conclude: That the wasm build is correct, only that it agrees with the native one. A defect present in both compiles identically; the independent checks are Tier D against Aztec's production world state and Tier A against a second implementation.
+- skeptic-cannot-conclude: That the wasm build is correct, only that it agrees with the native one. A defect present in both compiles identically; the independent checks are Tier D against Aztec's production world state and Tier A against a second implementation. **And it is not this tree's build**: `avm_spike_runner` was built inside `vm2wasm/`, from `spike.patch`, with the three hacks M6 measured and removed — a header-only `crypto_merkle_tree`, a stray `lmdb.h` on `LMDB_INCLUDE`, and `add_compile_options(-Wno-error)`. Superseded by FX-27, which is the same comparison on M6's real module split and M7's overlay, with the roots additionally compared against Tier D. Kept because it is the record of what was measured on 2026-08-21 and because the wasm binary behind it cannot be rebuilt without reconstructing the spike tree.
 - inventory: RI-01, RI-02, RI-18
 
 ### FX-25 — Upstream's own vm2 simulation suite under wasm
@@ -399,6 +399,30 @@ are not vendored and not redistributed.
 - skeptic-concludes: The wasm pass rate is quoted against upstream's whole suite rather than against a target whose size we chose. Every excluded test is named, and its reason is re-derived from the tree by mapping the test back through gtest's own declaration macros to the file that declares its suite, so a test that moved category makes the check red rather than disappearing.
 - skeptic-cannot-conclude: That the excluded 1,412 pass anywhere. They are declared by the native binary and were not run; what is established is only that they are outside the wasm target and why. Nor does the ledger say anything about tests upstream has not written.
 - inventory: RI-15, RI-16, RI-17
+
+### FX-27 — The native-versus-wasm differential driver, on this tree's build
+- tier: H
+- family: ONE translation unit built for x86-64 and for `wasm32-wasip1` by the same CMake code from a worktree of anchor `cpp` carrying six patches, printing one deterministic transcript that the two targets are compared on line for line, on two wasm runtimes
+- where: verification/m8/0001-test-vm2-AVM_DIFFERENTIAL-a-native-versus-wasm-diffe.patch, verification/lib_m8_differential.sh, verification/run_avm_differential.sh, verification/wasm_host/_transcript_compare.py, fixtures/wasm-parity/avm-differential-native.results, fixtures/wasm-parity/avm-differential-wasm-v8.results
+- upstream-source: `barretenberg/cpp/src/barretenberg/vm2/` and `world_state_reference/` @ anchor `cpp` built twice; the driver calls upstream's own `PublicTxSimulationTester` and `simulation::MemoryMerkleDB` and the transcripts are outputs of upstream code
+- capture: `just avm-differential` builds both and diffs them; `just verify-transcripts` runs the full comparison on V8 and on wasmtime
+- licence: Apache-2.0 (output of Apache-2.0 code)
+- measured: 2026-08-22 — 1,308 non-diagnostic lines **byte-identical** native versus wasm, containing 200 root+size lines, 622 sibling-path fields (167 distinct hash values) and 256 genesis prefill leaf preimages, all 256 distinct. The whole difference is **ten** enumerated `diag` lines — corrected on review from "three", which counted kinds rather than lines: the pointer width, whose value differs (64 versus 32), plus nine present only under wasm (the whole-run peak in pages and in KiB, and one per corpus program). Ten is also the size of the comparator's table and the count `verify_native_wasm_transcripts_identical` asserts. V8 and wasmtime agree on every non-diagnostic line. Five injected divergences — a wrong root, an unenumerated diagnostic, the same transcript twice, the two sides swapped, a truncated run — are each rejected by their own message.
+- skeptic-concludes: The AVM and Aztec's own in-memory world state produce identical results on the two targets, on the build this campaign actually ships rather than on the spike's, and the comparison now includes the world state read DIRECTLY — roots, sizes, sibling paths, leaf values, low-leaf lookups and indexed-leaf preimages — rather than only the effects a transaction leaves behind. The wasm-only diagnostics are enumerated by key and asserted individually, so nothing is filtered by a pattern.
+- skeptic-cannot-conclude: That the wasm build is correct, only that it agrees with the native one; a defect present in both compiles identically, and FX-28 is the independent side of that. **And the program half is seven hand-assembled programs, compared field for field** — an integration check across two targets, not a breadth claim. Breadth is FX-25 (upstream's own 391 tests) and semantics is FX-01/FX-02 (the differential oracle). Only `x86_64-linux` was exercised.
+- inventory: RI-01, RI-02, RI-18, RI-51
+
+### FX-28 — The wasm world state against Aztec's production one, and upstream's own fidelity gate
+- tier: H
+- family: the roots, sizes, sibling path and genesis prefill preimages the in-memory world state produces INSIDE the wasm module, compared against Tier D's vectors captured from the real LMDB `NativeWorldStateService`; plus upstream's own seven-case reference-versus-real equivalence suite, run at the pinned commit
+- where: verification/test_tree_roots_match_real_world_state.sh, verification/wasm_host/_tierd_compare.py, verification/verify_upstream_world_state_reference_gate_green.sh, fixtures/trees/world-state-vectors.json, .github/workflows/avm-wasm.yml
+- upstream-source: `barretenberg/cpp/src/barretenberg/world_state/memory_merkle_db.test.cpp` @ anchor `cpp` — upstream's own `MemoryMerkleDBEquivalenceTest`, whose header calls itself "the canonical-fidelity gate for MemoryMerkleDB" — plus `world_state.test.cpp`, `constants.nr` and `merkle_tree/root.nr`, all read LIVE from the fork on every run
+- capture: `just verify-roots-vs-world-state` and `just verify-world-state-gate`
+- licence: Apache-2.0 (output of Apache-2.0 code)
+- measured: 2026-08-22 — **129 assertions, 0 failures**, identical on the native and the wasm transcript. The four genesis roots and sizes equal upstream's own hardcoded constants; the eight-step mutation sequence, the checkpoint/mutate/revert cycle, the 42-level genesis note-hash sibling path and all 256 genesis prefill preimages with their low-leaf linkage equal Tier D's capture from the real world state; four levels of that sibling path additionally equal `root.nr`'s published empty-tree roots. Upstream's own gate: **7 tests from 1 suite ran, 7 passed, exit 0**, per test by name.
+- skeptic-concludes: The reference world state inside the wasm module reproduces Aztec's PRODUCTION world state, not merely the native build of itself — so the differential is anchored to an implementation we did not write. M2's asserted-versus-captured split is kept and re-asserted at the point of use: every `upstreamPublished` value is read live from the fork, every `captured` root is required to be absent from it, and an empty upstream file makes the comparator exit 3 rather than pass vacuously. The standing fidelity gate is upstream's own suite, not a dual-run harness of ours.
+- skeptic-cannot-conclude: That the trees are right in general. This is ONE scripted sequence of twelve mutating calls over eight steps (counted on review; "eleven" was wrong) plus a checkpoint cycle, chosen in M2 to cover the append, tail-insert, interleaved-insert and update-in-place paths; it is not a fuzz campaign, and the AVM↔Brillig fuzzer (RI-34, Gap 4) is still not stood up. The ARCHIVE tree is not exercised at all — advancing it needs a whole `BlockHeader`, which is M14's subject. Upstream's gate runs NATIVELY, because `world_state` is LMDB-backed and `bin/world_state_tests` exists in no wasm configure; what runs under wasm is the reference side of it.
+- inventory: RI-50, RI-51
 
 <!-- END:manifest -->
 

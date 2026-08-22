@@ -374,6 +374,72 @@ end-public-data roots), so this is a real comparison, not a comparison of consta
 
 Files: `native-with-roots.results`, `wasm-with-roots.results`.
 
+### Rebuilt on this tree's build, and extended, by M8 (2026-08-22)
+
+**Everything above is the vm2-wasm SPIKE's measurement.** It was taken inside `vm2wasm/`, from
+`spike.patch`, with the three hacks M6 later measured and removed: a header-only
+`crypto_merkle_tree`, a stray `lmdb.h` on `LMDB_INCLUDE`, and `add_compile_options(-Wno-error)` —
+which is how that tree got a green build with four narrowing conversions unfixed. It is kept
+because it is the record of what was measured on 2026-08-21 and because its binaries cannot be
+rebuilt without reconstructing that tree. **It is not this campaign's build and its numbers are not
+this campaign's numbers.**
+
+M8 redoes the comparison on M6's real module split plus M7's overlay, from a sixth patch
+(`verification/m8/`) that adds `AVM_DIFFERENTIAL` and one translation unit,
+`vm2/differential/avm_differential.cpp`, built by the same CMake code for both targets.
+
+| | value |
+|---|---|
+| non-diagnostic transcript lines, **byte-identical** native versus wasm | **1,308** |
+| root + size lines | **200** |
+| individual sibling-path hashes | **622** |
+| genesis prefill indexed-leaf preimages | **256** |
+| enumerated `diag` lines — the whole of the difference | **10** (corrected on review): the pointer width, whose VALUE differs (64 versus 32), plus nine present only under wasm — the whole-run peak in pages and in KiB and one per corpus program. Ten keys, which is the size of `_transcript_compare.py`'s table and what `verify_native_wasm_transcripts_identical` asserts |
+| runtimes | native x86-64, **V8** (node 24.19, shipped binary unmodified), **wasmtime 47** (`wasm-merge`) |
+
+**What is new is everything that looks at the trees DIRECTLY** rather than at the effects a
+transaction leaves behind. The spike printed 56 start/end snapshots. M8 additionally prints the
+genesis state of all four trees, the full 42-level sibling path of note-hash leaf 0, all 256 genesis
+prefill preimages with their low-leaf linkage, a replay of Tier D's eight-step mutation sequence
+with all four roots after **every** step, the checkpoint/mutate/revert cycle from that same capture,
+a padding sequence, and sampled sibling paths, leaf values and low-leaf lookups at sixteen chosen
+indices.
+
+**And the roots are compared against something that is not ours.** Tier D's vectors were captured
+from Aztec's production `NativeWorldStateService`; M8's driver replays that sequence, value for
+value, against the in-memory reference world state *inside the wasm module*. 129 assertions, 0
+failures, identical on the native and the wasm transcript. M2's split is kept and re-asserted at the
+point of use: the `upstreamPublished` half is read **live** out of the fork at the anchor on every
+run and the transcript compared against that, never against our own JSON; the `captured` half comes
+from the JSON and every root in it is required to be absent from the fork.
+
+**The standing fidelity gate is upstream's own suite, not a harness of ours.**
+`world_state/memory_merkle_db.test.cpp` carries seven `TEST_F(MemoryMerkleDBEquivalenceTest, …)`
+cases — its own header calls it "the canonical-fidelity gate for MemoryMerkleDB" — driving a real
+file-backed `world_state::WorldState` against a `MemoryMerkleDB` and comparing roots, sibling paths,
+low leaves, indexed-leaf preimages and leaf values after every step. **7 ran, 7 passed, exit 0**, at
+the pinned commit, asserted per test by name. It runs natively because `world_state` is LMDB-backed
+and `src/CMakeLists.txt` adds that subdirectory only when `NOT WASM`.
+
+**Two numbers in the table above are corrected rather than carried.** The spike's
+`peakLinearMemoryPages 217 (13888 KiB)` does not apply here: that driver ran every program twice,
+once with a step recorder materialising all 38,903 step records. M8's measures **173 pages /
+11,072 KiB**. And peak linear memory is **not a property of the module alone** — it is 172 pages
+under wasmtime and 173 under node's WASI host, because the WASI environment is copied into linear
+memory before `main`. Established by moving it in both directions: a 61 KiB `--env` variable raises
+wasmtime's to 173, and `env -i` lowers node's to 172. "On the heaviest corpus program" also does not
+discriminate: the spread across the seven is **one page**, because the footprint is the world
+state's 128+128 genesis prefill and the module's static data rather than the program. `burn`
+executes 38,903 instructions to `add`'s 4 and adds no linear memory at all.
+
+**COVERAGE, because this milestone's own deliverable requires the number to be quoted with it.**
+The program half is **seven hand-assembled programs, compared field for field**. That is an
+integration check across two targets. It is **not** a breadth claim — breadth is Tier J's 391
+upstream tests — and it is **not** a semantic claim — that is Tier A's 77-comparison differential
+oracle. Each of the three states its own coverage so none can be quoted as another.
+
+Files: `avm-differential-native.results`, `avm-differential-wasm-v8.results`.
+
 ---
 
 ## Tier J — upstream's own vm2 simulation suite, built for wasm
@@ -690,17 +756,25 @@ unclaimed item in the corpus, because it is the only oracle that does not expire
 binary. Unknown until tried: whether a current `avm-transpiler` and a current `ssa_fuzzer` still
 agree with a `3a68d68ac2`-era `avm_simulator_bin.ts`.
 
-### Gap 5 — gmock does not work under wasm32-wasi
+### Gap 5 — gmock does not work under wasm32-wasi — **CLOSED (M7); the text below was stale**
 
-The single largest unclaimed coverage win. 35 of upstream's 59 vm2 simulation suites (≈243 of 387
-tests) cannot run under wasm because gtest's threading layer compiles against wasi-libc's pthread
-stubs and gmock's global expectation registry corrupts linear memory as a result. Details and the
-failed `GTEST_HAS_PTHREAD=0` attempt are in Tier J. Fixing it is a port of gmock's synchronisation
-to single-threaded wasm — bounded, but not trivial, and it is upstream-shaped work.
+**This gap is closed and its original statement was wrong.** It used to read: *"the single largest
+unclaimed coverage win — 35 of upstream's 59 vm2 simulation suites (≈243 of 387 tests) cannot run
+under wasm because gtest's threading layer compiles against wasi-libc's pthread stubs and gmock's
+global expectation registry corrupts linear memory as a result… fixing it is a port of gmock's
+synchronisation to single-threaded wasm"*, and concluded that *"141 of upstream's own semantics
+tests run under wasm; the remaining 243 are blocked by the test framework"*.
 
-Until then, the honest statement is: **the AVM itself is verified identical native-vs-wasm
-(transcript + 56 tree-root lines), and 141 of upstream's own semantics tests run under wasm; the
-remaining 243 are blocked by the test framework, not by the VM.**
+M7 measured the cause and it is not the stubs: it is an **ODR violation** across the gtest library
+boundary — googletest's CMake puts `-DGTEST_HAS_PTHREAD=1` on gtest's own four translation units
+and does not propagate it, so `internal::MutexBase` is a different type inside `libgtest.a` and in
+every consumer. Making the macro consistent — either value works — takes the suite from 0 to
+**391 of 391 passing, natively, on V8 and on wasmtime, identical per test**. No port of gmock was
+needed and no test is excluded for needing threads. See **Tier J** and DRIFT **D10**.
+
+The paragraph survived M7's rewrite of Tier J and was found on M8's review, where it was
+contradicting Tier J twelve sections further down in the same file. Kept rather than deleted so
+the correction is visible rather than silent.
 
 ### Gap 6 — browser execution
 
@@ -710,6 +784,29 @@ the browser build. No upstream fixture exists for browser AVM execution because 
 path is a network hop to a node. Authored fixtures needed: the same pinned transactions executed in
 a headless browser against the in-memory trees, asserting identical `publicTxEffect` and roots; plus
 a bundle assertion that a public-only page never fetches the barretenberg wasm.
+
+---
+
+### Gap 7 — the ARCHIVE tree, in the reference world state (found by M8)
+
+Tier D's capture records five trees at every step; M8's differential compares **four**. The reason
+is not an omission in the comparison — it is that `world_state_reference::MemoryMerkleDB` has no
+archive tree at all. Its `TreeRoots` carries `l1_to_l2_message_tree`, `note_hash_tree`,
+`nullifier_tree` and `public_data_tree`, and its `MerkleTreeId` enumerates `ARCHIVE` only because
+that enum is shared with the LMDB-backed world state. Tier D's capture deliberately leaves the
+archive unmutated for the same reason from the other side: advancing it needs
+`updateArchive(header)` and a whole `BlockHeader`, which is block-level rather than tree-level.
+
+So the archive's genesis root (`GENESIS_ARCHIVE_ROOT`, published in `constants.nr`) is asserted
+against upstream by M2's Tier D checker and, natively, by `world_state.test.cpp`'s
+`WorldStateTest.GetInitialTreeInfoForAllTrees` — **not** by `MemoryMerkleDBEquivalenceTest`, whose
+`expect_roots_equal()` compares exactly the four AVM trees and never the archive, and which is in
+any case the only suite M8's gate run selects. Corrected on review, because the first version of
+this paragraph credited the equivalence gate with an assertion it does not make. And **nothing
+anywhere compares an archive root native versus wasm**, because there is nothing in the wasm module
+to compare. That is **M14**'s subject, and it is the main remaining
+storage unknown the Introduction already names. Recorded here so the four-of-five is a stated scope
+rather than a number a reader has to reconstruct.
 
 ---
 
