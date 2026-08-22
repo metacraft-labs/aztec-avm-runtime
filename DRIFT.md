@@ -358,6 +358,77 @@ were absorbed silently.
   fallback, not the resolution. Until then, every wasm result in this tree is produced from a
   source line upstream does not have.
 
+## D10 — every wasm gtest binary barretenberg builds is an ODR violation across the gtest boundary
+
+- id: D10
+- status: open
+- opened: 2026-08-22
+- milestone: M7 (`verify_vm2_tests_pass_under_v8`, negative control `odr`), M10 (the AVM_WASM
+  CMake patch, which is where a fix would ride upstream), M11 (submission)
+- design-question: —
+- sides: upstream at anchor `cpp` (`barretenberg/cpp/cmake/gtest.cmake` and googletest v1.13.0's
+  own `googletest/cmake/internal_utils.cmake`) versus this project's overlay
+  (`aztec-avm-runtime/verification/m7/0001-test-vm2-AVM_SIM_TESTS-…patch`, which sets
+  `gtest_disable_pthreads` and makes the macros `PUBLIC`)
+- what: googletest's CMake puts `-DGTEST_HAS_PTHREAD=1` into `cxx_base_flags` whenever
+  `find_package(Threads)` succeeds, and under wasi-sdk it does — the sysroot ships pthread
+  **stubs**, so the probe compiles and links. That macro is applied to gtest's own four
+  translation units and is **not** propagated to consumers, who fall back to `gtest-port.h`'s own
+  default, which for wasi is **0**. `internal::MutexBase` is therefore a different type on the two
+  sides of the library boundary — `{pthread_mutex_t, bool, pthread_t}` inside `libgtest.a`, an
+  empty struct in every test translation unit — and `Mutex`, `GTestMutexLock`, `ThreadLocal` and
+  `GTEST_IS_THREADSAFE` all change with it. barretenberg's own `cmake/gtest.cmake` has the same
+  shape twice more, setting `GTEST_HAS_EXCEPTIONS=0` and `GTEST_HAS_STREAM_REDIRECTION=0`
+  `PRIVATE` on `gtest` under `WASM` — and the first of those is simply wrong for an `AVM_WASM`
+  build, which compiles with `-fwasm-exceptions`. Measured in an unmodified wasm configure:
+  4 translation units carry `-DGTEST_HAS_PTHREAD=1` and 0 carry `=0`.
+- and it is not theoretical: with the correction reverted in an otherwise identical tree, the wasm
+  `vm2_sim_tests` binary dies on the FIRST test with
+  `[ FATAL ] gtest-port.h:1660:: Condition has_owner_ && pthread_equal(owner_, pthread_self())
+  failed`, and with the death-named suite filtered out, with
+  `[ FATAL ] gtest-port.h:1642:: pthread_mutex_lock(&mutex_) failed with error 16` (EBUSY) inside
+  gmock's global expectation registry — **0 of 391 tests pass**. With the correction it is
+  391 of 391. That is the negative control in `verify_vm2_tests_pass_under_v8.sh`.
+- and it is the DISAGREEMENT and not the stubs, which the negative control cannot show on its own
+  (reverting the whole hunk is consistent with either diagnosis). Two further variants were built
+  and run on review, 2026-08-22, each a one-hunk edit of `cmake/gtest.cmake` in the same tree:
+  - **consistent `=1` on both sides** — `gtest_disable_pthreads` left off, so `cxx_base_flags`
+    keeps `-DGTEST_HAS_PTHREAD=1` on gtest's own four units, plus
+    `target_compile_definitions(gtest PUBLIC GTEST_HAS_PTHREAD=1 …)` so every consumer matches:
+    337 command lines at `=1`, 0 at `=0` — **391 of 391 pass, exit 0**. wasi-libc's pthread stubs
+    are sufficient for gtest and gmock in a single-threaded program *provided both sides agree*.
+    Either consistent value works; the mismatch is the defect.
+  - **`PUBLIC` alone, without `gtest_disable_pthreads`** — 4 command lines at `=1`, 333 at `=0`,
+    and it passes **0 of 391** on the same `gtest-port.h:1660` condition. The compile command is
+    `$DEFINES $INCLUDES $FLAGS` and googletest puts `cxx_base_flags` in `COMPILE_FLAGS`, so the
+    `=1` arrives **after** anything `target_compile_definitions` emits and wins on gtest's own
+    units. This is why "rebuilding gtest+gmock with `GTEST_HAS_PTHREAD=0` did not help" — not
+    because the setting failed to reach consumers. The load-bearing half of the correction is
+    `set(gtest_disable_pthreads ON … FORCE)`; `PUBLIC` fixes only the consumers. **Any upstream
+    form of this fix has to change `cxx_base_flags`, not only the target's definitions.**
+- why it matters: this is the whole of the "gmock does not work under wasm" finding the vm2-wasm
+  spike recorded as a permanent test-framework limitation (`fixtures/CORPUS.md` Tier J: 24 of 59
+  suites, 141 tests). It is not a limitation, it is a two-line CMake defect — and it silently
+  affects **every** wasm test binary barretenberg builds, not only ours. Upstream does not notice
+  because the wasm test binaries they run (`ecc_tests` and friends) use no gmock and never take
+  the paths where the two layouts disagree observably.
+- decision: Open, with the fix carried downstream rather than filed. The correction is in M7's
+  `AVM_SIM_TESTS` overlay and is **gated on `WASM AND AVM_SIM_TESTS`**, so no configuration
+  upstream has today changes — deliberately, because M4's and M6's measurements of the existing
+  wasm test binaries were taken with the mismatch in place and must stay reproducible. M7 does
+  **not** prepare a sixth `upstream-bugs/` entry for it: `SERIES.md` indexes four AVM_WASM patches,
+  M10 owns the final shape of the CMake changes that go upstream and M11 owns submission, so
+  folding this into one of them is that milestone's decision rather than this one's. Two things
+  M10/M11 need are recorded here rather than left to be re-derived: the upstream-facing form
+  **cannot carry the `AVM_SIM_TESTS` gate** (upstream has no such option), and nobody has yet
+  measured whether the ungated form is neutral for the wasm test binaries M4 and M6 measured — that
+  measurement is the precondition for upstreaming it, not a formality. This entry closes when
+  upstream's `cmake/gtest.cmake` stops applying those three macros privately, and not before.
+- evidence: `aztec-avm-runtime/verification/verify_vm2_tests_pass_under_v8.sh` (the `odr` control);
+  `aztec-avm-runtime/verification/m7/0001-test-vm2-AVM_SIM_TESTS-the-simulation-side-test-suit.patch`
+  (the `cmake/gtest.cmake` hunk and its reasoning);
+  `aztec-avm-runtime/fixtures/wasm-parity/EXCLUSIONS.md` ("Supersedes").
+
 <!-- END:drift -->
 
 ---
