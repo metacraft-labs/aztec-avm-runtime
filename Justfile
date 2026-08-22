@@ -590,3 +590,94 @@ verify-m7:
       echo "verify-m7: all checks passed"
     fi
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M8 — the native-versus-wasm differential, including tree roots
+# ---------------------------------------------------------------------------
+# The seven checks prepare ONE worktree of 233d8e0993 under $M8_WORK (default
+# ~/.cache/aztec-m8-differential) carrying SIX patches — the four AVM_WASM series
+# patches, M7's AVM_SIM_TESTS overlay and M8's own AVM_DIFFERENTIAL overlay
+# (verification/m8/) — and build TWO trees inside it: the wasm-avm one and a
+# native one. Both build the SAME differential driver from the SAME translation
+# unit; the native one also builds upstream's own world_state_tests, which
+# carries the seven MemoryMerkleDBEquivalenceTest cases that are the standing
+# reference-versus-real fidelity gate. Measured cold from an empty $M8_WORK on 32
+# cores: 4 min 42 s and 792 MB — `ninja avm_differential` builds only the driver's
+# own dependency subgraph (131 objects), not all 580 translation units the wasm
+# configure declares. /tmp is usually a tmpfs and is the wrong place.
+#
+# COVERAGE, because this milestone's own deliverable requires the number to be
+# quoted with it: the program half is SEVEN hand-assembled corpus programs,
+# compared field for field. That is an integration check across two targets and
+# NOT a breadth claim — breadth is M7's 391 upstream tests and semantics is M19's
+# 77-comparison oracle. Each of the three states its own coverage so none can be
+# quoted as another.
+#
+#   just avm-differential            build both, diff, exit non-zero on divergence
+#   just verify-tree-roots           verify_tree_roots_identical_native_wasm       (the check that BUILDS)
+#   just verify-roots-vs-world-state test_tree_roots_match_real_world_state
+#   just verify-world-state-gate     verify_upstream_world_state_reference_gate_green
+#   just verify-transcripts          verify_native_wasm_transcripts_identical
+#   just verify-revert-no-trap       test_revert_program_does_not_trap_module
+#   just verify-differential-exit    verify_avm_differential_exit_status           (runs the gate 8x)
+#   just verify-peak-memory          verify_wasm_peak_memory_budget
+#   just verify-m8                   all seven, in order — 510 assertions, ~5 min cold
+
+# AVM_DIFF_INJECT=root|diag|same|swap|truncate injects a deliberate divergence,
+# for the checks that measure this gate's own discriminating power.
+#
+# Build both targets, diff the transcripts, and exit non-zero on any divergence.
+avm-differential:
+    @verification/run_avm_differential.sh
+
+# Every tree root and size, identical native versus wasm, per line and never by count.
+verify-tree-roots:
+    @verification/verify_tree_roots_identical_native_wasm.sh
+
+# The roots the wasm module produces, against Tier D's vectors from the REAL WorldState.
+verify-roots-vs-world-state:
+    @verification/test_tree_roots_match_real_world_state.sh
+
+# Upstream's own reference-versus-real fidelity gate, run at the pinned commit.
+verify-world-state-gate:
+    @verification/verify_upstream_world_state_reference_gate_green.sh
+
+# Every non-diagnostic line identical on two runtimes, with the diagnostics enumerated.
+verify-transcripts:
+    @verification/verify_native_wasm_transcripts_identical.sh
+
+# revertCode 1 rather than a trapped instance: the throw/catch path inside wasm.
+verify-revert-no-trap:
+    @verification/test_revert_program_does_not_trap_module.sh
+
+# `just avm-differential` exits 0 clean and non-zero on each of five injected divergences.
+verify-differential-exit:
+    @verification/verify_avm_differential_exit_status.sh
+
+# Peak linear memory reported from inside the module, against a recorded budget.
+verify-peak-memory:
+    @verification/verify_wasm_peak_memory_budget.sh
+
+# Run the whole M8 verification set; every check runs even if an earlier one fails.
+verify-m8:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_tree_roots_identical_native_wasm \
+      test_tree_roots_match_real_world_state \
+      verify_upstream_world_state_reference_gate_green \
+      verify_native_wasm_transcripts_identical \
+      test_revert_program_does_not_trap_module \
+      verify_avm_differential_exit_status \
+      verify_wasm_peak_memory_budget
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m8: FAILED" >&2
+    else
+      echo "verify-m8: all checks passed"
+    fi
+    exit "$rc"
