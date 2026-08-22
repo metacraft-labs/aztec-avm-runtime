@@ -1,13 +1,15 @@
 # Native-vs-wasm parity fixtures
 
-Produced by agent **fixtures-and-specs**, 2026-08-21, by execution.
+Produced by agent **fixtures-and-specs**, 2026-08-21, and extended by **M8**, 2026-08-22, both by execution.
 
 ## Files
 
 | file | what |
 |---|---|
-| `native-with-roots.results` | `avm_spike_runner` transcript, native x86-64 |
-| `wasm-with-roots.results` | the same binary built for wasm32-wasi, run under Node's WASI |
+| `avm-differential-native.results` | **M8, current**: `avm_differential` transcript, native x86-64, from the tree this campaign ships (anchor + the four AVM_WASM patches + M7's overlay + M8's) |
+| `avm-differential-wasm-v8.results` | **M8, current**: the same translation unit built for `wasm32-wasip1`, run on V8 through `verification/wasm_host/run_wasm_test_binary.mjs`, shipped binary unmodified |
+| `native-with-roots.results` | **superseded (spike, 2026-08-21)**: `avm_spike_runner` transcript, native x86-64 |
+| `wasm-with-roots.results` | **superseded (spike, 2026-08-21)**: the same binary built for wasm32-wasi, run under Node's WASI |
 | `vm2-sim-tests-included.txt` | **M7, current**: the 391 tests the wasm suite runs, one name per line. Native, V8 and wasmtime pass all 391 and the three name sets are identical per test |
 | `vm2-tests-wasm-exclusions.tsv` | **M7, current**: one row per excluded test — 1,412 rows of `<test>\t<file>\t<reason>` — regenerated from the tree by `just verify-vm2-tests-exclusions` |
 | `EXCLUSIONS.md` | **M7, current**: the numbers, the five reason codes, the target-level exclusion and what is linked but not exercised |
@@ -16,10 +18,52 @@ Produced by agent **fixtures-and-specs**, 2026-08-21, by execution.
 | `vm2-sim-tests-under-wasm-raw.txt` | the **raw** wasm gtest transcript behind that summary, kept because it is the only record of the gmock trap: the `[ FATAL ] gtest-port.h:1660` assertion and the `memory access out of bounds` in `testing::Sequence::AddExpectation` quoted below are read from it. Regenerating it costs a full wasm barretenberg build, so it is committed rather than reconstructed |
 | `vm2_spike-sources/` | **preservation copy** — see the warning below |
 
-## The headline
+## The headline — M8, 2026-08-22
+
+`diff avm-differential-native.results avm-differential-wasm-v8.results` is **ten lines**, and every
+one of them is `diag `-prefixed: one whose *value* differs — the pointer width, 64 versus 32 — and
+nine that exist only under wasm: `wasm.peakLinearMemoryPages 173`,
+`wasm.peakLinearMemoryKiB 11072`, and one `wasm.peakLinearMemoryPages.after.<program>` for each of
+the seven corpus programs. Ten is the size of the comparator's own enumeration table and the count
+`verify_native_wasm_transcripts_identical` asserts. (Corrected on review from "three", which counted
+kinds rather than lines and predates the per-program diagnostics.) The **1,308 non-diagnostic
+lines are byte-identical**, and they carry **200 root+size lines, 622 individual sibling-path
+hashes (167 distinct values) and 256 genesis prefill leaf preimages, all 256 distinct**.
+
+The `diag ` prefix is the point. "identical apart from the wasm-specific lines", implemented as a
+`grep -v`, is a comparison whose scope nobody has measured — the same filter would swallow a value
+divergence on any line that happened to contain the pattern. `verification/wasm_host/_transcript_compare.py`
+carries a table of exactly which `diag` keys exist and on which side each may appear; a key that is
+not in the table is a **failure naming the key**, and that is exercised as a negative control.
+
+**The roots are also compared against something that is not ours.** The driver replays Tier D's
+eight-step mutation sequence — the same sequence, value for value, that `drift/capture_world_state.mjs`
+drove through Aztec's production LMDB `NativeWorldStateService` — inside the wasm module, and
+compares all four roots and sizes after every step, plus the checkpoint/mutate/revert cycle, the
+42-level genesis sibling path and all 256 prefill preimages. **129 assertions, 0 failures.** Run
+`just verify-roots-vs-world-state`.
+
+**Reproducing:** `just avm-differential` from `aztec-avm-runtime/`. It builds both, diffs them, and
+exits non-zero on any divergence; `AVM_DIFF_INJECT=root|diag|same|swap|truncate` injects one.
+
+**Coverage.** The program half is **seven hand-assembled programs, compared field for field** — an
+integration check across two targets, *not* a breadth claim. Breadth is `vm2-sim-tests-included.txt`
+(391 of upstream's own tests); semantics is the differential oracle's 77 comparisons.
+
+---
+
+## The spike's headline (2026-08-21) — superseded
 
 `diff native-with-roots.results wasm-with-roots.results` is **two lines**: the
 `pointer=64bit`/`32bit` banner and the wasm-only `peakLinearMemoryPages 217 (13888 KiB)`.
+
+That transcript is the vm2-wasm **spike's**, taken inside `vm2wasm/` from `spike.patch`, with the
+three hacks M6 later measured and removed — a header-only `crypto_merkle_tree`, a stray `lmdb.h` on
+`LMDB_INCLUDE`, and `add_compile_options(-Wno-error)`. Its `217` pages does not carry over: that
+driver ran every program **twice**, once with a step recorder materialising all 38,903 step records.
+M8's measures 173 pages / 11,072 KiB — and peak linear memory turns out not to be a property of the
+module alone, being 172 under wasmtime because the WASI environment is copied into linear memory
+before `main` (demonstrated by moving it in both directions in `verify_wasm_peak_memory_budget.sh`).
 
 All **56 tree-root lines** are identical. That is the assertion the previous transcript did not
 make: it compared revert codes, gas, fees, nullifiers, note hashes, data writes, logs, call frames
