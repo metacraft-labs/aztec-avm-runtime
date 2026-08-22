@@ -28,6 +28,10 @@ set -uo pipefail
 TEST_NAME="run_avm_differential"
 VERIFY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$VERIFY_DIR/lib.sh"
+# lib_m8_differential.sh asserts $M8_WORK is usable before anything else runs, and in THIS script's
+# vocabulary 1 means a divergence. A work directory that cannot be written is a broken run, not a
+# differing one, so that precondition exits 2 like every other precondition here.
+WORK_DIR_PRECONDITION_EXIT=2
 . "$VERIFY_DIR/lib_m8_differential.sh"
 
 fatal() { printf 'avm-differential: %s\n' "$2" >&2; exit "$1"; }

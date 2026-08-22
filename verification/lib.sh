@@ -167,24 +167,36 @@ require_nix() {
 # Free space is checked AND a real write is attempted, because they are different questions: a
 # quota is not free space, so `df` can report gigabytes available on a filesystem that will refuse
 # the next byte this user writes. The probe is 4 MB, written and removed.
+#
+# The exit status is `die`'s 1 by default, which is what a check wants. Scripts with their own exit
+# vocabulary set WORK_DIR_PRECONDITION_EXIT before sourcing their lib: run_avm_differential.sh sets
+# it to 2, because in its vocabulary 1 means DIVERGENCE, and a work directory it cannot write is a
+# broken run rather than a differing one. Collapsing those two is exactly what that script's
+# exit-status contract exists to prevent.
 # ---------------------------------------------------------------------------
+WORK_DIR_PRECONDITION_EXIT="${WORK_DIR_PRECONDITION_EXIT:-1}"
+
 require_work_dir() { # <dir> <minimum-gb>
   local dir="$1" min_gb="${2:-1}" avail_kb probe
+  _wd_die() {
+    printf '%s: cannot run: %s\n' "$TEST_NAME" "$*" >&2
+    exit "$WORK_DIR_PRECONDITION_EXIT"
+  }
   mkdir -p "$dir" 2>/dev/null \
-    || die "the work directory cannot be created: $dir (set the milestone's <M>_WORK)"
-  [ -w "$dir" ] || die "the work directory is not writable: $dir"
+    || _wd_die "the work directory cannot be created: $dir (set the milestone's <M>_WORK)"
+  [ -w "$dir" ] || _wd_die "the work directory is not writable: $dir"
   avail_kb="$(df -Pk "$dir" 2>/dev/null | awk 'NR==2 { print $4 }')"
   case "$avail_kb" in
-    ''|*[!0-9]*) die "could not read the free space of the work directory: $dir" ;;
+    ''|*[!0-9]*) _wd_die "could not read the free space of the work directory: $dir" ;;
   esac
   if [ "$avail_kb" -lt $((min_gb * 1024 * 1024)) ]; then
-    die "the work directory has $((avail_kb / 1024 / 1024)) GB free and this milestone needs about ${min_gb} GB: $dir
+    _wd_die "the work directory has $((avail_kb / 1024 / 1024)) GB free and this milestone needs about ${min_gb} GB: $dir
              /tmp is usually a small tmpfs; point the milestone's <M>_WORK somewhere with room."
   fi
   probe="$dir/.write-probe.$$"
   if ! dd if=/dev/zero of="$probe" bs=1M count=4 >/dev/null 2>&1; then
     rm -f "$probe" 2>/dev/null
-    die "the work directory reports free space but refuses a 4 MB write: $dir
+    _wd_die "the work directory reports free space but refuses a 4 MB write: $dir
              a disk quota, not a full filesystem — the checks would otherwise report this as
              dozens of unrelated assertion failures."
   fi
