@@ -588,15 +588,15 @@ component is and what it costs us, and does not repeat the deletion.
 - confidence: reasoned
 - experiment: n/a
 
-### RI-49 — WASI shim for `avm.wasm`'s eleven imports
-- upstream: `@aztec/bb.js` already ships a shim for exactly this import set, to run `barretenberg.wasm`
+### RI-49 — WASI shim for `avm.wasm`'s twelve imports
+- upstream: `@aztec/bb.js` already ships a shim for this import set, to run `barretenberg.wasm`
 - covers: -
 - decision: open
 - milestone: M17, M27
-- why: The import surface is frozen at eleven `wasi_snapshot_preview1` symbols — all libc startup and stdio, no filesystem, no network, no threads. bb.js's existing shim serves the same surface for the same engine, so writing one is the fallback rather than the plan.
+- why: M12 built the artefact and measured the surface: **eleven `wasi_snapshot_preview1` functions plus one non-WASI import, `env.memory` — twelve in total**. The eleven are all libc startup and stdio; no filesystem beyond that, no sockets, no threads, and no oracle or foreign-call surface at all. The twelfth exists because barretenberg links every wasm artefact `-Wl,--import-memory`, so the host owns the linear memory — which is a thing bb.js's shim already does for `barretenberg.wasm`, and is the reason to expect reuse to work rather than a reason to doubt it. Writing one is the fallback rather than the plan. **The twelve are a property of the code together with the link options, not of the code alone**, and M12 measures both: the same objects linked with `--export-dynamic` import fifteen, and linked with `-Wl,--no-gc-sections` import forty-six. A build that loses either option hands M17's shim a different problem, which is why the surface is asserted as an identity against two controls rather than recorded once.
 - rejection-reason: n/a
 - confidence: open
-- experiment: M17's deliverable: attempt instantiation of `avm.wasm` under bb.js's shim unchanged; if it fails, record which of the eleven imports it does not satisfy and write only that difference. `verify_wasi_shim_reuse_decision_recorded` requires the answer either way.
+- experiment: M17's deliverable: attempt instantiation of `avm.wasm` under bb.js's shim unchanged; if it fails, record which of the twelve imports it does not satisfy — including whether it supplies a memory of at least the module's declared 130-page minimum — and write only that difference. `verify_wasi_shim_reuse_decision_recorded` requires the answer either way. M12's `verify_avm_wasm_import_surface` pins the surface the shim has to serve, and `verification/wasm_host/avm_reactor_host.mjs` is a working existence proof that `node:wasi` plus one supplied memory is enough.
 
 ---
 
