@@ -137,6 +137,12 @@ assert_eq "and so does the reference" "burn" "$(m9_field "$bench_dir/ref.id" ben
 # larger than the effect being measured, so a measurement that reuses one set of files reports an
 # interval two to three times narrower than the quantity it claims to cover.
 # ---------------------------------------------------------------------------
+# Before the first timed round, and not after: a measurement taken beside someone
+# else's build is not a measurement of these binaries. This exits 3 — its own code,
+# distinct from an assertion failure — rather than producing a confident wrong
+# answer. See m9_require_idle_machine.
+m9_require_idle_machine
+
 samples="$bench_dir/native.tsv"
 inodes="$bench_dir/native.inodes"
 note "timing: $M9_BENCH_SESSIONS sessions of $M9_BENCH_ROUNDS rounds of $M9_BENCH_REPS, three binaries, rotated, re-copied per session"

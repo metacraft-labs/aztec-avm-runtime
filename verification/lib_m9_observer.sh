@@ -87,6 +87,86 @@
 M9_WORK="${M9_WORK:-$HOME/.cache/aztec-m9-observer}"
 require_work_dir "$M9_WORK" 8
 
+# ---------------------------------------------------------------------------
+# m9_require_idle_machine
+#
+# The timing check's whole claim is that a difference between two binaries is
+# smaller than the noise. That claim is only meaningful if the noise it measured
+# is the noise the binaries actually ran in. A competing multi-core build is not
+# noise this design can absorb: the between-session spread it characterises is
+# sd 1.42pp, and a barretenberg build alongside it will exceed that comfortably
+# and asymmetrically — whichever arm happens to overlap the busiest minutes takes
+# the penalty, and the rotation cannot cancel a load that is not periodic.
+#
+# It happened: M11's re-run had `just verify-m10` building while `verify-m9`
+# timed, and `test_observer_disabled_is_free` reported a failure that was an
+# artefact of the box rather than of the patch.
+#
+# So this is a PRECONDITION and not an assertion, for the same reason
+# require_work_dir is: nothing after it can be meaningfully evaluated, and a
+# wrong answer is worse than no answer. It gets its OWN exit code, because M9's
+# own review already found what happens when a precondition exit collides with a
+# check's semantic vocabulary — WORK_DIR_PRECONDITION_EXIT exists because
+# run_avm_differential.sh spends 1 on DIVERGENCE.
+#
+#   0  measured
+#   1  an assertion failed
+#   3  the machine was too busy to measure on (this)
+#
+# Two signals, because they fail differently. Competing build processes are exact
+# and immediate; load average is coarse and lags by up to a minute, which is
+# exactly the window in which a just-finished build still poisons a measurement.
+# Either one refuses.
+# ---------------------------------------------------------------------------
+M9_LOAD_PRECONDITION_EXIT="${M9_LOAD_PRECONDITION_EXIT:-3}"
+
+m9_require_idle_machine() {
+  local cores load1 max_load busy self_tree pid
+  cores="$(nproc 2>/dev/null || echo 1)"
+  # A quarter of the machine. The timed simulations are single-threaded, so this
+  # is not "is anything running" — it is "is enough of the machine free that one
+  # more single-threaded process is not queueing behind someone else's -j32".
+  max_load="${M9_IDLE_MAX_LOAD:-$(awk -v c="$cores" 'BEGIN{v=c/4; if (v<2) v=2; printf "%.2f", v}')}"
+  load1="$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo 0)"
+
+  # Our own ancestry is excluded by PID: `just`, this shell and the harness are
+  # not competitors, and matching them by name would make this refuse to run
+  # every time, which is its own kind of useless.
+  self_tree=" "
+  pid=$$
+  while [ -n "$pid" ] && [ "$pid" != "0" ] && [ "$pid" != "1" ]; do
+    self_tree="$self_tree$pid "
+    pid="$(awk '{print $4}' "/proc/$pid/stat" 2>/dev/null)"
+  done
+
+  busy=""
+  for name in ninja cmake cc1plus cc1 clang clang++ ld.lld lld rustc cargo make gcc g++; do
+    for p in $(pgrep -x "$name" 2>/dev/null); do
+      case "$self_tree" in *" $p "*) continue ;; esac
+      busy="$busy $name($p)"
+    done
+  done
+
+  if [ -n "$busy" ]; then
+    printf '%s: cannot run: the machine is building something else:%s\n' "$TEST_NAME" "$busy" >&2
+    printf '%s: a timing measurement taken beside a competing build is not measuring what it claims.\n' "$TEST_NAME" >&2
+    printf '%s: wait for the build to finish and re-run this check alone.\n' "$TEST_NAME" >&2
+    exit "$M9_LOAD_PRECONDITION_EXIT"
+  fi
+
+  if awk -v l="$load1" -v m="$max_load" 'BEGIN{exit !(l>m)}'; then
+    printf '%s: cannot run: 1-minute load average is %s on %s core(s); this check needs it below %s.\n' \
+      "$TEST_NAME" "$load1" "$cores" "$max_load" >&2
+    printf '%s: load average lags by up to a minute, so a build that has just finished still counts.\n' \
+      "$TEST_NAME" >&2
+    printf '%s: wait, then re-run this check alone. Override with M9_IDLE_MAX_LOAD if you mean it.\n' \
+      "$TEST_NAME" >&2
+    exit "$M9_LOAD_PRECONDITION_EXIT"
+  fi
+
+  note "machine is idle enough to time on: load1 $load1 on $cores core(s), limit $max_load, no competing builds"
+}
+
 # M8's helpers keep their own name and their own variable; pointing that variable at M9's directory
 # is what keeps the milestones' trees apart. lib_m8_differential.sh does the same for M7_WORK and
 # lib_vm2_tests.sh for M6_WORK, so m6_prepare_tree, m6_configure, m6_build, m6_tree_or_die and the

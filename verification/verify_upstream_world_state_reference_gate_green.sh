@@ -198,8 +198,52 @@ if [ -n "$YAML_JOBS" ]; then
 else
   fail "no YAML parser was available, so the workflow's structure could not be asserted"
 fi
-# Stated rather than implied: the job is written and has never run, exactly as M7's was.
-assert_contains "the workflow records that it has not been exercised by GitHub" \
-  "has never run" "$WF"
+# Reality, not a sentence in a comment.
+#
+# This assertion used to be `assert_contains "has never run" "$WF"` — a claim about
+# whether GitHub had ever executed the job, settled by grepping a YAML comment for
+# some words. That is the same class of vacuity the M10 review found in
+# `assert_contains "world_state"`: the text it reads is under our own control, so it
+# goes green whenever someone writes the right sentence and red whenever someone
+# rewords it, and in neither case has it looked at the thing it names. M11 reworded
+# the comment while fixing the workflow and the assertion went red without anything
+# about the subject having changed.
+#
+# It is answerable now. `upstream-bugs/` is published, so this workflow CAN run, and
+# whether it HAS is a fact the GitHub API will state. The assertion is that the
+# repository's own claim and the API agree — which fails in BOTH directions (a
+# workflow that has run while the comment still says it has not, and a comment
+# claiming success the API does not show) and does not go red merely because the
+# work succeeded.
+if ! command -v gh >/dev/null 2>&1; then
+  die "gh is not on PATH; the workflow's run history cannot be established, and a
+     comment in the YAML is not a substitute for it"
+fi
+if ! gh auth status >/dev/null 2>&1; then
+  die "gh is not authenticated; the workflow's run history cannot be established"
+fi
+WF_RUNS_JSON="$(gh run list --repo metacraft-labs/aztec-avm-runtime \
+                  --workflow avm-wasm.yml --limit 100 \
+                  --json conclusion,status 2>/dev/null)" \
+  || die "could not query the workflow's run history from GitHub"
+WF_SUCCESSES="$(printf '%s' "$WF_RUNS_JSON" | python3 -c '
+import json, sys
+try:
+    rows = json.load(sys.stdin)
+except Exception:
+    rows = []
+print(sum(1 for r in rows if r.get("conclusion") == "success"))' 2>/dev/null)"
+case "$WF_SUCCESSES" in
+  ''|*[!0-9]*) die "could not count the successful runs (got: $WF_SUCCESSES)" ;;
+esac
+if printf '%s' "$WF" | grep -q "has never run"; then
+  WF_CLAIM="never-run"
+else
+  WF_CLAIM="has-run"
+fi
+if [ "$WF_SUCCESSES" -eq 0 ]; then WF_REALITY="never-run"; else WF_REALITY="has-run"; fi
+note "GitHub reports $WF_SUCCESSES successful run(s) of avm-wasm.yml"
+assert_eq "the workflow's recorded state agrees with its actual run history on GitHub" \
+  "$WF_REALITY" "$WF_CLAIM"
 
 finish
