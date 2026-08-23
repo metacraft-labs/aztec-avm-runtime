@@ -397,3 +397,116 @@ jobs:
           name: avm-wasm-reactor
           path: artifacts-m12
           retention-days: 30
+
+  avm-contract-db:
+    name: shippable contract DB and checkpoint coordination
+    runs-on: eph-linux-x64
+    # M13. ONE worktree carrying TEN patches — the reactor job's nine plus M13's own overlay — and
+    # the same two builds inside it. It is a SEPARATE worktree and a separate work directory from
+    # the reactor job's on purpose: M13's overlay takes the export list from thirty-nine names to
+    # forty-nine, and `verify_avm_wasm_import_surface` holds the reactor's artefact to thirty-nine
+    # as an identity. Both jobs build their own tree and both must pass, which is the only way
+    # "additive" means anything.
+    #
+    # STATUS, STATED PLAINLY: this job has never run, and neither has any job above it. They all
+    # still abort at `Generate CI token` on "Input required and not supplied: app-id", which M11
+    # recorded as undiagnosed after the `vars.` spelling did not fix it. So this job existing means
+    # it is wired and names the check — not that a run has ever gated anything. CONTRACT-DB.md says
+    # the same thing in prose.
+    #
+    # None of M13's six checks times anything, so a busy runner costs time here rather than a wrong
+    # number; the reactor job's step-batching caveat does not apply.
+    timeout-minutes: 120
+    steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout aztec-avm-runtime
+        uses: actions/checkout@v4
+        with:
+          path: aztec-avm-runtime
+
+      - name: Clone the aztec-packages fork
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/aztec-packages
+          ref: aztec-avm-runtime
+          path: aztec-packages
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Clone codetracer-specs (the prepared patch series)
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-specs
+          ref: latest
+          path: codetracer-specs
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup Dev Environment
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Assert the series base commit is present
+        working-directory: aztec-packages
+        run: |
+          set -euo pipefail
+          git fetch --unshallow 2>/dev/null || true
+          git rev-parse --verify 233d8e0993^{commit}
+
+      - name: Assert the ten patches are present
+        run: |
+          set -euo pipefail
+          for p in \
+            codetracer-specs/upstream-bugs/aztec-merkle-tree-lmdb-split/0001-refactor-crypto-split-crypto_merkle_tree-from-its-LMD.patch \
+            codetracer-specs/upstream-bugs/aztec-wasi-sdk-33/0001-build-move-the-wasm-toolchain-from-wasi-sdk-27-to-33.patch \
+            codetracer-specs/upstream-bugs/aztec-bytecode-size-shift-32bit/0001-fix-vm2-widen-before-shifting-in-compute_public_bytec.patch \
+            codetracer-specs/upstream-bugs/aztec-avm-wasm-cmake/0001-build-wasm-optional-AVM_WASM-and-separate-the-AVM-mod.patch \
+            codetracer-specs/upstream-bugs/aztec-execution-observer-hook/0001-feat-vm2-per-instruction-observation-hook-for-the-fas.patch \
+            aztec-avm-runtime/verification/m7/0001-test-vm2-AVM_SIM_TESTS-the-simulation-side-test-suit.patch \
+            aztec-avm-runtime/verification/m8/0001-test-vm2-AVM_DIFFERENTIAL-a-native-versus-wasm-diffe.patch \
+            aztec-avm-runtime/verification/m9/0001-test-vm2-step-records-the-upstream-ExecutionEvent-sea.patch \
+            aztec-avm-runtime/verification/m12/0001-test-vm2-AVM_REACTOR-a-standalone-avm.wasm-reactor-a.patch \
+            aztec-avm-runtime/verification/m13/0001-test-vm2-a-shippable-in-memory-contract-DB-and-a-che.patch ; do
+            test -f "$p" || { echo "::error::missing prepared patch: $p" >&2; exit 1; }
+          done
+
+      - name: Build avm.wasm with the shippable contract DB and run the M13 checks
+        working-directory: aztec-avm-runtime
+        env:
+          # Not $TMPDIR: the builds are several gigabytes and a tmpfs /tmp is the wrong place. A
+          # DIFFERENT directory from the reactor job's, so neither can answer for the other.
+          M13_WORK: ${{ github.workspace }}/m13-work
+        # See the M7 job: `shell: bash` supplies `-o pipefail`, which the default `bash -e {0}`
+        # does not, so `| tee` cannot swallow a failure.
+        shell: bash
+        run: dev-exec just verify-m13 2>&1 | tee verify-m13.log
+
+      - name: Collect the transcripts and the measurement record
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p artifacts-m13
+          cp aztec-avm-runtime/verify-m13.log artifacts-m13/ 2>/dev/null || true
+          for f in "${{ github.workspace }}"/m13-work/*.out \
+                   "${{ github.workspace }}"/m13-work/*.err \
+                   "${{ github.workspace }}"/m13-work/contractdb-inputs.txt \
+                   "${{ github.workspace }}"/m13-work/debug-names.txt \
+                   "${{ github.workspace }}"/m13-work/measured.env ; do
+            [ -f "$f" ] && cp "$f" artifacts-m13/ || true
+          done
+          ls -la artifacts-m13
+
+      - name: Upload transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: avm-wasm-contract-db
+          path: artifacts-m13
+          retention-days: 30
