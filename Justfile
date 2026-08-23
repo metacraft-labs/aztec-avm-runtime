@@ -776,3 +776,45 @@ verify-m9:
       echo "verify-m9: all checks passed"
     fi
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M10 — the AVM-module / server-module CMake split, and the AVM_WASM flag.
+# ---------------------------------------------------------------------------
+
+# With AVM_WASM off nothing moves: the guard exhaustively, two presets concretely,
+# and upstream's own vm2_tests and world_state_tests run on both sides.
+verify-cmake-split-neutral:
+    @verification/verify_cmake_split_native_neutral.sh
+
+# What the FUZZING_AVM block really demonstrates, and the fuzzing presets unchanged.
+verify-cmake-split-fuzzing:
+    @verification/verify_cmake_split_fuzzing_preset_unchanged.sh
+
+# AVM_WASM on: the AVM group builds for wasm and no server module is reachable.
+verify-cmake-split-wasm-avm:
+    @verification/verify_cmake_split_enables_wasm_avm.sh
+
+# The patch applies to the stated base; which prerequisite is an apply one and which a build one.
+verify-cmake-split-patch-applies:
+    @verification/verify_avm_wasm_module_split_patch_applies.sh
+
+# Run the whole M10 verification set; every check runs even if an earlier one fails.
+verify-m10:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_cmake_split_native_neutral \
+      verify_cmake_split_fuzzing_preset_unchanged \
+      verify_cmake_split_enables_wasm_avm \
+      verify_avm_wasm_module_split_patch_applies
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m10: FAILED" >&2
+    else
+      echo "verify-m10: all checks passed"
+    fi
+    exit "$rc"
