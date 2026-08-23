@@ -13,13 +13,28 @@ The ledger is generated, not written. Three inputs:
 Generating it is the point. A ledger maintained by hand beside a JSON file is two
 documents that drift, and this project has already paid for that twice; here the
 prose cannot disagree with the data because it is produced from it.
+
+The rendering is a PURE FUNCTION OF THE THREE INPUT FILES. It carries no wall
+clock, and that is a correction rather than an omission: an earlier version wrote
+`Generated <date.today()>` into the output, which made the committed ledger a
+function of the calendar as well as of the data. `verify_carry_ledger_complete`
+compares the committed file to what the data renders to, so from the day after
+each regeneration that check failed for a reason that said nothing about the
+ledger — and, because it rendered over the tracked file to do the comparison, it
+left the working tree dirty on its way out. Every date the ledger states now comes
+from the data (upstream commit dates in `exposure.json`, the replayed tip in
+`rebase.json`); when it was generated is git's question and git answers it exactly.
+
+Reading the inputs from elsewhere and writing the output elsewhere are both
+supported (`--series`, `--exposure`, `--rebase`, `--output`) so a check can render
+into a temporary directory and compare, without ever writing a tracked file.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
-from datetime import date
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -37,10 +52,18 @@ STATUS_MEANING = {
 }
 
 
-def main() -> int:
-    series = json.loads(SERIES.read_text())
-    exposure = json.loads(EXPOSURE.read_text()) if EXPOSURE.is_file() else None
-    rebase = json.loads(REBASE.read_text()) if REBASE.is_file() else None
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--series", type=Path, default=SERIES)
+    ap.add_argument("--exposure", type=Path, default=EXPOSURE)
+    ap.add_argument("--rebase", type=Path, default=REBASE)
+    ap.add_argument("--output", type=Path, default=OUT,
+                    help="where to write; '-' writes to stdout")
+    args = ap.parse_args(argv)
+
+    series = json.loads(args.series.read_text())
+    exposure = json.loads(args.exposure.read_text()) if args.exposure.is_file() else None
+    rebase = json.loads(args.rebase.read_text()) if args.rebase.is_file() else None
     patches = sorted(series["patches"], key=lambda p: p["order"])
 
     L: list[str] = []
@@ -58,7 +81,10 @@ def main() -> int:
     w("`codetracer-specs/upstream-bugs/`, which holds the patch itself, the `PR.md` written")
     w("for an upstream audience, and a verification script with a meaningful exit status.")
     w("")
-    w("Generated %s from `carry/series.json`." % date.today().isoformat())
+    w("Generated from `carry/series.json`, `carry/exposure.json` and `carry/rebase.json` by")
+    w("`tools/render_carry_ledger.py`. The rendering is a function of those files alone and of")
+    w("no wall clock, so re-rendering an unchanged set of inputs reproduces this file byte for")
+    w("byte on any day. When it was last regenerated is git's question.")
     w("")
 
     w("## Status")
@@ -244,8 +270,12 @@ def main() -> int:
     w("them and its body names their pull request numbers.")
     w("")
 
-    OUT.write_text("\n".join(L) + "\n")
-    print("wrote %s (%d lines)" % (OUT, len(L) + 1))
+    text = "\n".join(L) + "\n"
+    if str(args.output) == "-":
+        sys.stdout.write(text)
+    else:
+        args.output.write_text(text)
+        print("wrote %s (%d lines)" % (args.output, len(L) + 1))
     return 0
 
 

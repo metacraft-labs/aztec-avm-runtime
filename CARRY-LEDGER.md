@@ -10,7 +10,10 @@ Every patch here is traceable to a directory under
 `codetracer-specs/upstream-bugs/`, which holds the patch itself, the `PR.md` written
 for an upstream audience, and a verification script with a meaningful exit status.
 
-Generated 2026-08-23 from `carry/series.json`.
+Generated from `carry/series.json`, `carry/exposure.json` and `carry/rebase.json` by
+`tools/render_carry_ledger.py`. The rendering is a function of those files alone and of
+no wall clock, so re-rendering an unchanged set of inputs reproduces this file byte for
+byte on any day. When it was last regenerated is git's question.
 
 ## Status
 
