@@ -279,3 +279,121 @@ jobs:
           name: avm-wasm-native-vs-wasm-differential
           path: artifacts-m8
           retention-days: 30
+
+  avm-reactor:
+    name: avm.wasm reactor, host ABI and size budget
+    runs-on: eph-linux-x64
+    # M12. ONE worktree carrying NINE patches, and two builds inside it: the wasm-avm one, which
+    # produces `avm.wasm`, its unpruned control, the msgpack enumeration and `barretenberg.wasm`
+    # (built only so the size comparison is a measurement from this tree rather than a figure
+    # quoted from elsewhere), and a native one for the driver whose transcript the reactor is
+    # compared against. Measured from an empty work directory on 32 cores, twice: 7m50s and 7m46s,
+    # 1.2 GB — both with a WARM ccache. A CI runner starts cold, and the first wasm build of
+    # barretenberg's proving stack in this campaign took about nine minutes on its own, so budget
+    # generously rather than tightly; the cap below is generous for that reason.
+    #
+    # STATUS, STATED PLAINLY: this job has never run, and neither has either job above it. Both of
+    # those still abort at `Generate CI token` on "Input required and not supplied: app-id", which
+    # M11 recorded as undiagnosed after the `vars.` spelling did not fix it. So "the size budget is
+    # enforced in CI" means the job exists, is wired and names the check — not that a run has ever
+    # gated anything. `verify_avm_wasm_size_budget` asserts the former and REACTOR-ABI.md states
+    # the latter.
+    #
+    # ONE OF THE SIX CHECKS TIMES TWO CALL PATTERNS. `test_avm_reactor_step_stream_batching` waits
+    # for the machine to go idle and exits 3 rather than reporting a number measured beside a
+    # competing build, so a busy runner fails this job with a distinct status instead of producing
+    # a wrong ratio.
+    timeout-minutes: 120
+    steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout aztec-avm-runtime
+        uses: actions/checkout@v4
+        with:
+          path: aztec-avm-runtime
+
+      - name: Clone the aztec-packages fork
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/aztec-packages
+          ref: aztec-avm-runtime
+          path: aztec-packages
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Clone codetracer-specs (the prepared patch series)
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-specs
+          ref: latest
+          path: codetracer-specs
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup Dev Environment
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Assert the series base commit is present
+        working-directory: aztec-packages
+        run: |
+          set -euo pipefail
+          git fetch --unshallow 2>/dev/null || true
+          git rev-parse --verify 233d8e0993^{commit}
+
+      - name: Assert the nine patches are present
+        run: |
+          set -euo pipefail
+          for p in \
+            codetracer-specs/upstream-bugs/aztec-merkle-tree-lmdb-split/0001-refactor-crypto-split-crypto_merkle_tree-from-its-LMD.patch \
+            codetracer-specs/upstream-bugs/aztec-wasi-sdk-33/0001-build-move-the-wasm-toolchain-from-wasi-sdk-27-to-33.patch \
+            codetracer-specs/upstream-bugs/aztec-bytecode-size-shift-32bit/0001-fix-vm2-widen-before-shifting-in-compute_public_bytec.patch \
+            codetracer-specs/upstream-bugs/aztec-avm-wasm-cmake/0001-build-wasm-optional-AVM_WASM-and-separate-the-AVM-mod.patch \
+            codetracer-specs/upstream-bugs/aztec-execution-observer-hook/0001-feat-vm2-per-instruction-observation-hook-for-the-fas.patch \
+            aztec-avm-runtime/verification/m7/0001-test-vm2-AVM_SIM_TESTS-the-simulation-side-test-suit.patch \
+            aztec-avm-runtime/verification/m8/0001-test-vm2-AVM_DIFFERENTIAL-a-native-versus-wasm-diffe.patch \
+            aztec-avm-runtime/verification/m9/0001-test-vm2-step-records-the-upstream-ExecutionEvent-sea.patch \
+            aztec-avm-runtime/verification/m12/0001-test-vm2-AVM_REACTOR-a-standalone-avm.wasm-reactor-a.patch ; do
+            test -f "$p" || { echo "::error::missing prepared patch: $p" >&2; exit 1; }
+          done
+
+      - name: Build avm.wasm and run the reactor checks
+        working-directory: aztec-avm-runtime
+        env:
+          # Not $TMPDIR: the builds are several gigabytes and a tmpfs /tmp is the wrong place.
+          M12_WORK: ${{ github.workspace }}/m12-work
+        # See the M7 job: `shell: bash` supplies `-o pipefail`, which the default `bash -e {0}`
+        # does not, so `| tee` cannot swallow a failure.
+        shell: bash
+        run: dev-exec just verify-m12 2>&1 | tee verify-m12.log
+
+      - name: Collect transcripts and the measured sizes
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p artifacts-m12
+          cp aztec-avm-runtime/verify-m12.log artifacts-m12/ 2>/dev/null || true
+          for f in "${{ github.workspace }}"/m12-work/*.transcript \
+                   "${{ github.workspace }}"/m12-work/*.coverage \
+                   "${{ github.workspace }}"/m12-work/*.alloc \
+                   "${{ github.workspace }}"/m12-work/*.iface \
+                   "${{ github.workspace }}"/m12-work/*.hinted \
+                   "${{ github.workspace }}"/m12-work/*compare*.txt \
+                   "${{ github.workspace }}"/m12-work/measured.env ; do
+            [ -f "$f" ] && cp "$f" artifacts-m12/ || true
+          done
+          ls -la artifacts-m12
+
+      - name: Upload transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: avm-wasm-reactor
+          path: artifacts-m12
+          retention-days: 30
