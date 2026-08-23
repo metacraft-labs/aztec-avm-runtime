@@ -87,8 +87,12 @@ assert_contains "PR.md records the downstream carry as the fallback" \
   '## If this is declined' "$pr"
 assert_contains "PR.md discloses our own motive, at the end" \
   '## How we found it, and why we care' "$pr"
+# The date moves whenever the search is re-run, and it must: the convention is to
+# re-check before filing, so a date frozen at the first search would be evidence
+# that nobody had. It was 2026-08-21 when this check was written and 2026-08-23
+# after M11 re-ran every entry's search against issues AND pull requests.
 assert_contains "PR.md records the prior-art search and its date" \
-  'Search was 2026-08-21' "$pr"
+  'Search was 2026-08-23' "$pr"
 
 # --------------------------------------------------------------------------
 # 2. PR.md's numbers, re-derived rather than read.
