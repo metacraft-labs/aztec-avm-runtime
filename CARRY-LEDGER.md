@@ -110,15 +110,17 @@ Size: **8 file(s), +114 / −25 over 14 hunk(s)** (8 modified).
 
 Measured against `233d8e0993` (2026-08-19) with `tools/measure_carry_exposure.py`, not estimated.
 
-**Size.** 53 distinct files, +608 / −293 across 77 hunks — the UNION, which is what
-the set costs. Summing the five per-patch rows instead gives +613 / −295 over 80
-hunks, which is a different and larger number because 3 file(s) are touched by
-more than one patch. Both are stated so neither can be quoted as the other.
+**Size.** 53 distinct files, +611 / −293. That is git's own diff between the base
+and the base with all five patches applied — what the SET costs — and it is not the
+same arithmetic as summing the five per-patch rows, which gives +613 / −295 over 80
+hunks. The two differ because 3 file(s) are touched by more than one patch and one
+patch's added line can be another's context. Both are stated so neither can be quoted
+as the other. The 80 hunks are a property of the patch files, not of the endpoint diff.
 
 | Category | Files | Changed lines |
 | --- | --- | --- |
 | c++ | 37 | 709 |
-| cmake | 11 | 135 |
+| cmake | 11 | 138 |
 | other | 2 | 36 |
 | shell | 3 | 21 |
 
@@ -129,7 +131,7 @@ surface.
 
 **Churn.** Over the twelve months before the base (`2025-08-19` .. `2026-08-19`), upstream made
 **41.17 commits per month** touching a file this series modifies, and
-**6.42 per month** touching the LINES it modifies. The second number is the one
+**6.58 per month** touching the LINES it modifies. The second number is the one
 that predicts a rebase conflict; the first is an upper bound on it.
 
 The eight files whose carried lines upstream touched most, in that window:
@@ -147,7 +149,7 @@ The eight files whose carried lines upstream touched most, in that window:
 
 **Against the spike's estimate.** The spike said "roughly 80 lines of CMake plus
 one function-level rebase risk in `hybrid_execution.cpp`". Measured, the CMake
-side is **11 files and 135 changed lines**, not 80; and `hybrid_execution.cpp` is
+side is **11 files and 138 changed lines**, not 80; and `hybrid_execution.cpp` is
 **not** the top rebase risk: 4 upstream commits landed on its carried lines in
 twelve months, against 16 for `simulation_helper.cpp`. The estimate named the
 wrong file and understated the CMake side.

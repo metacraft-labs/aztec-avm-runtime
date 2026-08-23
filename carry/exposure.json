@@ -1,7 +1,7 @@
 {
-  "union_added": 608,
+  "union_added": 611,
   "union_removed": 293,
-  "union_hunks": 77,
+  "patch_hunks": 80,
   "sum_of_per_patch_added": 613,
   "sum_of_per_patch_removed": 295,
   "sum_of_per_patch_hunks": 80,
@@ -145,15 +145,15 @@
     "scripts/setup-container.sh"
   ],
   "by_category_files": {
+    "cmake": 11,
     "other": 2,
     "shell": 3,
-    "cmake": 11,
     "c++": 37
   },
   "by_category_lines": {
+    "cmake": 138,
     "other": 36,
     "shell": 21,
-    "cmake": 135,
     "c++": 709
   },
   "churn_12mo_before_base": {
@@ -236,7 +236,7 @@
   },
   "line_churn_12mo_before_base": {
     "barretenberg/cpp/CMakeLists.txt": 4,
-    "barretenberg/cpp/CMakePresets.json": 0,
+    "barretenberg/cpp/CMakePresets.json": 2,
     "barretenberg/cpp/cmake/arch.cmake": 5,
     "barretenberg/cpp/cmake/threading.cmake": 1,
     "barretenberg/cpp/scripts/audit/audit_scopes/merkle_tree_audit_scope.md": 2,
@@ -275,5 +275,5 @@
   },
   "line_churn_unmeasurable": [],
   "upstream_commits_per_month_touching_a_modified_file": 41.17,
-  "upstream_commits_per_month_touching_a_carried_hunk": 6.42
+  "upstream_commits_per_month_touching_a_carried_hunk": 6.58
 }

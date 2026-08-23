@@ -45,16 +45,26 @@ entry="$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d["pat
 pfile="$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d["patches"][2]["patch"])' "$REPO_ROOT/carry/series.json")"
 target="$SPECS/upstream-bugs/$entry/$pfile"
 cp "$target" "$work/orig.patch"
-# Append one context-free added line to the last hunk of the smallest patch. It
-# is restored immediately; the point is only that the numbers must notice.
+# Append a VALID one-line new-file diff to the smallest patch, before git's own
+# trailing signature. It has to stay a patch git can apply, because the
+# measurement now takes its totals from a real diff between the base tree and the
+# tree with every patch applied — an edit that corrupts a hunk header would make
+# the tool fail rather than report a different number, which tests nothing.
 python3 - "$target" <<'PY'
 import sys
-lines = open(sys.argv[1]).read().splitlines(keepends=True)
-for i in range(len(lines) - 1, -1, -1):
-    if lines[i].startswith("+") and not lines[i].startswith("+++"):
-        lines.insert(i + 1, "+// SYNTHETIC PROBE\n")
-        break
-open(sys.argv[1], "w").writelines(lines)
+text = open(sys.argv[1]).read()
+probe = ("diff --git a/SYNTHETIC_PROBE.txt b/SYNTHETIC_PROBE.txt\n"
+         "new file mode 100644\n"
+         "--- /dev/null\n"
+         "+++ b/SYNTHETIC_PROBE.txt\n"
+         "@@ -0,0 +1 @@\n"
+         "+SYNTHETIC PROBE\n")
+i = text.rfind("\n-- \n")
+if i == -1:
+    text = text + probe
+else:
+    text = text[:i + 1] + probe + text[i + 1:]
+open(sys.argv[1], "w").write(text)
 PY
 python3 "$REPO_ROOT/tools/measure_carry_exposure.py" --json "$work/probe.json" >/dev/null 2>&1
 cp "$work/orig.patch" "$target"

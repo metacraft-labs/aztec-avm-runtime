@@ -143,6 +143,71 @@ def line_churn(fork: Path, base: str, path: str, ranges: list[tuple[int, int]],
     return len(seen), True
 
 
+def endpoint_diff(fork: Path, base: str, patch_files: list[Path]) -> dict[str, dict]:
+    """What the whole set changes, as git sees it.
+
+    The patches are applied to the base in a scratch index and the resulting tree
+    is diffed against the base tree. This is the only honest answer to "how big is
+    the carry set": the per-patch rows cannot be summed, because two patches can
+    touch one file and one patch's added line can be another's context.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        env = dict(os.environ, GIT_INDEX_FILE=os.path.join(tmp, "index"))
+        base_tree = run(["git", "-C", str(fork), "rev-parse", base + "^{tree}"]).strip()
+        run(["git", "-C", str(fork), "read-tree", base_tree], env=env)
+        for pf in patch_files:
+            run(["git", "-C", str(fork), "apply", "--cached", "--whitespace=nowarn",
+                 str(pf)], env=env)
+        final_tree = run(["git", "-C", str(fork), "write-tree"], env=env).strip()
+
+    # `-z`, not the default. With rename detection on, plain `--numstat` writes a
+    # rename as the compressed `{old => new}` form in ONE field, which is not a
+    # path and cannot be looked up anywhere else; `-z` emits the two paths as
+    # separate NUL-terminated fields instead.
+    out: dict[str, dict] = {}
+    raw = run(["git", "-C", str(fork), "diff-tree", "-r", "-M", "-z", "--numstat",
+               base_tree, final_tree])
+    fields = raw.split("\0")
+    i = 0
+    while i < len(fields):
+        rec = fields[i]
+        i += 1
+        if not rec:
+            continue
+        parts = rec.split("\t")
+        if len(parts) < 3:
+            continue
+        add, rem, path = parts[0], parts[1], parts[2]
+        if path == "":            # a rename: the two paths follow as fields
+            old_path, new_path = fields[i], fields[i + 1]
+            i += 2
+            path = new_path
+        out[path] = {"added": 0 if add == "-" else int(add),
+                     "removed": 0 if rem == "-" else int(rem),
+                     "kind": "modified"}
+
+    raw = run(["git", "-C", str(fork), "diff-tree", "-r", "-M", "-z", "--name-status",
+               base_tree, final_tree])
+    fields = raw.split("\0")
+    i = 0
+    while i < len(fields):
+        code = fields[i]
+        i += 1
+        if not code:
+            continue
+        if code[0] == "R":
+            path = fields[i + 1]
+            i += 2
+            kind = "renamed"
+        else:
+            path = fields[i]
+            i += 1
+            kind = {"A": "new", "D": "deleted"}.get(code[0], "modified")
+        out.setdefault(path, {"added": 0, "removed": 0, "kind": kind})
+        out[path]["kind"] = kind
+    return out
+
+
 def churn(fork: Path, paths: list[str], since: str, until: str) -> dict[str, int]:
     """Commits in upstream's own history touching each path in a window."""
     out: dict[str, int] = {}
@@ -174,9 +239,14 @@ def main() -> int:
                     "--date=short", tip]).strip()
     window_start = (date.fromisoformat(base_date) - timedelta(days=365)).isoformat()
 
+    ordered = sorted(series["patches"], key=lambda p: p["order"])
+    endpoint = endpoint_diff(
+        fork, base,
+        [specs / "upstream-bugs" / p["entry"] / p["patch"] for p in ordered])
+
     per_patch = []
     all_files: dict[str, dict] = {}
-    for p in sorted(series["patches"], key=lambda p: p["order"]):
+    for p in ordered:
         patch = specs / "upstream-bugs" / p["entry"] / p["patch"]
         files = parse_patch(patch)
         cats = collections.Counter()
@@ -187,14 +257,20 @@ def main() -> int:
             removed += info["removed"]
             hunks += info["hunks"]
             # Later patches in the series can touch a file an earlier one did.
+            # Only the HUNK GEOMETRY is accumulated here — hunks, context and the
+            # pre-image ranges the line-churn measurement needs. The +/- totals for
+            # the set as a whole are NOT summed from these rows: see below, where
+            # they come from a real diff between the base tree and the tree with
+            # every patch applied. Summing per-file rows across patches is not the
+            # same arithmetic, and this file got it wrong in both directions before
+            # the endpoint diff replaced it.
             prev = all_files.get(path)
-            if prev is None or prev["kind"] == "modified":
+            if prev is None:
                 all_files[path] = dict(info)
             else:
-                all_files[path]["added"] += info["added"]
-                all_files[path]["removed"] += info["removed"]
-                all_files[path]["hunks"] += info["hunks"]
-                all_files[path]["context"] += info["context"]
+                prev["hunks"] += info["hunks"]
+                prev["context"] += info["context"]
+                prev["ranges"] = prev.get("ranges", []) + info.get("ranges", [])
         per_patch.append({
             "id": p["id"], "entry": p["entry"], "title": p["title"],
             "files": len(files), "added": added, "removed": removed, "hunks": hunks,
@@ -202,10 +278,13 @@ def main() -> int:
             "kinds": dict(collections.Counter(i["kind"] for i in files.values())),
         })
 
-    modified = sorted(p for p, i in all_files.items() if i["kind"] == "modified")
-    created = sorted(p for p, i in all_files.items() if i["kind"] == "new")
-    renamed = sorted(p for p, i in all_files.items() if i["kind"] == "renamed")
-    deleted = sorted(p for p, i in all_files.items() if i["kind"] == "deleted")
+    # Classification also comes from the endpoint diff. A file one patch creates
+    # and a later one edits is CREATED by the set, not modified, and only the
+    # endpoint knows that.
+    modified = sorted(p for p, i in endpoint.items() if i["kind"] == "modified")
+    created = sorted(p for p, i in endpoint.items() if i["kind"] == "new")
+    renamed = sorted(p for p, i in endpoint.items() if i["kind"] == "renamed")
+    deleted = sorted(p for p, i in endpoint.items() if i["kind"] == "deleted")
 
     before = churn(fork, modified, window_start, base_date)
     after = churn(fork, modified, base_date, tip_date)
@@ -227,23 +306,24 @@ def main() -> int:
 
     totals_by_cat = collections.Counter()
     lines_by_cat = collections.Counter()
-    for path, info in all_files.items():
+    for path, info in endpoint.items():
         c = categorise(path)
         totals_by_cat[c] += 1
         lines_by_cat[c] += info["added"] + info["removed"]
 
-    # The union, which is what the SET costs. Summing the per-patch rows instead
-    # would double-count the files two patches both touch, and this project has
-    # already shipped one pair of documents quoting two different numbers for one
-    # quantity. Both are reported, each labelled with what it is.
-    union_added = sum(i["added"] for i in all_files.values())
-    union_removed = sum(i["removed"] for i in all_files.values())
+    # What the SET costs, taken from a real diff between the base tree and the tree
+    # with every patch applied — git's arithmetic, not ours. Summing the per-patch
+    # rows is a DIFFERENT quantity: it counts a file twice when two patches touch
+    # it, and it cannot see that one patch's added line is another's context. Both
+    # are reported, each labelled with what it is.
+    union_added = sum(r["added"] for r in endpoint.values())
+    union_removed = sum(r["removed"] for r in endpoint.values())
     union_hunks = sum(i["hunks"] for i in all_files.values())
 
     report = {
         "union_added": union_added,
         "union_removed": union_removed,
-        "union_hunks": union_hunks,
+        "patch_hunks": union_hunks,
         "sum_of_per_patch_added": sum(r["added"] for r in per_patch),
         "sum_of_per_patch_removed": sum(r["removed"] for r in per_patch),
         "sum_of_per_patch_hunks": sum(r["hunks"] for r in per_patch),
@@ -251,7 +331,7 @@ def main() -> int:
         "upstream_tip": tip, "upstream_tip_date": tip_date,
         "churn_window": [window_start, base_date],
         "per_patch": per_patch,
-        "files_total": len(all_files),
+        "files_total": len(endpoint),
         "files_modified": len(modified),
         "files_created": len(created),
         "files_renamed": len(renamed),
@@ -268,18 +348,21 @@ def main() -> int:
     }
     Path(args.json).write_text(json.dumps(report, indent=2) + "\n")
 
-    total_added = sum(i["added"] for i in all_files.values())
-    total_removed = sum(i["removed"] for i in all_files.values())
-    total_hunks = sum(i["hunks"] for i in all_files.values())
-    ctx = sum(all_files[p]["context"] for p in modified)
+    total_added = union_added
+    total_removed = union_removed
+    total_hunks = union_hunks
+    ctx = sum(all_files[p]["context"] for p in modified if p in all_files)
 
     print("Carry exposure if upstream accepts NOTHING")
     print("  measured against %s (%s); upstream tip %s (%s)"
           % (base[:10], base_date, tip[:10], tip_date))
     print()
     print("SIZE")
-    print("  %d file(s), +%d / -%d over %d hunk(s)"
-          % (len(all_files), total_added, total_removed, total_hunks))
+    print("  %d file(s), +%d / -%d   [git's own diff, base -> base + all five]"
+          % (len(endpoint), total_added, total_removed))
+    print("  %d hunk(s) across the five patch files (a different quantity: the endpoint"
+          % total_hunks)
+    print("  diff has no hunks of its own to count)")
     for c in sorted(totals_by_cat):
         print("    %-6s %2d file(s), %4d changed line(s)" % (c, totals_by_cat[c], lines_by_cat[c]))
     print()
@@ -289,8 +372,9 @@ def main() -> int:
     print("  the modified files carry %d line(s) of context a three-way merge must match"
           % ctx)
     for p in modified:
-        i = all_files[p]
-        print("    +%-4d -%-4d %2d hunk(s)  %s" % (i["added"], i["removed"], i["hunks"], p))
+        i = endpoint[p]
+        h = all_files.get(p, {}).get("hunks", 0)
+        print("    +%-4d -%-4d %2d hunk(s)  %s" % (i["added"], i["removed"], h, p))
     print()
     print("CHURN — upstream commits touching those files")
     print("  window %s .. %s (12 months before the base)" % (window_start, base_date))

@@ -144,15 +144,17 @@ def main() -> int:
         w("Measured against `%s` (%s) with `tools/measure_carry_exposure.py`, not estimated."
           % (exposure["base"][:10], exposure["base_date"]))
         w("")
-        w("**Size.** %d distinct files, +%d / −%d across %d hunks — the UNION, which is what"
-          % (exposure["files_total"], exposure["union_added"],
-             exposure["union_removed"], exposure["union_hunks"]))
-        w("the set costs. Summing the five per-patch rows instead gives +%d / −%d over %d"
+        w("**Size.** %d distinct files, +%d / −%d. That is git's own diff between the base"
+          % (exposure["files_total"], exposure["union_added"], exposure["union_removed"]))
+        w("and the base with all five patches applied — what the SET costs — and it is not the")
+        w("same arithmetic as summing the five per-patch rows, which gives +%d / −%d over %d"
           % (exposure["sum_of_per_patch_added"], exposure["sum_of_per_patch_removed"],
              exposure["sum_of_per_patch_hunks"]))
-        w("hunks, which is a different and larger number because %d file(s) are touched by"
+        w("hunks. The two differ because %d file(s) are touched by more than one patch and one"
           % (sum(r["files"] for r in exposure["per_patch"]) - exposure["files_total"]))
-        w("more than one patch. Both are stated so neither can be quoted as the other.")
+        w("patch's added line can be another's context. Both are stated so neither can be quoted")
+        w("as the other. The %d hunks are a property of the patch files, not of the endpoint diff."
+          % exposure["patch_hunks"])
         w("")
         w("| Category | Files | Changed lines |")
         w("| --- | --- | --- |")
