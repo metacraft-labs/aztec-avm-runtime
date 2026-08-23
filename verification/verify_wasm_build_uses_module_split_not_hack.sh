@@ -158,8 +158,21 @@ assert_eq "no include directory is named for lmdb either" \
   "0" "$(printf '%s\n' "$INCLUDES" | grep -ci 'lmdb')"
 assert_eq "and no lmdb.h exists anywhere under the wasm build tree" \
   "0" "$(find "$AVM_CPP/build-wasm-avm" -name lmdb.h 2>/dev/null | wc -l)"
-assert_eq "nor anywhere in the fork worktree outside a native build's _deps" \
-  "0" "$(find "$M6_TREE_AVM" -name lmdb.h -not -path '*/build-native*/*' 2>/dev/null | wc -l)"
+# Nor anywhere in the fork worktree except where FetchContent puts it. This used
+# to exclude by BUILD-DIRECTORY NAME (`*/build-native*/*`), which made it a
+# statement about how the directories happen to be called: M10 added
+# `build-m10-native` and `build-m10-fuzzing-avm` and the assertion went red on two
+# FetchContent copies that are exactly what it meant to allow. It now excludes by
+# what the path IS — a `_deps` subtree — and the exclusion is MEASURED rather than
+# assumed: the search must find some lmdb.h at all, and every one it finds must be
+# under a `_deps`, so nothing is being waved through and nothing is inert.
+LMDB_ALL="$(find "$M6_TREE_AVM" -name lmdb.h 2>/dev/null | sort)"
+LMDB_N=$(printf '%s\n' "$LMDB_ALL" | grep -c . || true)
+LMDB_DEPS=$(printf '%s\n' "$LMDB_ALL" | grep -c '/_deps/' || true)
+assert_ge "the lmdb.h search is not inert — FetchContent has fetched one somewhere" 1 "$LMDB_N"
+assert_eq "and every lmdb.h in the worktree is a FetchContent copy under a build tree's _deps" \
+  "$LMDB_N" "$LMDB_DEPS"
+assert_eq "so none is in the fork's own sources" "0" "$((LMDB_N - LMDB_DEPS))"
 
 # The consequence, at symbol level.
 for a in libvm2_sim.a libworld_state_reference.a; do
