@@ -1020,3 +1020,73 @@ verify-m12:
       echo "verify-m12: all checks passed"
     fi
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M13 — the shippable contract DB and checkpoint coordination.
+#
+# ONE worktree of 233d8e0993 under $M13_WORK (default ~/.cache/aztec-m13-contractdb)
+# carrying TEN patches: M12's nine plus M13's own overlay. Two builds inside it, the
+# same two M12 makes.
+#
+# M13's tree is NOT M12's, on purpose: the overlay takes the export list from
+# thirty-nine names to forty-nine, and `verify_avm_wasm_import_surface` holds M12's
+# artefact to thirty-nine as an identity — correctly, since an export appearing is as
+# much a finding as one disappearing. Both milestones build their own tree in their own
+# work directory and both are re-run in the sweep, which is the only way "additive"
+# means anything.
+#
+#   just verify-contract-db-decision  verify_contract_db_reuse_decision_recorded  (the check that BUILDS)
+#   just verify-contract-db-methods   test_contract_db_eight_methods_covered
+#   just verify-checkpoint-lockstep   test_checkpoint_lockstep_contract_and_merkle
+#   just verify-checkpoint-depth      test_checkpoint_depth_balanced_after_nested_reverts
+#   just verify-debug-function-name   test_debug_function_name_from_upstream_db
+#   just verify-deploy-roundtrip      e2e_deploy_call_revert_roundtrip
+#   just verify-m13                   all six, in order
+# ---------------------------------------------------------------------------
+
+# Eight ContractDBInterface implementations enumerated from the fork, three dispositions, one taken.
+verify-contract-db-decision:
+    @verification/verify_contract_db_reuse_decision_recorded.sh
+
+# All eight methods against all seven corpus contracts, each getter with a registered and an absent argument.
+verify-contract-db-methods:
+    @verification/test_contract_db_eight_methods_covered.sh
+
+# The coordinator, an injected desynchronisation, and the wrong state a naive owner produces from it.
+verify-checkpoint-lockstep:
+    @verification/test_checkpoint_lockstep_contract_and_merkle.sh
+
+# Every corpus program through the coordinator; both stacks back where they started, roots restored.
+verify-checkpoint-depth:
+    @verification/test_checkpoint_depth_balanced_after_nested_reverts.sh
+
+# Artifact names in, artifact names out, and the same name on the AVM's own frame label.
+verify-debug-function-name:
+    @verification/test_debug_function_name_from_upstream_db.sh
+
+# A contract deployed DURING execution: kept when the tx succeeds, gone when it reverts, roots with it.
+verify-deploy-roundtrip:
+    @verification/e2e_deploy_call_revert_roundtrip.sh
+
+# Run the whole M13 verification set; every check runs even if an earlier one fails.
+verify-m13:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_contract_db_reuse_decision_recorded \
+      test_contract_db_eight_methods_covered \
+      test_checkpoint_lockstep_contract_and_merkle \
+      test_checkpoint_depth_balanced_after_nested_reverts \
+      test_debug_function_name_from_upstream_db \
+      e2e_deploy_call_revert_roundtrip
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m13: FAILED" >&2
+    else
+      echo "verify-m13: all checks passed"
+    fi
+    exit "$rc"
