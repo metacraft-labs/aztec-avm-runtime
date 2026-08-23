@@ -130,14 +130,30 @@ interfaces are exposed as exports over implementations resident in the module. T
 host-implemented, imported-callback shape is M15's *chatty* arm and is measured there against this
 one; nothing here forecloses it.
 
-### The raw contract DB is provisional and M13 owns it
+### The raw contract DB was provisional here, and M13 has since answered it
 
-`TestContractDB` from `vm2/testing/` is the only in-memory raw `ContractDBInterface` upstream has.
-`PureContractDB` is a decorator over a raw one; upstream's shippable raw one is the native,
-IPC-backed `cdb`, which cannot reach wasm. Whether `TestContractDB` ships, is upstreamed as an
-in-memory store beside `PureContractDB`, or is replaced is M13's deliverable. The module names it in
-one place so that decision is a one-line change. `get_debug_function_name` returns `nullopt` there
-today, and the check asserts that rather than papering over it — M13 wires it properly.
+In **this** artefact — the nine-patch M12 tree these numbers are measured from — the raw
+`ContractDBInterface` is `TestContractDB` from `vm2/testing/`. `PureContractDB` is a decorator over
+a raw one, and `get_debug_function_name` returns `nullopt` in `TestContractDB`, which the check
+asserts rather than papers over. The module names the raw store in one place so the decision was a
+one-line change.
+
+**M13 made it, and two things this section used to say were wrong.** The enumeration found **eight**
+implementations of `ContractDBInterface` upstream, not the three the question was framed around —
+including `FuzzerContractDB` under `avm_fuzzer/`, a barretenberg subdirectory rather than anything
+under `vm2/`. And upstream's shippable raw one is **not** the native `cdb` module: `cdb` is a
+*transport adapter*, `CdbIpcContractDB` translating eight method calls into IPC, and on the far side
+`yarn-project/simulator/src/public/cdb_ipc_server.ts` serves all eight out of the **TypeScript**
+`PublicContractsDB`. So the shape upstream ships is store in TypeScript, adapter in C++, and the
+wasm analogue of it is M15's *chatty* arm rather than anything C++ resident.
+
+The answer taken is `simulation::MemoryContractDB` under `vm2/simulation/standalone/`, beside the
+decorator that had never had a raw store to decorate, with a `CheckpointCoordinator` owning both
+checkpoint stacks. That tree is **not** this one: it carries a tenth overlay and exports forty-nine
+names rather than thirty-nine, and it is measured in
+[`CONTRACT-DB.md`](CONTRACT-DB.md) and reproduced by `just verify-m13`. The identity above is held
+to thirty-nine for **this** artefact on purpose — an export appearing is as much a finding as one
+disappearing — so the two trees are built and checked separately rather than reconciled in prose.
 
 ## The host ABI is upstream's msgpack schemas
 
