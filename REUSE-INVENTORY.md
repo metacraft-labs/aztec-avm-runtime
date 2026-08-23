@@ -115,14 +115,14 @@ checker rejects it.
 - experiment: n/a
 
 ### RI-07 — Contract DB implementation
-- upstream: `PureContractDB` in `vm2/simulation/standalone/concrete_dbs.hpp`, `TestContractDB` in `vm2/testing/`, and the native IPC-backed `cdb` module @ anchor `cpp`
+- upstream: `PureContractDB` in `vm2/simulation/standalone/concrete_dbs.hpp` (a decorator), `TestContractDB` in `vm2/testing/`, `FuzzerContractDB` in `avm_fuzzer/common/interfaces/`, `HintedRawContractDB` in `vm2/simulation/lib/`, and the IPC-backed `cdb` module fronting the TypeScript `PublicContractsDB` @ anchor `cpp`
 - covers: contract-db
-- decision: open
+- decision: extend
 - milestone: M13
-- why: The world-state half of the host surface is already Aztec's and already running in wasm; the contract-DB half is not yet exercised in the shape we would ship. `PureContractDB` is a **decorator** over a raw `ContractDBInterface`, not a store. `TestContractDB` is the test implementation and is what the passing wasm transcripts actually used. Upstream's shippable raw one is `cdb`, which is native and IPC-backed. So there are three live candidates and the answer is not yet evidenced.
+- why: **Settled by enumeration in M13, and the enumeration found eight implementations where this entry named three.** The three the plan named are all unfit: `PureContractDB` is a decorator with nothing to decorate — at the anchor it was the ONLY `ContractDBInterface` in `simulation/standalone/`; `TestContractDB`'s `add_contracts` has an empty body and its `get_debug_function_name` is `return std::nullopt;`, which makes two of M13's six deliverables unimplementable against it; and `cdb` links `barretenberg` and `ipc_runtime`, so it cannot reach wasm — and it is a transport adapter rather than a store, because the store it fronts is the TypeScript `PublicContractsDB` served over a unix socket by `cdb_ipc_server.ts`. The two the plan did NOT name matter too: `HintedRawContractDB` is raw, in-memory and already inside `avm.wasm`, but answers only what a previous hint-collecting run asked; and `FuzzerContractDB` implements both of the methods `TestContractDB` does not, in a `FUZZING_AVM`-gated module whose line is `DEPENDENCIES vm2` — the proving `vm2` — with an instance-log decoder that reads the wrong field order (DRIFT D12). So the answer is neither "ship it" nor "write one": it is `simulation::MemoryContractDB` under `standalone/`, beside the decorator that needs a raw one, written in Aztec's module and in a shape they could take. Writing one of ours was rejected because it would be a THIRD copy of the same map-backed store whose drift we would then own forever.
 - rejection-reason: n/a
-- confidence: open
-- experiment: M13's enumeration: build `TestContractDB` into the wasm reactor and drive all eight `ContractDBInterface` methods against the corpus contracts, including `add_contracts` during execution and a deploy/call/revert round trip. If it passes unchanged the answer is "ship it"; if it fails only on test-shaped assumptions the answer is "upstream it as an in-memory store under `standalone/` beside `PureContractDB`"; only if both fail is a store of ours justified — and it is eight methods, four of which are lookups into artifacts the TypeScript layer already holds.
+- confidence: measured
+- experiment: n/a — settled by `verify_contract_db_reuse_decision_recorded`, which re-derives the eight implementations from the fork at the anchor by one regular expression on every run, and by the five behavioural checks beside it. `CONTRACT-DB.md` carries the enumeration and the three dispositions.
 
 ### RI-08 — Per-instruction execution observer
 - upstream: `vm2/simulation/events/event_emitter.hpp`'s `EventEmitterInterface<ExecutionEvent>` — a real per-instruction seam, on the wrong execution path. See the rejection reason.
@@ -597,6 +597,16 @@ component is and what it costs us, and does not repeat the deletion.
 - rejection-reason: n/a
 - confidence: open
 - experiment: M17's deliverable: attempt instantiation of `avm.wasm` under bb.js's shim unchanged; if it fails, record which of the twelve imports it does not satisfy — including whether it supplies a memory of at least the module's declared 130-page minimum — and write only that difference. `verify_wasi_shim_reuse_decision_recorded` requires the answer either way. M12's `verify_avm_wasm_import_surface` pins the surface the shim has to serve, and `verification/wasm_host/avm_reactor_host.mjs` is a working existence proof that `node:wasi` plus one supplied memory is enough.
+
+### RI-52 — The owner of the two checkpoint stacks
+- upstream: `TxExecution::simulate` in `vm2/simulation/gadgets/tx_execution.cpp` pairs `merkle_db` and `contract_db` checkpoints at five sites @ anchor `cpp`; `PublicTxSimulator` and `PublicProcessor` do the equivalent on the TypeScript side
+- covers: -
+- decision: build
+- milestone: M13
+- why: Inside a transaction the pairing is upstream's and M13 does not second-guess it: `TxExecution` opens a checkpoint on BOTH DBs at the end of setup and closes it on the app-logic and teardown paths, while `ContextProvider` and `Execution` open one on the merkle DB alone per call frame — deliberately, since a nested call can write storage and cannot publish a contract class. What has no upstream counterpart is an owner OUTSIDE a simulation, where a consumer opens a checkpoint per transaction or per block across two interfaces that know nothing about each other. That is a property of our boundary — the reactor exposes both interfaces as exports and a host can drive either — and not of upstream's product, where the two stacks are only ever moved by code that already holds both.
+- rejection-reason: does-not-exist: searched upstream for a type that owns both stacks — `git grep` for every call site of `create_checkpoint` / `commit_checkpoint` / `revert_checkpoint` under `barretenberg/cpp/src/barretenberg/vm2/` at the anchor, and for the TypeScript equivalents under `yarn-project/simulator/src/public/`. Every pairing found is INSIDE a transaction: `TxExecution` (five paired sites), `MerkleDB`/`PureMerkleDB` pairing the raw merkle DB with the written-slots tree, and `SideEffectTrackingDB` pairing it with the side-effect tracker. None of them is an owner a host can hold across transactions, none exposes a depth or an id for the contract side — `ContractDBInterface` declares no `get_checkpoint_id` where `LowLevelMerkleDBInterface` does — and `PublicContractsDB` on the TypeScript side throws on underflow while `world_state::MemoryMerkleDB` pops an empty `std::stack`. The coordinator is 70 lines and lives beside the store in `standalone/`, so it goes upstream with it.
+- confidence: measured
+- experiment: n/a — `test_checkpoint_lockstep_contract_and_merkle` runs the same injected desynchronisation twice, once through the coordinator (detected, by name) and once by hand (a plausible-looking wrong state), so the value of the owner is a comparison of two measured runs.
 
 ---
 
