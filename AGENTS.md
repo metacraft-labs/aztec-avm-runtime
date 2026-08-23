@@ -100,6 +100,38 @@ This convention governs this repo **and** the sibling fork checkout at
 downstream edit to an upstream file is a rebase cost forever, so downstream
 conventions live here rather than there.
 
+## The fork's branches, and the one line that must never be crossed
+
+`../aztec-packages` has **two** remotes: `origin` is `metacraft-labs/aztec-packages`
+and `upstream` is `AztecProtocol/aztec-packages`. Never push to `upstream`, and
+never open a pull request from a script. Filing upstream is a person's decision
+and a person's command — `submit/pr<N>-*.sh` in this repo, run by hand — and
+`just verify-submission-manual` asserts that exactly one file here is even
+capable of it.
+
+It is a public repository, so every branch name and every commit message on it
+must be neutral and user-facing: no internal project names, no roadmap, no
+milestone identifiers.
+
+| branch on `origin` | what it is |
+|---|---|
+| `aztec-avm-runtime` | the base commit plus our nix dev-shell commits. The fork's default branch, and what the checks build from |
+| `pr/1-…` … `pr/5-…` | one per prepared upstream contribution, ready to file. **Generated**, not hand-built |
+| `codetracer` | downstream development: `aztec-avm-runtime` plus all five patches in dependency order. The base for M12 onward |
+
+**Do not commit onto the `pr/*` or `codetracer` branches by hand.** They are
+regenerated from the patch files in `codetracer-specs/upstream-bugs/` by
+`just make-fork-branches`, deterministically down to the commit id, and
+`just verify-pr-branches` rebuilds every one of them and requires it to equal
+what is published. A hand-made fixup would be silently discarded on the next
+regeneration — and, worse, would mean the branch filed upstream is not the patch
+that was reviewed. Change the patch file, then regenerate.
+
+**`codetracer` is not the neutrality harness.** M3–M10 prove that the patches
+change nothing natively by building the pristine base and the patched tree as
+separate worktrees and comparing them. A branch with the patches already applied
+cannot be the "before" side of that. Do not repoint a check at it.
+
 ## Layout
 
 ```
