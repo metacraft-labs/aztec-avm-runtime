@@ -511,6 +511,51 @@ were absorbed silently.
   `aztec-avm-runtime/verification/verify_observation_hook_step_records_identical.sh` (no AVM log
   line in either transcript, at least twenty in the wasm stderr).
 
+## D12 — the AVM fuzzer's contract-instance log decoder reads the wrong field order
+
+- id: D12
+- status: open
+- opened: 2026-08-24
+- milestone: M13 (found while enumerating the contract DB implementations; used as the negative
+  control in `e2e_deploy_call_revert_roundtrip`)
+- design-question: the published-event field layout is defined in TypeScript and consumed in C++;
+  which side is the authority, and what checks that they agree?
+- sides: upstream at anchor `cpp` versus itself — `FuzzerContractDB::from_logs(const PrivateLog&)`
+  in `barretenberg/cpp/src/barretenberg/avm_fuzzer/common/interfaces/dbs.cpp` against
+  `ContractInstancePublishedEvent.fromLog` in
+  `yarn-project/protocol-contracts/src/instance-registry/contract_instance_published_event.ts`, the
+  file that decoder's own comment cites as its source.
+- what: The TypeScript reader skips the tag and then reads, in order, **address, version, salt,
+  contractClassId, initializationHash, immutablesHash, the seven `PublicKeys` fields, deployer** —
+  fifteen fields. The C++ decoder's comment says the layout is "tag (index 0), version (index 1),
+  contract address (index 2)" and it takes `log.fields[2]` as the contract address, which is the
+  **version**. Having started three fields in, it reads salt, contractClassId and
+  initializationHash correctly by coincidence of offset, then walks straight into the public keys
+  and takes `immutablesHash` for `npkMHash` — so `immutablesHash` is dropped entirely and the last
+  two keys, `mspkMHash` and `fbpkMHash`, are never read at all. Five of the seven keys are shifted
+  by one field.
+- why it matters: it is invisible from inside the fuzzer, which is the whole shape of the hazard.
+  The fuzzer publishes its own logs and consumes them with this decoder, so its encoder and its
+  decoder are wrong *together* and every round trip closes. Nothing else in upstream's C++ decodes
+  a deployment log — in production the decoding happens in TypeScript, in `PublicContractsDB`
+  — so there is no second implementation for it to disagree with. Anyone who reuses this decoder
+  against a log a real deployment produced gets a contract instance at the wrong address with two
+  unset keys, and no error.
+- decision: Open, and **not** reported upstream from here. It is in a `FUZZING_AVM`-gated module we
+  do not build and do not ship, and this campaign's posture is to contribute on merit rather than
+  to file drive-by findings in code it does not exercise. What M13 does instead is refuse to
+  inherit it: `MemoryContractDB::decode_instance_log` is written from the TypeScript reader, with
+  the divergence named in a comment at the decode site, and
+  `e2e_deploy_call_revert_roundtrip` applies the fuzzer's field order to the same bytes as a
+  **negative control** — it must disagree with upstream's reader on the address for all seven
+  corpus programs, or the agreement the check asserts would hold for any layout at all. If the
+  store is ever filed upstream this entry is the note that goes with it. It closes when the fuzzer
+  reads the layout the TypeScript publisher writes.
+- evidence: `aztec-avm-runtime/verification/e2e_deploy_call_revert_roundtrip.sh` (112 field
+  comparisons against upstream's own two readers, and the fuzzer-layout control);
+  `aztec-avm-runtime/diffsim/decode_deployment_logs.mjs` (the upstream readers, driven from the
+  pinned npm packages); `aztec-avm-runtime/CONTRACT-DB.md` "Why each candidate is or is not fit".
+
 <!-- END:drift -->
 
 ---
