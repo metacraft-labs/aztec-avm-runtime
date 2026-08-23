@@ -109,8 +109,14 @@ neg "a 'build' entry with its rejection-reason deleted" \
 neg "a tagged but contentless rejection reason" \
     's|^- rejection-reason: cannot-reach-target:.*$|- rejection-reason: cannot-reach-target: no.|'
 # 4. An 'open' entry with no experiment — the way `open` could be used to dodge.
+#
+# The mutation is expressed over the STRUCTURE — the `- experiment:` line inside any block whose
+# decision is `open` — and not over the text of one entry's experiment. It used to name `M13`,
+# which was RI-07's; when M13 settled that entry the needle stopped matching, the mutation changed
+# nothing, and the control reported ITSELF as vacuous rather than passing. That is the check
+# working, and the fix is to stop tying a control to a sentence that is supposed to change.
 neg "an 'open' entry with its experiment deleted" \
-    '/^- experiment: M13/,/^- *$/{/^- experiment: M13/s|.*|- experiment: n/a|}'
+    '/^- decision: open$/,/^### RI-/{/^- experiment: /s|.*|- experiment: n/a|}'
 # 5. A decision outside the vocabulary.
 neg "a decision outside the closed vocabulary" \
     '0,/^- decision: depend$/s//- decision: probably-fine/'
