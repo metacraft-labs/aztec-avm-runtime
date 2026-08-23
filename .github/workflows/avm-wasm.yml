@@ -178,9 +178,15 @@ jobs:
     # `vars.CI_TOKEN_PROVIDER_APP_ID` now, which is what every other repository in the
     # organisation uses.
     #
+    # A FIFTH, and it is the one currently blocking: the `vars.` spelling did NOT fix it. Runners
+    # do pick both jobs up (group `nixos self-hosted`), `Set up job` succeeds, and `Generate CI
+    # token` still aborts on "Input required and not supplied: app-id" — 40s for this job, 41s
+    # for `carry.yml`. The organisation variable exists and reads `visibility: all`, so the cause
+    # is not the spelling. Undiagnosed, and recorded as such rather than guessed at.
+    #
     # Whoever watches the first run should still expect to learn something: no assessment above
     # is a substitute for a green run, and this job — like the one above — still **has never run**
-    # to completion. Both reach the queue and sit there waiting for an `eph-linux-x64` runner.
+    # to completion. Nothing downstream of `Generate CI token` has ever executed.
     timeout-minutes: 120
     steps:
       - name: Generate CI token
