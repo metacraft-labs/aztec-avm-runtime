@@ -126,19 +126,54 @@ if [ "$rc5" -ne 0 ]; then
 else
   fail "the stacked patch's script ran with no prerequisite filed (exit 0)"
 fi
-assert_contains "and it names the prerequisite it is waiting on" \
-  "prerequisite p1 has not been filed" "$out5"
+# Which prerequisite it names depends on how many have been filed, so the expected
+# one is derived from the ledger rather than written down as p1. Hard-coding it
+# made this fail the moment the first pull request was recorded.
+first_unfiled="$(python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+by = {p["id"]: p for p in d["patches"]}
+p5 = by["p5"]
+deps = sorted(set(p5["apply_depends_on"]) | set(p5["build_depends_on"]),
+              key=lambda i: by[i]["order"])
+print(next((i for i in deps if not by[i]["ledger"]["url"]), ""))' "$SERIES")"
+[ -n "$first_unfiled" ] || die "every prerequisite of p5 is filed; this check needs an unfiled one"
+assert_contains "and it names the first prerequisite it is waiting on" \
+  "prerequisite $first_unfiled has not been filed" "$out5"
 assert_contains "and it names the order to run them in" \
   "submit/pr3-widen-before-shifting.sh" "$out5"
 
 # --- the ledger's claim about reality ---------------------------------------
+#
+# An INVARIANT, not a snapshot. An earlier version of this asserted "five
+# prepared, zero URLs", which is true today and becomes false the moment the
+# milestone's own next step happens — a check that fails when the work succeeds is
+# worse than no check. What must always hold is that an unfiled patch says so in
+# both places and a filed one carries its URL in both places.
 n_prepared="$(python3 -c 'import json,sys
 print(sum(1 for p in json.load(open(sys.argv[1]))["patches"] if p["ledger"]["status"] == "prepared"))' "$SERIES")"
 n_url="$(python3 -c 'import json,sys
 print(sum(1 for p in json.load(open(sys.argv[1]))["patches"] if p["ledger"]["url"]))' "$SERIES")"
-assert_eq "all five are recorded as prepared, which is what unfiled means" "5" "$n_prepared"
-assert_eq "no upstream URL is recorded, because nothing has been filed" "0" "$n_url"
-n_ready="$(grep -c 'READY TO REVIEW — not filed' "$SPECS"/upstream-bugs/aztec-*/PR.md | grep -c ':1$')"
-assert_eq "all five PR.md files still say READY TO REVIEW, not filed" "5" "$n_ready"
+n_total="$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["patches"]))' "$SERIES")"
+note "ledger today: $n_total patch(es), $n_prepared not filed, $n_url carrying an upstream URL"
+assert_eq "every patch that is not recorded as prepared carries a URL" \
+  "$n_total" "$((n_prepared + n_url))"
+
+n_agree=0
+while IFS='|' read -r id entry status url; do
+  md="$SPECS/upstream-bugs/$entry/PR.md"
+  line="$(grep -m1 '^\*\*Status:\*\*' "$md")"
+  if [ -z "$url" ]; then
+    assert_contains "$id: unfiled in the ledger, and its PR.md says not filed" \
+      "not filed" "$line"
+  else
+    assert_contains "$id: filed in the ledger, and its PR.md carries the same URL" \
+      "$url" "$line"
+  fi
+  n_agree=$((n_agree + 1))
+done < <(python3 -c 'import json,sys
+for p in sorted(json.load(open(sys.argv[1]))["patches"], key=lambda p: p["order"]):
+    print("%s|%s|%s|%s" % (p["id"], p["entry"], p["ledger"]["status"], p["ledger"]["url"] or ""))' "$SERIES")
+assert_eq "all five entries were compared against their PR.md" "5" "$n_agree"
 
 finish
