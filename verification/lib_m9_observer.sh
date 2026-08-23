@@ -120,8 +120,19 @@ require_work_dir "$M9_WORK" 8
 # ---------------------------------------------------------------------------
 M9_LOAD_PRECONDITION_EXIT="${M9_LOAD_PRECONDITION_EXIT:-3}"
 
+# It WAITS before it refuses, and that is not a softening. The load this check
+# sees at the moment it starts timing is usually its OWN — it has just built two
+# drivers with the whole machine, and the 1-minute average is still carrying that
+# build when the first simulation would run. A precondition that refuses there is
+# a precondition that can never pass, which is how a check gets an --i-mean-it
+# flag bolted on and then gets run with it. So it polls for a bounded window and
+# fails only if the machine is STILL busy at the end of it; the failure mode it
+# exists for — somebody else's build running for the next half hour — outlasts the
+# window and is still caught.
+M9_IDLE_WAIT="${M9_IDLE_WAIT:-420}"
+
 m9_require_idle_machine() {
-  local cores load1 max_load busy self_tree pid
+  local cores load1 max_load busy self_tree pid waited=0 reason=""
   cores="$(nproc 2>/dev/null || echo 1)"
   # A quarter of the machine. The timed simulations are single-threaded, so this
   # is not "is anything running" — it is "is enough of the machine free that one
@@ -139,32 +150,41 @@ m9_require_idle_machine() {
     pid="$(awk '{print $4}' "/proc/$pid/stat" 2>/dev/null)"
   done
 
-  busy=""
-  for name in ninja cmake cc1plus cc1 clang clang++ ld.lld lld rustc cargo make gcc g++; do
-    for p in $(pgrep -x "$name" 2>/dev/null); do
-      case "$self_tree" in *" $p "*) continue ;; esac
-      busy="$busy $name($p)"
+  while : ; do
+    busy=""
+    for name in ninja cmake cc1plus cc1 clang clang++ ld.lld lld rustc cargo make gcc g++; do
+      for p in $(pgrep -x "$name" 2>/dev/null); do
+        case "$self_tree" in *" $p "*) continue ;; esac
+        busy="$busy $name($p)"
+      done
     done
+    load1="$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo 0)"
+
+    reason=""
+    [ -n "$busy" ] && reason="another build is running:$busy"
+    if [ -z "$reason" ] && awk -v l="$load1" -v m="$max_load" 'BEGIN{exit !(l>m)}'; then
+      reason="1-minute load average is $load1 on $cores core(s), above the limit of $max_load"
+    fi
+    [ -z "$reason" ] && break
+
+    if [ "$waited" -ge "$M9_IDLE_WAIT" ]; then
+      printf '%s: cannot run: %s\n' "$TEST_NAME" "$reason" >&2
+      printf '%s: still busy after %ss. A timing measurement taken beside a competing build is\n' \
+        "$TEST_NAME" "$waited" >&2
+      printf '%s: not measuring what it claims, so this refuses rather than reporting a number.\n' \
+        "$TEST_NAME" >&2
+      printf '%s: run it on an idle machine. M9_IDLE_WAIT and M9_IDLE_MAX_LOAD override, and if\n' \
+        "$TEST_NAME" >&2
+      printf '%s: you use them, the interval this check reports is not the one it documents.\n' \
+        "$TEST_NAME" >&2
+      exit "$M9_LOAD_PRECONDITION_EXIT"
+    fi
+    [ "$waited" -eq 0 ] && note "waiting for the machine to go idle before timing: $reason"
+    sleep 15
+    waited=$((waited + 15))
   done
 
-  if [ -n "$busy" ]; then
-    printf '%s: cannot run: the machine is building something else:%s\n' "$TEST_NAME" "$busy" >&2
-    printf '%s: a timing measurement taken beside a competing build is not measuring what it claims.\n' "$TEST_NAME" >&2
-    printf '%s: wait for the build to finish and re-run this check alone.\n' "$TEST_NAME" >&2
-    exit "$M9_LOAD_PRECONDITION_EXIT"
-  fi
-
-  if awk -v l="$load1" -v m="$max_load" 'BEGIN{exit !(l>m)}'; then
-    printf '%s: cannot run: 1-minute load average is %s on %s core(s); this check needs it below %s.\n' \
-      "$TEST_NAME" "$load1" "$cores" "$max_load" >&2
-    printf '%s: load average lags by up to a minute, so a build that has just finished still counts.\n' \
-      "$TEST_NAME" >&2
-    printf '%s: wait, then re-run this check alone. Override with M9_IDLE_MAX_LOAD if you mean it.\n' \
-      "$TEST_NAME" >&2
-    exit "$M9_LOAD_PRECONDITION_EXIT"
-  fi
-
-  note "machine is idle enough to time on: load1 $load1 on $cores core(s), limit $max_load, no competing builds"
+  note "machine is idle enough to time on: load1 $load1 on $cores core(s), limit $max_load, no competing builds, waited ${waited}s"
 }
 
 # M8's helpers keep their own name and their own variable; pointing that variable at M9's directory
