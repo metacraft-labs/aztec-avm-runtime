@@ -424,6 +424,21 @@ were absorbed silently.
   measured whether the ungated form is neutral for the wasm test binaries M4 and M6 measured — that
   measurement is the precondition for upstreaming it, not a formality. This entry closes when
   upstream's `cmake/gtest.cmake` stops applying those three macros privately, and not before.
+
+  **M10 took the decision this entry left to it, and the answer is no.** The fix does *not* ride
+  upstream on the `AVM_WASM` patch. Two reasons, and the second is the one that decides it. First,
+  patch 5 is already the only patch in the series with no independent merit, and attaching a
+  test-framework change to it would make both harder to review and give a maintainer one reason to
+  decline two things. Second and decisively, the precondition above is still unmet: the ungated
+  form changes **every** wasm gtest binary barretenberg builds, including the `ecc_tests` that
+  patch 2's entire neutrality argument was measured with (998 ran / 924 passed, transcripts
+  identical line for line, on both toolchains), and nobody has re-measured those with the macro
+  made consistent. M10 did not make that measurement either and does not claim to have — it is
+  recorded as M10's outstanding task and as M11's precondition. If the correction is offered at
+  all it should go **first and alone**, since its merit is entirely independent of anything AVM:
+  it is a defect in how googletest's `cxx_base_flags` reaches consumers, and it affects upstream's
+  builds whether or not an AVM ever compiles to wasm. `SERIES.md`'s "Considered and not filed"
+  section carries the same verdict for a reader who never opens this ledger.
 - evidence: `aztec-avm-runtime/verification/verify_vm2_tests_pass_under_v8.sh` (the `odr` control);
   `aztec-avm-runtime/verification/m7/0001-test-vm2-AVM_SIM_TESTS-the-simulation-side-test-suit.patch`
   (the `cmake/gtest.cmake` hunk and its reasoning);
