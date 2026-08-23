@@ -67,11 +67,16 @@ jobs:
 
       # The four prepared patches and M7's overlay reference is here; the checks
       # apply them with `git am` and refuse to run without them.
+      #
+      # `latest`, not `main`: that repository is a specification repository, so
+      # `latest` is its GitHub default branch and the only one the series is
+      # published on. `main` is 292 commits behind it and carries no
+      # `upstream-bugs/` at all, which made this step fail deterministically.
       - name: Clone codetracer-specs (the prepared patch series)
         uses: metacraft-labs/metacraft-github-actions/clone-repo@main
         with:
           repo: metacraft-labs/codetracer-specs
-          ref: main
+          ref: latest
           path: codetracer-specs
           gh-token: ${{ steps.app-token.outputs.token }}
 
@@ -150,17 +155,24 @@ jobs:
     # `MemoryMerkleDBEquivalenceTest` cases that are the standing reference-versus-real fidelity
     # gate. Measured cold on 32 cores from an empty $M8_WORK: 4 min 42 s and 792 MB.
     #
-    # STATUS: this job, like the one above, is written and **has never run**. Nothing has been
-    # pushed. M7's review recorded three failures that are knowable without running it and that
-    # apply here identically, because the steps are the same: the `codetracer-specs` checkout uses
-    # `ref: main` while that repository's default branch is `latest` and no remote branch of it
-    # carries `upstream-bugs/` at all, so the "Assert the prepared patches are present" step fails
-    # deterministically until the series is published; this repository has no
-    # `.github/sibling-repos`; and `setup-dev-env` has no `working-directory` input while the repo
-    # is checked out at `aztec-avm-runtime/` rather than at the workspace root. Whoever pushes
-    # should expect the first run to be a debugging run. They are NOT fixed here: the fix is a
-    # publication decision, not a YAML edit, and guessing at it would produce a second job that
-    # looks green in review and is not.
+    # STATUS: M11 published the series and pushed this branch, so this job and the one above run
+    # for the first time. Of M7's three recorded pre-run failures, one is fixed and two are
+    # assessed rather than guessed at:
+    #
+    #   * `ref: main` on the `codetracer-specs` checkout — FIXED. `latest` is that repository's
+    #     default branch and now carries `upstream-bugs/`; that was the publication decision M7
+    #     declined to guess at, and M11 made it.
+    #   * no `.github/sibling-repos` in this repository — assessed as NOT a failure. Both jobs
+    #     clone their two siblings explicitly with `clone-repo`, and `clone-siblings` (which
+    #     `setup-dev-env` delegates to) prints "no cross-repo siblings to clone" and succeeds
+    #     when neither the `siblings` input nor the file is present.
+    #   * `setup-dev-env` has no `working-directory` input — assessed as NOT a failure for the
+    #     `nix` flavor. That action only *installs* the `dev-exec` wrapper; the wrapper resolves
+    #     the flake in the cwd of the step that calls it, and every `dev-exec` step below sets
+    #     `working-directory: aztec-avm-runtime`, which is where `flake.nix` is.
+    #
+    # Whoever watches the first run should still expect to learn something: no assessment above
+    # is a substitute for a green run, and neither job has produced one yet.
     timeout-minutes: 120
     steps:
       - name: Generate CI token
@@ -184,11 +196,13 @@ jobs:
           path: aztec-packages
           gh-token: ${{ steps.app-token.outputs.token }}
 
+      # `latest` for the same reason as the job above: it is that repository's
+      # default branch and the only one carrying `upstream-bugs/`.
       - name: Clone codetracer-specs (the prepared patch series)
         uses: metacraft-labs/metacraft-github-actions/clone-repo@main
         with:
           repo: metacraft-labs/codetracer-specs
-          ref: main
+          ref: latest
           path: codetracer-specs
           gh-token: ${{ steps.app-token.outputs.token }}
 
