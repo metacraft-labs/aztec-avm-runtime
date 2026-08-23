@@ -179,7 +179,8 @@ jobs:
     # organisation uses.
     #
     # Whoever watches the first run should still expect to learn something: no assessment above
-    # is a substitute for a green run, and neither job has produced one yet.
+    # is a substitute for a green run, and this job — like the one above — still **has never run**
+    # to completion. Both reach the queue and sit there waiting for an `eph-linux-x64` runner.
     timeout-minutes: 120
     steps:
       - name: Generate CI token
