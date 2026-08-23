@@ -151,6 +151,40 @@
 #   just carry-ledger              re-render CARRY-LEDGER.md from the data
 #   just record-submission ...     record an upstream outcome in all three places
 #
+# The M12 verification set (the standalone `avm.wasm` reactor and its host ABI). It
+# prepares ONE worktree of 233d8e0993 under $M12_WORK (default
+# ~/.cache/aztec-m12-reactor) carrying NINE patches — the four AVM_WASM series
+# patches, the prepared observation hook, and M7's, M8's, M9's and M12's overlays —
+# and builds TWO trees inside it: the wasm-avm one (which produces `avm.wasm`, its
+# unpruned control, the msgpack enumeration, the differential driver, upstream's own
+# `vm2_sim_tests` and `barretenberg.wasm` for the size comparison) and a native one
+# (the driver whose transcript the reactor is compared against, and the same
+# enumeration for x86-64). Measured from empty on 32 cores: about 8 minutes and 1.2 GB
+# — with a WARM ccache, so it is a warm figure and not a from-nothing one.
+# 585 assertions, 6/6, reproduced from an empty $M12_WORK at a path it had never been
+# built in — which is a stronger claim than it sounds, and one an earlier version of
+# the size check could not have made.
+#
+#   just verify-reactor-imports    verify_avm_wasm_import_surface          (the check that BUILDS)
+#   just verify-reactor-size       verify_avm_wasm_size_budget
+#   just verify-reactor-msgpack    verify_host_abi_reuses_upstream_msgpack
+#   just verify-reactor-alloc      test_avm_reactor_alloc_free_roundtrip
+#   just verify-reactor-steps      test_avm_reactor_step_stream_batching   (times; needs an idle box)
+#   just verify-reactor-transcripts test_avm_reactor_transcripts_match_driver
+#   just verify-m12                all six, in order
+#
+# COVERAGE, because this milestone's numbers must never be quoted as another's: the
+# transcript half is the SAME SEVEN corpus programs M8 compares, driven this time
+# THROUGH the reactor's msgpack ABI from JavaScript. That is an integration check
+# across a boundary, not a breadth claim (M7's 391 upstream tests) and not a semantic
+# one (M19's 77-comparison oracle). The step half re-checks `burn`'s 38,903 records,
+# which is M9's number and is quoted from there.
+#
+# `test_avm_reactor_step_stream_batching` TIMES two call patterns and therefore
+# asserts its own precondition: it waits for the machine to go idle and exits 3 — a
+# code of its own, distinct from 1 for a failed assertion — rather than reporting a
+# number measured beside somebody else's build.
+
 # NOTHING in this Justfile files anything upstream. The five `submit/pr<N>-*.sh`
 # scripts do that, one pull request each, and a person runs them.
 #
@@ -933,5 +967,56 @@ verify-m11:
       echo "verify-m11: FAILED" >&2
     else
       echo "verify-m11: all checks passed"
+    fi
+    exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M12 — the standalone avm.wasm reactor and its host ABI.
+# ---------------------------------------------------------------------------
+
+# Eleven WASI imports plus env.memory, thirty-nine exports, and the two link-option controls beside them.
+verify-reactor-imports:
+    @verification/verify_avm_wasm_import_surface.sh
+
+# The stripped module against a budget BOTH controls fail, and -Oz, exports, gc-sections and strip apart.
+verify-reactor-size:
+    @verification/verify_avm_wasm_size_budget.sh
+
+# Forty-two crossed types round-tripped on both targets; the one that is ours, with its reason.
+verify-reactor-msgpack:
+    @verification/verify_host_abi_reuses_upstream_msgpack.sh
+
+# Thirteen sizes round-tripped, and thirty-two simulations through one instance.
+verify-reactor-alloc:
+    @verification/test_avm_reactor_alloc_free_roundtrip.sh
+
+# ceil(38903 / B) crossings at four batch sizes, and the per-event shape measured rather than assumed.
+verify-reactor-steps:
+    @verification/test_avm_reactor_step_stream_batching.sh
+
+# The seven corpus programs through the msgpack ABI on V8, against the native driver, roots included.
+verify-reactor-transcripts:
+    @verification/test_avm_reactor_transcripts_match_driver.sh
+
+# Run the whole M12 verification set; every check runs even if an earlier one fails.
+verify-m12:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_avm_wasm_import_surface \
+      verify_avm_wasm_size_budget \
+      verify_host_abi_reuses_upstream_msgpack \
+      test_avm_reactor_alloc_free_roundtrip \
+      test_avm_reactor_step_stream_batching \
+      test_avm_reactor_transcripts_match_driver
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m12: FAILED" >&2
+    else
+      echo "verify-m12: all checks passed"
     fi
     exit "$rc"
