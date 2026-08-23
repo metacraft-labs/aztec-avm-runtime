@@ -1,0 +1,140 @@
+name: Downstream carry
+
+# The recurring cost of carrying patches upstream has not taken is invisible
+# until the day it is expensive. This job makes it a dated failure instead: it
+# replays the whole ordered carry set onto a fresh fetch of upstream's own branch
+# and fails, naming the patch and the files, the moment one stops applying.
+#
+# It runs weekly because that is the cadence at which upstream moves under us,
+# and on every change to the series, the tools or the ledger — so a change that
+# breaks the carry set is caught by the change rather than by the calendar.
+#
+# It files nothing. Submission is a person's command (`submit/pr<N>-*.sh`), and
+# `verify_submission_is_a_manual_step` asserts that no automation here can open a
+# pull request.
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - "carry/**"
+      - "tools/make_fork_branches.py"
+      - "tools/rebase_upstream_patches.py"
+      - "tools/measure_carry_exposure.py"
+      - "tools/render_carry_ledger.py"
+      - "tools/record_submission.py"
+      - "submit/**"
+      - "verification/verify_carry_*.sh"
+      - "verification/verify_pr_branches_match_patches.sh"
+      - "verification/verify_accepted_patches_dropped_from_carry.sh"
+      - "verification/verify_submission_is_a_manual_step.sh"
+      - "CARRY-LEDGER.md"
+      - ".github/workflows/carry.yml"
+  pull_request:
+    branches: [dev, main]
+  schedule:
+    # Mondays, an hour before the AVM_WASM job, so a carry-set break is already
+    # reported by the time the expensive build starts failing for the same reason.
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: carry-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  carry-set-still-applies:
+    name: the carry set still applies to upstream HEAD
+    runs-on: eph-linux-x64
+    # No build: this replays patches and reads git history. Minutes, not hours.
+    timeout-minutes: 45
+    steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      # The workspace layout the checks assume: aztec-packages and
+      # codetracer-specs are SIBLINGS of this repository.
+      - name: Checkout aztec-avm-runtime
+        uses: actions/checkout@v4
+        with:
+          path: aztec-avm-runtime
+
+      - name: Clone the aztec-packages fork
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/aztec-packages
+          ref: aztec-avm-runtime
+          path: aztec-packages
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Clone codetracer-specs (the prepared patch series)
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-specs
+          ref: latest
+          path: codetracer-specs
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      # A shallow clone has neither the base commit nor the twelve months of
+      # history the exposure measurement reads, and both failures read like
+      # broken patches rather than like a missing clone.
+      - name: Deepen the fork and add the upstream remote
+        working-directory: aztec-packages
+        run: |
+          set -euo pipefail
+          git fetch --unshallow 2>/dev/null || true
+          git remote get-url upstream >/dev/null 2>&1 \
+            || git remote add upstream https://github.com/AztecProtocol/aztec-packages.git
+          git fetch upstream next
+          git rev-parse --verify 233d8e0993^{commit}
+
+      - name: Setup Dev Environment
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      # `shell: bash` rather than the default `bash -e {0}`, which has no
+      # pipefail: piping into `tee` would otherwise hand the step tee's exit
+      # status and a failing check would report a green job.
+      - name: Replay the carry set onto upstream HEAD
+        working-directory: aztec-avm-runtime
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: dev-exec just rebase-upstream-patches 2>&1 | tee rebase.log
+
+      - name: The carry set, the branches, the ledger and the exposure
+        working-directory: aztec-avm-runtime
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          M11_WORK: ${{ github.workspace }}/m11-work
+        run: dev-exec just verify-m11 2>&1 | tee verify-m11.log
+
+      - name: Collect the reports
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p artifacts-carry
+          for f in aztec-avm-runtime/rebase.log \
+                   aztec-avm-runtime/verify-m11.log \
+                   aztec-avm-runtime/carry/rebase.json \
+                   aztec-avm-runtime/carry/exposure.json \
+                   aztec-avm-runtime/CARRY-LEDGER.md ; do
+            [ -f "$f" ] && cp "$f" artifacts-carry/ || true
+          done
+          ls -la artifacts-carry
+
+      - name: Upload the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: downstream-carry-reports
+          path: artifacts-carry
+          retention-days: 90

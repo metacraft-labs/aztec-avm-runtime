@@ -20,3 +20,8 @@ vm2wasm/src/
 vm2wasm/wasi-sdk-33/
 vm2wasm/shims/
 vm2wasm/*.wasm.gz
+
+# submit/: the scripts are tracked; what a submission RUN leaves behind — the
+# rendered pull-request body and the tracker-search transcript — is scratch and
+# is regenerated on every run.
+/.submit/

@@ -33,7 +33,10 @@ tested with `npm install`, with no barretenberg C++ build, no Rust/wasm-bindgen 
 | `browser-probe/` | esbuild browser-bundle probe and its node-builtin shims |
 | `../aztec-packages` | the `metacraft-labs/aztec-packages` fork, branch `aztec-avm-runtime` — a **workspace-root sibling**, registered in the workspace manifests alongside this repo (it used to live at `upstream/aztec-packages`) |
 | `upstream/tsavm` | gitignored worktree of the fork at `3a68d68ac2`, the commit before the TS AVM was deleted |
-| `verification/` | the M0, M1 and M2 verification checks; see `just --list` |
+| `verification/` | the M0 … M11 verification checks; see `just --list` |
+| `carry/` | the **ordered carry set** (`series.json`), the measured carry exposure (`exposure.json`) and the last replay onto upstream (`rebase.json`). `series.json` is the authority for what we carry, in what order, and where each patch stands with upstream |
+| `CARRY-LEDGER.md` | the readable carry ledger, **generated** from `carry/` — status per patch, what carrying each costs, and the measured total exposure if upstream accepts nothing |
+| `submit/` | one script per prepared contribution, `submit/pr<N>-*.sh`. A **person** runs them; nothing else in this repository can open a pull request, and `just verify-submission-manual` asserts that |
 | `fixtures/MANIFEST.md` | **the fixture manifest** — one entry per family, with its upstream source, capture procedure, licence, and *both* what a skeptic should conclude from it passing and what they must not |
 | `fixtures/trees/world-state-vectors.json` | the Tier D root oracle: the genesis and post-genesis states upstream publishes (asserted against the fork) plus the mutation sequence, checkpoint/revert, sibling path and prefill leaves it does not |
 | `fixtures/differential-arm-counts.json` | what the differential suite actually COMPARES, measured rather than read: 216 comparisons, not 758 tests |

@@ -1,0 +1,29 @@
+{
+  "tip": "127dec3ec90a33a9c4edaf3d7fee8baa96276580",
+  "tip_ref": "upstream/next",
+  "base": "233d8e099336c1773b89e939100af047ed9c4f71",
+  "commits_since_base": 3,
+  "patches": [
+    {
+      "id": "p1",
+      "result": "applies"
+    },
+    {
+      "id": "p2",
+      "result": "applies"
+    },
+    {
+      "id": "p3",
+      "result": "applies"
+    },
+    {
+      "id": "p4",
+      "result": "applies"
+    },
+    {
+      "id": "p5",
+      "result": "applies"
+    }
+  ],
+  "failures": 0
+}

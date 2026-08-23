@@ -1,0 +1,177 @@
+{
+  "_comment": [
+    "THE ORDERED CARRY SET. This file is the authority for three things that were",
+    "previously only prose: which patches we carry, in what order, and where each one",
+    "stands with upstream.",
+    "",
+    "Every entry is traceable to a directory under codetracer-specs/upstream-bugs/,",
+    "which holds the patch itself, its PR.md and its verification script. Nothing here",
+    "duplicates a patch's contents; `entry` + `patch` locate them.",
+    "",
+    "Consumers:",
+    "  tools/make_fork_branches.py       builds the per-PR branches and the `codetracer`",
+    "                                    branch in the fork from this order",
+    "  tools/rebase_upstream_patches.py  replays the set onto a fresh upstream fetch and",
+    "                                    reports per commit which one stopped applying",
+    "  tools/measure_carry_exposure.py   measures what the whole set costs if none of it",
+    "                                    is accepted",
+    "  verification/verify_carry_ledger_complete.sh  holds CARRY-LEDGER.md to this file",
+    "  verification/verify_carry_set_complete.sh     holds this file to upstream-bugs/",
+    "",
+    "`ledger.status` vocabulary, and it is closed:",
+    "  prepared  - ready to file; not filed. No upstream URL exists.",
+    "  submitted - filed upstream; no maintainer verdict yet.",
+    "  accepted  - merged upstream. Drops out of the carry set once `base` moves past it.",
+    "  declined  - upstream said no. `reason` and `maintenance` are then REQUIRED.",
+    "  stalled   - filed, no verdict, and the trail has gone cold. `reason` REQUIRED.",
+    "",
+    "`apply_depends_on` vs `build_depends_on` is a real distinction and is measured, not",
+    "assumed: see verification/verify_avm_wasm_module_split_patch_applies.sh. An apply",
+    "dependency is one without which `git am` is REJECTED; a build dependency is one",
+    "without which the tree applies cleanly and then fails to compile."
+  ],
+  "base": {
+    "commit": "233d8e099336c1773b89e939100af047ed9c4f71",
+    "short": "233d8e0993",
+    "source": "pins.json anchors.cpp — this file does not declare the pin, it names it"
+  },
+  "fork": {
+    "remote": "https://github.com/metacraft-labs/aztec-packages.git",
+    "upstream": "https://github.com/AztecProtocol/aztec-packages.git",
+    "upstream_branch": "next",
+    "downstream_branch": "codetracer",
+    "downstream_base_branch": "aztec-avm-runtime"
+  },
+  "patches": [
+    {
+      "id": "p1",
+      "order": 1,
+      "entry": "aztec-merkle-tree-lmdb-split",
+      "patch": "0001-refactor-crypto-split-crypto_merkle_tree-from-its-LMD.patch",
+      "branch": "pr/1-crypto-merkle-tree-lmdb-split",
+      "title": "refactor(crypto): split crypto_merkle_tree from its LMDB backend",
+      "kind": "refactor",
+      "standalone": true,
+      "apply_depends_on": [],
+      "build_depends_on": [],
+      "ledger": {
+        "status": "prepared",
+        "url": null,
+        "reason": null,
+        "maintenance": null,
+        "submission_script": "submit/pr1-crypto-merkle-tree-lmdb-split.sh"
+      },
+      "tracker_queries": [
+        "crypto_merkle_tree lmdb",
+        "lmdblib dependency",
+        "BB_LITE"
+      ],
+      "carry_note": "Largest of the five and the only one that moves paths: 35 files, 9 renames, 1 deletion. Renames are cheap to carry — upstream has no version of the new path to move under us — but expensive to rebase if upstream edits the old path, and the audit-scope document it updates is a file upstream also maintains."
+    },
+    {
+      "id": "p2",
+      "order": 2,
+      "entry": "aztec-wasi-sdk-33",
+      "patch": "0001-build-move-the-wasm-toolchain-from-wasi-sdk-27-to-33.patch",
+      "branch": "pr/2-wasi-sdk-33",
+      "title": "build: move the wasm toolchain from wasi-sdk 27 to 33",
+      "kind": "build",
+      "standalone": true,
+      "apply_depends_on": [],
+      "build_depends_on": [],
+      "ledger": {
+        "status": "prepared",
+        "url": null,
+        "reason": null,
+        "maintenance": null,
+        "submission_script": "submit/pr2-wasi-sdk-33.sh"
+      },
+      "tracker_queries": [
+        "wasi-sdk",
+        "try_catch_shim",
+        "wasm32-wasi-threads deprecated"
+      ],
+      "carry_note": "Five files, no source. Cheap to carry mechanically. The exposure is not size but SUPERSESSION: open upstream PR #22815 would replace wasi-sdk with Emscripten entirely, which would not conflict with this patch so much as delete the thing it pins. If that lands, this patch is dropped and patch 5's toolchain gate is rewritten."
+    },
+    {
+      "id": "p3",
+      "order": 3,
+      "entry": "aztec-bytecode-size-shift-32bit",
+      "patch": "0001-fix-vm2-widen-before-shifting-in-compute_public_bytec.patch",
+      "branch": "pr/3-widen-before-shifting",
+      "title": "fix(vm2): widen before shifting in compute_public_bytecode_first_field",
+      "kind": "portability",
+      "standalone": true,
+      "apply_depends_on": [],
+      "build_depends_on": [],
+      "ledger": {
+        "status": "prepared",
+        "url": null,
+        "reason": null,
+        "maintenance": null,
+        "submission_script": "submit/pr3-widen-before-shifting.sh"
+      },
+      "tracker_queries": [
+        "compute_public_bytecode",
+        "shift-count-overflow",
+        "wasm32 vm2 portability"
+      ],
+      "carry_note": "One file, +3/-1, one hunk. The cheapest thing in the set to carry: 2 commits touched its lines in twelve months."
+    },
+    {
+      "id": "p4",
+      "order": 4,
+      "entry": "aztec-execution-observer-hook",
+      "patch": "0001-feat-vm2-per-instruction-observation-hook-for-the-fas.patch",
+      "branch": "pr/4-execution-observation-hook",
+      "title": "feat(vm2): per-instruction observation hook for the fast execution loop",
+      "kind": "feature",
+      "standalone": true,
+      "apply_depends_on": [],
+      "build_depends_on": [],
+      "ledger": {
+        "status": "prepared",
+        "url": null,
+        "reason": null,
+        "maintenance": null,
+        "submission_script": "submit/pr4-execution-observation-hook.sh"
+      },
+      "tracker_queries": [
+        "CallStackMetadataCollector",
+        "per-instruction observation vm2",
+        "ExecutionEvent emitter hook"
+      ],
+      "carry_note": "Two new headers and one new .cpp, which cost nothing to carry, plus edits to four files upstream owns. `simulation_helper.cpp` is the hot one — 16 commits landed on the lines this patch touches in twelve months, the highest in the whole series, and higher than `hybrid_execution.cpp`'s 4, which the spike had named as THE risk."
+    },
+    {
+      "id": "p5",
+      "order": 5,
+      "entry": "aztec-avm-wasm-cmake",
+      "patch": "0001-build-wasm-optional-AVM_WASM-and-separate-the-AVM-mod.patch",
+      "branch": "pr/5-avm-wasm-module-split",
+      "title": "build(wasm): optional AVM_WASM, and separate the AVM modules from the server modules",
+      "kind": "build",
+      "standalone": false,
+      "apply_depends_on": [
+        "p1"
+      ],
+      "build_depends_on": [
+        "p2",
+        "p3"
+      ],
+      "ledger": {
+        "status": "prepared",
+        "url": null,
+        "reason": null,
+        "maintenance": null,
+        "submission_script": "submit/pr5-avm-wasm-module-split.sh"
+      },
+      "tracker_queries": [
+        "AVM_WASM",
+        "wasm AVM simulator",
+        "FUZZING_AVM"
+      ],
+      "carry_note": "Five CMake files and three C++ files. The one with no independent merit, and the one most likely to be carried forever. Its exposure is concentrated in `src/CMakeLists.txt` (9 commits on the carried lines in twelve months) and `cmake/arch.cmake` (5). Both are files upstream restructures rather than tweaks, which is the shape of conflict that needs a person rather than a three-way merge."
+    }
+  ]
+}

@@ -126,6 +126,34 @@
 # twice, from the `wasm` preset with and without the patch, and compares the
 # artefacts byte for byte. Budget about 5 GB under $M6_WORK.
 #
+# The M11 verification set (patch submission and the downstream carry). It builds
+# nothing and needs no work directory beyond a checkout, but it DOES need network:
+# it fetches upstream, fetches our fork, and runs each contribution's tracker
+# search through `gh`. A search that cannot run fails the check rather than being
+# reported as "no prior art found".
+#
+#   just verify-carry-set          verify_carry_set_complete                     (~5 s)
+#   just verify-pr-branches        verify_pr_branches_match_patches              (~2 min)
+#   just verify-carry-applies      verify_carry_set_applies_to_upstream_head     (~1 min)
+#   just verify-carry-ledger       verify_carry_ledger_complete                  (~5 s)
+#   just verify-carry-drop         verify_accepted_patches_dropped_from_carry    (~30 s)
+#   just verify-carry-exposure     verify_carry_exposure_measured                (~30 s)
+#   just verify-submission-manual  verify_submission_is_a_manual_step            (~3 min)
+#   just verify-m11                all seven, in order
+#
+# M11's working tools:
+#
+#   just carry-report              the order and the dependency structure
+#   just make-fork-branches        rebuild the per-PR and `codetracer` branches
+#   just make-fork-branches-push   and push them to OUR fork
+#   just rebase-upstream-patches   replay the carry set onto a fresh upstream fetch
+#   just carry-exposure            re-measure what the whole set costs if nothing lands
+#   just carry-ledger              re-render CARRY-LEDGER.md from the data
+#   just record-submission ...     record an upstream outcome in all three places
+#
+# NOTHING in this Justfile files anything upstream. The five `submit/pr<N>-*.sh`
+# scripts do that, one pull request each, and a person runs them.
+#
 # M1's working tools, which the checks drive:
 #
 #   just check-drift                   the vendored tree vs its recorded commits
@@ -816,5 +844,94 @@ verify-m10:
       echo "verify-m10: FAILED" >&2
     else
       echo "verify-m10: all checks passed"
+    fi
+    exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M11 — patch submission and the downstream carry.
+#
+# NOTHING HERE FILES ANYTHING UPSTREAM. Submission is a person's decision and a
+# person's command: `submit/pr<N>-*.sh`, one per pull request, run by hand. The
+# recipes below build the branches those scripts file from, keep the carry set
+# applicable as upstream moves, and hold the ledger to the data.
+# ---------------------------------------------------------------------------
+
+# Rebuild the five per-PR branches and the `codetracer` development branch in the fork.
+make-fork-branches:
+    @python3 tools/make_fork_branches.py --work "${M11_WORK:-$HOME/.cache/aztec-m11-branches}"
+
+# The same, and push them to our fork. Never pushes anywhere but metacraft-labs.
+make-fork-branches-push:
+    @python3 tools/make_fork_branches.py --work "${M11_WORK:-$HOME/.cache/aztec-m11-branches}" --push
+
+# Print the carry set's order and dependency structure without building anything.
+carry-report:
+    @python3 tools/make_fork_branches.py --report
+
+# Replay the carry set onto a fresh upstream fetch; non-zero if any patch stops applying.
+rebase-upstream-patches:
+    @python3 tools/rebase_upstream_patches.py --json carry/rebase.json
+
+# Re-measure what the whole set costs if upstream accepts none of it.
+carry-exposure:
+    @python3 tools/measure_carry_exposure.py
+
+# Re-render CARRY-LEDGER.md from carry/series.json, carry/exposure.json and carry/rebase.json.
+carry-ledger:
+    @python3 tools/render_carry_ledger.py
+
+# Record an upstream outcome: `just record-submission p1 submitted https://.../pull/123`.
+record-submission id status url:
+    @python3 tools/record_submission.py --id {{id}} --status {{status}} --url {{url}}
+
+# The carry set is complete and traceable to upstream-bugs/, three copies of each title agree.
+verify-carry-set:
+    @verification/verify_carry_set_complete.sh
+
+# Every per-PR branch is byte for byte what its patch file produces, locally and as published.
+verify-pr-branches:
+    @verification/verify_pr_branches_match_patches.sh
+
+# The whole set still applies to upstream HEAD, and M6/M10's build evidence still transfers.
+verify-carry-applies:
+    @verification/verify_carry_set_applies_to_upstream_head.sh
+
+# The ledger is what the data renders to, and every entry is complete for its status.
+verify-carry-ledger:
+    @verification/verify_carry_ledger_complete.sh
+
+# An accepted patch drops out of the carry set; positive and negative controls.
+verify-carry-drop:
+    @verification/verify_accepted_patches_dropped_from_carry.sh
+
+# The exposure is measured rather than estimated, and the spike's estimate is corrected.
+verify-carry-exposure:
+    @verification/verify_carry_exposure_measured.sh
+
+# Filing is a manual step, and nothing else in this repository can file.
+verify-submission-manual:
+    @verification/verify_submission_is_a_manual_step.sh
+
+# Run the whole M11 verification set; every check runs even if an earlier one fails.
+verify-m11:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_carry_set_complete \
+      verify_pr_branches_match_patches \
+      verify_carry_set_applies_to_upstream_head \
+      verify_carry_ledger_complete \
+      verify_accepted_patches_dropped_from_carry \
+      verify_carry_exposure_measured \
+      verify_submission_is_a_manual_step
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m11: FAILED" >&2
+    else
+      echo "verify-m11: all checks passed"
     fi
     exit "$rc"
