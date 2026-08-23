@@ -1,0 +1,1730 @@
+From 184a1d2476918ebde03cf6c6ea4f2d1a109d178c Mon Sep 17 00:00:00 2001
+From: Zahary Karadjov <zahary@agent-harbor.com>
+Date: Sun, 23 Aug 2026 20:21:13 +0300
+Subject: [PATCH] test(vm2): AVM_REACTOR, a standalone avm.wasm reactor and its
+ msgpack host ABI
+
+Adds an optional, default-off AVM_REACTOR build producing avm.wasm: one
+WebAssembly module carrying vm2_sim and world_state_reference and nothing
+else, with no main. It is a WASI reactor, initialised through _initialize and
+called through an explicitly listed export set.
+
+The host ABI reuses the generated msgpack schemas rather than inventing an
+encoding: AvmFastSimulationInputs and AvmProvingInputs in, TxSimulationResult
+out, and the two host interfaces (ContractDBInterface's eight methods,
+LowLevelMerkleDBInterface's fourteen) exposed as exports over resident
+implementations, so the module's import surface stays WASI-only.
+
+avm_msgpack_coverage enumerates every crossed type by round-tripping it, for
+x86-64 and for wasm32-wasip1 from one translation unit. avm_differential grows
+a reactorinputs mode that prints the msgpack blobs a host needs to drive the
+module, lifted from the simulator's own hint output rather than recomputed.
+
+An unpruned control target links the same objects with --export-dynamic and
+without --gc-sections, so the size effect of the link options is measurable
+rather than asserted.
+---
+ barretenberg/cpp/CMakeLists.txt               |   1 +
+ .../cpp/src/barretenberg/vm2/CMakeLists.txt   | 190 ++++
+ .../vm2/differential/avm_differential.cpp     | 140 ++++
+ .../vm2/reactor/avm_msgpack_coverage.cpp      | 725 ++++++++++++++++++
+ .../barretenberg/vm2/reactor/avm_reactor.cpp  | 570 ++++++++++++++
+ 5 files changed, 1626 insertions(+)
+ create mode 100644 barretenberg/cpp/src/barretenberg/vm2/reactor/avm_msgpack_coverage.cpp
+ create mode 100644 barretenberg/cpp/src/barretenberg/vm2/reactor/avm_reactor.cpp
+
+diff --git a/barretenberg/cpp/CMakeLists.txt b/barretenberg/cpp/CMakeLists.txt
+index f002e0a6732..00c25cb7bc3 100644
+--- a/barretenberg/cpp/CMakeLists.txt
++++ b/barretenberg/cpp/CMakeLists.txt
+@@ -67,6 +67,7 @@ option(BB_LITE "Exclude server-side subsystems: lmdb, world_state, ipc, nodejs_m
+ option(AVM_WASM "Build the AVM simulator (vm2_sim) for wasm. Additive; implies real C++ exceptions." OFF)
+ option(AVM_SIM_TESTS "Build vm2_sim_tests: the simulation-side subset of vm2_tests, without the proving stack. Additive." OFF)
+ option(AVM_DIFFERENTIAL "Build avm_differential: the native-versus-wasm differential driver. Additive." OFF)
++option(AVM_REACTOR "Build avm.wasm: the standalone AVM reactor and its msgpack coverage enumerator. Additive." OFF)
+ 
+ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+     message(STATUS "Compiling for ARM.")
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt b/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt
+index e8622cbdd41..0199a1dc84b 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt
++++ b/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt
+@@ -100,6 +100,194 @@ if(AVM_DIFFERENTIAL)
+   endif()
+ endif()
+ 
++# AVM_REACTOR: avm.wasm -- the standalone AVM reactor.
++#
++# ONE WebAssembly module carrying the AVM (`vm2_sim`), its in-memory reference world state
++# (`world_state_reference`) and nothing else, so a page that only executes a public transaction
++# never downloads the proving stack. It has no `main`: it is a WASI *reactor*, initialised through
++# `_initialize` and then called through its exports.
++#
++# It lives in `reactor/`, which -- like `differential/` -- is deliberately NOT one of the
++# directories vm2_sim globs, and is excluded explicitly from the `if(AVM)` block below so it can
++# never end up inside a library archive.
++#
++# THE EXPORT LIST IS WRITTEN OUT AND NOTHING ELSE IS EXPORTED. `--export-dynamic` is deliberately
++# not passed: with it, every `visibility("default")` symbol in the link closure becomes an export
++# and the module's surface would be whatever the compiler happened to leave visible. Each name
++# below is also a `--gc-sections` root, so the two options together are what "exports pruned"
++# means here -- the reachable set is exactly what these names reach.
++#
++# Default OFF and additive: with the option off, not one target moves in any configuration.
++if(AVM_REACTOR)
++    # The msgpack enumeration, built for BOTH targets. It has no main-less linkage requirements and
++    # needs no test support, so it is a plain executable in both configurations.
++    add_executable(avm_msgpack_coverage
++        ${CMAKE_CURRENT_SOURCE_DIR}/reactor/avm_msgpack_coverage.cpp
++    )
++    target_link_libraries(avm_msgpack_coverage PRIVATE vm2_sim)
++    if(WASM)
++        target_link_options(avm_msgpack_coverage PRIVATE -Wl,-z,stack-size=8388608)
++    endif()
++
++    if(WASM)
++        # The test-support translation units, for the same reason AVM_DIFFERENTIAL takes them: they
++        # are the set already known to compile and link without the proving stack, and
++        # `TestContractDB` -- the only in-memory raw ContractDBInterface upstream has -- is among
++        # them. Which raw contract DB ships is M13's deliverable, not this target's.
++        file(GLOB VM2_REACTOR_SUPPORT_FILES testing/*.cpp)
++        list(FILTER VM2_REACTOR_SUPPORT_FILES EXCLUDE REGEX ".*\\.(test|bench|fuzzer)\\.cpp$")
++
++        add_executable(avm-reactor-debug.wasm
++            ${CMAKE_CURRENT_SOURCE_DIR}/reactor/avm_reactor.cpp
++            ${VM2_REACTOR_SUPPORT_FILES}
++        )
++        target_compile_definitions(avm-reactor-debug.wasm PRIVATE AVM_SIM_TESTS_WITHOUT_TRACEGEN)
++        target_link_libraries(avm-reactor-debug.wasm PRIVATE vm2_sim)
++
++        set(AVM_REACTOR_EXPORTS
++            avm_abi_version
++            avm_alloc
++            avm_free
++            avm_result_ptr
++            avm_result_len
++            avm_simulate
++            avm_simulate_with_hinted_dbs
++            avm_steps_count
++            avm_steps_batch
++            avm_contract_db_create
++            avm_contract_db_destroy
++            avm_contract_db_get_contract_instance
++            avm_contract_db_get_contract_class
++            avm_contract_db_get_bytecode_commitment
++            avm_contract_db_get_debug_function_name
++            avm_contract_db_add_contracts
++            avm_contract_db_create_checkpoint
++            avm_contract_db_commit_checkpoint
++            avm_contract_db_revert_checkpoint
++            avm_contract_db_register_class
++            avm_contract_db_register_instance
++            avm_merkle_db_create
++            avm_merkle_db_destroy
++            avm_merkle_db_get_tree_roots
++            avm_merkle_db_get_sibling_path
++            avm_merkle_db_get_low_indexed_leaf
++            avm_merkle_db_get_leaf_value
++            avm_merkle_db_get_leaf_preimage_public_data_tree
++            avm_merkle_db_get_leaf_preimage_nullifier_tree
++            avm_merkle_db_insert_indexed_leaves_public_data_tree
++            avm_merkle_db_insert_indexed_leaves_nullifier_tree
++            avm_merkle_db_append_leaves
++            avm_merkle_db_pad_tree
++            avm_merkle_db_create_checkpoint
++            avm_merkle_db_commit_checkpoint
++            avm_merkle_db_revert_checkpoint
++            avm_merkle_db_get_checkpoint_id
++        )
++        set(AVM_REACTOR_EXPORT_FLAGS "")
++        foreach(_sym ${AVM_REACTOR_EXPORTS})
++            list(APPEND AVM_REACTOR_EXPORT_FLAGS "-Wl,--export=${_sym}")
++        endforeach()
++
++        target_link_options(avm-reactor-debug.wasm PRIVATE
++            -mexec-model=reactor
++            -Wl,--gc-sections
++            -Wl,-z,stack-size=8388608
++            ${AVM_REACTOR_EXPORT_FLAGS}
++        )
++
++        # Strip the debug info: `avm.wasm` is the shipped artefact and the size budget is measured
++        # on it, not on the linker's output.
++        add_custom_command(
++            OUTPUT ${CMAKE_BINARY_DIR}/bin/avm.wasm
++            COMMAND ${CMAKE_STRIP} ${CMAKE_BINARY_DIR}/bin/avm-reactor-debug.wasm -o ${CMAKE_BINARY_DIR}/bin/avm.wasm
++            DEPENDS avm-reactor-debug.wasm
++            COMMENT "Stripping debug info to create avm.wasm"
++        )
++        add_custom_target(avm.wasm ALL DEPENDS ${CMAKE_BINARY_DIR}/bin/avm.wasm)
++
++        # The gzipped size is the number the budget is stated in, so it is produced by the build
++        # rather than by whatever gzip the checking script happens to find.
++        add_custom_command(
++            OUTPUT ${CMAKE_BINARY_DIR}/bin/avm.wasm.gz
++            COMMAND gzip -9 -n -c ${CMAKE_BINARY_DIR}/bin/avm.wasm > ${CMAKE_BINARY_DIR}/bin/avm.wasm.gz
++            DEPENDS ${CMAKE_BINARY_DIR}/bin/avm.wasm
++            COMMENT "Creating gzipped avm.wasm"
++        )
++        add_custom_target(avm.wasm.gz ALL DEPENDS ${CMAKE_BINARY_DIR}/bin/avm.wasm.gz)
++
++        # THE CONTROL, so that "--gc-sections, exports pruned" is a measurement and not a claim.
++        # The same sources and the same objects, linked with `--export-dynamic` and WITHOUT
++        # `--gc-sections`: every `visibility("default")` symbol in the closure becomes an export and
++        # nothing unreachable is dropped. Stripped and gzipped the same way, so the two rows differ
++        # only by the two link options. A check that measured only `avm.wasm` would be green for a
++        # build in which neither option did anything.
++        add_executable(avm-reactor-unpruned.wasm
++            ${CMAKE_CURRENT_SOURCE_DIR}/reactor/avm_reactor.cpp
++            ${VM2_REACTOR_SUPPORT_FILES}
++        )
++        target_compile_definitions(avm-reactor-unpruned.wasm PRIVATE AVM_SIM_TESTS_WITHOUT_TRACEGEN)
++        target_link_libraries(avm-reactor-unpruned.wasm PRIVATE vm2_sim)
++        target_link_options(avm-reactor-unpruned.wasm PRIVATE
++            -mexec-model=reactor
++            -Wl,--export-dynamic
++            -Wl,-z,stack-size=8388608
++        )
++        add_custom_command(
++            OUTPUT ${CMAKE_BINARY_DIR}/bin/avm-unpruned.wasm
++            COMMAND ${CMAKE_STRIP} ${CMAKE_BINARY_DIR}/bin/avm-reactor-unpruned.wasm -o ${CMAKE_BINARY_DIR}/bin/avm-unpruned.wasm
++            DEPENDS avm-reactor-unpruned.wasm
++            COMMENT "Stripping the unpruned control"
++        )
++        add_custom_command(
++            OUTPUT ${CMAKE_BINARY_DIR}/bin/avm-unpruned.wasm.gz
++            COMMAND gzip -9 -n -c ${CMAKE_BINARY_DIR}/bin/avm-unpruned.wasm > ${CMAKE_BINARY_DIR}/bin/avm-unpruned.wasm.gz
++            DEPENDS ${CMAKE_BINARY_DIR}/bin/avm-unpruned.wasm
++            COMMENT "Creating gzipped unpruned control"
++        )
++        add_custom_target(avm-unpruned.wasm.gz ALL DEPENDS ${CMAKE_BINARY_DIR}/bin/avm-unpruned.wasm.gz)
++
++        # THE SECOND CONTROL, and the reason it exists is that the first one cannot isolate
++        # `--gc-sections` at all.
++        #
++        # MEASURED, and it corrects what this file used to say: wasm-ld garbage-collects BY
++        # DEFAULT — its own `--help` reads `--gc-sections  Enable garbage collection of unused
++        # sections (default)`. So `avm-reactor-unpruned.wasm` above, which merely omits the flag,
++        # still collects. What that control varies is `--export-dynamic`, which turns every
++        # `visibility("default")` symbol in the closure into a GC ROOT and therefore RETAINS code
++        # that pulls three more WASI functions in with it.
++        #
++        # Turning the collector off is a different and much larger thing, and it has to be said
++        # explicitly. Same objects, same explicit export list, one option changed: the module then
++        # imports forty-five WASI functions instead of eleven. Without this target, "--gc-sections
++        # and pruned exports, measured apart" is two claims sharing one measurement.
++        add_executable(avm-reactor-nogc.wasm
++            ${CMAKE_CURRENT_SOURCE_DIR}/reactor/avm_reactor.cpp
++            ${VM2_REACTOR_SUPPORT_FILES}
++        )
++        target_compile_definitions(avm-reactor-nogc.wasm PRIVATE AVM_SIM_TESTS_WITHOUT_TRACEGEN)
++        target_link_libraries(avm-reactor-nogc.wasm PRIVATE vm2_sim)
++        target_link_options(avm-reactor-nogc.wasm PRIVATE
++            -mexec-model=reactor
++            -Wl,--no-gc-sections
++            -Wl,-z,stack-size=8388608
++            ${AVM_REACTOR_EXPORT_FLAGS}
++        )
++        add_custom_command(
++            OUTPUT ${CMAKE_BINARY_DIR}/bin/avm-nogc.wasm
++            COMMAND ${CMAKE_STRIP} ${CMAKE_BINARY_DIR}/bin/avm-reactor-nogc.wasm -o ${CMAKE_BINARY_DIR}/bin/avm-nogc.wasm
++            DEPENDS avm-reactor-nogc.wasm
++            COMMENT "Stripping the no-gc control"
++        )
++        add_custom_command(
++            OUTPUT ${CMAKE_BINARY_DIR}/bin/avm-nogc.wasm.gz
++            COMMAND gzip -9 -n -c ${CMAKE_BINARY_DIR}/bin/avm-nogc.wasm > ${CMAKE_BINARY_DIR}/bin/avm-nogc.wasm.gz
++            DEPENDS ${CMAKE_BINARY_DIR}/bin/avm-nogc.wasm
++            COMMENT "Creating gzipped no-gc control"
++        )
++        add_custom_target(avm-nogc.wasm.gz ALL DEPENDS ${CMAKE_BINARY_DIR}/bin/avm-nogc.wasm.gz)
++    endif()
++endif()
++
+ # vm2_sim needs -fPIC because it's linked into the nodejs_module shared library
+ set_target_properties(vm2_sim_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+ 
+@@ -117,6 +265,8 @@ if(AVM)
+   # The differential driver is a standalone executable with its own main(); it is never part of a
+   # library module, in any configuration.
+   list(FILTER VM2_SOURCE_FILES EXCLUDE REGEX ".*/differential/.*\\.cpp$")
++  # Same for the reactor: it carries wasm exports and its own module-level state.
++  list(FILTER VM2_SOURCE_FILES EXCLUDE REGEX ".*/reactor/.*\\.cpp$")
+ 
+   # Make vm2 and vm2_sim sources mutually exclusive
+   foreach(SIM_FILE ${VM2_SIM_SOURCE_FILES})
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp b/barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp
+index b5cb0ef0c32..09f31652ead 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp
++++ b/barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp
+@@ -70,6 +70,8 @@
+ #include <utility>
+ #include <vector>
+ 
++#include "barretenberg/serialize/msgpack_impl.hpp"
++
+ #include "barretenberg/vm2/common/avm_io.hpp"
+ #include "barretenberg/vm2/common/aztec_types.hpp"
+ #include "barretenberg/vm2/common/field.hpp"
+@@ -905,6 +907,140 @@ void mode_benchsteps(const std::string& program, uint64_t reps)
+     line("benchsteps.done", "1");
+ }
+ 
++
++// ===========================================================================
++// M12 -- the standalone reactor's inputs.
++//
++// `reactorinputs` prints, per corpus program, the msgpack blobs a host needs to drive `avm.wasm`:
++// the two entry points' inputs and the four resident-DB seeding calls that put the reactor's own
++// contract DB and merkle DB into the state this tester is in at simulate time.
++//
++// NOTHING HERE RECOMPUTES ANYTHING UPSTREAM ALREADY COMPUTES. The transaction, the global
++// variables and the protocol contracts are lifted out of the `ExecutionHints` upstream's own
++// hint-collecting run produced; the deployment nullifier and the fee-juice public-data leaf are
++// READ BACK out of the tester's own trees at the index they landed at, rather than re-derived from
++// `DOM_SEP__*` constants and a fee-payer balance restated on our side. A constant restated
++// downstream is a constant that can drift away from upstream's silently, and `fund_fee_payer` is
++// private precisely because it is upstream's business and not ours.
++//
++// The blobs are printed as HEX ON STDOUT rather than written to files. Writing files would pull
++// `fopen` and its WASI surface into this translation unit, which is also compiled for wasm and
++// whose import surface other milestones measure.
++// ---------------------------------------------------------------------------
++std::string hexbytes(const msgpack::sbuffer& buf)
++{
++    static const char* D = "0123456789abcdef";
++    std::string out;
++    out.reserve(buf.size() * 2);
++    for (size_t i = 0; i < buf.size(); ++i) {
++        const auto b = static_cast<uint8_t>(buf.data()[i]);
++        out += D[(b >> 4) & 0xF];
++        out += D[b & 0xF];
++    }
++    return out;
++}
++
++template <typename T> void emit_blob(const std::string& key, const T& value)
++{
++    msgpack::sbuffer buf;
++    msgpack::pack(buf, value);
++    line(key + ".bytes", dec(static_cast<uint64_t>(buf.size())));
++    line(key, hexbytes(buf));
++}
++
++void mode_reactor_inputs()
++{
++    line("reactorInputs.version", "1");
++    line("reactorInputs.coverage", "seven-hand-assembled-corpus-programs-the-same-seven-M8-compares");
++
++    const auto programs = corpus();
++    line("reactorInputs.programs.count", dec(static_cast<uint64_t>(programs.size())));
++
++    for (const auto& [name, bytecode] : programs) {
++        const std::string p = "reactorInputs." + name;
++
++        PublicTxSimulationTester tester;
++        const auto contract = tester.deploy_contract(bytecode);
++
++        // The deployment nullifier, read back from the tree it was inserted into.
++        const auto after_deploy = tester.merkle_db().get_tree_roots();
++        const index_t nullifier_index = static_cast<index_t>(after_deploy.nullifier_tree.next_available_leaf_index) - 1;
++        const auto deployment_nullifier = tester.merkle_db().get_leaf_preimage_nullifier_tree(nullifier_index).leaf;
++
++        // ONE simulation on this tester, so `tx_count` is 0 and the transaction's first nullifier is
++        // the same one the default transcript's run used. It also runs `fund_fee_payer`, which is
++        // what puts the fee-juice leaf in the public data tree.
++        auto hint_config = PublicTxSimulationTester::default_config();
++        hint_config.collect_hints = true;
++        hint_config.collect_public_inputs = true;
++        hint_config.collect_statistics = true;
++        const auto hinted = tester.simulate_tx({ TestEnqueuedCall{ .contract_address = contract.address } }, hint_config);
++        if (!hinted.hints.has_value() || !hinted.public_inputs.has_value()) {
++            std::cerr << "avm_differential: hint collection produced no hints or no public inputs for " << name << "\n";
++            std::exit(2);
++        }
++
++        const auto after_fund = tester.merkle_db().get_tree_roots();
++        const index_t public_data_index =
++            static_cast<index_t>(after_fund.public_data_tree.next_available_leaf_index) - 1;
++        const auto fee_juice_leaf = tester.merkle_db().get_leaf_preimage_public_data_tree(public_data_index).leaf;
++
++        line(p + ".address", hex(contract.address));
++        line(p + ".bytes", dec(static_cast<uint64_t>(bytecode.size())));
++        line(p + ".setup.nullifierIndex", dec(static_cast<uint64_t>(nullifier_index)));
++        line(p + ".setup.publicDataIndex", dec(static_cast<uint64_t>(public_data_index)));
++
++        // The four resident-DB seeding calls, each an upstream type.
++        emit_blob(p + ".setup.class", contract.contract_class);
++        emit_blob(p + ".setup.instance", std::make_tuple(contract.address, contract.instance));
++        emit_blob(p + ".setup.nullifier", deployment_nullifier);
++        emit_blob(p + ".setup.publicdata", fee_juice_leaf);
++
++        // `simulate` with host-provided DB references. The config asks for exactly what the default
++        // transcript's run asks for, so the two are comparable line for line.
++        AvmFastSimulationInputs fast{
++            .ws_revision = {},
++            .config = PublicTxSimulationTester::default_config(),
++            .tx = hinted.hints->tx,
++            .global_variables = hinted.hints->global_variables,
++            .protocol_contracts = hinted.hints->protocol_contracts,
++        };
++        fast.config.collect_statistics = true;
++        fast.config.collect_public_inputs = true;
++        emit_blob(p + ".fast", fast);
++
++#if AVM_HAS_EXECUTION_OBSERVER
++        // The same, with the observation hook on, for the step-stream measurement.
++        AvmFastSimulationInputs fast_steps = fast;
++        fast_steps.config.collect_execution_steps = true;
++        emit_blob(p + ".faststeps", fast_steps);
++#endif
++
++        // `simulate_with_hinted_dbs`: self-contained, no DB handle involved.
++        const AvmProvingInputs proving{ .public_inputs = *hinted.public_inputs, .hints = *hinted.hints };
++        emit_blob(p + ".proving", proving);
++
++        // Per-program arguments for the exported ContractDBInterface lookups.
++        emit_blob(p + ".args.address", contract.address);
++        emit_blob(p + ".args.classId", contract.contract_class.id);
++        emit_blob(p + ".args.debugName", std::make_tuple(contract.address, FunctionSelector(0)));
++    }
++
++    // Arguments for the exported LowLevelMerkleDBInterface methods that do not depend on a program.
++    // Each is an upstream type or a msgpack array of upstream types; none is a schema of ours.
++    emit_blob("reactorInputs.args.treeIndex", std::make_tuple(MerkleTreeId::NOTE_HASH_TREE, uint64_t(0)));
++    emit_blob("reactorInputs.args.treeValue", std::make_tuple(MerkleTreeId::NULLIFIER_TREE, FF(144)));
++    emit_blob("reactorInputs.args.leafIndex", uint64_t(0));
++    emit_blob("reactorInputs.args.appendLeaves",
++              std::make_tuple(MerkleTreeId::NOTE_HASH_TREE, std::vector<FF>{ FF(42) }));
++    emit_blob("reactorInputs.args.padTree", std::make_tuple(MerkleTreeId::NOTE_HASH_TREE, uint64_t(5)));
++    emit_blob("reactorInputs.args.nullifierLeaf", NullifierLeafValue(FF(144)));
++    emit_blob("reactorInputs.args.publicDataLeaf", PublicDataLeafValue(FF(145), FF(1)));
++    emit_blob("reactorInputs.args.emptyDeployment", ContractDeploymentData{});
++
++    line("reactorInputs.done", "1");
++}
++
+ } // namespace
+ 
+ int main(int argc, char** argv)
+@@ -921,6 +1057,10 @@ int main(int argc, char** argv)
+         mode_events();
+         return 0;
+     }
++    if (mode == "reactorinputs") {
++        mode_reactor_inputs();
++        return 0;
++    }
+     if (mode == "bench" || mode == "benchsteps") {
+         if (argc < 4) {
+             std::cerr << "usage: avm_differential " << mode << " <program> <reps>\n";
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/reactor/avm_msgpack_coverage.cpp b/barretenberg/cpp/src/barretenberg/vm2/reactor/avm_msgpack_coverage.cpp
+new file mode 100644
+index 00000000000..cf20241b6d4
+--- /dev/null
++++ b/barretenberg/cpp/src/barretenberg/vm2/reactor/avm_msgpack_coverage.cpp
+@@ -0,0 +1,725 @@
++// The host-ABI msgpack enumeration, BY EXECUTION.
++//
++// M12's deliverable is phrased the right way round: *confirm upstream's generated schemas cover the
++// surface we cross, and only then define anything of our own for what they do not*. This program is
++// that confirmation. For every type that crosses the reactor boundary it
++//
++//   1. builds a value with non-default content in every field it names,
++//   2. packs it with msgpack and unpacks it back,
++//   3. asserts the round-trip is equal, and
++//   4. asserts a MUTATED copy is NOT equal — because a round-trip check over a type whose
++//      `operator==` returns true for everything passes for the wrong reason, and this campaign has
++//      already had one membership test pass over an empty haystack.
++//
++// A type with no schema does not fail here: it fails to COMPILE. That is the point of doing the
++// enumeration in C++ rather than by grepping for `MSGPACK_CAMEL_CASE_FIELDS` — a grep tells you a
++// macro is present, a compile tells you the packer and the unpacker both exist and agree.
++//
++// Each line names where the schema is DECLARED, so "upstream's schema" is a claim about a file and
++// not an impression. `origin=upstream` means the declaration is in a file no overlay of ours
++// touches; `origin=prepared-patch` means it is added by one of the five prepared upstream
++// contributions (only `ExecutionStep` and `TxSimulationResult::execution_steps`, from the
++// per-instruction observation hook); `origin=ours` means we declared it, and the reason is printed.
++//
++// Built for x86-64 AND for wasm32-wasip1 from the same translation unit, because a schema that
++// round-trips on one target and not the other is exactly the kind of thing this campaign measures
++// rather than assumes.
++
++#include <cstdint>
++#include <cstring>
++#include <iostream>
++#include <optional>
++#include <string>
++#include <tuple>
++#include <vector>
++
++#include "barretenberg/serialize/msgpack.hpp"
++#include "barretenberg/serialize/msgpack_impl.hpp"
++#include "barretenberg/serialize/test_helper.hpp"
++
++#include "barretenberg/crypto/merkle_tree/indexed_tree/indexed_leaf.hpp"
++#include "barretenberg/crypto/merkle_tree/response.hpp"
++#include "barretenberg/vm2/common/avm_io.hpp"
++#include "barretenberg/vm2/common/aztec_types.hpp"
++#include "barretenberg/world_state_reference/merkle_tree_id.hpp"
++
++namespace {
++
++using namespace bb::avm2;
++using bb::crypto::merkle_tree::GetLowIndexedLeafResponse;
++using bb::crypto::merkle_tree::IndexedLeaf;
++using bb::crypto::merkle_tree::LeafUpdateWitnessData;
++using bb::crypto::merkle_tree::NullifierLeafValue;
++using bb::crypto::merkle_tree::PublicDataLeafValue;
++using bb::crypto::merkle_tree::SequentialInsertionResult;
++using bb::world_state::MerkleTreeId;
++using bb::world_state::WorldStateRevision;
++
++// The one type the reactor declares. Kept byte-identical in shape to upstream's
++// bb::bbapi::ErrorResponse so a host decoder written for that decodes this.
++struct AvmReactorError {
++    std::string message;
++    bool operator==(const AvmReactorError& other) const = default;
++    SERIALIZATION_FIELDS(message);
++};
++
++int failures = 0;
++int checks = 0;
++
++void report(const std::string& name, const std::string& origin, const std::string& declared_in, bool ok, size_t bytes)
++{
++    ++checks;
++    if (!ok) {
++        ++failures;
++    }
++    std::cout << "msgpack." << name << " origin=" << origin << " declaredIn=" << declared_in
++              << " roundTrip=" << (ok ? "1" : "0") << " bytes=" << bytes << "\n";
++}
++
++bool same(const msgpack::sbuffer& a, const msgpack::sbuffer& b)
++{
++    return a.size() == b.size() && std::memcmp(a.data(), b.data(), a.size()) == 0;
++}
++
++// value: a populated instance. mutated: the same with ONE field changed.
++//
++// The comparison is on the RE-PACKED BYTES rather than on `operator==`, for two reasons. Several
++// of these types do not declare one at all (`SequentialInsertionResult` is the first), so an
++// equality-based check would silently narrow the enumeration to the types that happen to have it.
++// And bytes are the stronger question anyway: a `convert` that quietly drops a field round-trips
++// equal under a hand-written `operator==` that does not read it, and does not round-trip equal
++// here, because the re-pack emits that field's default.
++template <typename T>
++void covers(const std::string& name, const std::string& origin, const std::string& declared_in, const T& value, const T& mutated)
++{
++    msgpack::sbuffer packed;
++    msgpack::pack(packed, value);
++    T back;
++    msgpack::unpack(packed.data(), packed.size()).get().convert(back);
++    msgpack::sbuffer repacked;
++    msgpack::pack(repacked, back);
++    const bool round_trips = same(packed, repacked);
++
++    // The mutated copy must encode DIFFERENTLY. Without this a round-trip check passes for a
++    // schema that names no fields at all -- it would encode an empty map both times.
++    msgpack::sbuffer other;
++    msgpack::pack(other, mutated);
++    const bool discriminates = !same(packed, other);
++
++    report(name, origin, declared_in, round_trips && discriminates && packed.size() > 0, packed.size());
++    if (!round_trips) {
++        std::cout << "msgpack." << name << ".roundTripBytesDiffer 1\n";
++    }
++    if (!discriminates) {
++        std::cout << "msgpack." << name << ".encodingDiscriminates 0\n";
++    }
++}
++
++FF f(uint64_t v)
++{
++    return FF(v);
++}
++
++PublicKeys keys()
++{
++    PublicKeys k;
++    k.nullifier_key_hash = f(11);
++    k.incoming_viewing_key = AffinePoint::one();
++    k.outgoing_viewing_key_hash = f(12);
++    k.tagging_key_hash = f(13);
++    k.message_signing_key_hash = f(14);
++    k.fallback_key_hash = f(15);
++    return k;
++}
++
++ContractInstance instance()
++{
++    ContractInstance i;
++    i.salt = f(3);
++    i.deployer = f(4);
++    i.current_contract_class_id = f(5);
++    i.original_contract_class_id = f(6);
++    i.initialization_hash = f(7);
++    i.immutables_hash = f(8);
++    i.public_keys = keys();
++    return i;
++}
++
++ContractClass klass()
++{
++    ContractClass c;
++    c.id = f(21);
++    c.artifact_hash = f(22);
++    c.private_functions_root = f(23);
++    c.packed_bytecode = { 1, 2, 3, 4 };
++    return c;
++}
++
++Gas gas(uint32_t l2, uint32_t da)
++{
++    return Gas{ .l2_gas = l2, .da_gas = da };
++}
++
++GasFees fees()
++{
++    return GasFees{ .fee_per_da_gas = uint128_t(2), .fee_per_l2_gas = uint128_t(3) };
++}
++
++GasSettings gas_settings()
++{
++    return GasSettings{ .gas_limits = gas(100, 200),
++                        .teardown_gas_limits = gas(10, 20),
++                        .max_fees_per_gas = fees(),
++                        .max_priority_fees_per_gas = fees() };
++}
++
++GlobalVariables globals()
++{
++    GlobalVariables g;
++    g.chain_id = f(31);
++    g.version = f(32);
++    g.block_number = 33;
++    g.slot_number = f(34);
++    g.timestamp = 35;
++    g.coinbase = f(36);
++    g.fee_recipient = f(37);
++    g.gas_fees = fees();
++    return g;
++}
++
++ProtocolContracts protocol_contracts()
++{
++    ProtocolContracts p;
++    p.derived_addresses[0] = f(41);
++    return p;
++}
++
++AccumulatedData accumulated()
++{
++    AccumulatedData a;
++    a.note_hashes = { f(51) };
++    a.nullifiers = { f(52) };
++    a.l2_to_l1_messages = { ScopedL2ToL1Message{
++        .message = L2ToL1Message{ .recipient = f(53), .content = f(54) }, .contract_address = f(55) } };
++    return a;
++}
++
++ContractDeploymentData deployment()
++{
++    ContractDeploymentData d;
++    d.contract_class_logs = { ContractClassLog{
++        .contract_address = f(61), .fields = ContractClassLogFields{}, .emitted_length = 1 } };
++    d.private_logs = { PrivateLog{ .fields = {}, .emitted_length = 2 } };
++    return d;
++}
++
++PublicCallRequest call_request()
++{
++    return PublicCallRequest{
++        .msg_sender = f(71), .contract_address = f(72), .is_static_call = true, .calldata_hash = f(73)
++    };
++}
++
++Tx tx()
++{
++    Tx t;
++    t.hash = "0xdeadbeef";
++    t.gas_settings = gas_settings();
++    t.effective_gas_fees = fees();
++    t.non_revertible_contract_deployment_data = deployment();
++    t.revertible_contract_deployment_data = deployment();
++    t.non_revertible_accumulated_data = accumulated();
++    t.revertible_accumulated_data = accumulated();
++    t.setup_enqueued_calls = { PublicCallRequestWithCalldata{ .request = call_request(), .calldata = { f(81) } } };
++    t.app_logic_enqueued_calls = { PublicCallRequestWithCalldata{ .request = call_request(),
++                                                                  .calldata = { f(82) } } };
++    t.teardown_enqueued_call =
++        PublicCallRequestWithCalldata{ .request = call_request(), .calldata = { f(83) } };
++    t.gas_used_by_private = gas(1, 2);
++    t.fee_payer = f(84);
++    return t;
++}
++
++PublicSimulatorConfig config()
++{
++    PublicSimulatorConfig c;
++    c.prover_id = f(91);
++    c.skip_fee_enforcement = true;
++    c.collect_call_metadata = true;
++    c.collect_hints = true;
++    c.collect_public_inputs = true;
++    c.collect_debug_logs = true;
++    c.collect_statistics = true;
++    c.collect_execution_steps = true;
++    c.collection_limits = CollectionLimitsConfig{ .max_debug_log_memory_reads = 1,
++                                                  .max_calldata_size_in_fields = 2,
++                                                  .max_returndata_size_in_fields = 3,
++                                                  .max_call_stack_depth = 4,
++                                                  .max_call_stack_items = 5 };
++    return c;
++}
++
++AppendOnlyTreeSnapshot snapshot(uint64_t root)
++{
++    return AppendOnlyTreeSnapshot{ .root = f(root), .next_available_leaf_index = 7 };
++}
++
++TreeSnapshots tree_snapshots()
++{
++    return TreeSnapshots{ .l1_to_l2_message_tree = snapshot(101),
++                          .note_hash_tree = snapshot(102),
++                          .nullifier_tree = snapshot(103),
++                          .public_data_tree = snapshot(104) };
++}
++
++PublicInputs public_inputs()
++{
++    PublicInputs pi;
++    pi.global_variables = globals();
++    pi.protocol_contracts = protocol_contracts();
++    pi.start_tree_snapshots = tree_snapshots();
++    pi.start_gas_used = gas(1, 2);
++    pi.gas_settings = gas_settings();
++    pi.effective_gas_fees = fees();
++    pi.fee_payer = f(111);
++    pi.prover_id = f(112);
++    pi.public_call_request_array_lengths =
++        PublicCallRequestArrayLengths{ .setup_calls = 1, .app_logic_calls = 1, .teardown_call = true };
++    pi.public_setup_call_requests[0] = call_request();
++    pi.public_app_logic_call_requests[0] = call_request();
++    pi.public_teardown_call_request = call_request();
++    pi.end_tree_snapshots = tree_snapshots();
++    pi.end_gas_used = gas(3, 4);
++    pi.transaction_fee = f(113);
++    pi.reverted = true;
++    return pi;
++}
++
++IndexedLeaf<NullifierLeafValue> nullifier_leaf()
++{
++    return IndexedLeaf<NullifierLeafValue>(NullifierLeafValue(f(121)), 5, f(122));
++}
++
++IndexedLeaf<PublicDataLeafValue> public_data_leaf()
++{
++    return IndexedLeaf<PublicDataLeafValue>(PublicDataLeafValue(f(131), f(132)), 6, f(133));
++}
++
++template <typename LeafValue> LeafUpdateWitnessData<LeafValue> witness(const IndexedLeaf<LeafValue>& leaf)
++{
++    return LeafUpdateWitnessData<LeafValue>(leaf, 3, { f(141), f(142) });
++}
++
++ExecutionHints hints()
++{
++    ExecutionHints h;
++    h.global_variables = globals();
++    h.tx = tx();
++    h.protocol_contracts = protocol_contracts();
++    h.contract_instances = { ContractInstanceHint{ .hint_key = 1,
++                                                   .address = f(151),
++                                                   .salt = f(152),
++                                                   .deployer = f(153),
++                                                   .current_contract_class_id = f(154),
++                                                   .original_contract_class_id = f(155),
++                                                   .initialization_hash = f(156),
++                                                   .immutables_hash = f(157),
++                                                   .public_keys = PublicKeysHint{ .npk_m_hash = f(158),
++                                                                                  .ovpk_m_hash = f(159),
++                                                                                  .tpk_m_hash = f(160),
++                                                                                  .mspk_m_hash = f(161),
++                                                                                  .fbpk_m_hash = f(162) } } };
++    h.contract_classes = { ContractClassHint{ .hint_key = 2,
++                                              .class_id = f(163),
++                                              .artifact_hash = f(164),
++                                              .private_functions_root = f(165),
++                                              .packed_bytecode = { 9, 8, 7 } } };
++    h.bytecode_commitments = { BytecodeCommitmentHint{ .hint_key = 3, .class_id = f(166), .commitment = f(167) } };
++    h.debug_function_names = { DebugFunctionNameHint{ .address = f(168), .selector = f(169), .name = "transfer" } };
++    h.contract_db_create_checkpoint_hints = { CheckpointActionNoStateChangeHint{
++        .action_counter = 1, .old_checkpoint_id = 2, .new_checkpoint_id = 3 } };
++    h.starting_tree_roots = tree_snapshots();
++    h.get_sibling_path_hints = { GetSiblingPathHint{ .hint_key = snapshot(171),
++                                                     .tree_id = MerkleTreeId::NOTE_HASH_TREE,
++                                                     .index = 4,
++                                                     .path = { f(172), f(173) } } };
++    h.get_previous_value_index_hints = { GetPreviousValueIndexHint{ .hint_key = snapshot(174),
++                                                                    .tree_id = MerkleTreeId::NULLIFIER_TREE,
++                                                                    .value = f(175),
++                                                                    .index = 5,
++                                                                    .already_present = true } };
++    h.get_leaf_preimage_hints_public_data_tree = { GetLeafPreimageHint<IndexedLeaf<PublicDataLeafValue>>{
++        .hint_key = snapshot(176), .index = 6, .leaf_preimage = public_data_leaf() } };
++    h.get_leaf_preimage_hints_nullifier_tree = { GetLeafPreimageHint<IndexedLeaf<NullifierLeafValue>>{
++        .hint_key = snapshot(177), .index = 7, .leaf_preimage = nullifier_leaf() } };
++    h.get_leaf_value_hints = { GetLeafValueHint{
++        .hint_key = snapshot(178), .tree_id = MerkleTreeId::PUBLIC_DATA_TREE, .index = 8, .value = f(179) } };
++    h.sequential_insert_hints_public_data_tree = { SequentialInsertHint<PublicDataLeafValue>{
++        .hint_key = snapshot(180),
++        .tree_id = MerkleTreeId::PUBLIC_DATA_TREE,
++        .leaf = PublicDataLeafValue(f(181), f(182)),
++        .low_leaves_witness_data = witness(public_data_leaf()),
++        .insertion_witness_data = witness(public_data_leaf()),
++        .state_after = snapshot(183) } };
++    h.sequential_insert_hints_nullifier_tree = { SequentialInsertHint<NullifierLeafValue>{
++        .hint_key = snapshot(184),
++        .tree_id = MerkleTreeId::NULLIFIER_TREE,
++        .leaf = NullifierLeafValue(f(185)),
++        .low_leaves_witness_data = witness(nullifier_leaf()),
++        .insertion_witness_data = witness(nullifier_leaf()),
++        .state_after = snapshot(186) } };
++    h.append_leaves_hints = { AppendLeavesHint{ .hint_key = snapshot(187),
++                                                .state_after = snapshot(188),
++                                                .tree_id = MerkleTreeId::L1_TO_L2_MESSAGE_TREE,
++                                                .leaves = { f(189) } } };
++    h.create_checkpoint_hints = { CreateCheckpointHint{
++        .action_counter = 4, .old_checkpoint_id = 5, .new_checkpoint_id = 6 } };
++    h.revert_checkpoint_hints = { RevertCheckpointHint{ .action_counter = 7,
++                                                        .old_checkpoint_id = 8,
++                                                        .new_checkpoint_id = 9,
++                                                        .state_before = tree_snapshots(),
++                                                        .state_after = tree_snapshots() } };
++    return h;
++}
++
++ExecutionStep step(uint32_t pc)
++{
++    return ExecutionStep{
++        .context_id = 1, .contract_address = f(191), .pc = pc, .opcode = 42, .gas_used = gas(10, 20)
++    };
++}
++
++CallStackMetadata frame()
++{
++    CallStackMetadata m;
++    m.timestamp = 1;
++    m.phase = CoarseTransactionPhase::APP_LOGIC;
++    m.contract_address = f(201);
++    m.caller_pc = 2;
++    m.calldata = { f(202) };
++    m.is_static_call = true;
++    m.gas_limit = gas(30, 40);
++    m.output = { f(203) };
++    m.reverted = true;
++    m.internal_call_stack_at_exit = { 3, 4 };
++    m.halting_message = "reverted";
++    m.num_nested_calls = 0;
++    return m;
++}
++
++TxSimulationResult result()
++{
++    TxSimulationResult r;
++    r.gas_used = GasUsed{ .total_gas = gas(1, 2),
++                          .teardown_gas = gas(3, 4),
++                          .public_gas = gas(5, 6),
++                          .billed_gas = gas(7, 8) };
++    r.revert_code = RevertCode::APP_LOGIC_REVERTED;
++    r.public_tx_effect = PublicTxEffect{
++        .transaction_fee = f(211),
++        .note_hashes = { f(212) },
++        .nullifiers = { f(213) },
++        .l2_to_l1_msgs = { ScopedL2ToL1Message{ .message = L2ToL1Message{ .recipient = f(214), .content = f(215) },
++                                                .contract_address = f(216) } },
++        .public_logs = { PublicLog{ .fields = {}, .contract_address = f(217) } },
++        .public_data_writes = { PublicDataWrite{ .leaf_slot = f(218), .value = f(219) } }
++    };
++    r.call_stack_metadata = { frame() };
++    r.logs = std::vector<DebugLog>{ DebugLog{
++        .contract_address = f(221), .level = "info", .message = "hello", .fields = { f(222) } } };
++    r.execution_steps = std::vector<ExecutionStep>{ step(1), step(2) };
++    r.public_inputs = public_inputs();
++    r.hints = hints();
++    r.stats = { { "total_instructions_executed", "4" } };
++    return r;
++}
++
++// Upstream declaration sites, so `origin=upstream` is a claim about a file.
++const char* AZTEC_TYPES = "vm2/common/aztec_types.hpp";
++const char* AVM_IO = "vm2/common/avm_io.hpp";
++const char* INDEXED_LEAF = "crypto/merkle_tree/indexed_tree/indexed_leaf.hpp";
++const char* RESPONSE = "crypto/merkle_tree/response.hpp";
++const char* MERKLE_TREE_ID = "world_state_reference/merkle_tree_id.hpp";
++const char* REACTOR = "vm2/reactor/avm_reactor.cpp";
++
++} // namespace
++
++int main()
++{
++    std::cout << "msgpackCoverage.version 1\n";
++    std::cout << "msgpackCoverage.pointerBits " << (sizeof(void*) * 8) << "\n";
++
++    // ---- the AVM's own IO types --------------------------------------------------------------
++    {
++        auto v = public_inputs();
++        auto m = v;
++        m.reverted = false;
++        covers("PublicInputs", "upstream", AVM_IO, v, m);
++    }
++    {
++        auto v = hints();
++        auto m = v;
++        m.tx.hash = "changed";
++        covers("ExecutionHints", "upstream", AVM_IO, v, m);
++    }
++    {
++        AvmProvingInputs v{ .public_inputs = public_inputs(), .hints = hints() };
++        auto m = v;
++        m.public_inputs.reverted = false;
++        covers("AvmProvingInputs", "upstream", AVM_IO, v, m);
++    }
++    {
++        AvmFastSimulationInputs v{ .ws_revision = WorldStateRevision{ .forkId = 1,
++                                                                      .blockNumber = 2,
++                                                                      .includeUncommitted = true },
++                                   .config = config(),
++                                   .tx = tx(),
++                                   .global_variables = globals(),
++                                   .protocol_contracts = protocol_contracts() };
++        auto m = v;
++        m.config.skip_fee_enforcement = false;
++        covers("AvmFastSimulationInputs", "upstream", AVM_IO, v, m);
++    }
++    {
++        auto v = result();
++        auto m = v;
++        m.revert_code = RevertCode::OK;
++        covers("TxSimulationResult", "upstream", AVM_IO, v, m);
++    }
++    {
++        auto v = config();
++        auto m = v;
++        m.collect_execution_steps = false;
++        covers("PublicSimulatorConfig", "upstream", AVM_IO, v, m);
++    }
++    {
++        auto v = tx();
++        auto m = v;
++        m.hash = "other";
++        covers("Tx", "upstream", AVM_IO, v, m);
++    }
++    {
++        auto v = PublicTxEffect{ .transaction_fee = f(231) };
++        auto m = v;
++        m.transaction_fee = f(232);
++        covers("PublicTxEffect", "upstream", AVM_IO, v, m);
++    }
++    {
++        auto v = frame();
++        auto m = v;
++        m.reverted = false;
++        covers("CallStackMetadata", "upstream", AVM_IO, v, m);
++    }
++    // The one schema that arrives with a PREPARED UPSTREAM CONTRIBUTION rather than with the
++    // pinned anchor: `ExecutionStep`, added by the per-instruction observation hook (M9's patch 4).
++    {
++        auto v = step(7);
++        auto m = v;
++        m.pc = 8;
++        covers("ExecutionStep", "prepared-patch", AVM_IO, v, m);
++    }
++
++    // ---- the shared Aztec types ---------------------------------------------------------------
++    {
++        auto v = instance();
++        auto m = v;
++        m.salt = f(999);
++        covers("ContractInstance", "upstream", AZTEC_TYPES, v, m);
++    }
++    {
++        auto v = klass();
++        auto m = v;
++        m.id = f(999);
++        covers("ContractClass", "upstream", AZTEC_TYPES, v, m);
++    }
++    {
++        auto v = klass().with_commitment(f(241));
++        auto m = v;
++        m.public_bytecode_commitment = f(242);
++        covers("ContractClassWithCommitment", "upstream", AZTEC_TYPES, v, m);
++    }
++    {
++        auto v = keys();
++        auto m = v;
++        m.tagging_key_hash = f(999);
++        covers("PublicKeys", "upstream", AZTEC_TYPES, v, m);
++    }
++    {
++        auto v = deployment();
++        auto m = v;
++        m.private_logs.clear();
++        covers("ContractDeploymentData", "upstream", AZTEC_TYPES, v, m);
++    }
++    {
++        auto v = globals();
++        auto m = v;
++        m.block_number = 999;
++        covers("GlobalVariables", "upstream", AZTEC_TYPES, v, m);
++    }
++    {
++        auto v = tree_snapshots();
++        auto m = v;
++        m.note_hash_tree.next_available_leaf_index = 999;
++        covers("TreeSnapshots", "upstream", AZTEC_TYPES, v, m);
++    }
++    {
++        auto v = snapshot(251);
++        auto m = v;
++        m.root = f(252);
++        covers("AppendOnlyTreeSnapshot", "upstream", AZTEC_TYPES, v, m);
++    }
++    {
++        auto v = gas_settings();
++        auto m = v;
++        m.gas_limits.l2_gas = 999;
++        covers("GasSettings", "upstream", AZTEC_TYPES, v, m);
++    }
++    {
++        auto v = GasUsed{ .total_gas = gas(1, 2), .teardown_gas = gas(3, 4), .public_gas = gas(5, 6), .billed_gas = gas(7, 8) };
++        auto m = v;
++        m.billed_gas.da_gas = 999;
++        covers("GasUsed", "upstream", AZTEC_TYPES, v, m);
++    }
++    {
++        auto v = protocol_contracts();
++        auto m = v;
++        m.derived_addresses[0] = f(999);
++        covers("ProtocolContracts", "upstream", AZTEC_TYPES, v, m);
++    }
++    {
++        auto v = DebugLog{ .contract_address = f(261), .level = "warn", .message = "m", .fields = { f(262) } };
++        auto m = v;
++        m.level = "info";
++        covers("DebugLog", "upstream", AZTEC_TYPES, v, m);
++    }
++
++    // ---- the merkle-tree types the low-level DB returns ---------------------------------------
++    {
++        auto v = nullifier_leaf();
++        auto m = v;
++        m.nextIndex = 999;
++        covers("IndexedLeaf<NullifierLeafValue>", "upstream", INDEXED_LEAF, v, m);
++    }
++    {
++        auto v = public_data_leaf();
++        auto m = v;
++        m.nextIndex = 999;
++        covers("IndexedLeaf<PublicDataLeafValue>", "upstream", INDEXED_LEAF, v, m);
++    }
++    {
++        auto v = NullifierLeafValue(f(271));
++        auto m = NullifierLeafValue(f(272));
++        covers("NullifierLeafValue", "upstream", INDEXED_LEAF, v, m);
++    }
++    {
++        auto v = PublicDataLeafValue(f(281), f(282));
++        auto m = PublicDataLeafValue(f(281), f(283));
++        covers("PublicDataLeafValue", "upstream", INDEXED_LEAF, v, m);
++    }
++    {
++        auto v = witness(nullifier_leaf());
++        auto m = v;
++        m.index = 999;
++        covers("LeafUpdateWitnessData<NullifierLeafValue>", "upstream", RESPONSE, v, m);
++    }
++    {
++        SequentialInsertionResult<NullifierLeafValue> v{ .low_leaf_witness_data = { witness(nullifier_leaf()) },
++                                                         .insertion_witness_data = { witness(nullifier_leaf()) } };
++        auto m = v;
++        m.insertion_witness_data[0].index = 999;
++        covers("SequentialInsertionResult<NullifierLeafValue>", "upstream", RESPONSE, v, m);
++    }
++    {
++        SequentialInsertionResult<PublicDataLeafValue> v{ .low_leaf_witness_data = { witness(public_data_leaf()) },
++                                                          .insertion_witness_data = { witness(public_data_leaf()) } };
++        auto m = v;
++        m.insertion_witness_data[0].index = 999;
++        covers("SequentialInsertionResult<PublicDataLeafValue>", "upstream", RESPONSE, v, m);
++    }
++    {
++        GetLowIndexedLeafResponse v{ true, 5 };
++        GetLowIndexedLeafResponse m{ false, 5 };
++        covers("GetLowIndexedLeafResponse", "upstream", RESPONSE, v, m);
++    }
++    {
++        auto v = WorldStateRevision{ .forkId = 1, .blockNumber = 2, .includeUncommitted = true };
++        auto m = v;
++        m.blockNumber = 3;
++        covers("WorldStateRevision", "upstream", MERKLE_TREE_ID, v, m);
++    }
++
++    // ---- enums, which msgpack needs registered explicitly --------------------------------------
++    {
++        auto v = MerkleTreeId::PUBLIC_DATA_TREE;
++        auto m = MerkleTreeId::NOTE_HASH_TREE;
++        covers("MerkleTreeId", "upstream", MERKLE_TREE_ID, v, m);
++    }
++    {
++        auto v = RevertCode::TEARDOWN_REVERTED;
++        auto m = RevertCode::OK;
++        covers("RevertCode", "upstream", AZTEC_TYPES, v, m);
++    }
++    {
++        auto v = CoarseTransactionPhase::TEARDOWN;
++        auto m = CoarseTransactionPhase::SETUP;
++        covers("CoarseTransactionPhase", "upstream", AVM_IO, v, m);
++    }
++
++    // ---- the multi-argument encodings the exported DB methods use ------------------------------
++    // These are msgpack-c's OWN std::tuple adaptor over types already covered above. Nothing here
++    // declares a schema; the entry exists so "the arguments cross as upstream types" is measured
++    // and not asserted in prose.
++    {
++        std::tuple<MerkleTreeId, uint64_t> v{ MerkleTreeId::NULLIFIER_TREE, 7 };
++        std::tuple<MerkleTreeId, uint64_t> m{ MerkleTreeId::NULLIFIER_TREE, 8 };
++        covers("tuple<MerkleTreeId,uint64>", "msgpack-adaptor", "msgpack/adaptor/cpp11/tuple.hpp", v, m);
++    }
++    {
++        std::tuple<MerkleTreeId, std::vector<FF>> v{ MerkleTreeId::NOTE_HASH_TREE, { f(291), f(292) } };
++        std::tuple<MerkleTreeId, std::vector<FF>> m{ MerkleTreeId::NOTE_HASH_TREE, { f(291) } };
++        covers("tuple<MerkleTreeId,vector<FF>>", "msgpack-adaptor", "msgpack/adaptor/cpp11/tuple.hpp", v, m);
++    }
++    {
++        std::tuple<AztecAddress, ContractInstance> v{ f(301), instance() };
++        std::tuple<AztecAddress, ContractInstance> m{ f(302), instance() };
++        covers("tuple<AztecAddress,ContractInstance>", "msgpack-adaptor", "msgpack/adaptor/cpp11/tuple.hpp", v, m);
++    }
++    {
++        std::tuple<AztecAddress, FunctionSelector> v{ f(311), f(312) };
++        std::tuple<AztecAddress, FunctionSelector> m{ f(311), f(313) };
++        covers("tuple<AztecAddress,FunctionSelector>", "msgpack-adaptor", "msgpack/adaptor/cpp11/tuple.hpp", v, m);
++    }
++    {
++        std::optional<ContractInstance> v = instance();
++        std::optional<ContractInstance> m = std::nullopt;
++        covers("optional<ContractInstance>", "msgpack-adaptor", "msgpack/adaptor/cpp11/optional.hpp", v, m);
++    }
++    {
++        std::vector<ExecutionStep> v{ step(1), step(2), step(3) };
++        std::vector<ExecutionStep> m{ step(1), step(2) };
++        covers("vector<ExecutionStep>", "msgpack-adaptor", "msgpack/adaptor/vector.hpp", v, m);
++    }
++    {
++        std::vector<FF> v{ f(321), f(322) };
++        std::vector<FF> m{ f(321) };
++        covers("SiblingPath", "msgpack-adaptor", "msgpack/adaptor/vector.hpp", v, m);
++    }
++
++    // ---- the one type this campaign declares ---------------------------------------------------
++    // Upstream HAS an error envelope: bb::bbapi::ErrorResponse in bbapi/bbapi_shared.hpp, with the
++    // same single `message` field and the same SERIALIZATION_FIELDS. It is not usable here: the
++    // `bbapi` module's own dependency line is
++    // `barretenberg_module(bbapi common chonk dsl crypto_poseidon2 ... ecc srs)`, which is the
++    // proving stack this artefact exists to exclude, and the header is not includable on its own
++    // (it names ChonkStepProcessor and acir_format::AcirFormat). Ours is shaped identically so a
++    // host decoder written for upstream's decodes it unchanged.
++    {
++        AvmReactorError v{ .message = "boom" };
++        AvmReactorError m{ .message = "other" };
++        covers("AvmReactorError", "ours", REACTOR, v, m);
++    }
++
++    std::cout << "msgpackCoverage.checks " << checks << "\n";
++    std::cout << "msgpackCoverage.failures " << failures << "\n";
++    return failures == 0 ? 0 : 1;
++}
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/reactor/avm_reactor.cpp b/barretenberg/cpp/src/barretenberg/vm2/reactor/avm_reactor.cpp
+new file mode 100644
+index 00000000000..c8ae2befc95
+--- /dev/null
++++ b/barretenberg/cpp/src/barretenberg/vm2/reactor/avm_reactor.cpp
+@@ -0,0 +1,570 @@
++// avm.wasm — the standalone AVM reactor.
++//
++// One WebAssembly module containing the AVM (`vm2_sim`), its in-memory reference world state
++// (`world_state_reference`) and nothing else, so a page that only executes a public transaction
++// never downloads the proving stack. It has no `main`: it is a WASI *reactor*, initialised once
++// through `_initialize` and then called through the exports below.
++//
++// THE HOST ABI IS UPSTREAM'S OWN MSGPACK SCHEMAS, NOT AN ENCODING OF OURS.
++//
++// Every value that crosses this boundary is a type Aztec already declared with
++// `MSGPACK_CAMEL_CASE_FIELDS`, `SERIALIZATION_FIELDS`, a hand-written `msgpack()` or
++// `MSGPACK_ADD_ENUM` — `AvmFastSimulationInputs`, `AvmProvingInputs`, `TxSimulationResult`,
++// `ExecutionStep`, `ContractInstance`, `ContractClassWithCommitment`, `ContractDeploymentData`,
++// `TreeSnapshots`, `IndexedLeaf<...>`, `SequentialInsertionResult<...>`,
++// `GetLowIndexedLeafResponse`, `MerkleTreeId`. Where a method takes more than one argument they
++// are packed as a msgpack ARRAY of those same types (msgpack-c's own `std::tuple` adaptor); that
++// is an encoding msgpack provides, not a schema we declared.
++//
++// EXACTLY ONE TYPE IS OURS, and the reason is specific rather than stylistic. Upstream does have
++// a msgpack error envelope — `bb::bbapi::ErrorResponse { std::string message; }` in
++// `bbapi/bbapi_shared.hpp` — but it is declared inside the `bbapi` module, whose own
++// `barretenberg_module(bbapi common chonk dsl crypto_poseidon2 ... ecc srs)` line pulls the
++// proving stack this artefact exists to exclude, and the header is not includable on its own
++// (it names `ChonkStepProcessor` and `acir_format::AcirFormat`). So `AvmReactorError` below is
++// declared here — with the SAME single `message` field and the same `SERIALIZATION_FIELDS`, so a
++// host decoder written against upstream's `ErrorResponse` decodes ours unchanged, and so that
++// deleting ours in favour of upstream's is a one-line change if `bbapi` is ever split.
++//
++// WHY THERE IS NO IMPORTED DB SURFACE.
++//
++// The two host interfaces, `ContractDBInterface` (eight methods) and `LowLevelMerkleDBInterface`
++// (fourteen), are exposed as wasm EXPORTS over implementations resident in this module — not as
++// imported callbacks the host implements. That is deliberate and it is what keeps this module's
++// import surface to WASI alone: an imported DB callback would be a foreign-call surface, and the
++// AVM has none (unlike the private ACVM/Brillig side). The host-implemented, imported-callback
++// shape is M15's "chatty" arm and is measured there against this one; nothing here forecloses it.
++//
++// `HighLevelMerkleDBInterface` is deliberately NOT exposed. It is internal to vm2 and
++// `simulate_fast_internal` satisfies it itself with `PureMerkleDB`, exactly as it wraps whatever
++// raw contract DB it is handed in `PureContractDB`.
++//
++// THE RAW CONTRACT DB IS PROVISIONAL AND M13 OWNS IT. `TestContractDB` from `vm2/testing/` is the
++// only in-memory raw `ContractDBInterface` upstream has; `PureContractDB` is a decorator over a
++// raw one and the shippable raw one is the native, IPC-backed `cdb`. Whether `TestContractDB`
++// ships, is upstreamed as an in-memory store beside `PureContractDB`, or is replaced is M13's
++// deliverable. This module names it in one place so that decision is a one-line change here.
++
++#include <cstddef>
++#include <cstdint>
++#include <cstring>
++#include <memory>
++#include <optional>
++#include <span>
++#include <string>
++#include <tuple>
++#include <unordered_map>
++#include <utility>
++#include <vector>
++
++#include "barretenberg/common/wasm_export.hpp"
++#include "barretenberg/serialize/msgpack.hpp"
++#include "barretenberg/serialize/msgpack_impl.hpp"
++
++#include "barretenberg/vm2/avm_sim_api.hpp"
++#include "barretenberg/vm2/common/avm_io.hpp"
++#include "barretenberg/vm2/common/aztec_types.hpp"
++#include "barretenberg/vm2/simulation/interfaces/db.hpp"
++#include "barretenberg/vm2/simulation/lib/memory_merkle_db.hpp"
++#include "barretenberg/vm2/testing/public_tx_simulation_tester.hpp"
++
++namespace {
++
++using namespace bb::avm2;
++using bb::avm2::simulation::MemoryMerkleDB;
++using bb::avm2::testing::TestContractDB;
++using bb::crypto::merkle_tree::NullifierLeafValue;
++using bb::crypto::merkle_tree::PublicDataLeafValue;
++using bb::world_state::MerkleTreeId;
++
++using index_t = bb::crypto::merkle_tree::index_t;
++
++// The one type this module declares. Shaped exactly like upstream's bbapi::ErrorResponse.
++struct AvmReactorError {
++    std::string message;
++
++    bool operator==(const AvmReactorError& other) const = default;
++
++    SERIALIZATION_FIELDS(message);
++};
++
++// ---------------------------------------------------------------------------
++// The result buffer.
++//
++// Every call that produces bytes leaves them here and returns a status; the host then reads
++// `avm_result_ptr()` / `avm_result_len()`. One buffer, reused, owned by the module: the alternative
++// — returning a freshly allocated pointer the host must free — makes every error path a leak, and
++// M12's own alloc/free check exists because that is the failure this shape removes.
++//
++// It is NOT `avm_alloc`ed. Input buffers are the host's to allocate and free; this one is the
++// module's and is never handed to `avm_free`.
++std::vector<uint8_t> g_result;
++
++// The step stream of the most recent simulation, kept so it can be drained in BATCHES rather than
++// re-encoded per call. See avm_steps_batch.
++std::vector<ExecutionStep> g_steps;
++
++void set_result(const msgpack::sbuffer& buf)
++{
++    g_result.assign(buf.data(), buf.data() + buf.size());
++}
++
++template <typename T> void pack_result(const T& value)
++{
++    msgpack::sbuffer buf;
++    msgpack::pack(buf, value);
++    set_result(buf);
++}
++
++void clear_result()
++{
++    g_result.clear();
++}
++
++template <typename T> T unpack_args(const uint8_t* data, uint32_t len)
++{
++    T out;
++    msgpack::unpack(reinterpret_cast<const char*>(data), len).get().convert(out);
++    return out;
++}
++
++// Status codes. 0 is success; everything else leaves an AvmReactorError in the result buffer.
++constexpr int32_t AVM_OK = 0;
++constexpr int32_t AVM_ERR_EXCEPTION = 1; // a std::exception escaped — including a bad input decode
++constexpr int32_t AVM_ERR_UNKNOWN = 2;   // a non-std::exception escaped
++constexpr int32_t AVM_ERR_HANDLE = 3;    // no such DB handle
++
++void set_error(const std::string& message)
++{
++    pack_result(AvmReactorError{ .message = message });
++}
++
++// Every export runs its body through this. A C++ exception must never unwind out of a wasm export:
++// it would trap the instance, and a trapped instance and a reverted transaction are not the same
++// thing (M17 enforces that distinction on the host side; this is its C++ half).
++template <typename F> int32_t guarded(F&& body)
++{
++    try {
++        body();
++        return AVM_OK;
++    } catch (const std::exception& e) {
++        set_error(e.what());
++        return AVM_ERR_EXCEPTION;
++    } catch (...) {
++        set_error("unknown exception");
++        return AVM_ERR_UNKNOWN;
++    }
++}
++
++// ---------------------------------------------------------------------------
++// DB handles.
++//
++// A handle is an opaque uint32 the host holds. Resident DBs, not host callbacks.
++// ---------------------------------------------------------------------------
++uint32_t g_next_handle = 1;
++std::unordered_map<uint32_t, std::unique_ptr<MemoryMerkleDB>> g_merkle_dbs;
++std::unordered_map<uint32_t, std::unique_ptr<TestContractDB>> g_contract_dbs;
++
++MemoryMerkleDB* merkle_db(uint32_t handle)
++{
++    auto it = g_merkle_dbs.find(handle);
++    return it == g_merkle_dbs.end() ? nullptr : it->second.get();
++}
++
++TestContractDB* contract_db(uint32_t handle)
++{
++    auto it = g_contract_dbs.find(handle);
++    return it == g_contract_dbs.end() ? nullptr : it->second.get();
++}
++
++} // namespace
++
++// ===========================================================================
++// Linear memory
++// ===========================================================================
++
++// The host's way to place an input buffer in linear memory. Sized allocation on both sides so the
++// module never has to remember a length it was not told: `avm_free` is given back the same size,
++// which is what `operator delete[]` with a size wants and what keeps this a two-line pair rather
++// than a bookkeeping table.
++WASM_EXPORT uint8_t* avm_alloc(uint32_t size)
++{
++    if (size == 0) {
++        // A zero-size allocation must still return a distinct, freeable pointer: returning null
++        // would make "allocation failed" and "you asked for nothing" the same answer.
++        size = 1;
++    }
++    return new (std::nothrow) uint8_t[size];
++}
++
++WASM_EXPORT void avm_free(uint8_t* ptr, uint32_t size)
++{
++    (void)size;
++    delete[] ptr;
++}
++
++WASM_EXPORT uint32_t avm_result_ptr()
++{
++    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_result.data()));
++}
++
++WASM_EXPORT uint32_t avm_result_len()
++{
++    return static_cast<uint32_t>(g_result.size());
++}
++
++// The ABI version. Bumped when an export's meaning changes, so a host that loads a module it was
++// not written for fails at load rather than on a field it silently misreads.
++WASM_EXPORT uint32_t avm_abi_version()
++{
++    return 1;
++}
++
++// ===========================================================================
++// The two simulate entry points
++// ===========================================================================
++
++// Self-contained: everything the simulation needs is in `hints`, and no DB handle is involved.
++// Input: msgpack `AvmProvingInputs`. Result: msgpack `TxSimulationResult`.
++WASM_EXPORT int32_t avm_simulate_with_hinted_dbs(const uint8_t* inputs, uint32_t len)
++{
++    return guarded([&] {
++        std::vector<uint8_t> bytes(inputs, inputs + len);
++        const AvmProvingInputs parsed = AvmProvingInputs::from(bytes);
++        AvmSimAPI api;
++        const TxSimulationResult result = api.simulate_with_hinted_dbs(parsed);
++        g_steps = result.execution_steps.has_value() ? *result.execution_steps : std::vector<ExecutionStep>{};
++        pack_result(result);
++    });
++}
++
++// Host-provided DB references: the host names which resident contract DB and which resident merkle
++// DB to run against. Input: msgpack `AvmFastSimulationInputs`. Result: msgpack `TxSimulationResult`.
++WASM_EXPORT int32_t avm_simulate(const uint8_t* inputs, uint32_t len, uint32_t contract_db_handle, uint32_t merkle_db_handle)
++{
++    TestContractDB* cdb = contract_db(contract_db_handle);
++    MemoryMerkleDB* mdb = merkle_db(merkle_db_handle);
++    if (cdb == nullptr || mdb == nullptr) {
++        set_error("no such DB handle");
++        return AVM_ERR_HANDLE;
++    }
++    return guarded([&] {
++        std::vector<uint8_t> bytes(inputs, inputs + len);
++        const AvmFastSimulationInputs parsed = AvmFastSimulationInputs::from(bytes);
++        AvmSimAPI api;
++        const TxSimulationResult result = api.simulate(parsed, *cdb, *mdb, nullptr);
++        g_steps = result.execution_steps.has_value() ? *result.execution_steps : std::vector<ExecutionStep>{};
++        pack_result(result);
++    });
++}
++
++// ===========================================================================
++// The step stream, in batches
++// ===========================================================================
++//
++// The steps of the last simulation are already inside the `TxSimulationResult` this module returns,
++// under upstream's own `execution_steps` field — so a host that wants all of them has them after
++// ONE crossing. This pair exists for the case the result is decoded without them (a host that asks
++// for steps but not for the whole result, or one that streams them into a trace writer as it goes):
++// `avm_steps_batch(from, count)` re-encodes a WINDOW of the retained vector, so a run of N steps
++// costs ceil(N / batch) crossings rather than N.
++//
++// There is deliberately no per-step export. Measuring the rejected shape does not need one:
++// `avm_steps_batch(i, 1)` IS one crossing per step, through the same export, so the comparison is
++// between two call patterns rather than between two APIs.
++
++WASM_EXPORT uint32_t avm_steps_count()
++{
++    return static_cast<uint32_t>(g_steps.size());
++}
++
++WASM_EXPORT int32_t avm_steps_batch(uint32_t from, uint32_t count)
++{
++    return guarded([&] {
++        const size_t n = g_steps.size();
++        const size_t begin = from >= n ? n : static_cast<size_t>(from);
++        // Written as a subtraction rather than as `begin + count >= n`, because `size_t` is 32 bits
++        // on wasm32 and `count` is a uint32 the HOST supplies: `begin + count` wraps for a count
++        // near 2^32 - begin, and a wrapped `end` below `begin` would construct a vector from a
++        // reversed range. The window is clamped, so an out-of-range request is an empty or a
++        // truncated batch and never a trap.
++        const size_t end = static_cast<size_t>(count) >= (n - begin) ? n : begin + static_cast<size_t>(count);
++        const std::vector<ExecutionStep> window(g_steps.begin() + static_cast<ptrdiff_t>(begin),
++                                                g_steps.begin() + static_cast<ptrdiff_t>(end));
++        pack_result(window);
++    });
++}
++
++// ===========================================================================
++// ContractDBInterface — the eight methods, plus create/destroy and the two population entry
++// points the raw in-memory implementation needs. The eight are named for the interface methods
++// exactly, so the export list IS the interface.
++// ===========================================================================
++
++WASM_EXPORT uint32_t avm_contract_db_create()
++{
++    const uint32_t handle = g_next_handle++;
++    g_contract_dbs.emplace(handle, std::make_unique<TestContractDB>());
++    return handle;
++}
++
++WASM_EXPORT void avm_contract_db_destroy(uint32_t handle)
++{
++    g_contract_dbs.erase(handle);
++}
++
++#define AVM_CONTRACT_DB(handle)                                                                                        \
++    TestContractDB* db = contract_db(handle);                                                                          \
++    if (db == nullptr) {                                                                                               \
++        set_error("no such contract DB handle");                                                                       \
++        return AVM_ERR_HANDLE;                                                                                         \
++    }
++
++// args: msgpack AztecAddress. result: msgpack optional<ContractInstance>.
++WASM_EXPORT int32_t avm_contract_db_get_contract_instance(uint32_t handle, const uint8_t* args, uint32_t len)
++{
++    AVM_CONTRACT_DB(handle)
++    return guarded([&] { pack_result(db->get_contract_instance(unpack_args<AztecAddress>(args, len))); });
++}
++
++// args: msgpack ContractClassId. result: msgpack optional<ContractClass>.
++WASM_EXPORT int32_t avm_contract_db_get_contract_class(uint32_t handle, const uint8_t* args, uint32_t len)
++{
++    AVM_CONTRACT_DB(handle)
++    return guarded([&] { pack_result(db->get_contract_class(unpack_args<ContractClassId>(args, len))); });
++}
++
++// args: msgpack ContractClassId. result: msgpack optional<FF>.
++WASM_EXPORT int32_t avm_contract_db_get_bytecode_commitment(uint32_t handle, const uint8_t* args, uint32_t len)
++{
++    AVM_CONTRACT_DB(handle)
++    return guarded([&] { pack_result(db->get_bytecode_commitment(unpack_args<ContractClassId>(args, len))); });
++}
++
++// args: msgpack [AztecAddress, FunctionSelector]. result: msgpack optional<string>.
++WASM_EXPORT int32_t avm_contract_db_get_debug_function_name(uint32_t handle, const uint8_t* args, uint32_t len)
++{
++    AVM_CONTRACT_DB(handle)
++    return guarded([&] {
++        const auto [address, selector] = unpack_args<std::tuple<AztecAddress, FunctionSelector>>(args, len);
++        pack_result(db->get_debug_function_name(address, selector));
++    });
++}
++
++// args: msgpack ContractDeploymentData. no result.
++WASM_EXPORT int32_t avm_contract_db_add_contracts(uint32_t handle, const uint8_t* args, uint32_t len)
++{
++    AVM_CONTRACT_DB(handle)
++    return guarded([&] {
++        db->add_contracts(unpack_args<ContractDeploymentData>(args, len));
++        clear_result();
++    });
++}
++
++WASM_EXPORT int32_t avm_contract_db_create_checkpoint(uint32_t handle)
++{
++    AVM_CONTRACT_DB(handle)
++    return guarded([&] {
++        db->create_checkpoint();
++        clear_result();
++    });
++}
++
++WASM_EXPORT int32_t avm_contract_db_commit_checkpoint(uint32_t handle)
++{
++    AVM_CONTRACT_DB(handle)
++    return guarded([&] {
++        db->commit_checkpoint();
++        clear_result();
++    });
++}
++
++WASM_EXPORT int32_t avm_contract_db_revert_checkpoint(uint32_t handle)
++{
++    AVM_CONTRACT_DB(handle)
++    return guarded([&] {
++        db->revert_checkpoint();
++        clear_result();
++    });
++}
++
++// Population. NOT part of ContractDBInterface: these are how the in-memory raw implementation is
++// seeded, and they are named after TestContractDB's own methods rather than dressed up as
++// interface ones. M13 decides what the shippable raw contract DB is; these two move with it.
++//
++// args: msgpack ContractClassWithCommitment. no result.
++WASM_EXPORT int32_t avm_contract_db_register_class(uint32_t handle, const uint8_t* args, uint32_t len)
++{
++    AVM_CONTRACT_DB(handle)
++    return guarded([&] {
++        db->add_contract_class(unpack_args<ContractClassWithCommitment>(args, len));
++        clear_result();
++    });
++}
++
++// args: msgpack [AztecAddress, ContractInstance]. no result.
++WASM_EXPORT int32_t avm_contract_db_register_instance(uint32_t handle, const uint8_t* args, uint32_t len)
++{
++    AVM_CONTRACT_DB(handle)
++    return guarded([&] {
++        const auto [address, instance] = unpack_args<std::tuple<AztecAddress, ContractInstance>>(args, len);
++        db->add_contract_instance(address, instance);
++        clear_result();
++    });
++}
++
++// ===========================================================================
++// LowLevelMerkleDBInterface — all fourteen methods.
++// ===========================================================================
++
++WASM_EXPORT uint32_t avm_merkle_db_create()
++{
++    const uint32_t handle = g_next_handle++;
++    g_merkle_dbs.emplace(handle, std::make_unique<MemoryMerkleDB>());
++    return handle;
++}
++
++WASM_EXPORT void avm_merkle_db_destroy(uint32_t handle)
++{
++    g_merkle_dbs.erase(handle);
++}
++
++#define AVM_MERKLE_DB(handle)                                                                                          \
++    MemoryMerkleDB* db = merkle_db(handle);                                                                            \
++    if (db == nullptr) {                                                                                               \
++        set_error("no such merkle DB handle");                                                                         \
++        return AVM_ERR_HANDLE;                                                                                         \
++    }
++
++// result: msgpack TreeSnapshots.
++WASM_EXPORT int32_t avm_merkle_db_get_tree_roots(uint32_t handle)
++{
++    AVM_MERKLE_DB(handle)
++    return guarded([&] { pack_result(db->get_tree_roots()); });
++}
++
++// args: msgpack [MerkleTreeId, uint64]. result: msgpack vector<FF>.
++WASM_EXPORT int32_t avm_merkle_db_get_sibling_path(uint32_t handle, const uint8_t* args, uint32_t len)
++{
++    AVM_MERKLE_DB(handle)
++    return guarded([&] {
++        const auto [tree_id, leaf_index] = unpack_args<std::tuple<MerkleTreeId, uint64_t>>(args, len);
++        pack_result(db->get_sibling_path(tree_id, static_cast<index_t>(leaf_index)));
++    });
++}
++
++// args: msgpack [MerkleTreeId, FF]. result: msgpack GetLowIndexedLeafResponse.
++WASM_EXPORT int32_t avm_merkle_db_get_low_indexed_leaf(uint32_t handle, const uint8_t* args, uint32_t len)
++{
++    AVM_MERKLE_DB(handle)
++    return guarded([&] {
++        const auto [tree_id, value] = unpack_args<std::tuple<MerkleTreeId, FF>>(args, len);
++        pack_result(db->get_low_indexed_leaf(tree_id, value));
++    });
++}
++
++// args: msgpack [MerkleTreeId, uint64]. result: msgpack FF.
++WASM_EXPORT int32_t avm_merkle_db_get_leaf_value(uint32_t handle, const uint8_t* args, uint32_t len)
++{
++    AVM_MERKLE_DB(handle)
++    return guarded([&] {
++        const auto [tree_id, leaf_index] = unpack_args<std::tuple<MerkleTreeId, uint64_t>>(args, len);
++        pack_result(db->get_leaf_value(tree_id, static_cast<index_t>(leaf_index)));
++    });
++}
++
++// args: msgpack uint64. result: msgpack IndexedLeaf<PublicDataLeafValue>.
++WASM_EXPORT int32_t avm_merkle_db_get_leaf_preimage_public_data_tree(uint32_t handle, const uint8_t* args, uint32_t len)
++{
++    AVM_MERKLE_DB(handle)
++    return guarded([&] {
++        pack_result(db->get_leaf_preimage_public_data_tree(static_cast<index_t>(unpack_args<uint64_t>(args, len))));
++    });
++}
++
++// args: msgpack uint64. result: msgpack IndexedLeaf<NullifierLeafValue>.
++WASM_EXPORT int32_t avm_merkle_db_get_leaf_preimage_nullifier_tree(uint32_t handle, const uint8_t* args, uint32_t len)
++{
++    AVM_MERKLE_DB(handle)
++    return guarded([&] {
++        pack_result(db->get_leaf_preimage_nullifier_tree(static_cast<index_t>(unpack_args<uint64_t>(args, len))));
++    });
++}
++
++// args: msgpack PublicDataLeafValue. result: msgpack SequentialInsertionResult<PublicDataLeafValue>.
++WASM_EXPORT int32_t avm_merkle_db_insert_indexed_leaves_public_data_tree(uint32_t handle,
++                                                                        const uint8_t* args,
++                                                                        uint32_t len)
++{
++    AVM_MERKLE_DB(handle)
++    return guarded([&] {
++        pack_result(db->insert_indexed_leaves_public_data_tree(unpack_args<PublicDataLeafValue>(args, len)));
++    });
++}
++
++// args: msgpack NullifierLeafValue. result: msgpack SequentialInsertionResult<NullifierLeafValue>.
++WASM_EXPORT int32_t avm_merkle_db_insert_indexed_leaves_nullifier_tree(uint32_t handle,
++                                                                       const uint8_t* args,
++                                                                       uint32_t len)
++{
++    AVM_MERKLE_DB(handle)
++    return guarded([&] {
++        pack_result(db->insert_indexed_leaves_nullifier_tree(unpack_args<NullifierLeafValue>(args, len)));
++    });
++}
++
++// args: msgpack [MerkleTreeId, vector<FF>]. no result.
++WASM_EXPORT int32_t avm_merkle_db_append_leaves(uint32_t handle, const uint8_t* args, uint32_t len)
++{
++    AVM_MERKLE_DB(handle)
++    return guarded([&] {
++        const auto [tree_id, leaves] = unpack_args<std::tuple<MerkleTreeId, std::vector<FF>>>(args, len);
++        db->append_leaves(tree_id, std::span<const FF>(leaves.data(), leaves.size()));
++        clear_result();
++    });
++}
++
++// args: msgpack [MerkleTreeId, uint64]. no result.
++WASM_EXPORT int32_t avm_merkle_db_pad_tree(uint32_t handle, const uint8_t* args, uint32_t len)
++{
++    AVM_MERKLE_DB(handle)
++    return guarded([&] {
++        const auto [tree_id, num_leaves] = unpack_args<std::tuple<MerkleTreeId, uint64_t>>(args, len);
++        db->pad_tree(tree_id, static_cast<size_t>(num_leaves));
++        clear_result();
++    });
++}
++
++WASM_EXPORT int32_t avm_merkle_db_create_checkpoint(uint32_t handle)
++{
++    AVM_MERKLE_DB(handle)
++    return guarded([&] {
++        db->create_checkpoint();
++        clear_result();
++    });
++}
++
++WASM_EXPORT int32_t avm_merkle_db_commit_checkpoint(uint32_t handle)
++{
++    AVM_MERKLE_DB(handle)
++    return guarded([&] {
++        db->commit_checkpoint();
++        clear_result();
++    });
++}
++
++WASM_EXPORT int32_t avm_merkle_db_revert_checkpoint(uint32_t handle)
++{
++    AVM_MERKLE_DB(handle)
++    return guarded([&] {
++        db->revert_checkpoint();
++        clear_result();
++    });
++}
++
++// result: msgpack uint32.
++WASM_EXPORT int32_t avm_merkle_db_get_checkpoint_id(uint32_t handle)
++{
++    AVM_MERKLE_DB(handle)
++    return guarded([&] { pack_result(db->get_checkpoint_id()); });
++}
+-- 
+2.50.1
+
