@@ -1,0 +1,1586 @@
+From 034aebaea24b5764d99c89e0b7922ef24c691e87 Mon Sep 17 00:00:00 2001
+From: Zahary Karadjov <zahary@agent-harbor.com>
+Date: Mon, 24 Aug 2026 00:49:06 +0300
+Subject: [PATCH] test(vm2): a shippable in-memory contract DB, and a
+ checkpoint coordinator
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Adds simulation::MemoryContractDB in simulation/standalone/, beside the
+PureContractDB decorator that needs a raw ContractDBInterface, and points the
+avm.wasm reactor at it instead of TestContractDB from vm2/testing/.
+
+The store is what the two existing in-memory copies are not. add_contracts is
+implemented against the field layouts the TypeScript publishers define, so a
+transaction that publishes a contract class and then calls into it works;
+TestContractDB's add_contracts is a no-op and FuzzerContractDB's instance
+decoder reads (tag, version, address) where upstream writes
+(tag, address, version) and stops two public-key fields short.
+get_debug_function_name answers from registered DebugFunctionNameHints —
+upstream's own type, the one ExecutionHints already carries — rather than
+returning nullopt unconditionally as both copies do. And committing or
+reverting with no checkpoint open throws, with the TypeScript
+PublicContractsDB's own two messages, instead of silently doing nothing.
+
+Adds CheckpointCoordinator beside it: the single owner of the two independent
+checkpoint stacks ContractDBInterface and LowLevelMerkleDBInterface each
+declare. One create is one on each DB, the ContractDBInterface it hands out is
+the PureContractDB decorator rather than the raw store, and it compares both
+DBs' checkpoint ids against its own depth before and after every operation, so
+a stack moved outside it is reported by name rather than surfacing later as a
+root that cannot be explained.
+
+Exports the coordinator and the contract DB's checkpoint id from the reactor
+(49 exports, up from 39; the twelve imports are unchanged), and adds an
+avm_differential contractdbinputs mode that prints what a host needs to drive
+all of it, including deployment logs a Node script decodes with upstream's own
+ContractClassPublishedEvent.fromLog and ContractInstancePublishedEvent.fromLog.
+
+The reactor no longer links vm2/testing/ at all.
+---
+ .../cpp/src/barretenberg/vm2/CMakeLists.txt   |  33 ++-
+ .../vm2/differential/avm_differential.cpp     | 278 +++++++++++++++++
+ .../barretenberg/vm2/reactor/avm_reactor.cpp  | 206 ++++++++++++-
+ .../standalone/checkpoint_coordinator.cpp     |  70 +++++
+ .../standalone/checkpoint_coordinator.hpp     | 104 +++++++
+ .../standalone/memory_contract_db.cpp         | 265 +++++++++++++++++
+ .../standalone/memory_contract_db.hpp         | 113 +++++++
+ .../standalone/memory_contract_db.test.cpp    | 280 ++++++++++++++++++
+ 8 files changed, 1321 insertions(+), 28 deletions(-)
+ create mode 100644 barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/checkpoint_coordinator.cpp
+ create mode 100644 barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/checkpoint_coordinator.hpp
+ create mode 100644 barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/memory_contract_db.cpp
+ create mode 100644 barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/memory_contract_db.hpp
+ create mode 100644 barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/memory_contract_db.test.cpp
+
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt b/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt
+index 8b22b6c7dc6..68532eee640 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt
++++ b/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt
+@@ -130,18 +130,19 @@ if(AVM_REACTOR)
+     endif()
+ 
+     if(WASM)
+-        # The test-support translation units, for the same reason AVM_DIFFERENTIAL takes them: they
+-        # are the set already known to compile and link without the proving stack, and
+-        # `TestContractDB` -- the only in-memory raw ContractDBInterface upstream has -- is among
+-        # them. Which raw contract DB ships is M13's deliverable, not this target's.
+-        file(GLOB VM2_REACTOR_SUPPORT_FILES testing/*.cpp)
+-        list(FILTER VM2_REACTOR_SUPPORT_FILES EXCLUDE REGEX ".*\\.(test|bench|fuzzer)\\.cpp$")
+-
++        # THE REACTOR NO LONGER TAKES THE `testing/` TRANSLATION UNITS, and that is M13's answer
++        # rather than a tidy-up. It took them for one symbol: `TestContractDB`, named provisionally
++        # as the only in-memory raw ContractDBInterface upstream had. The shippable one is
++        # `simulation::MemoryContractDB` in `simulation/standalone/`, which is part of `vm2_sim`
++        # itself, so `vm2/testing/` — and with it `PublicTxSimulationTester` and the second
++        # `MemoryMerkleDB` it owns — leaves this module's link closure entirely. The size difference
++        # is measured by `verify_contract_db_reuse_decision_recorded` rather than asserted here.
++        #
++        # `AVM_SIM_TESTS_WITHOUT_TRACEGEN` goes with them: nothing in the reactor's sources is
++        # guarded by it any more.
+         add_executable(avm-reactor-debug.wasm
+             ${CMAKE_CURRENT_SOURCE_DIR}/reactor/avm_reactor.cpp
+-            ${VM2_REACTOR_SUPPORT_FILES}
+         )
+-        target_compile_definitions(avm-reactor-debug.wasm PRIVATE AVM_SIM_TESTS_WITHOUT_TRACEGEN)
+         target_link_libraries(avm-reactor-debug.wasm PRIVATE vm2_sim)
+ 
+         set(AVM_REACTOR_EXPORTS
+@@ -182,6 +183,16 @@ if(AVM_REACTOR)
+             avm_merkle_db_commit_checkpoint
+             avm_merkle_db_revert_checkpoint
+             avm_merkle_db_get_checkpoint_id
++            avm_contract_db_get_checkpoint_id
++            avm_contract_db_register_debug_function_names
++            avm_coordinator_create
++            avm_coordinator_destroy
++            avm_coordinator_create_checkpoint
++            avm_coordinator_commit_checkpoint
++            avm_coordinator_revert_checkpoint
++            avm_coordinator_checkpoint_ids
++            avm_coordinator_assert_lockstep
++            avm_coordinator_simulate
+         )
+         set(AVM_REACTOR_EXPORT_FLAGS "")
+         foreach(_sym ${AVM_REACTOR_EXPORTS})
+@@ -223,9 +234,7 @@ if(AVM_REACTOR)
+         # build in which neither option did anything.
+         add_executable(avm-reactor-unpruned.wasm
+             ${CMAKE_CURRENT_SOURCE_DIR}/reactor/avm_reactor.cpp
+-            ${VM2_REACTOR_SUPPORT_FILES}
+         )
+-        target_compile_definitions(avm-reactor-unpruned.wasm PRIVATE AVM_SIM_TESTS_WITHOUT_TRACEGEN)
+         target_link_libraries(avm-reactor-unpruned.wasm PRIVATE vm2_sim)
+         target_link_options(avm-reactor-unpruned.wasm PRIVATE
+             -mexec-model=reactor
+@@ -262,9 +271,7 @@ if(AVM_REACTOR)
+         # and pruned exports, measured apart" is two claims sharing one measurement.
+         add_executable(avm-reactor-nogc.wasm
+             ${CMAKE_CURRENT_SOURCE_DIR}/reactor/avm_reactor.cpp
+-            ${VM2_REACTOR_SUPPORT_FILES}
+         )
+-        target_compile_definitions(avm-reactor-nogc.wasm PRIVATE AVM_SIM_TESTS_WITHOUT_TRACEGEN)
+         target_link_libraries(avm-reactor-nogc.wasm PRIVATE vm2_sim)
+         target_link_options(avm-reactor-nogc.wasm PRIVATE
+             -mexec-model=reactor
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp b/barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp
+index 09f31652ead..27d634757cb 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp
++++ b/barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp
+@@ -58,7 +58,9 @@
+ #define AVM_HAS_EXECUTION_OBSERVER 0
+ #endif
+ 
++#include <algorithm>
+ #include <chrono>
++#include <fstream>
+ #include <cstddef>
+ #include <cstdint>
+ #include <cstdlib>
+@@ -70,6 +72,7 @@
+ #include <utility>
+ #include <vector>
+ 
++#include "barretenberg/common/serialize.hpp"
+ #include "barretenberg/serialize/msgpack_impl.hpp"
+ 
+ #include "barretenberg/vm2/common/avm_io.hpp"
+@@ -1041,6 +1044,277 @@ void mode_reactor_inputs()
+     line("reactorInputs.done", "1");
+ }
+ 
++
++// ===========================================================================
++// M13 -- the shippable contract DB, its two population paths, and the checkpoint coordinator.
++//
++// `contractdbinputs` prints, per corpus program, what a host needs to exercise all EIGHT
++// `ContractDBInterface` methods against `simulation::MemoryContractDB` inside `avm.wasm`, plus the
++// two things `TestContractDB` could not supply at all:
++//
++//   * a `ContractDeploymentData` carrying the program's own contract class and instance encoded as
++//     PUBLISHED-EVENT LOGS, so `add_contracts` has something real to decode. The encoder here is
++//     the inverse of the decoder in `MemoryContractDB`, and neither is the authority: the field
++//     layouts are the TypeScript publishers' and the M13 verification decodes these same log fields
++//     with upstream's own `ContractClassPublishedEvent.fromLog` and
++//     `ContractInstancePublishedEvent.fromLog` in Node and requires the two decodes to agree. The
++//     raw fields are therefore printed as well, not only the packed blob.
++//
++//   * a `DebugFunctionNameHint` vector and a fast-simulation input whose enqueued call carries the
++//     matching selector as `calldata[0]`, which is what `TxExecution::get_debug_function_name`
++//     reads. The tester computes the calldata hash itself, so the call is upstream-shaped rather
++//     than a struct edited after the fact.
++//
++// And `.fastdeploy` is the same input with a SECOND contract's deployment logs placed in
++// `revertible_contract_deployment_data`. `TxExecution::insert_revertibles` calls
++// `contract_db.add_contracts` with exactly that field, INSIDE the checkpoint it opens at the end of
++// setup -- so on a program that succeeds the contract survives the transaction, and on one that
++// reverts it must be gone along with the tree writes. That is the deploy/call/revert roundtrip, run
++// by upstream's own code rather than by a sequence this driver performs.
++// ---------------------------------------------------------------------------
++
++// The published-event ENCODERS. Ours, and only a driver's: upstream's stores decode these logs,
++// they never produce them (the Noir protocol contracts do). Written from the same two TypeScript
++// readers the decoder is written from, so a disagreement between them shows up as a decode failure
++// rather than as a silent field shift.
++ContractClassLog encode_class_log(const ContractClassWithCommitment& klass)
++{
++    // class-registry/contract_class_published_event.ts: [0] tag, [1] id, [2] version,
++    // [3] artifactHash, [4] privateFunctionsRoot, [5] byte length, then 31 payload bytes per field.
++    std::vector<FF> fields;
++    fields.push_back(FF(0));            // tag; the reader skips it
++    fields.push_back(klass.id);
++    fields.push_back(FF(2));            // version
++    fields.push_back(klass.artifact_hash);
++    fields.push_back(klass.private_functions_root);
++    fields.push_back(FF(static_cast<uint64_t>(klass.packed_bytecode.size())));
++    for (size_t i = 0; i < klass.packed_bytecode.size(); i += 31) {
++        // A field is 32 bytes big-endian and the payload occupies the LOW 31, so the top byte is
++        // zero and `to_buffer(...)[0]` -- the byte the reader drops -- is that zero.
++        std::vector<uint8_t> be(32, 0);
++        const size_t n = std::min<size_t>(31, klass.packed_bytecode.size() - i);
++        for (size_t b = 0; b < n; ++b) {
++            be[1 + b] = klass.packed_bytecode[i + b];
++        }
++        fields.push_back(from_buffer<FF>(be));
++    }
++    return ContractClassLog{ .contract_address = 0,
++                             .fields = ContractClassLogFields{ .fields = fields },
++                             .emitted_length = static_cast<uint32_t>(fields.size()) };
++}
++
++PrivateLog encode_instance_log(const AztecAddress& address, const ContractInstance& instance)
++{
++    // instance-registry/contract_instance_published_event.ts: [0] tag, [1] address, [2] version,
++    // [3] salt, [4] contractClassId, [5] initializationHash, [6] immutablesHash,
++    // [7..13] publicKeys, [14] deployer.
++    std::vector<FF> fields;
++    fields.push_back(FF(0)); // tag
++    fields.push_back(address);
++    fields.push_back(FF(2)); // version
++    fields.push_back(instance.salt);
++    fields.push_back(instance.current_contract_class_id);
++    fields.push_back(instance.initialization_hash);
++    fields.push_back(instance.immutables_hash);
++    for (const FF& k : instance.public_keys.to_fields()) {
++        fields.push_back(k);
++    }
++    fields.push_back(instance.deployer);
++    return PrivateLog{ .fields = fields, .emitted_length = static_cast<uint32_t>(fields.size()) };
++}
++
++void emit_fields(const std::string& key, const std::vector<FF>& fields)
++{
++    line(key + ".count", dec(static_cast<uint64_t>(fields.size())));
++    for (size_t i = 0; i < fields.size(); ++i) {
++        line(key + "." + dec(static_cast<uint64_t>(i)), hex(fields[i]));
++    }
++}
++
++// The debug function names, from a file the caller supplies: one name per line, in corpus order.
++//
++// THE NAMES ARE THE ARTIFACTS', NOT THIS DRIVER'S. The seven corpus programs are hand-assembled
++// bytecode and have no compiled artifact to take a name from, so the check feeds in real function
++// names derived from `fixtures/contracts/artifacts.json` — the six compiled Noir contracts the M2
++// corpus names — and then requires both the DB's answer and the AVM's own frame label to be exactly
++// those. Without the file the names fall back to `corpus::<program>`, so the driver is runnable on
++// its own; the check never uses the fallback.
++std::vector<std::string> read_debug_names(const std::string& path, size_t count)
++{
++    std::vector<std::string> names;
++    if (!path.empty()) {
++        std::ifstream in(path);
++        if (!in) {
++            std::cerr << "avm_differential: cannot read the debug-name file: " << path << "\n";
++            std::exit(2);
++        }
++        std::string l;
++        while (std::getline(in, l)) {
++            if (!l.empty()) {
++                names.push_back(l);
++            }
++        }
++        if (names.size() != count) {
++            std::cerr << "avm_differential: the debug-name file carries " << names.size() << " name(s), need "
++                      << count << "\n";
++            std::exit(2);
++        }
++    }
++    return names;
++}
++
++void mode_contract_db_inputs(const std::string& names_path)
++{
++    line("contractDbInputs.version", "1");
++    line("contractDbInputs.coverage", "seven-hand-assembled-corpus-programs-the-same-seven-M8-and-M12-compare");
++
++    const auto programs = corpus();
++    line("contractDbInputs.programs.count", dec(static_cast<uint64_t>(programs.size())));
++    const auto supplied_names = read_debug_names(names_path, programs.size());
++    line("contractDbInputs.debugNames.source", supplied_names.empty() ? "fallback" : names_path);
++
++    uint64_t index = 0;
++    for (const auto& [name, bytecode] : programs) {
++        const std::string p = "contractDbInputs." + name;
++        const FF selector = FF(0x51100000ULL + index);
++        const std::string function_name =
++            supplied_names.empty() ? ("corpus::" + name) : supplied_names[static_cast<size_t>(index)];
++        ++index;
++
++        PublicTxSimulationTester tester;
++        const auto contract = tester.deploy_contract(bytecode);
++
++        // A SECOND deployment of the same bytecode under a different salt: a different address and a
++        // different instance, sharing the class. This is the one that arrives through
++        // `add_contracts` during execution rather than through explicit registration.
++        //
++        // It is deployed on a SEPARATE tester, so it leaves no mark on the trees the transaction
++        // below runs against: `deploy_contract` derives the address from the salt, the class id and
++        // the deployer, none of which depend on tree state, and this contract is meant to arrive as
++        // a published-event log rather than as a pre-seeded deployment nullifier. Deploying it on
++        // the same tester silently added a second deployment nullifier that the reactor's seeding
++        // then replayed INSTEAD of the first one — every program halted exceptionally because the
++        // contract being called was no longer resolvable.
++        PublicTxSimulationTester deploy_tester;
++        const auto deployed = deploy_tester.deploy_contract(bytecode, /*salt=*/FF(0xd0ed));
++
++        const auto after_deploy = tester.merkle_db().get_tree_roots();
++        const index_t nullifier_index = static_cast<index_t>(after_deploy.nullifier_tree.next_available_leaf_index) - 1;
++        const auto deployment_nullifier = tester.merkle_db().get_leaf_preimage_nullifier_tree(nullifier_index).leaf;
++
++        auto hint_config = PublicTxSimulationTester::default_config();
++        hint_config.collect_hints = true;
++        hint_config.collect_public_inputs = true;
++        hint_config.collect_statistics = true;
++        // The selector as calldata[0]: `TxExecution::get_debug_function_name` reads exactly that,
++        // and an enqueued call with empty calldata never reaches the contract DB at all.
++        const auto hinted = tester.simulate_tx(
++            { TestEnqueuedCall{ .contract_address = contract.address, .calldata = { selector } } }, hint_config);
++        if (!hinted.hints.has_value()) {
++            std::cerr << "avm_differential: hint collection produced no hints for " << name << "\n";
++            std::exit(2);
++        }
++
++        const auto after_fund = tester.merkle_db().get_tree_roots();
++        const index_t public_data_index =
++            static_cast<index_t>(after_fund.public_data_tree.next_available_leaf_index) - 1;
++        const auto fee_juice_leaf = tester.merkle_db().get_leaf_preimage_public_data_tree(public_data_index).leaf;
++
++        line(p + ".address", hex(contract.address));
++        line(p + ".classId", hex(contract.contract_class.id));
++        line(p + ".commitment", hex(contract.contract_class.public_bytecode_commitment));
++        line(p + ".selector", hex(selector));
++        line(p + ".functionName", function_name);
++        // The second contract, field by field in plain hex. These are what the M13 check compares
++        // upstream's OWN TypeScript log decoders against, so the wire format is settled by two
++        // independent decoders agreeing on the same bytes rather than by this driver's encoder
++        // agreeing with the decoder written from the same page.
++        line(p + ".deployed.address", hex(deployed.address));
++        line(p + ".deployed.classId", hex(deployed.contract_class.id));
++        line(p + ".deployed.artifactHash", hex(deployed.contract_class.artifact_hash));
++        line(p + ".deployed.privateFunctionsRoot", hex(deployed.contract_class.private_functions_root));
++        line(p + ".deployed.bytecodeBytes", dec(static_cast<uint64_t>(deployed.contract_class.packed_bytecode.size())));
++        line(p + ".deployed.salt", hex(deployed.instance.salt));
++        line(p + ".deployed.deployer", hex(deployed.instance.deployer));
++        line(p + ".deployed.initializationHash", hex(deployed.instance.initialization_hash));
++        line(p + ".deployed.immutablesHash", hex(deployed.instance.immutables_hash));
++        {
++            const auto keys = deployed.instance.public_keys.to_fields();
++            for (size_t k = 0; k < keys.size(); ++k) {
++                line(p + ".deployed.publicKey." + dec(static_cast<uint64_t>(k)), hex(keys[k]));
++            }
++        }
++
++        // The four seeding calls M12 already uses, unchanged.
++        emit_blob(p + ".setup.class", contract.contract_class);
++        emit_blob(p + ".setup.instance", std::make_tuple(contract.address, contract.instance));
++        emit_blob(p + ".setup.nullifier", deployment_nullifier);
++        emit_blob(p + ".setup.publicdata", fee_juice_leaf);
++
++        // Debug names, as UPSTREAM'S OWN hint type.
++        const std::vector<DebugFunctionNameHint> names = {
++            DebugFunctionNameHint{ .address = contract.address, .selector = selector, .name = function_name }
++        };
++        emit_blob(p + ".setup.debugnames", names);
++
++        // The deployment logs, both packed and as raw fields for the cross-language decode.
++        const ContractClassLog class_log = encode_class_log(deployed.contract_class);
++        const PrivateLog instance_log = encode_instance_log(deployed.address, deployed.instance);
++        const ContractDeploymentData deployment{ .contract_class_logs = { class_log },
++                                                 .private_logs = { instance_log } };
++        emit_blob(p + ".args.deployment", deployment);
++        emit_fields(p + ".logs.class", class_log.fields.fields);
++        emit_fields(p + ".logs.instance", instance_log.fields);
++
++        // The same for the program's OWN contract, so `add_contracts` and explicit registration can
++        // be shown to populate the store identically.
++        const ContractDeploymentData self_deployment{
++            .contract_class_logs = { encode_class_log(contract.contract_class) },
++            .private_logs = { encode_instance_log(contract.address, contract.instance) }
++        };
++        emit_blob(p + ".args.selfDeployment", self_deployment);
++
++        AvmFastSimulationInputs fast{
++            .ws_revision = {},
++            .config = PublicTxSimulationTester::default_config(),
++            .tx = hinted.hints->tx,
++            .global_variables = hinted.hints->global_variables,
++            .protocol_contracts = hinted.hints->protocol_contracts,
++        };
++        fast.config.collect_statistics = true;
++        fast.config.collect_public_inputs = true;
++        emit_blob(p + ".fast", fast);
++
++        // The deploying variant. `revertible_contract_deployment_data` is the ONLY field that
++        // differs, and it is the field `insert_revertibles` hands to `add_contracts`.
++        AvmFastSimulationInputs fast_deploy = fast;
++        fast_deploy.tx.revertible_contract_deployment_data = deployment;
++        emit_blob(p + ".fastdeploy", fast_deploy);
++
++        // Per-program arguments for the exported lookups.
++        emit_blob(p + ".args.address", contract.address);
++        emit_blob(p + ".args.classId", contract.contract_class.id);
++        emit_blob(p + ".args.debugName", std::make_tuple(contract.address, selector));
++        emit_blob(p + ".args.deployedAddress", deployed.address);
++        emit_blob(p + ".args.deployedClassId", deployed.contract_class.id);
++        // An address and a class id NOBODY registers, so "found" is a discrimination rather than an
++        // observation: every getter must answer nullopt for these.
++        emit_blob(p + ".args.absentAddress", FF(0xabbe5e17ULL));
++        emit_blob(p + ".args.absentClassId", FF(0xabbe5e18ULL));
++        emit_blob(p + ".args.absentDebugName", std::make_tuple(contract.address, FF(0xabbe5e19ULL)));
++    }
++
++    emit_blob("contractDbInputs.args.emptyDeployment", ContractDeploymentData{});
++    // Two DISTINCT tree writes, for the arm that shows what a naive owner produces from an injected
++    // desynchronisation: one inside the injected level and one inside the level the owner opens, so
++    // an unwind to the wrong level is visible in the roots rather than merely in a counter.
++    emit_blob("contractDbInputs.args.appendOuter",
++              std::make_tuple(MerkleTreeId::NOTE_HASH_TREE, std::vector<FF>{ FF(0x13e50001) }));
++    emit_blob("contractDbInputs.args.appendInner",
++              std::make_tuple(MerkleTreeId::NOTE_HASH_TREE, std::vector<FF>{ FF(0x13e50002) }));
++    line("contractDbInputs.done", "1");
++}
++
+ } // namespace
+ 
+ int main(int argc, char** argv)
+@@ -1061,6 +1335,10 @@ int main(int argc, char** argv)
+         mode_reactor_inputs();
+         return 0;
+     }
++    if (mode == "contractdbinputs") {
++        mode_contract_db_inputs(argc >= 3 ? std::string(argv[2]) : std::string());
++        return 0;
++    }
+     if (mode == "bench" || mode == "benchsteps") {
+         if (argc < 4) {
+             std::cerr << "usage: avm_differential " << mode << " <program> <reps>\n";
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/reactor/avm_reactor.cpp b/barretenberg/cpp/src/barretenberg/vm2/reactor/avm_reactor.cpp
+index 3c290433133..c22b749e5cd 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/reactor/avm_reactor.cpp
++++ b/barretenberg/cpp/src/barretenberg/vm2/reactor/avm_reactor.cpp
+@@ -39,11 +39,28 @@
+ // `simulate_fast_internal` satisfies it itself with `PureMerkleDB`, exactly as it wraps whatever
+ // raw contract DB it is handed in `PureContractDB`.
+ //
+-// THE RAW CONTRACT DB IS PROVISIONAL AND M13 OWNS IT. `TestContractDB` from `vm2/testing/` is the
+-// only in-memory raw `ContractDBInterface` upstream has; `PureContractDB` is a decorator over a
+-// raw one and the shippable raw one is the native, IPC-backed `cdb`. Whether `TestContractDB`
+-// ships, is upstreamed as an in-memory store beside `PureContractDB`, or is replaced is M13's
+-// deliverable. This module names it in one place so that decision is a one-line change here.
++// THE RAW CONTRACT DB, AND WHY IT IS THE ONE IT IS. It is
++// `simulation::MemoryContractDB`, in `simulation/standalone/` beside the `PureContractDB` decorator
++// that needs a raw one. It replaces `TestContractDB` from `vm2/testing/`, which this module named
++// provisionally: that class cannot serve this artefact, and not for stylistic reasons —
++// `add_contracts` is a no-op there, so a transaction that publishes a contract class and then calls
++// into it cannot work at all, and `get_debug_function_name` returns `nullopt` unconditionally, so a
++// trace frame can only ever be labelled by selector. The other in-memory copy upstream has,
++// `FuzzerContractDB`, implements both but decodes an instance log with the wrong field order.
++// `CdbIpcContractDB`, upstream's shippable raw one, is a transport adapter over a TypeScript store
++// and links `ipc_runtime`, which cannot reach wasm. See CONTRACT-DB.md for the enumeration.
++//
++// Dropping `TestContractDB` also drops this module's whole dependency on `vm2/testing/`: those
++// translation units are no longer linked into the reactor at all.
++//
++// THE TWO CHECKPOINT STACKS ARE DRIVEN BY ONE OWNER. `ContractDBInterface` and
++// `LowLevelMerkleDBInterface` each have their own create/commit/revert, and a host driving them
++// separately can put them out of step; a revert then leaves contract state and tree state
++// describing different histories, silently. The `avm_coordinator_*` exports below are a
++// `CheckpointCoordinator` per (contract DB, merkle DB) pair — the only thing that moves either
++// stack — and it compares the two DBs' checkpoint ids against its own depth on every operation.
++// The per-DB checkpoint exports remain, because they are the interface; they are also what an
++// injected desynchronisation uses, and what the coordinator then catches.
+ 
+ #include <cstddef>
+ #include <cstdint>
+@@ -66,13 +83,15 @@
+ #include "barretenberg/vm2/common/aztec_types.hpp"
+ #include "barretenberg/vm2/simulation/interfaces/db.hpp"
+ #include "barretenberg/vm2/simulation/lib/memory_merkle_db.hpp"
+-#include "barretenberg/vm2/testing/public_tx_simulation_tester.hpp"
++#include "barretenberg/vm2/simulation/standalone/checkpoint_coordinator.hpp"
++#include "barretenberg/vm2/simulation/standalone/memory_contract_db.hpp"
+ 
+ namespace {
+ 
+ using namespace bb::avm2;
+ using bb::avm2::simulation::MemoryMerkleDB;
+-using bb::avm2::testing::TestContractDB;
++using bb::avm2::simulation::CheckpointCoordinator;
++using bb::avm2::simulation::MemoryContractDB;
+ using bb::crypto::merkle_tree::NullifierLeafValue;
+ using bb::crypto::merkle_tree::PublicDataLeafValue;
+ using bb::world_state::MerkleTreeId;
+@@ -163,7 +182,8 @@ template <typename F> int32_t guarded(F&& body)
+ // ---------------------------------------------------------------------------
+ uint32_t g_next_handle = 1;
+ std::unordered_map<uint32_t, std::unique_ptr<MemoryMerkleDB>> g_merkle_dbs;
+-std::unordered_map<uint32_t, std::unique_ptr<TestContractDB>> g_contract_dbs;
++std::unordered_map<uint32_t, std::unique_ptr<MemoryContractDB>> g_contract_dbs;
++std::unordered_map<uint32_t, std::unique_ptr<CheckpointCoordinator>> g_coordinators;
+ 
+ MemoryMerkleDB* merkle_db(uint32_t handle)
+ {
+@@ -171,12 +191,18 @@ MemoryMerkleDB* merkle_db(uint32_t handle)
+     return it == g_merkle_dbs.end() ? nullptr : it->second.get();
+ }
+ 
+-TestContractDB* contract_db(uint32_t handle)
++MemoryContractDB* contract_db(uint32_t handle)
+ {
+     auto it = g_contract_dbs.find(handle);
+     return it == g_contract_dbs.end() ? nullptr : it->second.get();
+ }
+ 
++CheckpointCoordinator* coordinator(uint32_t handle)
++{
++    auto it = g_coordinators.find(handle);
++    return it == g_coordinators.end() ? nullptr : it->second.get();
++}
++
+ } // namespace
+ 
+ // ===========================================================================
+@@ -242,7 +268,7 @@ WASM_EXPORT int32_t avm_simulate_with_hinted_dbs(const uint8_t* inputs, uint32_t
+ // DB to run against. Input: msgpack `AvmFastSimulationInputs`. Result: msgpack `TxSimulationResult`.
+ WASM_EXPORT int32_t avm_simulate(const uint8_t* inputs, uint32_t len, uint32_t contract_db_handle, uint32_t merkle_db_handle)
+ {
+-    TestContractDB* cdb = contract_db(contract_db_handle);
++    MemoryContractDB* cdb = contract_db(contract_db_handle);
+     MemoryMerkleDB* mdb = merkle_db(merkle_db_handle);
+     if (cdb == nullptr || mdb == nullptr) {
+         set_error("no such DB handle");
+@@ -304,7 +330,7 @@ WASM_EXPORT int32_t avm_steps_batch(uint32_t from, uint32_t count)
+ WASM_EXPORT uint32_t avm_contract_db_create()
+ {
+     const uint32_t handle = g_next_handle++;
+-    g_contract_dbs.emplace(handle, std::make_unique<TestContractDB>());
++    g_contract_dbs.emplace(handle, std::make_unique<MemoryContractDB>());
+     return handle;
+ }
+ 
+@@ -314,7 +340,7 @@ WASM_EXPORT void avm_contract_db_destroy(uint32_t handle)
+ }
+ 
+ #define AVM_CONTRACT_DB(handle)                                                                                        \
+-    TestContractDB* db = contract_db(handle);                                                                          \
++    MemoryContractDB* db = contract_db(handle);                                                                        \
+     if (db == nullptr) {                                                                                               \
+         set_error("no such contract DB handle");                                                                       \
+         return AVM_ERR_HANDLE;                                                                                         \
+@@ -388,9 +414,21 @@ WASM_EXPORT int32_t avm_contract_db_revert_checkpoint(uint32_t handle)
+     });
+ }
+ 
+-// Population. NOT part of ContractDBInterface: these are how the in-memory raw implementation is
+-// seeded, and they are named after TestContractDB's own methods rather than dressed up as
+-// interface ones. M13 decides what the shippable raw contract DB is; these two move with it.
++// The checkpoint id, which `ContractDBInterface` does NOT declare — `LowLevelMerkleDBInterface`
++// does. It is read from the concrete store, with the same semantics as the merkle DB's: a stack
++// seeded with 0 and `parent + 1` pushed on create. Exported so a host can see the two stacks'
++// positions as two comparable integers instead of inferring agreement from behaviour.
++//
++// result: msgpack uint32.
++WASM_EXPORT int32_t avm_contract_db_get_checkpoint_id(uint32_t handle)
++{
++    AVM_CONTRACT_DB(handle)
++    return guarded([&] { pack_result(db->get_checkpoint_id()); });
++}
++
++// Population. NOT part of ContractDBInterface: this is how the in-memory raw implementation is
++// seeded by a consumer that already holds the artifacts, as opposed to observing them arrive
++// through `add_contracts` during execution. Both paths populate the same store.
+ //
+ // args: msgpack ContractClassWithCommitment. no result.
+ WASM_EXPORT int32_t avm_contract_db_register_class(uint32_t handle, const uint8_t* args, uint32_t len)
+@@ -413,6 +451,23 @@ WASM_EXPORT int32_t avm_contract_db_register_instance(uint32_t handle, const uin
+     });
+ }
+ 
++// Debug function names, so a trace frame can be labelled with the function's name instead of its
++// selector. The argument is a vector of `DebugFunctionNameHint` — UPSTREAM'S OWN type, the one
++// `ExecutionHints` already carries and `HintedRawContractDB` already consumes, with its own msgpack
++// schema and its own TypeScript counterpart (`AvmDebugFunctionNameHint`). Nothing here declares a
++// mapping of ours: a host that has hints and a host that has artifacts hand over the same type.
++//
++// args: msgpack vector<DebugFunctionNameHint>. no result.
++WASM_EXPORT int32_t avm_contract_db_register_debug_function_names(uint32_t handle, const uint8_t* args, uint32_t len)
++{
++    AVM_CONTRACT_DB(handle)
++    return guarded([&] {
++        const auto hints = unpack_args<std::vector<DebugFunctionNameHint>>(args, len);
++        db->add_debug_function_names(std::span<const DebugFunctionNameHint>(hints.data(), hints.size()));
++        clear_result();
++    });
++}
++
+ // ===========================================================================
+ // LowLevelMerkleDBInterface — all fourteen methods.
+ // ===========================================================================
+@@ -568,3 +623,124 @@ WASM_EXPORT int32_t avm_merkle_db_get_checkpoint_id(uint32_t handle)
+     AVM_MERKLE_DB(handle)
+     return guarded([&] { pack_result(db->get_checkpoint_id()); });
+ }
++
++// ===========================================================================
++// The checkpoint coordinator — the one owner of both stacks.
++//
++// A coordinator handle binds one contract DB handle to one merkle DB handle. It is the ONLY thing
++// a host should use to move a checkpoint: one create here is one on each DB, and likewise for
++// commit and revert. It also carries the state form of the claim, because "they were driven
++// together" is a property of a program and not of a state: both DBs report a checkpoint id with
++// the same semantics, and the coordinator compares them to its own depth before and after every
++// operation.
++//
++// THE PER-DB CHECKPOINT EXPORTS ARE DELIBERATELY STILL THERE. They are eight-of-eight and
++// fourteen-of-fourteen of the two interfaces, and removing three of each would make the export list
++// stop being the interface. They are also how a desynchronisation is INJECTED in the M13
++// verification: the host moves one stack behind the coordinator's back, and the next coordinated
++// operation must fail by name rather than produce a plausible-looking wrong state.
++//
++// The coordinator borrows both DBs by reference. Destroying a contract or merkle DB that a live
++// coordinator points at would dangle, so `avm_coordinator_create` is the only thing that takes
++// those references and a host is expected to destroy the coordinator first; the alternative — a
++// back-reference from each DB — buys nothing for a module whose handles are created and destroyed
++// by one host in one thread.
++// ===========================================================================
++
++WASM_EXPORT uint32_t avm_coordinator_create(uint32_t contract_db_handle, uint32_t merkle_db_handle)
++{
++    MemoryContractDB* cdb = contract_db(contract_db_handle);
++    MemoryMerkleDB* mdb = merkle_db(merkle_db_handle);
++    if (cdb == nullptr || mdb == nullptr) {
++        // 0 is never a valid handle: `g_next_handle` starts at 1.
++        return 0;
++    }
++    const uint32_t handle = g_next_handle++;
++    g_coordinators.emplace(handle, std::make_unique<CheckpointCoordinator>(*cdb, *mdb));
++    return handle;
++}
++
++WASM_EXPORT void avm_coordinator_destroy(uint32_t handle)
++{
++    g_coordinators.erase(handle);
++}
++
++#define AVM_COORDINATOR(handle)                                                                                        \
++    CheckpointCoordinator* coord = coordinator(handle);                                                                \
++    if (coord == nullptr) {                                                                                            \
++        set_error("no such coordinator handle");                                                                       \
++        return AVM_ERR_HANDLE;                                                                                         \
++    }
++
++WASM_EXPORT int32_t avm_coordinator_create_checkpoint(uint32_t handle)
++{
++    AVM_COORDINATOR(handle)
++    return guarded([&] {
++        coord->create_checkpoint();
++        clear_result();
++    });
++}
++
++WASM_EXPORT int32_t avm_coordinator_commit_checkpoint(uint32_t handle)
++{
++    AVM_COORDINATOR(handle)
++    return guarded([&] {
++        coord->commit_checkpoint();
++        clear_result();
++    });
++}
++
++WASM_EXPORT int32_t avm_coordinator_revert_checkpoint(uint32_t handle)
++{
++    AVM_COORDINATOR(handle)
++    return guarded([&] {
++        coord->revert_checkpoint();
++        clear_result();
++    });
++}
++
++// The three integers, so a host can assert lockstep itself rather than trust that this module did.
++// result: msgpack [uint32 coordinatorDepth, uint32 contractDbCheckpointId, uint32 merkleDbCheckpointId].
++WASM_EXPORT int32_t avm_coordinator_checkpoint_ids(uint32_t handle)
++{
++    AVM_COORDINATOR(handle)
++    return guarded([&] {
++        pack_result(std::make_tuple(coord->depth(), coord->contract_checkpoint_id(), coord->merkle_checkpoint_id()));
++    });
++}
++
++// Status 0 when the three agree. When they do not, the escape is a `std::exception` and therefore
++// comes back as AVM_ERR_EXCEPTION with an `AvmReactorError` naming WHICH side moved — the same
++// envelope every other failure uses, so a host needs no special case for it.
++WASM_EXPORT int32_t avm_coordinator_assert_lockstep(uint32_t handle)
++{
++    AVM_COORDINATOR(handle)
++    return guarded([&] {
++        coord->assert_lockstep();
++        clear_result();
++    });
++}
++
++// Simulate through the coordinator: the contract side is the `PureContractDB` decorator the
++// coordinator holds, never the raw store, and lockstep is asserted BEFORE and AFTER.
++//
++// It is not asserted DURING, and that is not an omission: `TxExecution` pairs the two stacks at
++// phase boundaries, but `ContextProvider` and `Execution` checkpoint the merkle DB alone per call
++// frame, deliberately — a nested call can write storage and cannot publish a contract class. Both
++// are balanced by the time the simulation returns, which is the assertion after it.
++//
++// Input: msgpack `AvmFastSimulationInputs`. Result: msgpack `TxSimulationResult`.
++WASM_EXPORT int32_t avm_coordinator_simulate(uint32_t handle, const uint8_t* inputs, uint32_t len)
++{
++    AVM_COORDINATOR(handle)
++    return guarded([&] {
++        coord->assert_lockstep();
++        std::vector<uint8_t> bytes(inputs, inputs + len);
++        const AvmFastSimulationInputs parsed = AvmFastSimulationInputs::from(bytes);
++        AvmSimAPI api;
++        const TxSimulationResult result = api.simulate(parsed, coord->contract_db(), coord->merkle_db(), nullptr);
++        g_steps = result.execution_steps.has_value() ? *result.execution_steps : std::vector<ExecutionStep>{};
++        coord->assert_lockstep();
++        pack_result(result);
++    });
++}
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/checkpoint_coordinator.cpp b/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/checkpoint_coordinator.cpp
+new file mode 100644
+index 00000000000..0efbb8b3b5d
+--- /dev/null
++++ b/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/checkpoint_coordinator.cpp
+@@ -0,0 +1,70 @@
++#include "barretenberg/vm2/simulation/standalone/checkpoint_coordinator.hpp"
++
++#include <stdexcept>
++#include <string>
++
++#include "barretenberg/common/log.hpp"
++
++namespace bb::avm2::simulation {
++
++std::string CheckpointCoordinator::lockstep_report() const
++{
++    return "coordinator=" + std::to_string(coordinated_depth) +
++           " contractDb=" + std::to_string(contract_checkpoint_id()) +
++           " merkleDb=" + std::to_string(merkle_checkpoint_id());
++}
++
++void CheckpointCoordinator::assert_lockstep() const
++{
++    if (in_lockstep()) {
++        return;
++    }
++    // Name the side rather than only the numbers: "they disagree" sends a reader to both stacks,
++    // and one of the two is always innocent.
++    const uint32_t contract_id = contract_checkpoint_id();
++    const uint32_t merkle_id = merkle_checkpoint_id();
++    std::string which;
++    if (contract_id != coordinated_depth && merkle_id != coordinated_depth) {
++        which = "both stacks moved outside the coordinator";
++    } else if (contract_id != coordinated_depth) {
++        which = "the CONTRACT db stack moved outside the coordinator";
++    } else {
++        which = "the MERKLE db stack moved outside the coordinator";
++    }
++    throw std::runtime_error("checkpoint stacks are not in lockstep: " + which + " (" + lockstep_report() + ")");
++}
++
++void CheckpointCoordinator::create_checkpoint()
++{
++    assert_lockstep();
++    decorated.create_checkpoint();
++    merkle.create_checkpoint();
++    ++coordinated_depth;
++    assert_lockstep();
++}
++
++void CheckpointCoordinator::commit_checkpoint()
++{
++    assert_lockstep();
++    if (coordinated_depth == 0) {
++        throw std::runtime_error("No checkpoint to commit");
++    }
++    decorated.commit_checkpoint();
++    merkle.commit_checkpoint();
++    --coordinated_depth;
++    assert_lockstep();
++}
++
++void CheckpointCoordinator::revert_checkpoint()
++{
++    assert_lockstep();
++    if (coordinated_depth == 0) {
++        throw std::runtime_error("No checkpoint to revert");
++    }
++    decorated.revert_checkpoint();
++    merkle.revert_checkpoint();
++    --coordinated_depth;
++    assert_lockstep();
++}
++
++} // namespace bb::avm2::simulation
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/checkpoint_coordinator.hpp b/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/checkpoint_coordinator.hpp
+new file mode 100644
+index 00000000000..dc06706a411
+--- /dev/null
++++ b/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/checkpoint_coordinator.hpp
+@@ -0,0 +1,104 @@
++#pragma once
++
++#include <cstdint>
++#include <string>
++
++#include "barretenberg/vm2/simulation/interfaces/db.hpp"
++#include "barretenberg/vm2/simulation/standalone/concrete_dbs.hpp"
++#include "barretenberg/vm2/simulation/standalone/memory_contract_db.hpp"
++
++namespace bb::avm2::simulation {
++
++/**
++ * @brief The single owner of the two checkpoint stacks.
++ *
++ * THE PROBLEM. `ContractDBInterface` and `LowLevelMerkleDBInterface` each declare their own
++ * `create_checkpoint` / `commit_checkpoint` / `revert_checkpoint`, and nothing in either type
++ * relates one to the other. Inside a transaction upstream's `TxExecution` already drives the two
++ * together — `merkle_db.create_checkpoint(); contract_db.create_checkpoint();` at the end of setup,
++ * and the matching pairs on the app-logic and teardown paths — so within a simulation the pairing
++ * is upstream's and this class does not second-guess it. The gap is OUTSIDE a simulation, where a
++ * consumer opens a checkpoint per transaction or per block across the two DBs itself. Two
++ * independent stacks driven by hand drift, and when they do a reverted transaction leaves the
++ * contract state describing one history and the trees describing another. Nothing throws, nothing
++ * logs, and the divergence surfaces later as a wrong root with no path back to its cause.
++ *
++ * WHAT THIS DOES ABOUT IT. Everything that moves either stack goes through it: one
++ * `create_checkpoint` here is one on each DB, and likewise for commit and revert. It cannot ENFORCE
++ * that — both DBs' own checkpoint methods remain public, and must, since they are three of the
++ * eight and three of the fourteen the two interfaces declare — so "they were driven together" would
++ * otherwise be a claim about a program rather than about a state. Hence the state form of it: both
++ * DBs expose a checkpoint id with the same semantics — a stack seeded with 0 and `parent + 1`
++ * pushed on create — so `assert_lockstep()` compares three integers that must be EQUAL, and says
++ * which side moved when they are not. A stack moved behind this object's back is therefore reported
++ * at the next boundary rather than at the revert that produces the wrong state.
++ *
++ * WHEN THE INVARIANT HOLDS. Between operations at this level, which is what a consumer driving
++ * transaction and block boundaries sees. It does NOT hold part-way through
++ * `AvmSimAPI::simulate`: `TxExecution` pairs the two stacks at phase boundaries, but
++ * `ContextProvider` and `Execution` checkpoint the MERKLE db alone per call frame, deliberately,
++ * because a nested call can write storage and cannot publish a contract class. Both are balanced by
++ * the time the simulation returns, so the identity holds before and after each call and is asserted
++ * there.
++ *
++ * WHY IT OBSERVES A CONCRETE STORE. `LowLevelMerkleDBInterface` declares `get_checkpoint_id()`;
++ * `ContractDBInterface` does not, and adding it there would oblige all eight implementations
++ * upstream has. So the contract side is observed through the concrete `MemoryContractDB` while
++ * being DRIVEN through the interface. That asymmetry is a fact about the interface rather than a
++ * shortcut, and it is the one change to `ContractDBInterface` worth proposing separately.
++ *
++ * THE DECORATOR IS IN THE CHAIN. The `ContractDBInterface&` this hands out is a `PureContractDB`
++ * wrapping the store, never the store itself, so a consumer inherits whatever that decorator does
++ * today and whatever it grows to do. `simulate_fast_internal` wraps whatever raw DB it is given in
++ * one of its own as well; passing it the decorator means it decorates a decorator, which is
++ * harmless — both forward — and is preferable to handing the interpreter a raw store on the
++ * argument that one of the two layers is currently redundant.
++ */
++class CheckpointCoordinator {
++  public:
++    CheckpointCoordinator(MemoryContractDB& contract_store, LowLevelMerkleDBInterface& merkle_db)
++        : store(contract_store)
++        , decorated(contract_store)
++        , merkle(merkle_db)
++    {}
++
++    CheckpointCoordinator(const CheckpointCoordinator&) = delete;
++    CheckpointCoordinator& operator=(const CheckpointCoordinator&) = delete;
++    CheckpointCoordinator(CheckpointCoordinator&&) = delete;
++    CheckpointCoordinator& operator=(CheckpointCoordinator&&) = delete;
++    ~CheckpointCoordinator() = default;
++
++    // What a consumer passes to AvmSimAPI::simulate. The contract side is the decorator.
++    ContractDBInterface& contract_db() { return decorated; }
++    LowLevelMerkleDBInterface& merkle_db() { return merkle; }
++    MemoryContractDB& contract_store() { return store; }
++
++    void create_checkpoint();
++    void commit_checkpoint();
++    void revert_checkpoint();
++
++    uint32_t depth() const { return coordinated_depth; }
++    uint32_t contract_checkpoint_id() const { return store.get_checkpoint_id(); }
++    uint32_t merkle_checkpoint_id() const { return merkle.get_checkpoint_id(); }
++
++    bool in_lockstep() const
++    {
++        return contract_checkpoint_id() == coordinated_depth && merkle_checkpoint_id() == coordinated_depth;
++    }
++
++    // A one-line description of the three ids, for a caller that wants to report rather than throw.
++    std::string lockstep_report() const;
++
++    // Throws a std::runtime_error naming which side moved and by how much. Called before and after
++    // every coordinated operation, so a stack moved behind this object's back is reported at the
++    // next boundary rather than at the revert that produces the wrong state.
++    void assert_lockstep() const;
++
++  private:
++    MemoryContractDB& store;
++    PureContractDB decorated;
++    LowLevelMerkleDBInterface& merkle;
++    uint32_t coordinated_depth = 0;
++};
++
++} // namespace bb::avm2::simulation
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/memory_contract_db.cpp b/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/memory_contract_db.cpp
+new file mode 100644
+index 00000000000..fe3eba6b936
+--- /dev/null
++++ b/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/memory_contract_db.cpp
+@@ -0,0 +1,265 @@
++#include "barretenberg/vm2/simulation/standalone/memory_contract_db.hpp"
++
++#include <cstddef>
++#include <cstdint>
++#include <stdexcept>
++#include <utility>
++#include <vector>
++
++#include "barretenberg/common/serialize.hpp"
++#include "barretenberg/vm2/common/aztec_types.hpp"
++#include "barretenberg/vm2/simulation/lib/contract_crypto.hpp"
++
++namespace bb::avm2::simulation {
++
++namespace {
++
++// A field of a published-event log carries 31 payload bytes: `bufferFromFields` in
++// `yarn-project/stdlib/src/abi/` drops the first byte of each 32-byte field.
++constexpr size_t PAYLOAD_BYTES_PER_FIELD = 31;
++
++} // namespace
++
++// ---------------------------------------------------------------------------
++// Decoding published-event logs.
++//
++// THE FIELD LAYOUTS BELOW ARE THE TYPESCRIPT PUBLISHERS', not a convention invented here. Each is
++// annotated with the reader in `yarn-project/protocol-contracts/src/` that defines it, and both are
++// checked against those readers by execution rather than by reading: the M13 verification decodes
++// the same log bytes with `ContractClassPublishedEvent.fromLog` and
++// `ContractInstancePublishedEvent.fromLog` in Node and requires the two decodes to agree field for
++// field. A layout re-derived downstream is a layout that can drift away from upstream's silently,
++// which is why the agreement is measured rather than assumed.
++// ---------------------------------------------------------------------------
++
++ContractClass MemoryContractDB::decode_class_log(const ContractClassLog& log)
++{
++    // `class-registry/contract_class_published_event.ts`, `fromLog`: the tag is field 0 and the
++    // reader starts at field 1 —
++    //   [1] contractClassId  [2] version  [3] artifactHash  [4] privateFunctionsRoot
++    //   [5] packed bytecode length in BYTES, then ceil(len / 31) payload fields.
++    const auto& fields = log.fields.fields;
++    if (fields.size() < 6) {
++        throw std::runtime_error("contract class log is too short to decode");
++    }
++    size_t offset = 1;
++    const FF class_id = fields[offset++];
++    offset++; // version — read and discarded, exactly as the TypeScript reader does for the AVM's
++              // purposes; `toContractClassPublic` carries it but `ContractClass` has no such field.
++    const FF artifact_hash = fields[offset++];
++    const FF private_functions_root = fields[offset++];
++    const auto declared_length = static_cast<size_t>(static_cast<uint64_t>(fields[offset++]));
++
++    // Bound the declared length by what the log can actually carry, for the reason the TypeScript
++    // reader states: otherwise a malformed log declares a multi-megabyte length backed by a tiny
++    // payload and forces the allocation during early validation.
++    const size_t available_fields = fields.size() - offset;
++    const size_t max_length = available_fields * PAYLOAD_BYTES_PER_FIELD;
++    if (declared_length > max_length) {
++        throw std::runtime_error("contract class log declares more bytecode than it carries");
++    }
++
++    std::vector<uint8_t> packed_bytecode;
++    packed_bytecode.reserve(declared_length);
++    for (size_t i = 0; i < available_fields && packed_bytecode.size() < declared_length; ++i) {
++        const std::vector<uint8_t> f = to_buffer(fields[offset + i]);
++        // Skip the first byte of each field: the payload is 31 bytes wide.
++        for (size_t b = 1; b < f.size() && packed_bytecode.size() < declared_length; ++b) {
++            packed_bytecode.push_back(f[b]);
++        }
++    }
++
++    return ContractClass{
++        .id = class_id,
++        .artifact_hash = artifact_hash,
++        .private_functions_root = private_functions_root,
++        .packed_bytecode = std::move(packed_bytecode),
++    };
++}
++
++std::pair<AztecAddress, ContractInstance> MemoryContractDB::decode_instance_log(const PrivateLog& log)
++{
++    // `instance-registry/contract_instance_published_event.ts`, `fromLog`: the tag is field 0, the
++    // reader skips it (`log.toBuffer().subarray(32)`) and then reads, IN THIS ORDER —
++    //   [1] address  [2] version  [3] salt  [4] contractClassId  [5] initializationHash
++    //   [6] immutablesHash  [7..13] publicKeys  [14] deployer
++    //
++    // `PublicKeys`' own seven fields are, from its constructor: npkMHash, ivpkM.x, ivpkM.y,
++    // ovpkMHash, tpkMHash, mspkMHash, fbpkMHash — the same order as this module's
++    // `PublicKeys::to_fields()`.
++    //
++    // THIS IS NOT THE ORDER `FuzzerContractDB::from_logs` READS, and the difference is a defect
++    // there rather than a variant format. That decoder's own comment says the layout is
++    // "tag, version, contract address" and it takes the address from field 2 — which is the
++    // VERSION — then reads salt/classId/initializationHash from 3/4/5 and continues straight into
++    // the public keys, so it takes `immutablesHash` (field 6) as `npkMHash` and stops two fields
++    // short, leaving `mspkMHash` and `fbpkMHash` unset. Nothing catches it because the fuzzer
++    // publishes and consumes its own logs, so its encoder and decoder are wrong together. The
++    // agreement asserted here is against the TypeScript reader, which is the format's authority.
++    const auto& fields = log.fields;
++    if (fields.size() < 15) {
++        throw std::runtime_error("contract instance log is too short to decode");
++    }
++    size_t offset = 1;
++    const AztecAddress address = fields[offset++];
++    offset++; // version
++    const FF salt = fields[offset++];
++    const ContractClassId contract_class_id = fields[offset++];
++    const FF initialization_hash = fields[offset++];
++    const FF immutables_hash = fields[offset++];
++    const PublicKeys public_keys = {
++        .nullifier_key_hash = fields[offset++],
++        .incoming_viewing_key = { fields[offset], fields[offset + 1] },
++        .outgoing_viewing_key_hash = fields[offset + 2],
++        .tagging_key_hash = fields[offset + 3],
++        .message_signing_key_hash = fields[offset + 4],
++        .fallback_key_hash = fields[offset + 5],
++    };
++    offset += 6;
++    const AztecAddress deployer = fields[offset++];
++
++    return { address,
++             ContractInstance{
++                 .salt = salt,
++                 .deployer = deployer,
++                 .current_contract_class_id = contract_class_id,
++                 .original_contract_class_id = contract_class_id,
++                 .initialization_hash = initialization_hash,
++                 .immutables_hash = immutables_hash,
++                 .public_keys = public_keys,
++             } };
++}
++
++// ---------------------------------------------------------------------------
++// ContractDBInterface
++// ---------------------------------------------------------------------------
++
++std::optional<ContractInstance> MemoryContractDB::get_contract_instance(const AztecAddress& address) const
++{
++    auto it = contract_instances.find(address);
++    return it == contract_instances.end() ? std::nullopt : std::make_optional(it->second);
++}
++
++std::optional<ContractClass> MemoryContractDB::get_contract_class(const ContractClassId& class_id) const
++{
++    auto it = contract_classes.find(class_id);
++    if (it == contract_classes.end()) {
++        return std::nullopt;
++    }
++    const auto& klass = it->second;
++    return ContractClass{
++        .id = klass.id,
++        .artifact_hash = klass.artifact_hash,
++        .private_functions_root = klass.private_functions_root,
++        .packed_bytecode = klass.packed_bytecode,
++    };
++}
++
++std::optional<FF> MemoryContractDB::get_bytecode_commitment(const ContractClassId& class_id) const
++{
++    auto it = contract_classes.find(class_id);
++    return it == contract_classes.end() ? std::nullopt : std::make_optional(it->second.public_bytecode_commitment);
++}
++
++std::optional<std::string> MemoryContractDB::get_debug_function_name(const AztecAddress& address,
++                                                                     const FunctionSelector& selector) const
++{
++    auto it = debug_function_names.find(std::make_pair(address, selector));
++    return it == debug_function_names.end() ? std::nullopt : std::make_optional(it->second);
++}
++
++void MemoryContractDB::add_contracts(const ContractDeploymentData& contract_deployment_data)
++{
++    for (const auto& log : contract_deployment_data.contract_class_logs) {
++        ContractClass klass = decode_class_log(log);
++        // The commitment is COMPUTED from the bytecode rather than taken from the log, because the
++        // log does not carry one: `toContractClassPublicWithBytecodeCommitment` computes it on the
++        // TypeScript side too, with the same function this calls.
++        const FF commitment = compute_public_bytecode_commitment(klass.packed_bytecode);
++        contract_classes.insert_or_assign(klass.id,
++                                          ContractClassWithCommitment{
++                                              .id = klass.id,
++                                              .artifact_hash = klass.artifact_hash,
++                                              .private_functions_root = klass.private_functions_root,
++                                              .packed_bytecode = std::move(klass.packed_bytecode),
++                                              .public_bytecode_commitment = commitment,
++                                          });
++    }
++    for (const auto& log : contract_deployment_data.private_logs) {
++        auto [address, instance] = decode_instance_log(log);
++        contract_instances.insert_or_assign(address, instance);
++    }
++}
++
++// ---------------------------------------------------------------------------
++// Checkpoints.
++//
++// Copy on create, restore on revert, discard on commit — the same shape as
++// `world_state::MemoryMerkleDB`, and the ids are deliberately the same vocabulary so a coordinating
++// owner can compare them directly.
++//
++// An underflow THROWS. Both existing in-memory copies return silently, and a caller that has
++// committed one time too many then goes on believing it holds a checkpoint it does not: the next
++// revert unwinds the wrong level and the contract state and the tree state end up describing
++// different transactions. That is exactly the failure this store exists to make loud. The messages
++// are the TypeScript `PublicContractsDB`'s own.
++// ---------------------------------------------------------------------------
++
++void MemoryContractDB::create_checkpoint()
++{
++    checkpoints.push(Checkpoint{ .contract_classes = contract_classes,
++                                 .contract_instances = contract_instances,
++                                 .debug_function_names = debug_function_names });
++    checkpoint_ids.push(checkpoint_ids.top() + 1);
++}
++
++void MemoryContractDB::commit_checkpoint()
++{
++    if (checkpoints.empty()) {
++        throw std::runtime_error("No checkpoint to commit");
++    }
++    checkpoints.pop();
++    checkpoint_ids.pop();
++}
++
++void MemoryContractDB::revert_checkpoint()
++{
++    if (checkpoints.empty()) {
++        throw std::runtime_error("No checkpoint to revert");
++    }
++    contract_classes = std::move(checkpoints.top().contract_classes);
++    contract_instances = std::move(checkpoints.top().contract_instances);
++    debug_function_names = std::move(checkpoints.top().debug_function_names);
++    checkpoints.pop();
++    checkpoint_ids.pop();
++}
++
++// ---------------------------------------------------------------------------
++// Explicit registration
++// ---------------------------------------------------------------------------
++
++void MemoryContractDB::add_contract_class(const ContractClassWithCommitment& contract_class)
++{
++    contract_classes.insert_or_assign(contract_class.id, contract_class);
++}
++
++void MemoryContractDB::add_contract_instance(const AztecAddress& address, const ContractInstance& instance)
++{
++    contract_instances.insert_or_assign(address, instance);
++}
++
++void MemoryContractDB::add_debug_function_name(const AztecAddress& address,
++                                               const FunctionSelector& selector,
++                                               std::string name)
++{
++    debug_function_names.insert_or_assign(std::make_pair(address, selector), std::move(name));
++}
++
++void MemoryContractDB::add_debug_function_names(std::span<const DebugFunctionNameHint> hints)
++{
++    for (const auto& hint : hints) {
++        debug_function_names.insert_or_assign(std::make_pair(hint.address, hint.selector), hint.name);
++    }
++}
++
++} // namespace bb::avm2::simulation
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/memory_contract_db.hpp b/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/memory_contract_db.hpp
+new file mode 100644
+index 00000000000..14b110bc809
+--- /dev/null
++++ b/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/memory_contract_db.hpp
+@@ -0,0 +1,113 @@
++#pragma once
++
++#include <cstdint>
++#include <optional>
++#include <span>
++#include <stack>
++#include <string>
++#include <vector>
++
++#include "barretenberg/vm2/common/avm_io.hpp"
++#include "barretenberg/vm2/common/aztec_types.hpp"
++#include "barretenberg/vm2/common/map.hpp"
++#include "barretenberg/vm2/simulation/interfaces/db.hpp"
++#include "barretenberg/vm2/simulation/lib/db_types.hpp"
++
++namespace bb::avm2::simulation {
++
++/**
++ * @brief An in-memory raw ContractDBInterface, with no dependency outside this module.
++ *
++ * WHY THIS EXISTS. `PureContractDB`, in this same directory, is a DECORATOR: it holds a
++ * `ContractDBInterface&` and forwards to it. It is not a store, and `simulate_fast_internal`
++ * constructs one around whatever raw contract DB it is handed. The raw ones that exist are
++ * `HintedRawContractDB` (backed by a transaction's `ExecutionHints`, so it can only answer what a
++ * previous hint-collecting run already asked), `CdbIpcContractDB` (a transport adapter over a
++ * TypeScript `PublicContractsDB`, reached over a unix socket and linking `ipc_runtime`), and two
++ * near-identical copies of the same little map-backed store: `TestContractDB` in `vm2/testing/`
++ * and `FuzzerContractDB` in `avm_fuzzer/common/interfaces/`. So there is no in-memory raw contract
++ * DB outside `testing/` and the fuzzer that a consumer can POPULATE — with artifacts it already
++ * holds, or with the deployment logs execution produces — as opposed to replaying a previous run's
++ * hints or asking a peer over a socket. This is that one, and it lives beside the decorator that
++ * needs it, in the directory whose name records that it is deliberately dependency-free.
++ *
++ * WHAT IT ADDS OVER THE TWO EXISTING COPIES, and each of the three is a behaviour they get wrong
++ * rather than a feature they lack:
++ *
++ *   - `add_contracts` is IMPLEMENTED against the field layout the TypeScript publishers define.
++ *     `TestContractDB`'s is a no-op ("tests deploy directly"), so a transaction that publishes a
++ *     contract class and then calls into it cannot work against it at all.
++ *     `FuzzerContractDB`'s decodes an instance log with the wrong field order — see the note above
++ *     `decode_instance_log` — and drops two fields.
++ *   - `get_debug_function_name` answers from a registered map rather than returning `nullopt`
++ *     unconditionally, which both copies do. The names it serves are `DebugFunctionNameHint`s, the
++ *     type `ExecutionHints` already carries and `HintedRawContractDB` already consumes, so a
++ *     consumer that has hints and a consumer that registers names are populating the same store
++ *     with the same type.
++ *   - committing or reverting with no checkpoint open THROWS. Both existing copies silently do
++ *     nothing, which turns an unbalanced sequence into a plausible-looking wrong state instead of
++ *     an error. The TypeScript `PublicContractsDB` — the shippable store this is the in-memory
++ *     analogue of — throws in both cases, with those two messages.
++ *
++ * CHECKPOINT IDS. `get_checkpoint_id()` has the same semantics as
++ * `LowLevelMerkleDBInterface::get_checkpoint_id()`: a stack seeded with 0, and `parent + 1` pushed
++ * on create. It is deliberately identical so that a coordinating owner driving a contract DB and a
++ * merkle DB together can compare the two ids as an EQUALITY rather than inferring agreement from
++ * two different vocabularies. It is not on `ContractDBInterface` — adding a method there would
++ * oblige all eight implementations — so it is read from the concrete store.
++ */
++class MemoryContractDB final : public ContractDBInterface {
++  public:
++    MemoryContractDB() = default;
++
++    // --- ContractDBInterface ------------------------------------------------
++    std::optional<ContractInstance> get_contract_instance(const AztecAddress& address) const override;
++    std::optional<ContractClass> get_contract_class(const ContractClassId& class_id) const override;
++    std::optional<FF> get_bytecode_commitment(const ContractClassId& class_id) const override;
++    std::optional<std::string> get_debug_function_name(const AztecAddress& address,
++                                                       const FunctionSelector& selector) const override;
++
++    void add_contracts(const ContractDeploymentData& contract_deployment_data) override;
++
++    void create_checkpoint() override;
++    void commit_checkpoint() override;
++    void revert_checkpoint() override;
++
++    // --- Explicit registration ---------------------------------------------
++    //
++    // The other half of the deliverable: a consumer that already holds a compiled artifact
++    // registers it directly, rather than round-tripping it through a published-event log.
++    void add_contract_class(const ContractClassWithCommitment& contract_class);
++    void add_contract_instance(const AztecAddress& address, const ContractInstance& instance);
++    void add_debug_function_name(const AztecAddress& address, const FunctionSelector& selector, std::string name);
++    void add_debug_function_names(std::span<const DebugFunctionNameHint> hints);
++
++    // --- Observation --------------------------------------------------------
++    uint32_t get_checkpoint_id() const { return checkpoint_ids.top(); }
++    uint32_t checkpoint_depth() const { return static_cast<uint32_t>(checkpoints.size()); }
++    size_t contract_class_count() const { return contract_classes.size(); }
++    size_t contract_instance_count() const { return contract_instances.size(); }
++    size_t debug_function_name_count() const { return debug_function_names.size(); }
++
++    // The decoders, exposed so a consumer can decode a published-event log without owning a store
++    // and so they can be tested directly against the TypeScript publishers' field layout.
++    static ContractClass decode_class_log(const ContractClassLog& log);
++    static std::pair<AztecAddress, ContractInstance> decode_instance_log(const PrivateLog& log);
++
++  private:
++    struct Checkpoint {
++        unordered_flat_map<ContractClassId, ContractClassWithCommitment> contract_classes;
++        unordered_flat_map<AztecAddress, ContractInstance> contract_instances;
++        unordered_flat_map<GetDebugFunctionNameKey, std::string> debug_function_names;
++    };
++
++    unordered_flat_map<ContractClassId, ContractClassWithCommitment> contract_classes;
++    unordered_flat_map<AztecAddress, ContractInstance> contract_instances;
++    unordered_flat_map<GetDebugFunctionNameKey, std::string> debug_function_names;
++
++    std::stack<Checkpoint> checkpoints;
++    // Seeded with 0 and pushed as parent + 1, mirroring MemoryMerkleDB exactly.
++    std::stack<uint32_t> checkpoint_ids{ { 0 } };
++};
++
++} // namespace bb::avm2::simulation
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/memory_contract_db.test.cpp b/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/memory_contract_db.test.cpp
+new file mode 100644
+index 00000000000..b7995c65bbb
+--- /dev/null
++++ b/barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/memory_contract_db.test.cpp
+@@ -0,0 +1,280 @@
++#include "barretenberg/vm2/simulation/standalone/memory_contract_db.hpp"
++
++#include "barretenberg/vm2/common/aztec_types.hpp"
++#include "barretenberg/vm2/simulation/lib/contract_crypto.hpp"
++#include "barretenberg/vm2/simulation/lib/memory_merkle_db.hpp"
++#include "barretenberg/vm2/simulation/standalone/checkpoint_coordinator.hpp"
++
++#include <cstdint>
++#include <gtest/gtest.h>
++#include <stdexcept>
++#include <vector>
++
++namespace bb::avm2::simulation {
++namespace {
++
++ContractClassWithCommitment make_class(uint64_t seed)
++{
++    std::vector<uint8_t> bytecode;
++    bytecode.reserve(70);
++    for (uint8_t i = 0; i < 70; ++i) {
++        bytecode.push_back(static_cast<uint8_t>(i + seed));
++    }
++    const FF commitment = compute_public_bytecode_commitment(bytecode);
++    return ContractClassWithCommitment{ .id = FF(seed),
++                                        .artifact_hash = FF(seed + 1000),
++                                        .private_functions_root = FF(seed + 2000),
++                                        .packed_bytecode = bytecode,
++                                        .public_bytecode_commitment = commitment };
++}
++
++ContractInstance make_instance(uint64_t seed)
++{
++    return ContractInstance{ .salt = FF(seed + 10),
++                             .deployer = FF(seed + 11),
++                             .current_contract_class_id = FF(seed),
++                             .original_contract_class_id = FF(seed),
++                             .initialization_hash = FF(seed + 12),
++                             .immutables_hash = FF(seed + 13),
++                             .public_keys = PublicKeys{ .nullifier_key_hash = FF(seed + 14),
++                                                        .incoming_viewing_key = { FF(seed + 15), FF(seed + 16) },
++                                                        .outgoing_viewing_key_hash = FF(seed + 17),
++                                                        .tagging_key_hash = FF(seed + 18),
++                                                        .message_signing_key_hash = FF(seed + 19),
++                                                        .fallback_key_hash = FF(seed + 20) } };
++}
++
++// The inverse of the decoders, used only to build a log to decode. It is deliberately not part of
++// the store: upstream's stores decode published-event logs, the Noir protocol contracts emit them.
++ContractClassLog encode_class_log(const ContractClassWithCommitment& klass)
++{
++    std::vector<FF> fields{ FF(0), klass.id, FF(2), klass.artifact_hash, klass.private_functions_root,
++                            FF(static_cast<uint64_t>(klass.packed_bytecode.size())) };
++    for (size_t i = 0; i < klass.packed_bytecode.size(); i += 31) {
++        std::vector<uint8_t> be(32, 0);
++        for (size_t b = 0; b < 31 && i + b < klass.packed_bytecode.size(); ++b) {
++            be[1 + b] = klass.packed_bytecode[i + b];
++        }
++        fields.push_back(from_buffer<FF>(be));
++    }
++    return ContractClassLog{ .contract_address = 0,
++                             .fields = ContractClassLogFields{ .fields = fields },
++                             .emitted_length = static_cast<uint32_t>(fields.size()) };
++}
++
++PrivateLog encode_instance_log(const AztecAddress& address, const ContractInstance& instance)
++{
++    std::vector<FF> fields{ FF(0),
++                            address,
++                            FF(2),
++                            instance.salt,
++                            instance.current_contract_class_id,
++                            instance.initialization_hash,
++                            instance.immutables_hash };
++    for (const FF& k : instance.public_keys.to_fields()) {
++        fields.push_back(k);
++    }
++    fields.push_back(instance.deployer);
++    return PrivateLog{ .fields = fields, .emitted_length = static_cast<uint32_t>(fields.size()) };
++}
++
++TEST(MemoryContractDBTest, LookupsMissBeforeAnythingIsRegistered)
++{
++    MemoryContractDB db;
++    EXPECT_FALSE(db.get_contract_instance(FF(1)).has_value());
++    EXPECT_FALSE(db.get_contract_class(FF(1)).has_value());
++    EXPECT_FALSE(db.get_bytecode_commitment(FF(1)).has_value());
++    EXPECT_FALSE(db.get_debug_function_name(FF(1), FF(2)).has_value());
++}
++
++TEST(MemoryContractDBTest, ExplicitRegistrationServesAllFourGetters)
++{
++    MemoryContractDB db;
++    const auto klass = make_class(7);
++    const auto instance = make_instance(7);
++    db.add_contract_class(klass);
++    db.add_contract_instance(FF(99), instance);
++    db.add_debug_function_name(FF(99), FF(0x5e1), "Token::transfer_in_public");
++
++    ASSERT_TRUE(db.get_contract_class(klass.id).has_value());
++    EXPECT_EQ(db.get_contract_class(klass.id)->packed_bytecode, klass.packed_bytecode);
++    EXPECT_EQ(db.get_bytecode_commitment(klass.id), klass.public_bytecode_commitment);
++    EXPECT_EQ(db.get_contract_instance(FF(99)), instance);
++    EXPECT_EQ(db.get_debug_function_name(FF(99), FF(0x5e1)), "Token::transfer_in_public");
++    // A different selector at the same address is a different key.
++    EXPECT_FALSE(db.get_debug_function_name(FF(99), FF(0x5e2)).has_value());
++}
++
++TEST(MemoryContractDBTest, DebugNamesArriveAsUpstreamHints)
++{
++    MemoryContractDB db;
++    const std::vector<DebugFunctionNameHint> hints = {
++        DebugFunctionNameHint{ .address = FF(1), .selector = FF(2), .name = "AMM::_swap" },
++        DebugFunctionNameHint{ .address = FF(1), .selector = FF(3), .name = "AMM::_add_liquidity" },
++    };
++    db.add_debug_function_names(hints);
++    EXPECT_EQ(db.get_debug_function_name(FF(1), FF(2)), "AMM::_swap");
++    EXPECT_EQ(db.get_debug_function_name(FF(1), FF(3)), "AMM::_add_liquidity");
++    EXPECT_EQ(db.debug_function_name_count(), 2u);
++}
++
++TEST(MemoryContractDBTest, AddContractsDecodesPublishedEventLogs)
++{
++    MemoryContractDB db;
++    const auto klass = make_class(21);
++    const auto instance = make_instance(21);
++    const ContractDeploymentData deployment{ .contract_class_logs = { encode_class_log(klass) },
++                                             .private_logs = { encode_instance_log(FF(555), instance) } };
++    db.add_contracts(deployment);
++
++    ASSERT_TRUE(db.get_contract_class(klass.id).has_value());
++    EXPECT_EQ(db.get_contract_class(klass.id)->packed_bytecode, klass.packed_bytecode);
++    EXPECT_EQ(db.get_contract_class(klass.id)->artifact_hash, klass.artifact_hash);
++    EXPECT_EQ(db.get_contract_class(klass.id)->private_functions_root, klass.private_functions_root);
++    // The commitment is computed from the decoded bytecode, and must equal the one computed from
++    // the original: every field of the instance survives the round trip, including the two the
++    // fuzzer's decoder drops.
++    EXPECT_EQ(db.get_bytecode_commitment(klass.id), klass.public_bytecode_commitment);
++    ASSERT_TRUE(db.get_contract_instance(FF(555)).has_value());
++    EXPECT_EQ(*db.get_contract_instance(FF(555)), instance);
++}
++
++TEST(MemoryContractDBTest, AddContractsAndExplicitRegistrationAgree)
++{
++    const auto klass = make_class(33);
++    const auto instance = make_instance(33);
++
++    MemoryContractDB registered;
++    registered.add_contract_class(klass);
++    registered.add_contract_instance(FF(777), instance);
++
++    MemoryContractDB observed;
++    observed.add_contracts(ContractDeploymentData{ .contract_class_logs = { encode_class_log(klass) },
++                                                   .private_logs = { encode_instance_log(FF(777), instance) } });
++
++    EXPECT_EQ(registered.get_contract_class(klass.id), observed.get_contract_class(klass.id));
++    EXPECT_EQ(registered.get_bytecode_commitment(klass.id), observed.get_bytecode_commitment(klass.id));
++    EXPECT_EQ(registered.get_contract_instance(FF(777)), observed.get_contract_instance(FF(777)));
++}
++
++TEST(MemoryContractDBTest, RevertUndoesRegistrationsAndCommitKeepsThem)
++{
++    MemoryContractDB db;
++    db.add_contract_class(make_class(1));
++    ASSERT_EQ(db.contract_class_count(), 1u);
++
++    db.create_checkpoint();
++    db.add_contract_class(make_class(2));
++    EXPECT_EQ(db.contract_class_count(), 2u);
++    db.revert_checkpoint();
++    EXPECT_EQ(db.contract_class_count(), 1u);
++    EXPECT_FALSE(db.get_contract_class(FF(2)).has_value());
++
++    db.create_checkpoint();
++    db.add_contract_class(make_class(3));
++    db.commit_checkpoint();
++    EXPECT_EQ(db.contract_class_count(), 2u);
++    EXPECT_TRUE(db.get_contract_class(FF(3)).has_value());
++}
++
++TEST(MemoryContractDBTest, CheckpointIdsFollowTheMerkleDbVocabulary)
++{
++    MemoryContractDB db;
++    EXPECT_EQ(db.get_checkpoint_id(), 0u);
++    db.create_checkpoint();
++    EXPECT_EQ(db.get_checkpoint_id(), 1u);
++    db.create_checkpoint();
++    EXPECT_EQ(db.get_checkpoint_id(), 2u);
++    db.revert_checkpoint();
++    EXPECT_EQ(db.get_checkpoint_id(), 1u);
++    db.commit_checkpoint();
++    EXPECT_EQ(db.get_checkpoint_id(), 0u);
++    EXPECT_EQ(db.checkpoint_depth(), 0u);
++}
++
++// The behaviour that turns an unbalanced sequence into an error instead of a wrong state. Both
++// existing in-memory copies return silently here.
++TEST(MemoryContractDBTest, UnderflowThrowsRatherThanSilentlyDoingNothing)
++{
++    MemoryContractDB db;
++    EXPECT_THROW(db.commit_checkpoint(), std::runtime_error);
++    EXPECT_THROW(db.revert_checkpoint(), std::runtime_error);
++    db.create_checkpoint();
++    db.commit_checkpoint();
++    EXPECT_THROW(db.commit_checkpoint(), std::runtime_error);
++}
++
++TEST(CheckpointCoordinatorTest, DrivesBothStacksAndReportsThemEqual)
++{
++    MemoryContractDB contract_db;
++    MemoryMerkleDB merkle_db;
++    CheckpointCoordinator coord(contract_db, merkle_db);
++
++    EXPECT_TRUE(coord.in_lockstep());
++    coord.create_checkpoint();
++    EXPECT_EQ(coord.depth(), 1u);
++    EXPECT_EQ(coord.contract_checkpoint_id(), 1u);
++    EXPECT_EQ(coord.merkle_checkpoint_id(), 1u);
++    coord.create_checkpoint();
++    EXPECT_EQ(coord.depth(), 2u);
++    coord.revert_checkpoint();
++    coord.commit_checkpoint();
++    EXPECT_EQ(coord.depth(), 0u);
++    EXPECT_TRUE(coord.in_lockstep());
++}
++
++TEST(CheckpointCoordinatorTest, DetectsADesynchronisationInjectedBehindItsBack)
++{
++    MemoryContractDB contract_db;
++    MemoryMerkleDB merkle_db;
++    CheckpointCoordinator coord(contract_db, merkle_db);
++    coord.create_checkpoint();
++
++    // The injection: the merkle stack is moved directly, exactly as a host calling the per-DB
++    // export would move it.
++    merkle_db.create_checkpoint();
++    EXPECT_FALSE(coord.in_lockstep());
++    EXPECT_THROW(coord.assert_lockstep(), std::runtime_error);
++    // And the next coordinated operation refuses rather than unwinding the wrong level.
++    EXPECT_THROW(coord.revert_checkpoint(), std::runtime_error);
++
++    // The other side, and the message must name the other side.
++    MemoryContractDB contract_db2;
++    MemoryMerkleDB merkle_db2;
++    CheckpointCoordinator coord2(contract_db2, merkle_db2);
++    coord2.create_checkpoint();
++    contract_db2.create_checkpoint();
++    try {
++        coord2.assert_lockstep();
++        FAIL() << "an injected contract-side desynchronisation was not detected";
++    } catch (const std::runtime_error& e) {
++        EXPECT_NE(std::string(e.what()).find("CONTRACT db stack"), std::string::npos);
++    }
++}
++
++TEST(CheckpointCoordinatorTest, RefusesToUnderflowEitherStack)
++{
++    MemoryContractDB contract_db;
++    MemoryMerkleDB merkle_db;
++    CheckpointCoordinator coord(contract_db, merkle_db);
++    // MemoryMerkleDB pops its stack unguarded, so this guard is what stands between a host and
++    // undefined behaviour there.
++    EXPECT_THROW(coord.commit_checkpoint(), std::runtime_error);
++    EXPECT_THROW(coord.revert_checkpoint(), std::runtime_error);
++    EXPECT_EQ(coord.depth(), 0u);
++}
++
++TEST(CheckpointCoordinatorTest, TheContractDbItHandsOutIsTheDecorator)
++{
++    MemoryContractDB contract_db;
++    MemoryMerkleDB merkle_db;
++    CheckpointCoordinator coord(contract_db, merkle_db);
++    // Not the store: the PureContractDB decorator over it, so a consumer inherits whatever that
++    // decorator does today and whatever it grows to do.
++    EXPECT_NE(static_cast<ContractDBInterface*>(&contract_db), &coord.contract_db());
++    contract_db.add_contract_class(make_class(5));
++    EXPECT_TRUE(coord.contract_db().get_contract_class(FF(5)).has_value());
++}
++
++} // namespace
++} // namespace bb::avm2::simulation
