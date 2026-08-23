@@ -146,8 +146,8 @@ require_branch_matches_patch() { # <branch> <patch-file>
 # The tracker search. It runs, or the script stops.
 # ---------------------------------------------------------------------------
 
-# GitHub's search API allows 30 requests per minute. Six queries per patch, two
-# requests each, is twelve — so one script is fine and five in a row are not, and
+# GitHub's search API allows 30 requests per minute. Three queries per patch, two
+# requests each, is six — so one script is fine and five in a row are not, and
 # the failure is an HTTP 403 that looks exactly like a broken search. Pace against
 # the real quota and retry the rate-limited case rather than reporting "the
 # tracker search failed" for something that is not a failure at all.
