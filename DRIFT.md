@@ -313,12 +313,28 @@ were absorbed silently.
   `wasm-threads` `ecc_tests`, run under wasmtime 21 (`nix shell nixpkgs/nixos-24.05#wasmtime`,
   the last release with `-Sthreads`) — they agree exactly: 1,104 tests from 78 suites, 1,010
   passed, exit 0, transcripts identical line for line on both toolchains.
+- and, found by M11's tracker search rather than by a build: **upstream may be leaving wasi-sdk
+  altogether.** [AztecProtocol/aztec-packages#22815](https://github.com/AztecProtocol/aztec-packages/pull/22815),
+  `feat(bb): migrate WASM toolchain from wasi-sdk to Emscripten`, is open — 71 files,
+  +1,962 / −1,068 — replacing the `wasm32-wasi` CMake toolchain with an Emscripten one, deleting
+  `scripts/wasmtime.sh` for a Node runner, and removing `-fno-exceptions` from the wasm
+  `add_compile_options` line. That would resolve this divergence in a third direction: not "upstream
+  moves to 33" and not "we carry the bump", but "the pin this entry is about stops existing". It has
+  had no activity since 2026-05-16 and its own description says the author has not built or tested
+  it, so it is recorded as a live possibility rather than a plan. The knock-on is real and is priced
+  in the carry ledger: our `wasm-avm` preset, its configure-time exceptions probe and the exception
+  flags in the AVM_WASM patch are all wasi-sdk-shaped and would need rewriting against Emscripten.
+  The 2026-08-21 search missed this and reported "no upstream issue found tracking the wasi-sdk
+  version"; that statement was wrong and is corrected in the contribution's `PR.md`.
 - decision: Open, with the fix prepared rather than only described:
   `codetracer-specs/upstream-bugs/aztec-wasi-sdk-33/` is a `git format-patch` against `233d8e0993`
   that moves the pin, demonstrated native-neutral (1,009 native translation units, byte-identical
   compile commands) and artefact-neutral (identical imports and C-ABI exports, 1.02% smaller). It is
-  **not filed**; M11 owns submission. This entry closes when upstream's pin moves, and not before —
-  the downstream carry (our own preset and nix shell) is the fallback, not the resolution.
+  **not filed**; M11 prepared the branch and the submission script and left the filing to a person.
+  This entry closes when upstream's pin moves, and not before — the downstream carry (our own preset
+  and nix shell) is the fallback, not the resolution. **Before filing, #22815's status is worth
+  asking about**: if it is going to land, the prepared patch is redundant and should be withdrawn
+  rather than argued for.
 
 ## D9 — the public bytecode commitment is a different number on a 32-bit target
 
