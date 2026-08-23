@@ -7,10 +7,14 @@
 # the write-up describes, and nothing else in this repository would notice.
 #
 # So every branch is rebuilt from its patch file(s) and required to equal, to the
-# commit id, what the fork carries locally AND what is published on our fork's
-# origin. The rebuild is deterministic by construction (committer identity and
-# date come from the patch's own headers, signing off), so this compares commit
-# ids rather than "equivalent" trees.
+# commit id, what is PUBLISHED on our fork's origin — the ref a pull request is
+# actually opened from. The rebuild is deterministic by construction (committer
+# identity and date come from the patch's own headers, signing off), so this
+# compares commit ids rather than "equivalent" trees.
+#
+# The commit COUNT per branch is asserted separately, because "the pull request
+# diff is exactly that patch" is a claim about how many commits are on the branch
+# and an identity check alone would not make it.
 #
 # The `codetracer` development branch is held to the same standard.
 
@@ -37,8 +41,8 @@ printf '%s\n' "$out" | sed 's/^/  |  /'
 n_ok="$(printf '%s\n' "$out" | grep -c '^ok   ' || true)"
 n_fail="$(printf '%s\n' "$out" | grep -c '^FAIL ' || true)"
 
-# Six branches, each compared twice (local and origin/): twelve identities.
-assert_eq "twelve branch identities were compared" "12" "$n_ok"
+# Six branches, each compared against what is PUBLISHED on our fork.
+assert_eq "six branch identities were compared" "6" "$n_ok"
 assert_eq "no branch differs from what its patch file(s) produce" "0" "$n_fail"
 if [ "$rc" -eq 0 ]; then
   pass "the branch generator's own exit status is 0"
@@ -52,9 +56,7 @@ for branch in $(python3 -c 'import json,sys
 d=json.load(open(sys.argv[1]))
 print(" ".join(p["branch"] for p in d["patches"]))
 ' "$SERIES") $(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["fork"]["downstream_branch"])' "$SERIES"); do
-  line_local="$(printf '%s\n' "$out" | grep -c "^ok   $branch  *[0-9a-f]" || true)"
   line_origin="$(printf '%s\n' "$out" | grep -c "^ok   origin/$branch  *[0-9a-f]" || true)"
-  assert_eq "$branch: the local branch equals the rebuild" "1" "$line_local"
   assert_eq "$branch: the published branch equals the rebuild" "1" "$line_origin"
 done
 
@@ -66,7 +68,7 @@ base="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["base"]["
 # so every pass and fail it recorded would be discarded and the assertion count
 # would silently drop by five.
 while read -r id branch want; do
-  got="$(git -C "$FORK_ROOT" rev-list --count "$base..$branch" 2>/dev/null)"
+  got="$(git -C "$FORK_ROOT" rev-list --count "$base..origin/$branch" 2>/dev/null)"
   assert_eq "$id: $branch carries $want commit(s) over the base" "$want" "$got"
 done < <(python3 -c 'import json,sys
 d=json.load(open(sys.argv[1]))

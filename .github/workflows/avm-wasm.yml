@@ -43,7 +43,7 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@v1
         with:
-          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
@@ -171,6 +171,13 @@ jobs:
     #     the flake in the cwd of the step that calls it, and every `dev-exec` step below sets
     #     `working-directory: aztec-avm-runtime`, which is where `flake.nix` is.
     #
+    # A FOURTH failure, which nobody had recorded, showed up on the first real run and is fixed
+    # here: `app-id` read `secrets.CI_TOKEN_PROVIDER_APP_ID`, and that identifier is an
+    # organisation VARIABLE rather than a secret, so `create-github-app-token` aborted on
+    # "Input required and not supplied: app-id" before any step of substance ran. It is
+    # `vars.CI_TOKEN_PROVIDER_APP_ID` now, which is what every other repository in the
+    # organisation uses.
+    #
     # Whoever watches the first run should still expect to learn something: no assessment above
     # is a substitute for a green run, and neither job has produced one yet.
     timeout-minutes: 120
@@ -179,7 +186,7 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@v1
         with:
-          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 

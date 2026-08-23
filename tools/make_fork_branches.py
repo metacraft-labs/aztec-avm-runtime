@@ -264,7 +264,12 @@ def main() -> int:
                 return 0
 
             if args.check:
-                for ref in (p["branch"], "origin/" + p["branch"]):
+                # Only the PUBLISHED ref. That is the one a pull request is opened
+                # from, so it is the one whose agreement with the patch file
+                # matters; a local branch is incidental, and requiring it would
+                # make this check fail on any fresh clone (CI's, for one) for a
+                # reason that says nothing about the patches.
+                for ref in ("origin/" + p["branch"],):
                     have = resolve(ref)
                     if have is None:
                         print("FAIL %s: does not exist; rebuild gives %s"
@@ -306,7 +311,7 @@ def main() -> int:
                       "(%s)" % (down, got_tree[:12], want_tree[:12]), file=sys.stderr)
                 failures += 1
             elif args.check:
-                for ref in (down, "origin/" + down):
+                for ref in ("origin/" + down,):
                     have = resolve(ref)
                     if have is None:
                         print("FAIL %s: does not exist; rebuild gives %s"

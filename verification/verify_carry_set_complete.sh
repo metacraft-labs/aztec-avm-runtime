@@ -7,11 +7,12 @@
 # it. A carry set that quietly omits a patch is worse than no carry set — the
 # rebase harness would then report green while a patch rots.
 #
-# It also holds the THREE copies of each patch's title to each other: the one in
-# carry/series.json, the one in the entry's PR.md, and the subject of the commit on
-# the branch. This project has twice shipped documents that disagreed about a
-# number; three copies of a string is the same failure waiting to happen, so all
-# three are compared rather than one being trusted.
+# It also holds the FOUR copies of each patch's title to each other: the one in
+# carry/series.json, the one in the entry's PR.md, the `Subject:` of the patch file
+# itself (unwrapped the way git unwraps it), and the subject of the commit on the
+# published branch that would be filed. This project has twice shipped documents
+# that disagreed about a number; four copies of a string is the same failure
+# waiting to happen, so all four are compared rather than one being trusted.
 
 TEST_NAME="verify_carry_set_complete"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
@@ -22,6 +23,14 @@ BUGS="$SPECS/upstream-bugs"
 
 assert_file "the carry set manifest exists" "$SERIES"
 assert_dir  "the upstream-bugs directory exists" "$BUGS"
+
+# The branch identities below are read from `origin/<branch>`, not from a local
+# branch: a fresh clone of the fork (CI's, for one) has only its default branch
+# locally, and what a pull request is opened from is the published ref anyway.
+# Fetch first, so "published" means published rather than last-fetched.
+if ! git -C "$FORK_ROOT" fetch --quiet origin 2>/dev/null; then
+  die "could not fetch the fork's origin; the branch identities are read from it"
+fi
 [ -f "$SERIES" ] || die "no carry set to check"
 [ -d "$BUGS" ] || die "no upstream-bugs directory at $BUGS"
 
@@ -86,8 +95,8 @@ PY
     "$title" "$patch_subject"
 
   # Copy 4, the one that actually gets filed: the branch's head commit.
-  head_subject="$(git -C "$FORK_ROOT" log -1 --format=%s "$branch" 2>/dev/null)"
-  assert_eq "$id: the branch head's subject equals the carry set's title" \
+  head_subject="$(git -C "$FORK_ROOT" log -1 --format=%s "origin/$branch" 2>/dev/null)"
+  assert_eq "$id: the published branch head's subject equals the carry set's title" \
     "$title" "$head_subject"
 done
 
