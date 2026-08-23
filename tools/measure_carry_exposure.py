@@ -75,6 +75,13 @@ def parse_patch(patch: Path) -> dict:
     new file has as many + lines as it has lines.
     """
     text = patch.read_text(errors="replace")
+    # Drop `git format-patch`'s trailing signature. It is a line that is exactly
+    # "-- " followed by the git version, and a naive line scan counts that "-- "
+    # as a REMOVED LINE — once per patch, so five phantom deletions across the
+    # series, in a document whose whole job is to report the size honestly.
+    tail = text.rfind("\n-- \n")
+    if tail != -1 and len(text) - tail < 120:
+        text = text[:tail + 1]
     files: dict[str, dict] = {}
     cur = None
     for line in text.splitlines():

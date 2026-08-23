@@ -56,7 +56,7 @@ established separately, by trying each combination rather than by grouping them.
 
 Largest of the five and the only one that moves paths: 35 files, 9 renames, 1 deletion. Renames are cheap to carry — upstream has no version of the new path to move under us — but expensive to rebase if upstream edits the old path, and the audit-scope document it updates is a file upstream also maintains.
 
-Size: **35 file(s), +325 / −253 over 40 hunk(s)** (1 deleted, 22 modified, 3 new, 9 renamed).
+Size: **35 file(s), +325 / −252 over 40 hunk(s)** (1 deleted, 22 modified, 3 new, 9 renamed).
 
 ### 2. `build: move the wasm toolchain from wasi-sdk 27 to 33`
 
@@ -68,7 +68,7 @@ Size: **35 file(s), +325 / −253 over 40 hunk(s)** (1 deleted, 22 modified, 3 n
 
 Five files, no source. Cheap to carry mechanically. The exposure is not size but SUPERSESSION: open upstream PR #22815 would replace wasi-sdk with Emscripten entirely, which would not conflict with this patch so much as delete the thing it pins. If that lands, this patch is dropped and patch 5's toolchain gate is rewritten.
 
-Size: **5 file(s), +23 / −14 over 5 hunk(s)** (5 modified).
+Size: **5 file(s), +23 / −13 over 5 hunk(s)** (5 modified).
 
 ### 3. `fix(vm2): widen before shifting in compute_public_bytecode_first_field`
 
@@ -78,9 +78,9 @@ Size: **5 file(s), +23 / −14 over 5 hunk(s)** (5 modified).
 * **Status**: **prepared** — ready to file; **not filed**
 * **Submission script**: `submit/pr3-widen-before-shifting.sh`
 
-One file, +3/-1, one hunk. The cheapest thing in the set to carry: 2 commits touched its lines in twelve months.
+One file, +3 / -1, one hunk — the cheapest thing in the set to carry. Two upstream commits touched its lines in the twelve months before the base.
 
-Size: **1 file(s), +3 / −2 over 1 hunk(s)** (1 modified).
+Size: **1 file(s), +3 / −1 over 1 hunk(s)** (1 modified).
 
 ### 4. `feat(vm2): per-instruction observation hook for the fast execution loop`
 
@@ -92,7 +92,7 @@ Size: **1 file(s), +3 / −2 over 1 hunk(s)** (1 modified).
 
 Two new headers and one new .cpp, which cost nothing to carry, plus edits to four files upstream owns. `simulation_helper.cpp` is the hot one — 16 commits landed on the lines this patch touches in twelve months, the highest in the whole series, and higher than `hybrid_execution.cpp`'s 4, which the spike had named as THE risk.
 
-Size: **7 file(s), +148 / −5 over 20 hunk(s)** (4 modified, 3 new).
+Size: **7 file(s), +148 / −4 over 20 hunk(s)** (4 modified, 3 new).
 
 ### 5. `build(wasm): optional AVM_WASM, and separate the AVM modules from the server modules`
 
@@ -104,23 +104,23 @@ Size: **7 file(s), +148 / −5 over 20 hunk(s)** (4 modified, 3 new).
 
 Five CMake files and three C++ files. The one with no independent merit, and the one most likely to be carried forever. Its exposure is concentrated in `src/CMakeLists.txt` (9 commits on the carried lines in twelve months) and `cmake/arch.cmake` (5). Both are files upstream restructures rather than tweaks, which is the shape of conflict that needs a person rather than a three-way merge.
 
-Size: **8 file(s), +114 / −26 over 14 hunk(s)** (8 modified).
+Size: **8 file(s), +114 / −25 over 14 hunk(s)** (8 modified).
 
 ## Total exposure if nothing is accepted
 
 Measured against `233d8e0993` (2026-08-19) with `tools/measure_carry_exposure.py`, not estimated.
 
-**Size.** 53 distinct files, +608 / −298 across 77 hunks — the UNION, which is what
-the set costs. Summing the five per-patch rows instead gives +613 / −300 over 80
+**Size.** 53 distinct files, +608 / −293 across 77 hunks — the UNION, which is what
+the set costs. Summing the five per-patch rows instead gives +613 / −295 over 80
 hunks, which is a different and larger number because 3 file(s) are touched by
 more than one patch. Both are stated so neither can be quoted as the other.
 
 | Category | Files | Changed lines |
 | --- | --- | --- |
-| c++ | 37 | 713 |
+| c++ | 37 | 709 |
 | cmake | 11 | 135 |
 | other | 2 | 36 |
-| shell | 3 | 22 |
+| shell | 3 | 21 |
 
 **Conflict surface.** 6 file(s) are created by the series, 9 renamed and 1
 deleted; those cost nothing to rebase, because upstream has no version of them to

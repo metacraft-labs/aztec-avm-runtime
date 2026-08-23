@@ -1,9 +1,9 @@
 {
   "union_added": 608,
-  "union_removed": 298,
+  "union_removed": 293,
   "union_hunks": 77,
   "sum_of_per_patch_added": 613,
-  "sum_of_per_patch_removed": 300,
+  "sum_of_per_patch_removed": 295,
   "sum_of_per_patch_hunks": 80,
   "base": "233d8e099336c1773b89e939100af047ed9c4f71",
   "base_date": "2026-08-19",
@@ -20,7 +20,7 @@
       "title": "refactor(crypto): split crypto_merkle_tree from its LMDB backend",
       "files": 35,
       "added": 325,
-      "removed": 253,
+      "removed": 252,
       "hunks": 40,
       "by_category": {
         "other": 1,
@@ -41,7 +41,7 @@
       "title": "build: move the wasm toolchain from wasi-sdk 27 to 33",
       "files": 5,
       "added": 23,
-      "removed": 14,
+      "removed": 13,
       "hunks": 5,
       "by_category": {
         "cmake": 2,
@@ -58,7 +58,7 @@
       "title": "fix(vm2): widen before shifting in compute_public_bytecode_first_field",
       "files": 1,
       "added": 3,
-      "removed": 2,
+      "removed": 1,
       "hunks": 1,
       "by_category": {
         "c++": 1
@@ -73,7 +73,7 @@
       "title": "feat(vm2): per-instruction observation hook for the fast execution loop",
       "files": 7,
       "added": 148,
-      "removed": 5,
+      "removed": 4,
       "hunks": 20,
       "by_category": {
         "c++": 7
@@ -89,7 +89,7 @@
       "title": "build(wasm): optional AVM_WASM, and separate the AVM modules from the server modules",
       "files": 8,
       "added": 114,
-      "removed": 26,
+      "removed": 25,
       "hunks": 14,
       "by_category": {
         "cmake": 5,
@@ -152,9 +152,9 @@
   },
   "by_category_lines": {
     "other": 36,
-    "shell": 22,
+    "shell": 21,
     "cmake": 135,
-    "c++": 713
+    "c++": 709
   },
   "churn_12mo_before_base": {
     "barretenberg/cpp/CMakeLists.txt": 21,

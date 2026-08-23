@@ -116,7 +116,7 @@
         "shift-count-overflow",
         "wasm32 vm2 portability"
       ],
-      "carry_note": "One file, +3/-1, one hunk. The cheapest thing in the set to carry: 2 commits touched its lines in twelve months."
+      "carry_note": "One file, +3 / -1, one hunk — the cheapest thing in the set to carry. Two upstream commits touched its lines in the twelve months before the base."
     },
     {
       "id": "p4",

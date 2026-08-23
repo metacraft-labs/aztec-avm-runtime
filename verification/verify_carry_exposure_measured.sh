@@ -70,6 +70,31 @@ assert_eq "the probe left the patch file exactly as it found it" \
   "$(sha256sum "$work/orig.patch" | awk '{print $1}')" \
   "$(sha256sum "$target" | awk '{print $1}')"
 
+# --- 2b. cross-checked against git's own arithmetic --------------------------
+# The tool parses the diff itself, so it can be wrong in ways that are invisible
+# from the outside — it counted `git format-patch`'s trailing "-- " signature as a
+# removed line, once per patch, until this assertion was added. Every patch file
+# carries git's OWN `N files changed, M insertions(+), K deletions(-)` line, and
+# the tool's per-patch row must equal it exactly.
+n_stat=0
+while IFS='|' read -r id entry pfile; do
+  stat_line="$(grep -m1 -E '^ [0-9]+ files? changed' "$SPECS/upstream-bugs/$entry/$pfile")"
+  want_files="$(printf '%s' "$stat_line" | grep -oE '^ [0-9]+' | tr -d ' ')"
+  want_add="$(printf '%s' "$stat_line" | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo 0)"
+  want_del="$(printf '%s' "$stat_line" | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo 0)"
+  got="$(python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+r = next(x for x in d["per_patch"] if x["id"] == sys.argv[2])
+print("%s %s %s" % (r["files"], r["added"], r["removed"]))' "$EXPOSURE" "$id")"
+  assert_eq "$id: the measured file/insertion/deletion counts are git's own" \
+    "$want_files $want_add $want_del" "$got"
+  n_stat=$((n_stat + 1))
+done < <(python3 -c 'import json,sys
+for p in sorted(json.load(open(sys.argv[1]))["patches"], key=lambda p: p["order"]):
+    print("%s|%s|%s" % (p["id"], p["entry"], p["patch"]))' "$REPO_ROOT/carry/series.json")
+assert_eq "all five patches were cross-checked against git's arithmetic" "5" "$n_stat"
+
 # --- 3. the numbers are real, and the estimate is corrected in writing -------
 cmake_files="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["by_category_files"].get("cmake",0))' "$EXPOSURE")"
 cmake_lines="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["by_category_lines"].get("cmake",0))' "$EXPOSURE")"
