@@ -104,8 +104,12 @@ d=json.load(open(sys.argv[1]));print(next(p for p in d["patches"] if p["id"]==sy
   assert_eq "$id: the body carries exactly PR.md's sections" "$want" "$got"
 
   # And nothing of ours. Each of these is a real leak that has to be absent.
+  # "re-check before filing" is the `upstream-bugs` convention talking to the next
+  # person on our side, and a maintainer reading it in a pull request body would
+  # reasonably wonder whether this one had been filed by accident.
   for needle in codetracer-specs aztec-avm-runtime metacraft-labs blocktracer \
-                "upstream-bugs" "SERIES.md" "milestone" "M10" "M11" "roadmap"; do
+                "upstream-bugs" "SERIES.md" "milestone" "M10" "M11" "roadmap" \
+                "re-check before filing"; do
     assert_not_contains "$id: the body does not name '$needle'" "$needle" "$(cat "$body")"
   done
   n_dry=$((n_dry + 1))

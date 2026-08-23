@@ -84,7 +84,13 @@ pr_body() { # <pr-md> <out-file> [<stack-note-file>]
     cat "$stack" >> "$out"
     printf '\n' >> "$out"
   fi
-  awk '/^## /{f=1} f' "$md" >> "$out"
+  # ...minus the one line in it that is an instruction to ourselves rather than
+  # part of the argument. "Search was <date>; re-check before filing" is the
+  # `upstream-bugs` convention talking to the next person on our side; a
+  # maintainer reading it in a pull request body would reasonably wonder whether
+  # this one had been filed by accident.
+  awk '/^## /{f=1} f' "$md" \
+    | grep -vE '^Search was [0-9-]+; re-check before filing\.$' >> "$out"
   local n
   n=$(grep -c '' "$out")
   [ "$n" -ge 40 ] || die "body derived from $md is only $n lines; that is not the whole document"
