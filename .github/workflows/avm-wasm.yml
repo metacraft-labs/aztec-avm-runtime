@@ -837,3 +837,134 @@ jobs:
         with:
           name: fallback-triggers
           path: aztec-avm-runtime/verify-m16.log
+
+  node-host:
+    name: the Node host — avm.wasm from TypeScript, and the trap/revert distinction
+    runs-on: eph-linux-x64
+    # M17. It builds what M12's job builds — the same nine-patch tree, the same two build
+    # directories — because the host has to be driven against a real module and compared against a
+    # real native reference, and it does so in ITS OWN work directory so the two jobs cannot
+    # rebuild the tree under each other. Budget as generously as M12's for the same reason: a CI
+    # runner starts with a cold ccache.
+    #
+    # IT NEEDS THE PUBLISHED @aztec/* PACKAGES, and that is a real dependency rather than an
+    # accident. `verify_wasi_shim_reuse_decision_recorded` enumerates them for WASI names as one
+    # half of the reuse question — the other half being the fork itself — and the check DIES with
+    # the remedy rather than skipping when they are absent. diffsim/package-lock.json is tracked,
+    # so `npm ci` is reproducible.
+    #
+    # It does NOT need an npm install for the package under test. `node-host/` has no dependencies
+    # at all: `tsc` comes from the dev shell and the three Node APIs it uses are declared in
+    # `node-host/types/`.
+    #
+    # STATUS, STATED PLAINLY: this job has never run, and neither has any job above it. They all
+    # still abort at `Generate CI token` on "Input required and not supplied: app-id", which M11
+    # recorded as undiagnosed. So this job existing means it is wired and names the checks — not
+    # that a run has ever gated anything.
+    timeout-minutes: 120
+    steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout aztec-avm-runtime
+        uses: actions/checkout@v4
+        with:
+          path: aztec-avm-runtime
+
+      - name: Clone the aztec-packages fork
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/aztec-packages
+          ref: aztec-avm-runtime
+          path: aztec-packages
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Clone codetracer-specs (the prepared patch series)
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-specs
+          ref: latest
+          path: codetracer-specs
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup Dev Environment
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Assert the series base commit is present
+        working-directory: aztec-packages
+        run: |
+          set -euo pipefail
+          # The reuse enumeration reads bb.js's shim and upstream's own node:wasi host with
+          # `git show` at this commit; a shallow clone would make it fail for a reason that has
+          # nothing to do with the reuse question.
+          git fetch --unshallow 2>/dev/null || true
+          git rev-parse --verify 233d8e0993^{commit}
+
+      - name: Assert M17's own inputs are present
+        run: |
+          set -euo pipefail
+          # The package, its type-level controls, the write-up and the shared library. Asserted
+          # here so that "the type system enforces it" cannot decay into a claim with no files
+          # behind it.
+          for p in \
+            aztec-avm-runtime/NODE-HOST.md \
+            aztec-avm-runtime/node-host/package.json \
+            aztec-avm-runtime/node-host/tsconfig.json \
+            aztec-avm-runtime/node-host/types/node-subset.d.ts \
+            aztec-avm-runtime/node-host/src/loader.ts \
+            aztec-avm-runtime/node-host/src/errors.ts \
+            aztec-avm-runtime/node-host/src/reactor.ts \
+            aztec-avm-runtime/node-host/src/engine-probe.ts \
+            aztec-avm-runtime/node-host/typecheck/positive/discriminates.ts \
+            aztec-avm-runtime/verification/lib_m17_node_host.sh ; do
+            test -f "$p" || { echo "::error::missing M17 input: $p" >&2; exit 1; }
+          done
+          test "$(ls -1 aztec-avm-runtime/node-host/typecheck/negative/*.ts | wc -l)" -eq 4 \
+            || { echo "::error::expected four type-level negative cases" >&2; exit 1; }
+
+      - name: Install the published @aztec packages (the reuse enumeration reads them)
+        working-directory: aztec-avm-runtime/diffsim
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tail -20
+
+      - name: Build avm.wasm and run the node-host checks
+        working-directory: aztec-avm-runtime
+        env:
+          # Not $TMPDIR: the builds are several gigabytes and a tmpfs /tmp is the wrong place. Its
+          # own directory, not M12's, so the two jobs cannot rebuild the tree under each other.
+          M17_WORK: ${{ github.workspace }}/m17-work
+        # See the M7 job: `shell: bash` supplies `-o pipefail`, which the default `bash -e {0}`
+        # does not, so `| tee` cannot swallow a failure.
+        shell: bash
+        run: dev-exec just verify-m17 2>&1 | tee verify-m17.log
+
+      - name: Collect the transcripts and the engine probes
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p artifacts-m17
+          cp aztec-avm-runtime/verify-m17.log artifacts-m17/ 2>/dev/null || true
+          for f in "${{ github.workspace }}"/m17-work/node-host.* \
+                   "${{ github.workspace }}"/m17-work/engine-*.txt \
+                   "${{ github.workspace }}"/m17-work/reuse-sites.txt \
+                   "${{ github.workspace }}"/m17-work/transcript-compare.txt \
+                   "${{ github.workspace }}"/m17-work/m17-measured.env ; do
+            [ -f "$f" ] && cp "$f" artifacts-m17/ || true
+          done
+          ls -la artifacts-m17
+
+      - name: Upload the node-host transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-host
+          path: artifacts-m17
+          retention-days: 30

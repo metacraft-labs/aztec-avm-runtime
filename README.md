@@ -31,9 +31,10 @@ tested with `npm install`, with no barretenberg C++ build, no Rust/wasm-bindgen 
 | `diffsim/` | `spike/` with the 7 files that differ from master restored from the npm tarball, so **both** simulators run in-process and the TS↔C++ differential harness works |
 | `probe-mt/` | merkle-tree probes: native world-state roots vs. the deleted `@aztec/merkle-tree` |
 | `browser-probe/` | esbuild browser-bundle probe and its node-builtin shims |
+| `node-host/` | **the TypeScript bindings over `avm.wasm`** — the loader on `node:wasi`, the msgpack decoder, the pooled reactor and the trap/revert error surface. No dependencies: `tsc` comes from the dev shell and the three Node APIs used are declared in `node-host/types/` |
 | `../aztec-packages` | the `metacraft-labs/aztec-packages` fork, branch `aztec-avm-runtime` — a **workspace-root sibling**, registered in the workspace manifests alongside this repo (it used to live at `upstream/aztec-packages`) |
 | `upstream/tsavm` | gitignored worktree of the fork at `3a68d68ac2`, the commit before the TS AVM was deleted |
-| `verification/` | the M0 … M11 verification checks; see `just --list` |
+| `verification/` | the M0 … M17 verification checks; see `just --list` |
 | `carry/` | the **ordered carry set** (`series.json`), the measured carry exposure (`exposure.json`) and the last replay onto upstream (`rebase.json`). `series.json` is the authority for what we carry, in what order, and where each patch stands with upstream |
 | `CARRY-LEDGER.md` | the readable carry ledger, **generated** from `carry/` — status per patch, what carrying each costs, and the measured total exposure if upstream accepts nothing |
 | `submit/` | one script per prepared contribution, `submit/pr<N>-*.sh`. A **person** runs them; nothing else in this repository can open a pull request, and `just verify-submission-manual` asserts that |
@@ -49,6 +50,7 @@ tested with `npm install`, with no barretenberg C++ build, no Rust/wasm-bindgen 
 | `WORLD-STATE.md` | what the in-memory reference world state covers of block production and what it does not: five implementations enumerated, thirteen operations classified, four dispositions worked in order — M14's write-up |
 | `BOUNDARY-SHAPE.md` | how much of the transaction and block loop lives inside wasm, decided on measurement, with the rejected shape's numbers retained — M15's write-up |
 | `FALLBACK.md` | the TypeScript-trees fallback: its three triggers evaluated conjunct by conjunct, the switch priced out of the deleted package, and the wrong-root hazard with its target values — M16's write-up, and the milestone closes **not-required** |
+| `NODE-HOST.md` | the Node host: the WASI-shim reuse question answered by enumeration, the toolchain gate and the engine premise that did not survive it, and the trap-versus-revert distinction the type system enforces — M17's write-up |
 | `PROVENANCE.md` | the machine-checked mapping of every vendored file to its upstream path and commit; the input `just check-drift` reads |
 | `pins.json` / `PINS.md` | the single authority for every upstream pin, and the policy for moving it |
 | `DRIFT.md` | the drift ledger: every place two pinned things disagree, opened when observed rather than when fixed |

@@ -1,0 +1,37 @@
+{
+  "//": [
+    "Type-checking only. Node 24 runs the .ts sources directly by stripping types, so there is no",
+    "emit step and no build artefact to keep in sync with the sources.",
+    "",
+    "`erasableSyntaxOnly` is what makes that safe rather than incidental: it refuses enums,",
+    "namespaces, parameter properties and anything else Node's stripper cannot erase, so a source",
+    "that type-checks is a source Node can run. Without it the failure would be at run time and in",
+    "a check rather than here.",
+    "",
+    "`verbatimModuleSyntax` forces `import type` on type-only imports, which is the other half of",
+    "the same property.",
+    "",
+    "No `@types/node`: the three Node modules this package uses are declared in types/, so `tsc`",
+    "runs against the nix-pinned toolchain with no npm dependency and no network."
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "NodeNext",
+    "moduleResolution": "nodenext",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": false,
+    "noEmit": true,
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": false,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": false,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*.ts", "types/**/*.d.ts"]
+}

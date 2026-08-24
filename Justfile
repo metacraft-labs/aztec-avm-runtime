@@ -1352,3 +1352,82 @@ verify-m16:
       echo "verify-m16: all checks passed"
     fi
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M17 — the Node host: driving avm.wasm from Node.js
+#
+#   just verify-node-gate          verify_node_v8_accepts_module            (BUILDS)
+#   just verify-node-transcripts   verify_node_transcripts_match_native
+#   just verify-node-trap-revert   test_wasm_trap_vs_avm_revert_distinguished
+#   just verify-node-pool          test_node_loader_instance_reuse
+#   just verify-node-memory        verify_node_peak_memory_budget
+#   just verify-node-reuse         verify_wasi_shim_reuse_decision_recorded
+#   just verify-node-steps         test_node_step_stream_batching
+#   just verify-exported-name-guard  test_large_assignment_survives_an_exported_name
+#   just verify-m17                all of them, in order
+#
+# `verify-node-gate` is the one that BUILDS: M12's nine-patch tree inside M17's own work
+# directory, plus the driver's inputs and the native reference transcript. Every other check
+# runs it if there is no measurement on record — never invents, defaults or skips.
+#
+# `verify-exported-name-guard` is carried from M11 rather than being M17's own: an ambient
+# exported `out` put 738 KB into the environment and made every later exec fail E2BIG. It builds
+# nothing and takes no work directory.
+# ---------------------------------------------------------------------------
+
+# The pinned V8 compiles avm.wasm's try_table, and the guard is shown to be able to fail. BUILDS.
+verify-node-gate:
+    @verification/verify_node_v8_accepts_module.sh
+
+# Seven corpus programs under Node, transcripts including tree roots, against the native reference.
+verify-node-transcripts:
+    @verification/verify_node_transcripts_match_native.sh
+
+# A trap and a revert, at run time and in the type system, neither reported as the other.
+verify-node-trap-revert:
+    @verification/test_wasm_trap_vs_avm_revert_distinguished.sh
+
+# One pooled instance against fresh ones: identical results, no linear-memory growth.
+verify-node-pool:
+    @verification/test_node_loader_instance_reuse.sh
+
+# Peak linear memory under V8 through the node host, against a recorded budget.
+verify-node-memory:
+    @verification/verify_node_peak_memory_budget.sh
+
+# Whether bb.js's WASI shim was reused, with the enumeration re-run rather than read back.
+verify-node-reuse:
+    @verification/verify_wasi_shim_reuse_decision_recorded.sh
+
+# Batched step-stream decoding, and the same records by both routes.
+verify-node-steps:
+    @verification/test_node_step_stream_batching.sh
+
+# A large assignment to an ambiently-exported name must still be able to exec.
+verify-exported-name-guard:
+    @verification/test_large_assignment_survives_an_exported_name.sh
+
+# Run the whole M17 verification set; every check runs even if an earlier one fails.
+verify-m17:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_node_v8_accepts_module \
+      verify_wasi_shim_reuse_decision_recorded \
+      verify_node_transcripts_match_native \
+      test_wasm_trap_vs_avm_revert_distinguished \
+      test_node_loader_instance_reuse \
+      test_node_step_stream_batching \
+      verify_node_peak_memory_budget \
+      test_large_assignment_survives_an_exported_name
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m17: FAILED" >&2
+    else
+      echo "verify-m17: all checks passed"
+    fi
+    exit "$rc"

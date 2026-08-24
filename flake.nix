@@ -41,6 +41,14 @@
               pkgs.nodejs_24
               pkgs.yarn-berry_4
 
+              # `tsc`, for the node host's type check. It is here rather than in an npm
+              # devDependency because the trap-versus-revert distinction is enforced by the TYPE
+              # SYSTEM, so the type checker is part of the toolchain the same way clang is — and a
+              # checkout should be able to run that check with no `npm install` and no network.
+              # node-host/ declares the three Node APIs it uses itself, so `@types/node` is not
+              # needed either.
+              pkgs.typescript
+
               # The wasm AVM toolchain. wasi-sdk 33 is load-bearing — see
               # nix/wasi-sdk.nix for why 27 (barretenberg's pin) cannot work.
               wasi-sdk

@@ -1,0 +1,22 @@
+{
+  "name": "@aztec-avm-runtime/node-host",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "TypeScript bindings driving avm.wasm from Node.js on node:wasi",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "//": [
+    "NO DEPENDENCIES, and that is the point rather than an accident.",
+    "The WASI half is node:wasi — Node's own, which supplies all eleven of avm.wasm's WASI",
+    "imports, and which upstream itself uses for the same job in",
+    "barretenberg/cpp/scripts/run_wasm_bench_node.mjs. bb.js's shim was measured and covers two of",
+    "the eleven; see src/loader.ts for the enumeration.",
+    "tsc comes from the nix dev shell, and the Node APIs used are declared in types/, so a clean",
+    "checkout can type-check and run this package with no npm install at all."
+  ],
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

@@ -16,77 +16,27 @@ import { WASI } from 'node:wasi';
 import { readFile } from 'node:fs/promises';
 
 // ---------------------------------------------------------------------------
-// msgpack decoding. Generic: the wire format, not the schemas.
+// msgpack decoding — RE-EXPORTED, NOT REIMPLEMENTED.
 //
-// `bin` comes back as a Uint8Array because that is what a 32-byte field element is on the wire
-// (barretenberg's `field::msgpack_pack` writes `pack_bin(32)` big-endian); the transcript
-// formatters are the only thing that decide a 32-byte bin should be rendered as `0x…`.
+// The decoder lives in `node-host/src/msgpack.ts` and this file re-exports it. M13 extracted it
+// once already so M12's and M13's hosts could not disagree about an encoding, and that argument
+// does not stop applying because the third copy would be in TypeScript: two implementations of a
+// wire format are two things that can disagree, and a difference between two transcripts must be a
+// difference in what the MODULE did.
+//
+// Node runs the `.ts` source directly by stripping types, so there is no build step between this
+// import and the sources; `node-host/tsconfig.json` sets `erasableSyntaxOnly`, which is what makes
+// that safe rather than incidental.
+//
+// It decodes and never encodes. Every input blob crossing into the module is produced by
+// upstream's own msgpack packers in C++ (`avm_differential reactorinputs` emits them as hex), and
+// what is decoded here is the WIRE FORMAT rather than the schemas.
 // ---------------------------------------------------------------------------
-export class Decoder {
-  constructor(bytes) {
-    this.u8 = bytes;
-    this.dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    this.o = 0;
-  }
-  u8at() { return this.u8[this.o++]; }
-  bytes(n) { const s = this.u8.subarray(this.o, this.o + n); this.o += n; return s; }
-  str(n) { return new TextDecoder().decode(this.bytes(n)); }
-  arr(n) { const a = new Array(n); for (let i = 0; i < n; i++) a[i] = this.next(); return a; }
-  map(n) {
-    const m = {};
-    for (let i = 0; i < n; i++) { const k = this.next(); m[typeof k === 'string' ? k : String(k)] = this.next(); }
-    return m;
-  }
-  u64() {
-    const v = this.dv.getBigUint64(this.o, false); this.o += 8;
-    return v <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(v) : v;
-  }
-  i64() {
-    const v = this.dv.getBigInt64(this.o, false); this.o += 8;
-    return (v <= BigInt(Number.MAX_SAFE_INTEGER) && v >= BigInt(Number.MIN_SAFE_INTEGER)) ? Number(v) : v;
-  }
-  next() {
-    const b = this.u8at();
-    if (b <= 0x7f) return b;
-    if (b >= 0xe0) return b - 0x100;
-    if (b >= 0x80 && b <= 0x8f) return this.map(b & 0x0f);
-    if (b >= 0x90 && b <= 0x9f) return this.arr(b & 0x0f);
-    if (b >= 0xa0 && b <= 0xbf) return this.str(b & 0x1f);
-    switch (b) {
-      case 0xc0: return null;
-      case 0xc2: return false;
-      case 0xc3: return true;
-      case 0xc4: return this.bytes(this.u8at());
-      case 0xc5: { const n = this.dv.getUint16(this.o, false); this.o += 2; return this.bytes(n); }
-      case 0xc6: { const n = this.dv.getUint32(this.o, false); this.o += 4; return this.bytes(n); }
-      case 0xca: { const v = this.dv.getFloat32(this.o, false); this.o += 4; return v; }
-      case 0xcb: { const v = this.dv.getFloat64(this.o, false); this.o += 8; return v; }
-      case 0xcc: return this.u8at();
-      case 0xcd: { const v = this.dv.getUint16(this.o, false); this.o += 2; return v; }
-      case 0xce: { const v = this.dv.getUint32(this.o, false); this.o += 4; return v; }
-      case 0xcf: return this.u64();
-      case 0xd0: { const v = this.dv.getInt8(this.o); this.o += 1; return v; }
-      case 0xd1: { const v = this.dv.getInt16(this.o, false); this.o += 2; return v; }
-      case 0xd2: { const v = this.dv.getInt32(this.o, false); this.o += 4; return v; }
-      case 0xd3: return this.i64();
-      case 0xd9: return this.str(this.u8at());
-      case 0xda: { const n = this.dv.getUint16(this.o, false); this.o += 2; return this.str(n); }
-      case 0xdb: { const n = this.dv.getUint32(this.o, false); this.o += 4; return this.str(n); }
-      case 0xdc: { const n = this.dv.getUint16(this.o, false); this.o += 2; return this.arr(n); }
-      case 0xdd: { const n = this.dv.getUint32(this.o, false); this.o += 4; return this.arr(n); }
-      case 0xde: { const n = this.dv.getUint16(this.o, false); this.o += 2; return this.map(n); }
-      case 0xdf: { const n = this.dv.getUint32(this.o, false); this.o += 4; return this.map(n); }
-      default: throw new Error(`msgpack: unsupported type byte 0x${b.toString(16)} at ${this.o - 1}`);
-    }
-  }
-}
-
-export function unpack(bytes) {
-  const d = new Decoder(bytes);
-  const v = d.next();
-  if (d.o !== bytes.length) throw new Error(`msgpack: ${bytes.length - d.o} trailing byte(s)`);
-  return v;
-}
+// IMPORTED and then re-exported, not `export … from`: a bare re-export does not bind the names
+// LOCALLY, so `Reactor.callWithArgs`'s own `unpack(...)` became a ReferenceError. `just verify-m12`
+// caught it — 150 failures across three checks — which is what that regression run was for.
+import { Decoder, unpack, hexOf } from '../../node-host/src/msgpack.ts';
+export { Decoder, unpack, hexOf };
 
 // ---------------------------------------------------------------------------
 // The module's own memory-import limits, read out of the binary. Guessing them is not an option:
@@ -233,14 +183,6 @@ export async function instantiateReactor(wasmPath) {
 // ---------------------------------------------------------------------------
 // Rendering and inputs
 // ---------------------------------------------------------------------------
-const HEXDIGITS = '0123456789abcdef';
-export function hexOf(bin) {
-  if (!(bin instanceof Uint8Array)) throw new Error(`expected a field element (bin), got ${typeof bin}`);
-  let s = '0x';
-  for (const b of bin) s += HEXDIGITS[(b >> 4) & 0xf] + HEXDIGITS[b & 0xf];
-  return s;
-}
-
 // The inputs file: `<key> <value>` lines from `avm_differential`.
 export function parseInputs(text) {
   const kv = new Map();
