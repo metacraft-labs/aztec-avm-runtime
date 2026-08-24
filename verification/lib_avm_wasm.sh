@@ -173,6 +173,30 @@ m6_sdk() {
 }
 
 # ---------------------------------------------------------------------------
+# m6_patch_ids_of_files <patch...>  ->  one `git patch-id --stable` per file, in order
+# m6_patch_ids_of_tree  <dir>       ->  the same for $M6_BASE_REV..HEAD, oldest first
+#
+# The identity of a prepared tree, derived from the artefact rather than from a
+# stamp we wrote next to it. `patch-id` hashes the diff hunks with line numbers
+# and whitespace normalised away, so it survives `git am`'s own rewriting and is
+# the same on both sides of the comparison — which a commit sha is not, since the
+# committer date goes into it.
+# ---------------------------------------------------------------------------
+m6_patch_ids_of_files() { # <patch...>
+  local p
+  for p in "$@"; do
+    git patch-id --stable <"$p" 2>/dev/null | awk '{print $1}'
+  done
+}
+
+m6_patch_ids_of_tree() { # <dir>
+  local dir="$1" c
+  for c in $(git -C "$dir" rev-list --reverse "$M6_BASE_REV..HEAD" 2>/dev/null); do
+    git -C "$dir" show --no-color "$c" 2>/dev/null | git patch-id --stable | awk '{print $1}'
+  done
+}
+
+# ---------------------------------------------------------------------------
 # m6_prepare_tree <name> <patch...>
 #
 # Idempotently materialises $M6_WORK/<name> as a detached worktree of
@@ -180,39 +204,113 @@ m6_sdk() {
 # `-3` is deliberately NOT passed: each patch must apply to what precedes it
 # exactly. Dies on any failure — a tree that cannot be prepared is a check that
 # cannot run, and a check that cannot run must fail.
+#
+# REUSE IS BY IDENTITY, NOT BY EXISTENCE, and M14's review is why. This function
+# used to reuse any directory that had a `.git` in it and assert only the COMMIT
+# COUNT. A work directory carrying an OLDER REVISION of the same patch file has
+# the same count, so it was reused and every number taken out of it was a number
+# about a source tree nobody had asked for. That is what a stale
+# `~/.cache/aztec-m12-reactor` did to M12 in the M14 sweep, and it was measured
+# rather than argued: the ordered patch-ids of that tree agreed with the nine
+# patch files on the first eight and disagreed on the ninth —
+# 5782c105912a5a623947eda4995bdba71db07332 in the tree against
+# d57cc56ccb7d73ff1b072ef637e7f4069fcf2e1b in `verification/m12/`, M12's own
+# overlay, revised after the tree was built.
+#
+# So the ordered patch-id list is compared, and a mismatch RE-CREATES the
+# worktree instead of failing. A check must not depend on state it did not
+# produce; and a sweep that reports red for a stale directory teaches its readers
+# to discount reds, which is the more expensive failure. The rebuild happens
+# once: if the freshly-applied tree still disagrees, that is a real defect in the
+# patch stack and it dies.
+#
+# `M6_REFUSE_REBUILD=1` turns the rebuild into a `die` naming the first
+# disagreeing position. That is not a softening switch — it is how
+# `test_prepared_tree_rejects_stale_inputs` observes the DETECTION without paying
+# for the recovery, and nothing in the campaign sets it.
+#
+# `M6_TREE_REBUILT` is set to 0 or 1 on return, so a caller can assert which
+# path it took.
 # ---------------------------------------------------------------------------
 m6_prepare_tree() {
   local name="$1"; shift
   local dir="$M6_WORK/$name" p
+  local -a patches=("$@")
 
   command -v git >/dev/null 2>&1 || die "git is required"
   command -v nix >/dev/null 2>&1 || die "nix is required (the builds run in the fork's dev shell)"
   [ -e "$FORK_ROOT/.git" ] || die "no aztec-packages checkout at $FORK_ROOT"
   git -C "$FORK_ROOT" rev-parse --verify --quiet "$M6_BASE_REV^{commit}" >/dev/null \
     || die "base commit $M6_BASE_REV is not in $FORK_ROOT"
-  for p in "$@"; do
+  for p in "${patches[@]+"${patches[@]}"}"; do
     [ -f "$p" ] || die "prepared patch missing: $p"
+    [ -s "$p" ] || die "prepared patch is empty: $p"
   done
 
   mkdir -p "$M6_WORK"
 
-  if [ ! -e "$dir/.git" ]; then
-    git -C "$FORK_ROOT" worktree prune >/dev/null 2>&1
-    git -C "$FORK_ROOT" worktree add --detach "$dir" "$M6_BASE_REV" >/dev/null 2>&1 \
-      || die "could not create the $name worktree at $dir"
-    for p in "$@"; do
-      if ! git -C "$dir" am "$p" >>"$M6_WORK/$name-am.log" 2>&1; then
-        git -C "$dir" am --abort >/dev/null 2>&1 || true
-        die "git am of $(basename "$p") failed on the $name tree — see $M6_WORK/$name-am.log"
-      fi
-    done
+  M6_TREE_REBUILT=0
+  local attempt=0 want="${#patches[@]}" got want_ids got_ids
+  # The expected identity, computed ONCE from the files. Non-emptiness is asserted
+  # here rather than assumed: `git patch-id` on a file it cannot parse prints
+  # nothing and exits 0, and two empty lists compare equal.
+  want_ids="$(m6_patch_ids_of_files "${patches[@]+"${patches[@]}"}")"
+  if [ "$want" -gt 0 ]; then
+    [ "$(printf '%s\n' "$want_ids" | grep -c .)" = "$want" ] \
+      || die "could not compute a patch-id for all $want prepared patches of the $name tree"
   fi
 
-  # The tree is base + exactly the patches asked for, in order, and nothing else.
-  local want="$#" got
-  got=$(git -C "$dir" rev-list --count "$M6_BASE_REV..HEAD" 2>/dev/null)
-  [ "$got" = "$want" ] \
-    || die "$dir is $M6_BASE_REV + $got commit(s), expected $want — remove it and re-run"
+  while : ; do
+    if [ ! -e "$dir/.git" ]; then
+      git -C "$FORK_ROOT" worktree prune >/dev/null 2>&1
+      git -C "$FORK_ROOT" worktree add --detach "$dir" "$M6_BASE_REV" >/dev/null 2>&1 \
+        || die "could not create the $name worktree at $dir"
+      for p in "${patches[@]+"${patches[@]}"}"; do
+        if ! git -C "$dir" am "$p" >>"$M6_WORK/$name-am.log" 2>&1; then
+          git -C "$dir" am --abort >/dev/null 2>&1 || true
+          die "git am of $(basename "$p") failed on the $name tree — see $M6_WORK/$name-am.log"
+        fi
+      done
+    fi
+
+    # The tree is base + exactly the patches asked for, in order, and nothing else.
+    got=$(git -C "$dir" rev-list --count "$M6_BASE_REV..HEAD" 2>/dev/null)
+    got_ids="$(m6_patch_ids_of_tree "$dir")"
+
+    local why=""
+    if [ "$got" != "$want" ]; then
+      why="it is $M6_BASE_REV + $got commit(s), expected $want"
+    elif [ "$want" -gt 0 ] && [ "$got_ids" != "$want_ids" ]; then
+      # Name the FIRST disagreeing position and both ids. "they differ" sends a
+      # reader back to the whole stack; "the ninth is the AVM_REACTOR overlay"
+      # sends them to one file.
+      local i=1 a b
+      while [ "$i" -le "$want" ]; do
+        a="$(printf '%s\n' "$want_ids" | sed -n "${i}p")"
+        b="$(printf '%s\n' "$got_ids"  | sed -n "${i}p")"
+        [ "$a" != "$b" ] && break
+        i=$((i + 1))
+      done
+      why="its commit $i has patch-id $b, but $(basename "${patches[$((i - 1))]}") has $a"
+    fi
+    [ -z "$why" ] && break
+
+    if [ "${M6_REFUSE_REBUILD:-0}" = "1" ]; then
+      die "the $name tree at $dir is STALE: $why"
+    fi
+    if [ "$attempt" -ne 0 ]; then
+      die "the $name tree at $dir is still wrong after a rebuild: $why"
+    fi
+    printf '%s: the %s tree at %s is stale (%s) — re-creating it\n' \
+      "$TEST_NAME" "$name" "$dir" "$why" >&2
+    attempt=1
+    M6_TREE_REBUILT=1
+    git -C "$FORK_ROOT" worktree remove --force "$dir" >/dev/null 2>&1 || rm -rf "$dir"
+    rm -rf "$dir"
+    git -C "$FORK_ROOT" worktree prune >/dev/null 2>&1
+    : >"$M6_WORK/$name-am.log"
+  done
+
   # `nodejs_module/` is excluded, and only that. Its CMakeLists runs
   # `yarn --immutable` at configure time and fails the WHOLE native configure
   # when node-addon-api cannot be resolved, so the native side has to run a

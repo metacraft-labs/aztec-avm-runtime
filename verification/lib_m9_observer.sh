@@ -112,6 +112,10 @@ require_work_dir "$M9_WORK" 8
 #   0  measured
 #   1  an assertion failed
 #   3  the machine was too busy to measure on (this)
+#   4  it measured, the answer is inside the budget, and the interval around it is still too
+#      wide to call that a claim at the session cap — M9_PRECISION_PRECONDITION_EXIT, added by
+#      M15 after M14's sweep reported a 1.05pp half-width against a required 1.00pp as though
+#      it were a regression
 #
 # Two signals, because they fail differently. Competing build processes are exact
 # and immediate; load average is coarse and lags by up to a minute, which is
@@ -259,8 +263,29 @@ M9_SENTINEL_OPCODE=
 M9_ENABLED_BUDGET_NATIVE_PCT="${M9_ENABLED_BUDGET_NATIVE_PCT:-20}"
 M9_ENABLED_BUDGET_WASM_PCT="${M9_ENABLED_BUDGET_WASM_PCT:-10}"
 
-# DISABLED. The budget is a bound, and the control below is what gives it meaning.
+# DISABLED. TWO budgets, because there are two claims and only one of them is the neutrality claim.
+#
+# M9_DISABLED_BUDGET_PCT is the COST side: the patched build must not be SLOWER than the unpatched
+# one by more than this. That is what "the disabled path costs nothing" means and it keeps the
+# tight bound. The control below is what gives it meaning.
+#
+# M9_DISABLED_FASTER_BUDGET_PCT is the COMPARABILITY side, and M15 added it after finding that the
+# single two-sided +/-2% had been passing by 0.05pp for two milestones. The patched build is
+# reproducibly FASTER — -1.26%, -1.38%, -1.40%, -1.71% and -1.75% over five measurements, one of
+# them a rebuild forced by M15's tree-freshness fix, which is how it was noticed. Those are five
+# measurements of ONE build pair: the two binaries come out byte-identical from every rebuild of
+# these trees, so the reading replicates and the code layout behind it is a single draw.
+#
+# The cause is NOT the hoist, and M15's review measured it rather than leaving it argued.
+# `m9nohoist` is the same patch with the observe call put back INSIDE the try block; against
+# `m9ref` on an idle machine, 32 sessions, it reads -1.28% CI [-1.71, -0.85] (same-bytes control
+# -0.01%) beside -1.75% CI [-2.34, -1.15] for the hoisted build measured the same way. Undoing the
+# hoist leaves the speed-up, so the exception-region argument does not explain it and must not be
+# offered upstream as one. Five percent is a bound with room for whatever does explain it and is
+# still a bound: an arm 20% faster is not the same program, and the check fabricates exactly that
+# case to prove the bound can fail.
 M9_DISABLED_BUDGET_PCT="${M9_DISABLED_BUDGET_PCT:-2}"
+M9_DISABLED_FASTER_BUDGET_PCT="${M9_DISABLED_FASTER_BUDGET_PCT:-5}"
 
 # Peak linear memory of the `steps` run, with every record materialised. M8's untraced run is 173
 # pages; this one is 389 under node's WASI host and 400 under wasmtime, and the difference from 173
@@ -512,19 +537,30 @@ m9_run_wasmtime() { # <wasm> <out> <err> [args...]
 # The whole loop runs inside ONE dev shell: 216 process launches through `nix develop` would spend
 # more time on the shell than on the measurement.
 # ---------------------------------------------------------------------------
-m9_bench_sessions() { # <kind> <patched> <unpatched> <dir> <out> <inodes> <sessions>
-  local kind="$1" pat="$2" unp="$3" dir="$4" out="$5" ino="$6" sessions="$7"
+# An eighth argument, FIRST, is the session index to start at, and it is what makes the
+# measurement EXTENSIBLE. If the interval that comes out of `$sessions` sessions is too wide to
+# support the assertion, the answer this design allows is more sessions — each one an independent
+# draw, appended to the same table — and not a wider bound. With FIRST greater than zero the
+# session directories, the samples file and the inode ledger are all APPENDED to rather than
+# reset, so the sessions already paid for are kept. See test_observer_disabled_is_free, which is
+# the only caller that extends.
+m9_bench_sessions() { # <kind> <patched> <unpatched> <dir> <out> <inodes> <sessions> [first]
+  local kind="$1" pat="$2" unp="$3" dir="$4" out="$5" ino="$6" sessions="$7" first="${8:-0}"
   [ -e "$pat" ] || die "m9_bench_sessions: no patched artefact at $pat"
   [ -e "$unp" ] || die "m9_bench_sessions: no unpatched artefact at $unp"
-  rm -rf "$dir"; mkdir -p "$dir" || die "m9_bench_sessions: cannot create $dir"
+  if [ "$first" -eq 0 ]; then
+    rm -rf "$dir"
+  fi
+  mkdir -p "$dir" || die "m9_bench_sessions: cannot create $dir"
   m6_in_devshell '
     kind="$1"; pat="$2"; unp="$3"; dir="$4"; out="$5"; ino="$6"
     sessions="$7"; rounds="$8"; reps="$9"; shift 9
-    hostjs="$1"; tmo="$2"
+    hostjs="$1"; tmo="$2"; first="$3"
     export LD_LIBRARY_PATH="/usr/lib:${LD_LIBRARY_PATH:-}"
-    : >"$out"; : >"$ino"
+    if [ "$first" -eq 0 ]; then : >"$out"; : >"$ino"; fi
     if [ "$kind" = native ]; then ext=""; else ext=".wasm"; fi
-    s=0
+    s="$first"
+    sessions=$((first + sessions))
     while [ "$s" -lt "$sessions" ]; do
       sd="$dir/s$(printf "%03d" "$s")"
       mkdir -p "$sd" || exit 90
@@ -565,7 +601,7 @@ m9_bench_sessions() { # <kind> <patched> <unpatched> <dir> <out> <inodes> <sessi
       s=$((s + 1))
     done
   ' "$kind" "$pat" "$unp" "$dir" "$out" "$ino" "$sessions" \
-    "$M9_BENCH_ROUNDS" "$M9_BENCH_REPS" "$M7_V8_HOST" "$M7_RUN_TIMEOUT" >/dev/null
+    "$M9_BENCH_ROUNDS" "$M9_BENCH_REPS" "$M7_V8_HOST" "$M7_RUN_TIMEOUT" "$first" >/dev/null
   local rc=$?
   case "$rc" in
     0) ;;
@@ -576,6 +612,78 @@ m9_bench_sessions() { # <kind> <patched> <unpatched> <dir> <out> <inodes> <sessi
   esac
   [ -s "$out" ] || die "m9_bench_sessions: the $kind timing loop produced no samples at all"
 }
+
+# ---------------------------------------------------------------------------
+# m9_measure_until_precise <kind> <patched> <unpatched> <dir> <out> <inodes> <report> <err> <start> <cap>
+#
+# THE ANSWER TO A TOO-WIDE INTERVAL IS MORE SESSIONS, NOT A WIDER BOUND, and this is where that
+# is carried out.
+#
+# `_timing_compare.py --disabled` exits 4 when the difference it measured lies inside the budget
+# but the interval around it is more than half the budget wide — a statement about how sharply
+# this machine, in this hour, could resolve the question, and not about the patch. M14's sweep hit
+# it at 1.05pp against a required 1.00pp on a correct tree, and reported it as a milestone
+# regression.
+#
+# The half-width falls as 1/sqrt(sessions) because the SESSION is the unit of replication, so the
+# fix is arithmetic: keep the sessions already measured, add another batch of independent ones —
+# each with its own fresh copies of all three arms, which is what makes it an independent draw —
+# and ask again. The comparator's own refusal message estimates how many would be enough, and the
+# batch size is taken from that estimate rather than doubling blindly.
+#
+# The cap exists so this terminates. Reaching it is the PRECONDITION case: the machine could not
+# resolve the question today, the check says so with its own exit code, and nothing is asserted
+# about a number it does not have.
+#
+# On return: M9_SESSIONS_RUN is the total measured, M9_TIMING_RC is the comparator's last status
+# (0 = compared, 4 = still not sharp enough at the cap), M9_TIMING_EXTENSIONS is how many extra
+# batches were needed — reported, because a value that creeps up over time means the host got
+# noisier and the cap should be revisited rather than the bound.
+# ---------------------------------------------------------------------------
+m9_measure_until_precise() { # <kind> <patched> <unpatched> <dir> <out> <ino> <report> <err> <start> <cap>
+  local kind="$1" pat="$2" unp="$3" dir="$4" out="$5" ino="$6" rep="$7" errf="$8"
+  local start="$9" cap="${10}"
+  local total=0 batch add
+  M9_TIMING_EXTENSIONS=0
+  m9_bench_sessions "$kind" "$pat" "$unp" "$dir" "$out" "$ino" "$start" 0
+  total="$start"
+  while : ; do
+    python3 "$M9_TIMING" --disabled "$out" "$M9_DISABLED_BUDGET_PCT" \
+      "$M9_DISABLED_FASTER_BUDGET_PCT" >"$rep" 2>"$errf"
+    M9_TIMING_RC=$?
+    [ "$M9_TIMING_RC" -ne 4 ] && break
+    [ "$total" -ge "$cap" ] && break
+    # The comparator's own estimate of how many sessions the observed spread needs. Clamped so a
+    # wild estimate cannot ask for an hour of timing, and floored so a batch is worth its setup.
+    add="$(sed -n 's/.*about \([0-9]\{1,\}\) sessions would.*/\1/p' "$errf" | head -1)"
+    case "$add" in ''|*[!0-9]*) add=$((total)) ;; *) add=$((add - total)) ;; esac
+    [ "$add" -lt 8 ] && add=8
+    [ $((total + add)) -gt "$cap" ] && add=$((cap - total))
+    [ "$add" -le 0 ] && break
+    printf '%s: the %s interval is not sharp enough at %s sessions; adding %s more\n' \
+      "$TEST_NAME" "$kind" "$total" "$add" >&2
+    sed -n '1,2p' "$errf" >&2
+    m9_bench_sessions "$kind" "$pat" "$unp" "$dir" "$out" "$ino" "$add" "$total"
+    total=$((total + add))
+    M9_TIMING_EXTENSIONS=$((M9_TIMING_EXTENSIONS + 1))
+  done
+  M9_SESSIONS_RUN="$total"
+}
+
+# The ceilings on that extension. Chosen from the cost of a session rather than from a round
+# number: a native session is about 8 s here and a V8 one about 25 s, so the native cap is a
+# little over twenty minutes of timing and the wasm cap about twenty. Both are far above the
+# spread this host has ever shown — 32 native sessions put the half-width at roughly 0.6pp
+# against the 1.00pp requirement, so reaching the cap means something about the machine has
+# changed and the honest answer is to say so rather than to measure a worse number harder.
+M9_BENCH_SESSION_CAP="${M9_BENCH_SESSION_CAP:-160}"
+M9_WASM_BENCH_SESSION_CAP="${M9_WASM_BENCH_SESSION_CAP:-48}"
+
+# The exit code this check spends on "measured, inside the budget, not sharp enough to claim".
+# Distinct from 1 (an assertion failed) and from 3 (the machine was too busy to measure at all),
+# because the three call for three different responses and collapsing them is what made M14's
+# sweep report a measurement threshold as a milestone regression.
+M9_PRECISION_PRECONDITION_EXIT="${M9_PRECISION_PRECONDITION_EXIT:-4}"
 
 # ---------------------------------------------------------------------------
 # The transcripts. Written by verify_observation_hook_step_records_identical, which is the check
