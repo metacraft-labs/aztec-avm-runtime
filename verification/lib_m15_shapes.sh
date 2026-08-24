@@ -245,22 +245,51 @@ m15_key() { # <file> <key>
 # Asserting emptiness would fail on a correct run; `--no-warnings` or a redirect would suppress a
 # real diagnostic along with those. So what is asserted is that stderr carries NOTHING FROM THE
 # FAILURE VOCABULARY — the words a C++ exception, a trap, an abort or a node stack trace put there
-# — and the tolerated lines are named, so node or the AVM changing what it prints becomes a finding
-# rather than a silently widened filter.
+# — and the named shapes are what it looks for.
+#
+# IT IS A BLACKLIST AND IT IS CALLED ONE. An earlier version of this comment said the tolerated
+# lines were "named, so node or the AVM changing what it prints becomes a finding", which describes
+# a WHITELIST and is not what the code does: anything outside the vocabulary passes silently. A
+# whitelist is not available here — the AVM's log lines carry addresses, gas figures and cache
+# sizes and change with the corpus — so the honest statement is that this catches the named failure
+# shapes and nothing else, and the call sites carry the rest: every one of them pairs this with an
+# `exit 0` and a `<mode>.done == 1` assertion, which catch every FATAL miss whatever was printed.
+#
+# THE VOCABULARY WAS WIDENED AFTER REVIEW MEASURED WHAT IT LET THROUGH. `[Ee]rror` behind a
+# `(^|[^A-Za-z])` guard does not match `TypeError:`, `ReferenceError:`, `RangeError:` or
+# `SyntaxError:` — the four commonest ways a node host fails — nor V8's all-caps
+# `FATAL ERROR: Reached heap limit`. The `*Error` family is matched as a FAMILY now, the all-caps
+# shapes are named separately, and so are wasmtime's bare `wasm trap:`, glibc's allocator
+# diagnostics (`double free or corruption`, `free(): invalid pointer`, `stack smashing detected`)
+# and the way a killed process reports itself.
 m15_stderr_unexpected() { # <file>
-  [ -f "$1" ] || { printf '0\n'; return; }
+  # A MISSING FILE IS NOT A CLEAN ONE. This used to print 0, which made the assertion vacuous at
+  # any call site that passed the wrong `$OUT` — the "comparisons must not succeed because both
+  # sides are empty" rule, one level down. It prints something no caller can compare equal to 0,
+  # so a wrong path becomes a named failure rather than a silent pass.
+  [ -f "$1" ] || { printf 'no-stderr-file:%s\n' "$1"; return; }
   # `grep -c` prints its count even when that count is zero and exits 1 for it, so the trailing
   # `|| true` swallows the STATUS and not the output — a `|| printf 0` there would print a second
   # zero and every caller would be comparing "0" against "0\n0".
   #
-  # ONE exclusion, and it is named rather than folded into the vocabulary: the AVM logs a revert's
-  # own message, and the corpus's `revert` program reverts with "Assertion failed:". A REVERT IS A
-  # TRANSACTION OUTCOME, NOT A FAILURE — conflating the two is the confusion M17's
-  # trap-versus-revert requirement exists to prevent — so the line that reports one is excluded by
-  # its own shape (`halted via REVERT with message:`) and the word "Assertion" stays in the
-  # vocabulary for every other line.
-  grep -v 'halted via REVERT with message:' "$1" \
-    | grep -cE '(^|[^A-Za-z])([Ee]rror|Traceback|Assertion|abort|Aborted|terminate called|RuntimeError|LinkError|panicked|Segmentation)([^A-Za-z]|$)' \
+  # ONE exclusion, and it is ANCHORED TO THE EXACT LINE rather than to its class. The AVM logs a
+  # revert's own message, and the corpus's `revert` program reverts with an EMPTY one, which the
+  # log renders as `Assertion failed: ` and then the `(mem: …)` suffix. A REVERT IS A TRANSACTION
+  # OUTCOME, NOT A FAILURE — conflating the two is the confusion M17's trap-versus-revert
+  # requirement exists to prevent — but `grep -v 'halted via REVERT with message:'` is an
+  # unanchored substring that exempts a revert carrying ANY message, and the revert channel is
+  # precisely how an internal C++ exception's `what()` reaches the caller. So the exemption is the
+  # empty-message line and only that: a revert whose message SAYS something is read like any other
+  # line, and if what it says is a failure word this counts it.
+  #
+  # A SECOND exclusion, anchored the same way and for the same reason: `nix develop` writes its
+  # own eval-cache chatter to the same stream, and `error (ignored): SQLite database '…' is busy`
+  # turns up on a busy host. It is nix's line, not the module's, and it says "ignored" itself. It
+  # is exempted by its exact shape rather than by dropping lowercase `error` from the vocabulary,
+  # which is what dropping it would have cost.
+  grep -vE 'halted via REVERT with message: Assertion failed: *(\(mem: [^)]*\))? *$' "$1" \
+    | grep -vE "^error \(ignored\): SQLite database '[^']*' is busy\$" \
+    | grep -cE '(^|[^A-Za-z])([Ee]rror|Traceback|Assertion|abort|Aborted|terminate called|panicked|Segmentation|Killed|core dumped|double free|invalid pointer|stack smashing detected|bad_alloc|SIGSEGV|SIGABRT|SIGBUS|SIGILL|wasm trap)([^A-Za-z]|$)|[A-Za-z]+Error([^A-Za-z]|$)|(FATAL ERROR|UNRECOVERABLE ERROR|INTERNAL ERROR)' \
     || true
 }
 
@@ -337,6 +366,54 @@ m15_run_bench() { # <tree> <out-file> [reps] [build-dir]
     export LD_LIBRARY_PATH="/usr/lib:${LD_LIBRARY_PATH:-}"
     "$1" "$2"
   ' "$bin" "$reps" >"$out" 2>"$out.err"
+}
+
+# ---------------------------------------------------------------------------
+# m15_bench_min <out> <fileA> <fileB> — combine two runs of ONE arm into one key=value file,
+# taking the MINIMUM of every numeric value.
+#
+# WHY THERE ARE TWO RUNS PER ARM AT ALL. The checkpoint characterisation used to run each arm
+# ONCE, base first, ext second, and compare the two files. Arm was therefore perfectly confounded
+# with launch order, and the arms are separate processes with separate heaps: whatever the first
+# process pays for a cold page cache and a fresh allocator, the second does not. Measured on this
+# host, the first run of a session reads 6,630 us at 10,000 leaves where the same binary's second
+# reads 9,384 — the ORDER effect is larger than the quantity the comparison was for.
+#
+# So the caller runs the four benches in the order base, ext, ext, base. Each arm occupies one
+# early slot and one late slot, so the mean launch position is 2.5 for both and the order effect
+# is balanced out rather than assigned to one arm. That is an ABBA design and it is the cheapest
+# thing that removes the confound; it costs one extra run per arm.
+#
+# THE MINIMUM, not the mean or the median of two. Each value is already the benchmark's own median
+# over `reps` repetitions inside one process, so what is left between the two runs is
+# between-PROCESS nuisance — page cache, allocator state, whichever core the scheduler picked — and
+# all of it is additive. The minimum of two draws of "true cost plus non-negative noise" is the
+# better estimate of the true cost; an average would carry half of whichever run was unlucky.
+#
+# Non-numeric values (`bench.name`) and values that happen to be equal pass through. The caller
+# asserts separately that the two runs produced the SAME KEYS, so a run that died early cannot be
+# silently minimised away into the other one.
+# ---------------------------------------------------------------------------
+m15_bench_min() { # <out> <fileA> <fileB>
+  local out="$1" a="$2" b="$3"
+  awk -F= -v OFS== '
+    FNR == NR { v[$1] = $2; order[++n] = $1; next }
+    ($1 in v) {
+      x = v[$1]; y = $2
+      if (x ~ /^[0-9]+$/ && y ~ /^[0-9]+$/) { v[$1] = (x + 0 < y + 0) ? x : y }
+    }
+    END { for (i = 1; i <= n; i++) print order[i], v[order[i]] }
+  ' "$a" "$b" >"$out"
+}
+
+# m15_bench_spread <fileA> <fileB> <key> — |A - B| for one numeric key: the run-to-run spread of
+# ONE binary, which is this measurement's own resolution at that key. Reported and asserted: it is
+# what says whether a cross-arm difference at that population is readable at all.
+m15_bench_spread() { # <fileA> <fileB> <key>
+  local x y
+  x="$(m15_bkey "$1" "$3")"; y="$(m15_bkey "$2" "$3")"
+  case "$x$y" in ''|*[!0-9]*) printf '\n'; return ;; esac
+  if [ "$x" -ge "$y" ]; then printf '%s\n' "$((x - y))"; else printf '%s\n' "$((y - x))"; fi
 }
 
 # m15_bkey <file> <key> — the benchmark prints `key=value`, not `key value`, because it is a C++

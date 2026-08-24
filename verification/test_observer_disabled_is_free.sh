@@ -57,9 +57,21 @@
 #   4  measured, the difference is INSIDE the budget, and the interval around it is still too
 #      wide to claim at the cap
 #
-# Exit 4 cannot hide a regression, and that is asserted rather than argued: two fabricated tables
-# below differ only by a shift, the unshifted one exits 4 and the shifted one FAILS the cost
-# assertion at exit 0, because the cost assertion is evaluated first and a FAIL wins.
+# NEITHER PRECONDITION CAN HIDE A REGRESSION, and both halves of that are asserted rather than
+# argued, by pairs of fabricated tables that differ in exactly one thing:
+#
+#   precision  two tables differing only by a shift. The unshifted one exits 4; the shifted one
+#              FAILS the cost assertion at exit 0.
+#   control    two tables differing only by whether a +30% regression is present under the same
+#              per-session scattering of the control. The one without it exits 4; the one with it
+#              exits 0 and reports the regression AND the failed control, as two FAIL rows.
+#
+# The second pair is M15's correction to itself. The first version of the control precondition
+# returned 4 with no rows whenever the control left the budget, on the argument that "the patch
+# cannot move the control". That argument is about the patch; the MACHINE moves the control, and
+# on a run where it does so while a regression is also present, a bare refusal discarded the
+# regression — `just verify-m9` reports 4 as PRECONDITION UNMET, so a measured +30% came out as a
+# non-red sweep. A recorded FAIL now outranks both refusals.
 #
 # AND THE BOUND IS NOT SYMMETRIC ANY MORE, WHICH IS M15'S OTHER CORRECTION HERE. The claim the
 # upstream patch stands on is that the DISABLED PATH COSTS NOTHING — a claim about not being
@@ -437,6 +449,73 @@ assert_true "and saying it is a precondition rather than a regression" \
   grep -q 'MEASUREMENT PRECONDITION, not a regression' "$ctl/noisy.err"
 assert_eq "and the patched-versus-unpatched arms were left untouched in that control" \
   "$(awk -F'\t' '$2 == "patched"' "$samples" | grep -c .)" "$(awk -F'\t' '$2 == "patched"' "$ctl/noisy.tsv" | grep -c .)"
+
+# AND THE CASE THAT SHOWS THE REFUSAL CANNOT SWALLOW A RESULT: a real regression measured ON a
+# machine that had also scattered the control. This is the one the previous version of the
+# precondition got wrong, and it got it wrong for a reason worth keeping in view — the argument
+# was "the patch cannot move the control, so the control cannot mask the patch", which is true
+# about the PATCH and silent about the MACHINE. The machine can scatter the control on a run where
+# a regression is present at the same time, and a bare refusal there DISCARDS a measured failure:
+# `just verify-m9` maps 4 to PRECONDITION UNMET, so a +30% regression came out as a non-red sweep.
+#
+# The table is synthesised from constants for the same reason the precision pair is: 32 x 15 x 3
+# rows, the patched arm a flat +30% on the unpatched one, and the control scattered +/-10% PER
+# SESSION — which is the machine's signature, not the patch's, since a copy of a binary cannot be
+# 10% away from the binary it was copied from for any reason but the host.
+#
+# What must come back is BOTH: exit 0, the cost assertion FAILING and named, and the control's own
+# row also FAILING beside it rather than replacing it.
+awk -v R="$ctl/regress_noisy.tsv" 'BEGIN{
+  OFS="\t"
+  for (s = 0; s < 32; s++) {
+    c = (s % 2 == 0) ? 0.90 : 1.10
+    for (i = 0; i < 15; i++) {
+      base = 100000 + (s * 7 + i * 13) % 200
+      print s, "patched",   int(base * 1.30)     > R
+      print s, "unpatched", int(base)            > R
+      print s, "control",   int(base * 1.30 * c) > R
+    }
+  }
+}'
+assert_eq "the regression-beside-a-scattered-control fabrication was written" "1440" \
+  "$(grep -c . "$ctl/regress_noisy.tsv")"
+python3 "$M9_TIMING" --disabled "$ctl/regress_noisy.tsv" "$M9_DISABLED_BUDGET_PCT" "$M9_DISABLED_FASTER_BUDGET_PCT" \
+  >"$ctl/regress_noisy.report" 2>"$ctl/regress_noisy.err"
+assert_eq "a real regression measured beside a failed control is a RESULT, not a refusal" "0" "$?"
+assert_true "the regression is reported, by name" \
+  grep -q '^FAIL	the disabled path is not SLOWER than the unpatched build' "$ctl/regress_noisy.report"
+assert_true "and the failed control is reported beside it rather than instead of it" \
+  grep -q '^FAIL	the same test calls two copies of the SAME binary equivalent' "$ctl/regress_noisy.report"
+assert_ge "so the report is not empty — the run made a claim" 18 \
+  "$(grep -c . "$ctl/regress_noisy.report" || true)"
+assert_eq "and nothing was written to stderr, because nothing was refused" "0" \
+  "$(grep -c . "$ctl/regress_noisy.err" || true)"
+# The pair that makes it a discrimination rather than an observation: the SAME scattering with the
+# regression removed still refuses, so what changed the outcome is the regression and not the
+# scattering. Without this, "it reported" would be consistent with the precondition having been
+# deleted outright.
+awk -v R="$ctl/noregress_noisy.tsv" 'BEGIN{
+  OFS="\t"
+  for (s = 0; s < 32; s++) {
+    c = (s % 2 == 0) ? 0.90 : 1.10
+    p = (s % 2 == 0) ? 0.999 : 1.001
+    for (i = 0; i < 15; i++) {
+      base = 100000 + (s * 7 + i * 13) % 200
+      print s, "patched",   int(base * p)     > R
+      print s, "unpatched", int(base)         > R
+      print s, "control",   int(base * p * c) > R
+    }
+  }
+}'
+python3 "$M9_TIMING" --disabled "$ctl/noregress_noisy.tsv" "$M9_DISABLED_BUDGET_PCT" "$M9_DISABLED_FASTER_BUDGET_PCT" \
+  >"$ctl/noregress_noisy.report" 2>"$ctl/noregress_noisy.err"
+assert_eq "the same scattering with NO regression under it still exits 4" "4" "$?"
+assert_eq "and prints no row at all, because there is nothing to report" "0" \
+  "$(grep -c . "$ctl/noregress_noisy.report" || true)"
+assert_true "the refusal says so in as many words" \
+  grep -q 'NOTHING ELSE ON THIS RUN FAILED' "$ctl/noregress_noisy.err"
+assert_false "and the two tables differ only in the regression" \
+  cmp -s "$ctl/regress_noisy.tsv" "$ctl/noregress_noisy.tsv"
 
 # And the defect this redesign exists to remove, exercised directly: collapse every sample into ONE
 # session — which is exactly what the superseded comparator was given — and the answer must be a

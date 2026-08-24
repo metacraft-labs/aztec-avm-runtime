@@ -83,10 +83,21 @@ because the remedies differ: exit 3 says the table is malformed or too short to 
 says the comparison was made and is not sharp enough to claim. See test_observer_disabled_is_free,
 which answers exit 4 by MEASURING MORE SESSIONS rather than by widening the bound.
 
-Exit 4 cannot be reached by a measurement that would otherwise have failed. The equivalence
-assertion is evaluated FIRST and an interval that leaves +/-budget is a FAIL with exit 0,
-however wide it is. So imprecision can neither buy a pass nor hide a regression: it can only
-buy a refusal to answer.
+EXIT 4 CANNOT BE REACHED BY A MEASUREMENT THAT WOULD OTHERWISE HAVE FAILED, and that is a
+property of the ORDER the two preconditions are decided in rather than of what they measure.
+Every assertion — cost, comparability, and their minimum-statistic siblings — is evaluated and
+recorded BEFORE either precondition is consulted. A recorded FAIL then outranks both: the run
+has a result, exit 0 reports it, and the precondition that also went off is reported ALONGSIDE
+it as a FAIL row of its own rather than replacing it. Exit 4 is reachable only when the
+recorded rows are all PASS and the run therefore has nothing to say.
+
+This was not always true of the control, and the counterexample is worth keeping: a table
+carrying a real +30% regression AND a control the machine had scattered used to return 4 with
+zero rows, which `just verify-m9` reports as PRECONDITION UNMET rather than FAILED. The
+argument for that — "the patch cannot move the control, so the control cannot mask the patch" —
+is sound about the PATCH and says nothing about the MACHINE, which can move the control while a
+regression is present at the same time. Both are now reported. See
+test_observer_disabled_is_free, which fabricates exactly that table.
 """
 
 import math
@@ -282,13 +293,14 @@ def disabled(path, budget, faster_budget):
     # INCLUDING A FAILING ONE: reporting a regression on evidence already demonstrated unable to
     # resolve one is the same error as reporting a pass on it.
     #
-    # It cannot mask a real regression, and that is structural rather than hopeful: the control
-    # compares the patched binary with a COPY OF ITSELF, so nothing the patch does moves it. A
-    # patched build 30% slower leaves the control intact and fails the cost assertion, which is
-    # exercised below.
-    #
-    # This is the same argument as the width one, in its strongest form, and it is what M14's
-    # review was doing by hand when it classified M9's reds as "environmental, not regressions".
+    # WHAT THAT ARGUMENT DOES NOT COVER, stated because an earlier version of this comment claimed
+    # it did. "Nothing the patch does moves the control" is true and is about the PATCH. The
+    # MACHINE moves the control, and it can do so on a run where a real regression is present as
+    # well — at which point returning a bare refusal DISCARDS a measured failure. So the refusal is
+    # conditional on there being nothing else to report: every assertion above is already recorded
+    # when this is reached, and a recorded FAIL outranks the refusal. When both happen, both are
+    # reported and the run is a FAILURE with the control's own row marked FAIL beside the
+    # regression's. Exit 4 is reachable only from an all-PASS set of rows.
     control_ok = ctl_lo >= -budget and ctl_hi <= budget
     control_slot = len(RESULTS)
     check("the same test calls two copies of the SAME binary equivalent, so it can resolve "
@@ -353,20 +365,35 @@ def disabled(path, budget, faster_budget):
           f"min {med_min:+.2f}%  same-bytes control {ctl_p:+.2f}% "
           f"CI [{ctl_lo:+.2f}, {ctl_hi:+.2f}] (range {min(ctl):+.2f}% .. {max(ctl):+.2f}%)")
 
-    # The precision precondition is decided LAST, so that a real failure recorded above wins. If
-    # anything failed, this is a normal run with a normal result and exit 0 reports it — with the
-    # reserved row turned into the FAIL it is, since a failing run's own imprecision is worth
-    # saying.
-    # The control's verdict is decided FIRST and outranks everything, for the reason above.
-    if not control_ok:
+    # BOTH PRECONDITIONS ARE DECIDED LAST, AND A MEASURED FAILURE OUTRANKS BOTH. The assertions
+    # above are already in RESULTS, so "did this run measure something worth reporting?" is a
+    # question that can be asked, and it is asked before either refusal is allowed to discard the
+    # answer. A refusal that threw away a recorded regression would turn a red sweep amber for a
+    # reason that has nothing to do with the patch, which is the failure mode this whole file
+    # exists to avoid — in the other direction.
+    measured_failure = any(status == "FAIL" for status, _, _ in RESULTS)
+    if not control_ok and measured_failure:
+        # Both happened. Report both: the regression keeps its row and the control is downgraded
+        # from the reserved PASS to the FAIL it is, so the reader sees a failing run whose
+        # measurement was ALSO taken on a machine that could not resolve two copies of one binary.
+        name, detail = RESULTS[control_slot][1], RESULTS[control_slot][2]
+        RESULTS[control_slot] = (
+            "FAIL", name,
+            f"{detail}  -- it does not: the control leaves the +/-{budget:.0f}% budget. "
+            "Reported rather than refused, because an assertion above FAILED on this same run "
+            "and a refusal would have discarded it. Read the failure above as a candidate "
+            "regression that this run cannot cleanly attribute, and re-measure on a quiet host.")
+    elif not control_ok:
         del RESULTS[control_slot]
         sys.stderr.write(
             f"the measurement could not resolve two copies of the SAME binary: the control's 95% "
             f"interval over {k} sessions is [{ctl_lo:+.2f}%, {ctl_hi:+.2f}%], which leaves the "
             f"+/-{budget:.0f}% budget.\n"
-            f"All of that spread is nuisance — the control IS the patched binary, copied — so no "
-            f"claim about the patched-versus-unpatched difference is supportable from this run, "
-            f"including a failing one. This is a MEASUREMENT PRECONDITION, not a regression.\n"
+            f"All of that spread is nuisance — the control IS the patched binary, copied — and "
+            f"NOTHING ELSE ON THIS RUN FAILED, so there is no result to report and none is "
+            f"invented. This is a MEASUREMENT PRECONDITION, not a regression. Had an assertion "
+            f"failed as well, it would have been reported and this would have been a FAIL row "
+            f"beside it.\n"
             f"The usual cause is other work on the machine arriving AFTER the idleness check, "
             f"which samples once and does not watch. Re-run on a quiet host.\n")
         return 4

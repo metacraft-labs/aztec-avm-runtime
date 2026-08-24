@@ -173,11 +173,72 @@ require_nix() {
 # it to 2, because in its vocabulary 1 means DIVERGENCE, and a work directory it cannot write is a
 # broken run rather than a differing one. Collapsing those two is exactly what that script's
 # exit-status contract exists to prevent.
+#
+# AND THE WORK DIRECTORY IS TAKEN EXCLUSIVELY, WHICH IS M15's REVIEW'S FINDING.
+#
+# Two `just verify-m9` runs were launched four minutes apart, both defaulting to the same
+# `~/.cache/aztec-m9-observer`, and they clobbered each other: one rebuilt the tree while the other
+# was benchmarking out of it ("required artefact missing: .../build-native-avm/bin/avm_differential"
+# is in the loser's own log), and both appended to the SAME `bench/native.tsv`, so the samples file
+# a timing interval was computed over held two runs' sessions under one set of session ids. The
+# reading that came out of that — +2.28% CI [-1.42%, +6.07%] with the same-bytes control failing
+# too — was then written up as a finding about foreign load on the machine. There was no foreign
+# load. The contention was self-inflicted, and nothing anywhere refused it, because this function
+# checked free space and nothing else.
+#
+# So a work directory is now HELD, for the lifetime of the process that took it, and a second
+# holder is a precondition failure that names the first. The lock is an `flock` on a file inside
+# the directory, so it is released by the kernel when the holder dies however it dies — no stale
+# lock file survives a kill, which a PID file would.
+#
+# TWO THINGS MUST NOT TRIP OVER IT, and both are handled by the same exported ledger rather than by
+# two mechanisms:
+#
+#   * the libraries ALIAS work directories on purpose — `lib_m14_world_state.sh` sets
+#     `M6_WORK="$M14_WORK"`, `lib_m9_observer.sh` sets `M8_WORK="$M9_WORK"`, and M15 points four of
+#     them at one directory — so one process calls this several times for the same path. flock
+#     conflicts between two open file descriptions even inside one process, so a naive lock would
+#     deadlock the campaign's own layering.
+#   * a check may run another check, or the differential runner, as a CHILD against the same work
+#     directory. That child is part of the same run and must not be refused by its own parent.
+#
+# `_WORK_DIR_LOCKS_HELD` is exported, so both cases are the same case: a path already in it is
+# already held by this run, and the second request is a no-op.
 # ---------------------------------------------------------------------------
 WORK_DIR_PRECONDITION_EXIT="${WORK_DIR_PRECONDITION_EXIT:-1}"
+_WORK_DIR_LOCKS_HELD="${_WORK_DIR_LOCKS_HELD:-}"
+export _WORK_DIR_LOCKS_HELD
+
+# There is deliberately NO opt-out. An unlocked run is exactly the run this exists to stop, and a
+# switch that turned a refusal back into a silent share would be the first thing reached for the
+# next time two runs collide. The refusal names the holder and says what to do about it; that is
+# the whole interface.
+
+_work_dir_hold() { # <canonical-dir> ; returns 0 if held (or already held), 1 if someone else has it
+  local dir="$1" fd
+  case ":$_WORK_DIR_LOCKS_HELD:" in
+    *":$dir:"*) return 0 ;;
+  esac
+  command -v flock >/dev/null 2>&1 || {
+    printf '  --   work-directory locking unavailable (no flock); concurrent runs are not refused\n'
+    return 0
+  }
+  exec {fd}>"$dir/.work-dir.lock" || return 1
+  if ! flock -n "$fd"; then
+    exec {fd}>&-
+    return 1
+  fi
+  # Who holds it, for the diagnostic the NEXT run prints. Written after the lock is taken, so it
+  # can never describe a holder that does not exist.
+  printf 'pid %s  check %s  since %s\n' "$$" "${TEST_NAME:-?}" "$(date -Is 2>/dev/null || date)" \
+    >"$dir/.work-dir.owner" 2>/dev/null || true
+  _WORK_DIR_LOCKS_HELD="$_WORK_DIR_LOCKS_HELD:$dir"
+  export _WORK_DIR_LOCKS_HELD
+  return 0
+}
 
 require_work_dir() { # <dir> <minimum-gb>
-  local dir="$1" min_gb="${2:-1}" avail_kb probe
+  local dir="$1" min_gb="${2:-1}" avail_kb probe canon holder
   _wd_die() {
     printf '%s: cannot run: %s\n' "$TEST_NAME" "$*" >&2
     exit "$WORK_DIR_PRECONDITION_EXIT"
@@ -201,6 +262,19 @@ require_work_dir() { # <dir> <minimum-gb>
              dozens of unrelated assertion failures."
   fi
   rm -f "$probe"
+  # LAST, so that a directory which cannot be written is reported as that rather than as a lock
+  # failure. `-P` resolves symlinks, so two spellings of one directory are one lock.
+  canon="$(cd "$dir" && pwd -P)" || _wd_die "the work directory vanished while it was being checked: $dir"
+  if ! _work_dir_hold "$canon"; then
+    holder="$(cat "$canon/.work-dir.owner" 2>/dev/null || true)"
+    _wd_die "another run already holds this work directory: $canon
+             held by: ${holder:-(unknown — the lock is taken but the owner file is unreadable)}
+             Two runs sharing one work directory rebuild the tree under each other and append to
+             one samples file; M15's review found a timing interval computed over two runs' sessions
+             under one set of session ids, and it was written up as foreign load on the machine.
+             Wait for that run, kill it, or give this one its own directory by setting the
+             milestone's <M>_WORK."
+  fi
 }
 
 # in_shell <repo> <script>: run <script> under `nix develop` for <repo>.

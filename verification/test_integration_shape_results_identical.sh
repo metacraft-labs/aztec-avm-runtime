@@ -140,4 +140,89 @@ assert_false "a dropped field is rejected too" \
 assert_eq "and it really was one line shorter" \
   "$(( $(m15_lines "$SCRATCH/$M15_REPRESENTATIVE.cha") - 1 ))" "$(m15_lines "$SCRATCH/mut-short")"
 
+# ---------------------------------------------------------------------------
+# THE FAILURE VOCABULARY ITSELF, exercised. Every check in this milestone asserts that a run wrote
+# nothing from it, and until review nothing established that it would recognise anything: the
+# `(^|[^A-Za-z])` guard in front of `[Ee]rror` meant `TypeError:`, `ReferenceError:`, `RangeError:`
+# and `SyntaxError:` — the four commonest ways a node host dies — did not match, nor did V8's
+# all-caps `FATAL ERROR:`. A vocabulary nobody has ever seen reject a line is an assertion that
+# passes because both sides are empty, one level up.
+#
+# So both directions are asserted here, on fabricated files, against the SAME function the seven
+# per-program assertions above call.
+# ---------------------------------------------------------------------------
+VOC="$SCRATCH/vocab"; mkdir -p "$VOC"
+i=0
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  i=$((i + 1))
+  printf '%s\n' "$line" >"$VOC/pos$i"
+  assert_ge "the failure vocabulary recognises: $line" 1 "$(m15_stderr_unexpected "$VOC/pos$i")"
+done <<'POS'
+TypeError: R.e.avm_simulate is not a function
+ReferenceError: mdb is not defined
+RangeError: Maximum call stack size exceeded
+SyntaxError: Unexpected end of JSON input
+FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory
+wasm trap: out of bounds memory access
+terminate called after throwing an instance of 'std::runtime_error'
+Segmentation fault (core dumped)
+double free or corruption (out)
+free(): invalid pointer
+*** stack smashing detected ***: terminated
+[NR_NULLIFIER_INSERTION] UNRECOVERABLE ERROR! Nullifier collision
+POS
+assert_eq "twelve failure shapes, each on its own" "12" "$i"
+
+# The tolerated lines, which a correct run really does produce (D11), and which must stay
+# tolerated — otherwise the vocabulary is asserting something about the AVM's log level.
+j=0
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  j=$((j + 1))
+  printf '%s\n' "$line" >"$VOC/neg$j"
+  assert_eq "and tolerates, because a correct run writes it: $line" "0" \
+    "$(m15_stderr_unexpected "$VOC/neg$j")"
+done <<'NEG'
+Simulating... (mem: N/A)
+[NON_REVERTIBLE] Inserting 1 nullifiers, 0 note hashes, and 0 L2 to L1 messages for tx 0xtest (mem: N/A)
+(node:12345) ExperimentalWarning: WASI is an experimental feature and might change at any time
+Out of gas exception: Out of gas: total L2 used 1 of 2, total DA used 96 of 100 (mem: N/A)
+PureTxBytecodeManager held 132 instructions in cache, totaling ~24 kB. (mem: N/A)
+NEG
+assert_eq "five tolerated shapes" "5" "$j"
+
+# THE TWO EXEMPTIONS ARE ANCHORED, and the pair below is what makes that a property rather than a
+# claim. The corpus's `revert` program reverts with an EMPTY message, and that line carries the
+# word "Assertion" — so it is exempt. A revert carrying a MESSAGE is the channel an internal C++
+# exception's `what()` travels on, and the class-wide `grep -v 'halted via REVERT with message:'`
+# this replaced exempted those too.
+printf '%s\n' '[APP_LOGIC] Enqueued call to 0x2a halted via REVERT with message: Assertion failed:  (mem: N/A)' \
+  >"$VOC/revert-empty"
+printf '%s\n' '[APP_LOGIC] Enqueued call to 0x2a halted via REVERT with message: Assertion failed: internal invariant broken (mem: N/A)' \
+  >"$VOC/revert-carrying"
+assert_eq "the corpus's own empty-message revert is exempt — a revert is an outcome, not a failure" \
+  "0" "$(m15_stderr_unexpected "$VOC/revert-empty")"
+assert_ge "but a revert CARRYING a message is not, because that is how an internal what() escapes" \
+  1 "$(m15_stderr_unexpected "$VOC/revert-carrying")"
+# The same shape for nix's own eval-cache chatter: its exact line is exempt, a lookalike is not.
+printf '%s\n' "error (ignored): SQLite database '/home/u/.cache/nix/eval-cache-v6/ab.sqlite' is busy" \
+  >"$VOC/nix-busy"
+printf '%s\n' "error (ignored): SQLite database is corrupt and the module did not load" \
+  >"$VOC/nix-lookalike"
+assert_eq "nix's own eval-cache line is exempt by its exact shape" "0" \
+  "$(m15_stderr_unexpected "$VOC/nix-busy")"
+assert_ge "a line that merely resembles it is not" 1 "$(m15_stderr_unexpected "$VOC/nix-lookalike")"
+
+# AND A MISSING FILE IS NOT A CLEAN ONE. This returned 0 — i.e. passed — so a call site that
+# passed the wrong `$OUT` had a vacuous assertion. It cannot compare equal to 0 now, and it names
+# the path it could not find.
+MISSING="$(m15_stderr_unexpected "$VOC/there-is-no-such-file")"
+assert_false "a missing stderr file does not read as a clean one" test "$MISSING" = "0"
+assert_true "and the answer names the path that was not there" \
+  test "$MISSING" = "no-stderr-file:$VOC/there-is-no-such-file"
+# The real files this check just read DO exist, so the assertions above were about content.
+assert_file "the representative program's stderr file is a real file" \
+  "$SCRATCH/$M15_REPRESENTATIVE.txt.err"
+
 finish

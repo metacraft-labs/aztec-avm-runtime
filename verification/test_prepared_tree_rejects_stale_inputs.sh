@@ -21,7 +21,10 @@
 #   aztec-m14-archive/m14                    commit 1, M14's own world_state_reference patch
 #
 # The first five differ only by a COMMENT that M10's review corrected in
-# `barretenberg/cpp/CMakeLists.txt`, so those milestones' numbers stand. The M12 one is the
+# `barretenberg/cpp/src/CMakeLists.txt` — the `src/` one; `barretenberg/cpp/CMakeLists.txt` is a
+# different, real file that carries `option(AVM_WASM …)`, and this header named it for two
+# revisions. Those milestones' numbers stand, and by artefact rather than by argument: the merged
+# wasm built before and after the comment change is byte-identical. The M12 one is the
 # stale overlay that turned M12 red in the M14 sweep. The M14 one is the pre-review revision
 # of M14's own patch, which is material. A mechanism that cannot tell the first case from the
 # third is the defect; that the first case happened to be harmless is luck.
@@ -298,6 +301,136 @@ assert_eq "M7's four series patches are the first four of M9's" \
 assert_true "but M7's FIFTH is not M9's fifth — the observer patch is inserted there" \
   test "$(m6_patch_ids_of_files "${STACK_M7[@]}" | sed -n 5p)" \
        != "$(m6_patch_ids_of_files "${STACK_M9[@]}" | sed -n 5p)"
+
+# ---------------------------------------------------------------------------
+# THE OTHER WAY A PREPARED TREE STOPS BEING THE TREE YOU ASKED FOR: someone else is using it.
+#
+# The freshness mechanism above compares a directory against the patch files that name it. It has
+# nothing to say about a SECOND RUN rebuilding that directory while the first is measuring out of
+# it, and M15's review found exactly that: two `just verify-m9` trees, four minutes apart, both on
+# the default `~/.cache/aztec-m9-observer`, appending to one `bench/native.tsv`. One of them logged
+# "required artefact missing: .../build-native-avm/bin/avm_differential" while the other rebuilt
+# the tree underneath it, and the timing interval that came out was computed over two runs'
+# sessions carrying one set of session ids. It was written up as foreign load on the machine; there
+# was none.
+#
+# `require_work_dir` holds the directory exclusively now, and the four properties that makes useful
+# are asserted here against the REAL function, in real processes — a lock nobody has watched refuse
+# anything is the "both sides were empty" defect one level down. A CHILD of the holding run is not
+# refused; an INDEPENDENT run is, by name and by pid; an ORPHAN that outlives its launcher keeps
+# the directory taken, which is the case review actually met; and the kernel frees it when the last
+# holder is killed, which is why it is an flock on a file rather than a pid file.
+# ---------------------------------------------------------------------------
+LOCKDIR="$SCRATCH/lockdir"
+mkdir -p "$LOCKDIR"
+LOCKLIB="$VERIFY_DIR/lib.sh"
+holder="$SCRATCH/lock-holder.sh"
+taker="$SCRATCH/lock-taker.sh"
+cat >"$holder" <<HOLDER
+#!/usr/bin/env bash
+set -uo pipefail
+TEST_NAME=lock_holder
+. "$LOCKLIB"
+require_work_dir "\$1" 1
+printf 'holder-took-it %s\n' "\$\$"
+# A CHILD of this run must not be refused by its own parent: checks invoke the differential
+# runner and each other, and the libraries alias four work-directory variables onto one path.
+"\$2" "\$1"
+printf 'child-rc %s\n' "\$?"
+# An ORPHAN that will outlive this process, holding the inherited descriptor. This is the exact
+# shape review found: two backgrounded \`just verify-m9\` trees reparented to init, still building
+# in a directory their launcher had let go of.
+sleep 300 &
+printf '%s\n' "\$!" >"\$3"
+# \`exec\` rather than a plain \`sleep\`: it REPLACES this process, so the pid the test kills is the
+# pid holding the lock. A child \`sleep\` would hold the inherited descriptor after its parent died
+# and the release below would be testing the wrong thing.
+exec sleep 300
+HOLDER
+cat >"$taker" <<TAKER
+#!/usr/bin/env bash
+set -uo pipefail
+TEST_NAME=lock_taker
+. "$LOCKLIB"
+require_work_dir "\$1" 1
+printf 'taker-took-it %s\n' "\$\$"
+TAKER
+chmod +x "$holder" "$taker"
+( "$holder" "$LOCKDIR" "$taker" "$SCRATCH/orphan.pid" >"$SCRATCH/holder.out" 2>"$SCRATCH/holder.err" & echo $! >"$SCRATCH/holder.pid" )
+HOLDER_PID="$(cat "$SCRATCH/holder.pid")"
+# Wait for the holder to have taken it rather than sleeping a guessed interval.
+for _ in $(seq 1 100); do
+  grep -q 'holder-took-it' "$SCRATCH/holder.out" 2>/dev/null && break
+  sleep 0.1
+done
+assert_true "the first run took the work directory" \
+  grep -q 'holder-took-it' "$SCRATCH/holder.out"
+assert_file "and the lock file is inside the directory it locks" "$LOCKDIR/.work-dir.lock"
+assert_true "with an owner record naming the pid and the check" \
+  grep -qE "^pid $HOLDER_PID  check lock_holder  since " "$LOCKDIR/.work-dir.owner"
+# The child, which shares the run and must not be refused. Its output is in the holder's file.
+for _ in $(seq 1 100); do
+  grep -q 'child-rc' "$SCRATCH/holder.out" 2>/dev/null && break
+  sleep 0.1
+done
+assert_true "a CHILD of the holding run is not refused — it is the same run" \
+  grep -q 'taker-took-it' "$SCRATCH/holder.out"
+assert_true "and it exited 0" grep -q '^child-rc 0$' "$SCRATCH/holder.out"
+
+# An INDEPENDENT run, which is the one that must be refused. `env -u` is what makes it
+# independent: the ledger of held directories is exported, and inheriting it is exactly what
+# distinguishes a child of this run from somebody else's run.
+env -u _WORK_DIR_LOCKS_HELD "$taker" "$LOCKDIR" >"$SCRATCH/taker.out" 2>"$SCRATCH/taker.err"
+TAKER_RC=$?
+assert_eq "an INDEPENDENT second run is refused, and not with a zero status" "1" "$TAKER_RC"
+assert_eq "it took nothing" "0" "$(grep -c 'taker-took-it' "$SCRATCH/taker.out" || true)"
+assert_true "the refusal names the directory" \
+  grep -q "another run already holds this work directory: $LOCKDIR" "$SCRATCH/taker.err"
+assert_true "and names who holds it, by pid and by check" \
+  grep -qE "held by: pid $HOLDER_PID  check lock_holder" "$SCRATCH/taker.err"
+assert_true "and says what goes wrong when two runs share one, so the reader can act on it" \
+  grep -q 'rebuild the tree under each other and append to' "$SCRATCH/taker.err"
+
+# THE ORPHAN PROPERTY, which is the one that matters for what review found. The lock is held by
+# every process that inherited the descriptor, not by the launcher, so killing the shell that
+# started a run does NOT hand the directory to the next one while its build is still going. Assert
+# it: the holder is killed, an orphaned `sleep` it left behind is not, and the directory stays
+# taken.
+lock_wait_gone() { # <pid>
+  local _
+  for _ in $(seq 1 100); do
+    kill -0 "$1" 2>/dev/null || return 0
+    sleep 0.1
+  done
+  return 1
+}
+# Waited for rather than assumed: the holder writes the pid a moment after it prints `child-rc`,
+# and a check that raced it would report "no orphan" as a property of the lock.
+for _ in $(seq 1 100); do
+  [ -s "$SCRATCH/orphan.pid" ] && break
+  sleep 0.1
+done
+ORPHAN_PID="$(cat "$SCRATCH/orphan.pid" 2>/dev/null || true)"
+assert_true "the holding run left an orphan behind, as a backgrounded build does" \
+  test -n "$ORPHAN_PID"
+kill -9 "$HOLDER_PID" 2>/dev/null
+assert_true "the holder is gone" lock_wait_gone "$HOLDER_PID"
+assert_true "the orphan is still alive" kill -0 "$ORPHAN_PID"
+env -u _WORK_DIR_LOCKS_HELD "$taker" "$LOCKDIR" >"$SCRATCH/taker2.out" 2>"$SCRATCH/taker2.err"
+assert_eq "and the directory is STILL taken, because the orphan inherited the descriptor" "1" "$?"
+assert_eq "so the next run still takes nothing" "0" \
+  "$(grep -c 'taker-took-it' "$SCRATCH/taker2.out" || true)"
+
+# AND IT IS RELEASED BY THE KERNEL once the last holder is gone, not by a cleanup path — which is
+# the reason it is an flock on a file rather than a pid file. Both processes were KILLED, so no
+# exit handler of either ran.
+kill -9 "$ORPHAN_PID" 2>/dev/null
+assert_true "the orphan is gone too" lock_wait_gone "$ORPHAN_PID"
+env -u _WORK_DIR_LOCKS_HELD "$taker" "$LOCKDIR" >"$SCRATCH/taker3.out" 2>"$SCRATCH/taker3.err"
+assert_eq "with the last holder gone the directory is free again — no stale lock file survives a kill" \
+  "0" "$?"
+assert_true "and the next run takes it" grep -q 'taker-took-it' "$SCRATCH/taker3.out"
+assert_file "even though the lock file itself is still there" "$LOCKDIR/.work-dir.lock"
 
 rm -rf "$SCRATCH"
 finish
