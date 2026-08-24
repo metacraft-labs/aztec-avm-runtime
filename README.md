@@ -47,6 +47,8 @@ tested with `npm install`, with no barretenberg C++ build, no Rust/wasm-bindgen 
 | `REACTOR-ABI.md` | the standalone `avm.wasm` reactor's export and import surface and its msgpack host ABI — M12's write-up |
 | `CONTRACT-DB.md` | the eight implementations of `ContractDBInterface` upstream has, the three dispositions, and the one taken — M13's write-up |
 | `WORLD-STATE.md` | what the in-memory reference world state covers of block production and what it does not: five implementations enumerated, thirteen operations classified, four dispositions worked in order — M14's write-up |
+| `BOUNDARY-SHAPE.md` | how much of the transaction and block loop lives inside wasm, decided on measurement, with the rejected shape's numbers retained — M15's write-up |
+| `FALLBACK.md` | the TypeScript-trees fallback: its three triggers evaluated conjunct by conjunct, the switch priced out of the deleted package, and the wrong-root hazard with its target values — M16's write-up, and the milestone closes **not-required** |
 | `PROVENANCE.md` | the machine-checked mapping of every vendored file to its upstream path and commit; the input `just check-drift` reads |
 | `pins.json` / `PINS.md` | the single authority for every upstream pin, and the policy for moving it |
 | `DRIFT.md` | the drift ledger: every place two pinned things disagree, opened when observed rather than when fixed |
@@ -101,7 +103,8 @@ recorded in `PROVENANCE.md`.
 - The trees now hash internal nodes with a **per-tree domain separator**,
   `poseidon2([SEP, lhs, rhs])` — reproduced exactly against the native world state in
   `probe-mt/`. The deleted `@aztec/merkle-tree` package uses undomained `poseidon2([l, r])`
-  and would produce wrong roots.
+  and would produce wrong roots — `FALLBACK.md` §3 carries both target values and re-derives
+  them on every run.
 - The whole execution path, `PublicProcessor` included, **bundles for the browser**:
   10.56 MB minified / 6.84 MB gzipped, of which the AVM itself is **115 KB**.
 - **The deleted TS↔C++ differential harness runs, and it is green.** `diffsim/` gets

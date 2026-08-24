@@ -1292,3 +1292,63 @@ verify-m15:
       echo "verify-m15: all checks passed"
     fi
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M16 — the narrowed TypeScript-trees fallback: evaluated, priced, and NOT taken.
+#
+# THIS MILESTONE BUILDS NOTHING AND TAKES NO WORK DIRECTORY. Its three triggers are
+# conjunctions and none of them fires, so the fallback is not executed — but the
+# milestone requires the evaluation and the price to be RECORDED either way, so a
+# future reader who has to reopen the question does not redo the analysis.
+#
+# What the two checks measure rather than quote:
+#
+#   * the price, out of @aztec/merkle-tree@5.0.0-nightly.20260316 as installed under
+#     probe-mt/node_modules/ — the last published nightly that ships the package at
+#     all, carried in pins.json as a declared npm_exceptions entry for that reason;
+#   * the hazard, twice over: the undomained root asked of the PACKAGE's own
+#     StandardTree, and the native one produced by the domain-separated recurrence
+#     with the separator read out of @aztec/constants and checked against two
+#     independent Tier D witnesses and against the fork's own DOM_SEP__MERKLE_HASH.
+#
+# Where a trigger rests on a number another milestone measured, it BINDS to that
+# milestone's document — BOUNDARY-SHAPE.md, WORLD-STATE.md — rather than reading a
+# stale artefact out of ~/.cache. Every such figure is asserted present on BOTH
+# sides, so a drift fails here instead of passing quietly.
+#
+#   just verify-fallback-triggers  verify_fallback_triggers_recorded_and_evaluated
+#   just verify-fallback-cost      verify_fallback_cost_priced
+#   just verify-m16                both, in order
+#
+# The other four verification entries in M16 are guarded by "If triggered" and stay
+# pending: an implementation the milestone says must not be written cannot have a
+# passing test, and a check that reported one would be the failure this campaign
+# keeps correcting.
+# ---------------------------------------------------------------------------
+
+# Each narrowed trigger evaluated conjunct by conjunct, with a negative case per conjunct.
+verify-fallback-triggers:
+    @verification/verify_fallback_triggers_recorded_and_evaluated.sh
+
+# The switch priced out of the installed package, and the wrong-root hazard re-derived.
+verify-fallback-cost:
+    @verification/verify_fallback_cost_priced.sh
+
+# Run the whole M16 verification set; every check runs even if an earlier one fails.
+verify-m16:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_fallback_triggers_recorded_and_evaluated \
+      verify_fallback_cost_priced
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m16: FAILED" >&2
+    else
+      echo "verify-m16: all checks passed"
+    fi
+    exit "$rc"

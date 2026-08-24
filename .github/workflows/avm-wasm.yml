@@ -745,3 +745,95 @@ jobs:
         with:
           name: boundary-shape
           path: artifacts-m15
+
+  fallback-triggers:
+    name: the TypeScript-trees fallback — triggers evaluated, cost priced, not taken
+    runs-on: eph-linux-x64
+    # M16. THIS JOB BUILDS NOTHING AND TAKES NO WORK DIRECTORY, which is what makes it the cheapest
+    # job in this workflow and the only one that needs neither the fork's build nor a compiler
+    # cache. It does need the fork checked out, because the two checks read the pinned anchor with
+    # `git show` — upstream's own DOM_SEP__* constants, its TypeScript merkle tree, and the
+    # whole-fork enumeration of MerkleTree{Write,Read}Operations implementations.
+    #
+    # It also needs `npm install` in probe-mt/, because the price and the hazard are MEASURED out
+    # of @aztec/merkle-tree@5.0.0-nightly.20260316 rather than quoted. That is a real dependency on
+    # the npm registry still serving a nightly upstream deleted the package from, and if it stops
+    # serving it this job goes red — CORRECTLY, because the artefact M16 prices would be gone and
+    # the price would have become unverifiable prose. pins.json records it as a declared
+    # npm_exceptions entry for exactly that reason.
+    #
+    # STATUS, STATED PLAINLY: this job has never run, and neither has any job above it. They all
+    # still abort at `Generate CI token` on "Input required and not supplied: app-id", which M11
+    # recorded as undiagnosed after the `vars.` spelling did not fix it. So this job existing means
+    # it is wired and names the checks — not that a run has ever gated anything.
+    timeout-minutes: 30
+    steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout aztec-avm-runtime
+        uses: actions/checkout@v4
+        with:
+          path: aztec-avm-runtime
+
+      - name: Clone the aztec-packages fork
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/aztec-packages
+          ref: aztec-avm-runtime
+          path: aztec-packages
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup Dev Environment
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Assert the anchor is present
+        working-directory: aztec-packages
+        run: |
+          set -euo pipefail
+          git fetch --unshallow 2>/dev/null || true
+          # The two checks read this commit with `git show`; a shallow clone would make them fail
+          # for a reason that has nothing to do with the fallback.
+          git rev-parse --verify 233d8e0993^{commit}
+
+      - name: Assert M16's own inputs are present
+        run: |
+          set -euo pipefail
+          # The write-up, the two measurement tools and the two probes. Asserted here so that
+          # "measured rather than quoted" cannot decay into a document nothing re-derives.
+          for p in \
+            aztec-avm-runtime/FALLBACK.md \
+            aztec-avm-runtime/verification/_fallback_parser.py \
+            aztec-avm-runtime/verification/_fallback_price.py \
+            aztec-avm-runtime/verification/lib_m16_fallback.sh \
+            aztec-avm-runtime/probe-mt/m16_hazard.mjs \
+            aztec-avm-runtime/probe-mt/m16_adapter_probe.mjs ; do
+            test -f "$p" || { echo "::error::missing M16 input: $p" >&2; exit 1; }
+          done
+
+      - name: Install the deleted merkle-tree package
+        working-directory: aztec-avm-runtime/probe-mt
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tail -20
+
+      - name: Run the M16 checks
+        working-directory: aztec-avm-runtime
+        # See the M7 job: `shell: bash` supplies `-o pipefail`, which the default `bash -e {0}` does
+        # not, so `| tee` cannot swallow a failure.
+        shell: bash
+        run: dev-exec just verify-m16 2>&1 | tee verify-m16.log
+
+      - name: Upload the M16 log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fallback-triggers
+          path: aztec-avm-runtime/verify-m16.log
