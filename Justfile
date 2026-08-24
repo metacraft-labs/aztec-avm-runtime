@@ -820,6 +820,7 @@ verify-m9:
     #!/usr/bin/env bash
     set -uo pipefail
     rc=0
+    precond=0
     for check in \
       verify_observation_hook_step_records_identical \
       test_observer_does_not_perturb \
@@ -830,14 +831,30 @@ verify-m9:
       verify_execution_observer_patch_applies_to_upstream
     do
       echo "=== $check"
-      verification/"$check".sh || rc=1
+      verification/"$check".sh
+      st=$?
+      case "$st" in
+        0) ;;
+        # M9's checks spend 3 and 4 on PRECONDITIONS — the machine was too busy to time on, or
+        # the interval it managed is inside the budget and still too wide to claim at the session
+        # cap. Neither is a milestone regression and neither is a pass, so they are reported
+        # under their own name and the target still exits non-zero. Collapsing them into 1 is
+        # what made M14's sweep read a measurement threshold as a red.
+        3|4) echo "verify-m9: $check exited $st — a measurement PRECONDITION, not a failure" >&2
+             precond=1 ;;
+        *) rc=1 ;;
+      esac
     done
     if [ "$rc" -ne 0 ]; then
       echo "verify-m9: FAILED" >&2
+      exit 1
+    elif [ "${precond:-0}" -ne 0 ]; then
+      echo "verify-m9: PRECONDITION UNMET — no check failed, and at least one could not measure" >&2
+      exit 4
     else
       echo "verify-m9: all checks passed"
     fi
-    exit "$rc"
+    exit 0
 
 # ---------------------------------------------------------------------------
 # M10 — the AVM-module / server-module CMake split, and the AVM_WASM flag.
@@ -998,6 +1015,14 @@ verify-reactor-steps:
 verify-reactor-transcripts:
     @verification/test_avm_reactor_transcripts_match_driver.sh
 
+# It lives in M12's set because a stale ~/.cache/aztec-m12-reactor is what made it necessary,
+# but m6_prepare_tree — the function it guards — is where every milestone from M6 on gets its
+# trees, and SEVEN of the campaign's default work trees were stale when this was written.
+#
+# A prepared work tree is reused only if its ORDERED patch-ids equal the patch files'.
+verify-tree-freshness:
+    @verification/test_prepared_tree_rejects_stale_inputs.sh
+
 # Run the whole M12 verification set; every check runs even if an earlier one fails.
 verify-m12:
     #!/usr/bin/env bash
@@ -1009,7 +1034,8 @@ verify-m12:
       verify_host_abi_reuses_upstream_msgpack \
       test_avm_reactor_alloc_free_roundtrip \
       test_avm_reactor_step_stream_batching \
-      test_avm_reactor_transcripts_match_driver
+      test_avm_reactor_transcripts_match_driver \
+      test_prepared_tree_rejects_stale_inputs
     do
       echo "=== $check"
       verification/"$check".sh || rc=1
@@ -1192,5 +1218,77 @@ verify-m14:
       echo "verify-m14: FAILED" >&2
     else
       echo "verify-m14: all checks passed"
+    fi
+    exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M15 — the integration shape across the wasm boundary, and the cost of the
+# reference world state's own checkpoints.
+#
+# ONE worktree of 233d8e0993 under $M15_WORK (default ~/.cache/aztec-m15-shapes)
+# carrying M13's TEN patches — M15 adds no eleventh, because the module M12 built
+# and M13 completed already contains BOTH candidate entry points and M12's own ABI
+# write-up recorded that "the choice between them is M15's". Plus the two
+# world-state trees the checkpoint characterisation needs, four trees and five,
+# prepared by M14's recipe inside M15's own work directory rather than read out of
+# M14's.
+#
+# A fully fused chatty arm — the two host interfaces over an imported callback — is
+# PREPARED under verification/m15/ and is not measured; BOUNDARY-SHAPE.md says so
+# rather than leaving it an unstated gap.
+#
+#   just verify-shapes-identical   test_integration_shape_results_identical
+#   just verify-crossing-budget    verify_boundary_crossing_budget
+#   just verify-checkpoint-cost    test_checkpoint_cost_characterised
+#   just verify-shape-wall-time    test_representative_transaction_wall_time
+#   just verify-msgpack-cost       test_msgpack_encode_decode_cost
+#   just verify-snapshot-boundary  e2e_world_state_snapshot_across_boundary
+#   just verify-m15                all six, in order
+# ---------------------------------------------------------------------------
+
+# The two shapes agree field for field on the corpus, so the choice is about cost.
+verify-shapes-identical:
+    @verification/test_integration_shape_results_identical.sh
+
+# Eighteen to twenty-two DB crossings per transaction, counted from upstream's own hint record.
+verify-crossing-budget:
+    @verification/verify_boundary_crossing_budget.sh
+
+# What the reference world state's O(state) checkpoints cost, over a decade of population.
+verify-checkpoint-cost:
+    @verification/test_checkpoint_cost_characterised.sh
+
+# A representative transaction and a full block, timed end to end through both shapes.
+verify-shape-wall-time:
+    @verification/test_representative_transaction_wall_time.sh
+
+# The null crossing, the transport at both payload sizes, and the decode — separately.
+verify-msgpack-cost:
+    @verification/test_msgpack_encode_decode_cost.sh
+
+# Export and import, and the finding that the two shapes do not answer it equally.
+verify-snapshot-boundary:
+    @verification/e2e_world_state_snapshot_across_boundary.sh
+
+# Run the whole M15 verification set; every check runs even if an earlier one fails.
+verify-m15:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      test_integration_shape_results_identical \
+      verify_boundary_crossing_budget \
+      test_checkpoint_cost_characterised \
+      test_representative_transaction_wall_time \
+      test_msgpack_encode_decode_cost \
+      e2e_world_state_snapshot_across_boundary
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m15: FAILED" >&2
+    else
+      echo "verify-m15: all checks passed"
     fi
     exit "$rc"

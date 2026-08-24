@@ -638,6 +638,36 @@ component is and what it costs us, and does not repeat the deletion.
 - confidence: measured
 - experiment: n/a — `verify_compiler_cache_effective` re-measures the cold/warm identity on a smaller target and asserts, separately, that the cache cannot mask a difference: M14's own base and patched trees differ in exactly one translation unit in the targets it builds, and compiling the second from a different absolute path against the warm cache gives 1 miss and the rest hits, with the two libraries differing by sha256. Two wasi-sdk toolchains compiling the same bytes miss and produce different objects.
 
+### RI-56 — The chatty boundary shape (`ContractDBInterface` / `LowLevelMerkleDBInterface` over an imported callback)
+- upstream: `barretenberg/vm2_wsdb/wsdb_ipc_merkle_db.hpp` — `WsdbIpcMerkleDB`, a `final` implementation of all fourteen `LowLevelMerkleDBInterface` methods over a WSDB IPC transport @ anchor `cpp`
+- covers: -
+- decision: build
+- milestone: M15
+- why: **Upstream already ships the chatty shape**, and finding that out was the enumeration this entry exists for. `WsdbIpcMerkleDB` holds a `WsdbIpcClient&` and a `WorldStateRevision` and translates each interface call into an IPC command over a Unix domain socket — per-method translate-and-cross, which is exactly the shape a host-implemented DB behind a wasm import needs. It lives in `barretenberg/vm2_wsdb/`, a subdirectory **parallel to** `vm2/`: the seventh instance of the shape that hid `automine/` under `sequencer-client/` and `FuzzerContractDB` under `avm_fuzzer/`. What is built is written *against* it rather than from a blank file: `verification/m15/avm_chatty_dbs.{hpp,cpp}` is the same per-method translation with the revision dropped (the AVM's interface has no parameter to carry one — RI-54) and one wasm import, `env.avm_host_db_call`, in place of the socket. **It is prepared and deliberately not measured**: M15's decision turns on the crossing COUNT and the crossing COST, and both are measured without it — the count from upstream's own hint record, the cost through the twenty-two exports M12 and M13 already built. BOUNDARY-SHAPE.md records it as prepared-not-measured rather than leaving it an unstated gap.
+- rejection-reason: cannot-reach-target: `WsdbIpcMerkleDB` cannot reach `wasm32-wasip1`. `vm2_wsdb/CMakeLists.txt` declares it against `wsdb` and `ipc_runtime`; `ipc_runtime` is a Unix-domain-socket transport and `wsdb` links `world_state`, which is lmdb-backed and takes a thread pool. The target is a browser runtime with no sockets and no threads.
+- confidence: measured
+- experiment: n/a — the enumeration is re-derived by `verify_boundary_crossing_budget`, which asserts the op table against `vm2/simulation/interfaces/db.hpp` method by method in both directions.
+
+### RI-57 — The boundary-crossing count of a transaction
+- upstream: `barretenberg/cpp/src/barretenberg/vm2/simulation/lib/hinting_dbs.hpp` (`HintingRawDB`) and the `ExecutionHints` schema it fills @ anchor `cpp`
+- covers: -
+- decision: depend
+- milestone: M15
+- why: M15 was asked to decide a boundary shape on measurement, and the quantity the decision turns on — how many times a transaction crosses the boundary in the chatty shape — is a number **upstream already records**. `HintingRawDB` is a recording decorator over both host DBs: it forwards every call and writes it into `ExecutionHints`, which is what makes `simulate_with_hinted_dbs` a replay. So the hint record is a per-METHOD tally of exactly the calls a host-implemented DB would have had to answer, and eighteen of its categories map one-to-one onto methods of the two interfaces. The count is therefore a COUNT and not an estimate: **18 to 22 per transaction** over the seven corpus programs, with `burn` executing 38,903 instructions and consulting the host twenty-two times. Nothing of ours computes it; `verification/wasm_host/_hint_crossings.mjs` is a 22-row mapping table and a decoder, and it reports any hint category it does not recognise rather than dropping it.
+- rejection-reason: n/a
+- confidence: measured
+- experiment: n/a
+
+### RI-58 — Checkpointing in the reference world state
+- upstream: `barretenberg/cpp/src/barretenberg/world_state_reference/memory_merkle_db.{hpp,cpp}` — `create_checkpoint` / `commit_checkpoint` / `revert_checkpoint` over `std::stack<State>` @ anchor `cpp`
+- covers: world-state
+- decision: extend
+- milestone: M15 (measurement), upstream contribution (the optimisation)
+- why: Depended on as it stands and **measured for the first time**, because nobody had: at the pinned anchor no benchmark anywhere in the fork names `world_state_reference`, `MemoryMerkleDB` or `memory_merkle_db`, and the only file that exercises checkpoints — `world_state/memory_merkle_db.test.cpp` — asserts equivalence and contains no clock. The class's own header says checkpoints "deep-copy the whole tree state onto a stack and restore on revert", and §6.4's design constraint asked for O(changes); the mechanism is `checkpoints_.push(state_)` where `State` is four whole trees by value — five with M14's archive patch — each a `SparseMemoryTree` over an `std::unordered_map<uint64_t, FF>`, so a push is a node-by-node rehash of every map and a pop a node-by-node destruction. Checkpoints are taken per nested call, per phase and per transaction. The disposition is an **upstream optimisation with independent merit, not a rewrite**: copy-on-write on the node map (`nodes_` behind a `shared_ptr`, cloned on first write after a checkpoint) or an undo journal of `(key, previous value)` per write — either makes `create_checkpoint` O(1) and moves the cost to the writes, where O(changes) puts it, without changing a single caller. The merit is upstream's own: `MemoryMerkleDB` is what the AVM fuzzer and `PublicTxSimulationTester` run against, and both take a checkpoint per nested call.
+- rejection-reason: n/a
+- confidence: measured
+- experiment: n/a — `test_checkpoint_cost_characterised` re-measures create, commit and revert over populations a decade apart, against the anchor's four trees AND M14's five, from one source that detects which it has with a `requires`-expression, and asserts the growth as a ratio rather than the microseconds as a budget.
+
 ---
 
 ## Not in this inventory, and why

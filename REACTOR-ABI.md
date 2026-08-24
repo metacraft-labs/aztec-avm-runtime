@@ -127,8 +127,14 @@ builds a `PureMerkleDB` itself, exactly as it wraps whatever raw contract DB it 
 A host-**implemented** `ContractDBInterface` would be an imported callback, and the deliverable's own
 "no oracle or foreign-call surface at all" would then be false of this artefact. So the two
 interfaces are exposed as exports over implementations resident in the module. The
-host-implemented, imported-callback shape is M15's *chatty* arm and is measured there against this
-one; nothing here forecloses it.
+host-implemented, imported-callback shape is M15's *chatty* arm; nothing here forecloses it.
+
+**Corrected by M15**, because a document that promises a measurement somebody else will make is a
+document that drifts: M15 did **not** measure the imported-callback shape. It measured the two
+entry points below and the twenty-two exported interface methods, found the crossing count to be
+18–22 per transaction and a crossing to cost 19 ns, and decided on the payload instead. The
+imported-callback arm is **prepared and not measured** — `verification/m15/avm_chatty_dbs.{hpp,cpp}`,
+written against upstream's own `WsdbIpcMerkleDB`. See `BOUNDARY-SHAPE.md`.
 
 ### The raw contract DB was provisional here, and M13 has since answered it
 
@@ -249,7 +255,10 @@ code, all four gas dimensions, the transaction fee, the nullifier and data-write
 with the driver and with the resident path exactly, for all seven corpus programs.
 
 The choice between them is **M15's**, and this milestone records the two measurements it will need
-rather than making it.
+rather than making it. **M15 made it: resident.** Not on the crossing count, which turned out to be
+18–22 per transaction at 19 ns each, but on the payload — the hinted arm's 186,712–191,807 bytes
+against 1,951 — and on the host having no way to hold the trees. `BOUNDARY-SHAPE.md` carries the
+numbers and the rejected shape's.
 
 ## The step stream
 
@@ -304,6 +313,12 @@ encode and decode all 38,903 records**, and that work dominates. What the differ
 crossing itself. So the number to carry into M15 is the 600-650 ns per crossing, not the 1.3x — a
 transaction that crosses the boundary per storage read pays that per read, and a shape that crosses
 once per transaction pays it once.
+
+**M15 re-measured the crossing on its own and got 19 ns**, and the two numbers are not in conflict:
+this one is a crossing that carries a batch of records and re-encodes them, M15's is
+`avm_abi_version()` returning a constant. The 600-650 ns is what a crossing costs *here*, with this
+payload; the 19 ns is what a crossing costs with none. M15 needed the second, because what it was
+pricing was the per-DB-operation overhead of a shape, not the cost of draining a step stream.
 
 Only `x86_64-linux` was exercised, as in M6 through M9.
 
