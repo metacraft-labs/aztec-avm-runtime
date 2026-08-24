@@ -326,15 +326,24 @@ try {
     // A BLOCK: the seven corpus programs as seven transactions against ONE world state and ONE
     // contract DB, with a checkpoint opened around each.
     //
-    // EVERY TRANSACTION IS REVERTED, AND THAT IS A PROPERTY OF THE CORPUS RATHER THAN A CHOICE.
-    // All seven hand-assembled programs emit the SAME nullifier, 0x…deadbeef, so committing any
-    // one of them makes the next fail with `[NR_NULLIFIER_INSERTION] UNRECOVERABLE ERROR!
-    // Nullifier collision` — which is upstream's own check working correctly on a corpus that was
-    // built as seven independent transactions and never as a block. So the block here measures
-    // seven EXECUTIONS against one world state and one contract DB, each inside its own checkpoint
-    // pair, and the state returns to where it started. What that costs is the block's execution
-    // cost; what it does not exercise is seven transactions' effects accumulating, and M20/M22
-    // need a corpus with distinct nullifiers before they can.
+    // EVERY TRANSACTION IS REVERTED, AND THE CAUSE IS M12'S DRIVER RATHER THAN THE CORPUS.
+    // All seven transactions carry the SAME first nullifier, 0x…deadbeef, so committing any one of
+    // them makes the next fail with `[NR_NULLIFIER_INSERTION] UNRECOVERABLE ERROR! Nullifier
+    // collision` — upstream's own duplicate check working correctly.
+    //
+    // But that nullifier is not emitted by the PROGRAMS at all: it is the tx-level non-revertible
+    // first nullifier, and upstream's `PublicTxSimulationTester` already makes it unique per
+    // transaction — `deadbeef + FF(tx_count); tx_count++`, with `tx_count` a per-instance member
+    // (vm2/testing/public_tx_simulation_tester.cpp:216-219, .hpp:109). M12's driver constructs a
+    // FRESH tester per program, on purpose, for transcript stability, which resets that counter
+    // every time. This comment said "a property of the corpus" for two revisions; it is a property
+    // of the harness.
+    //
+    // So the block here measures seven EXECUTIONS against one world state and one contract DB, each
+    // inside its own checkpoint pair, and the state returns to where it started. What that costs is
+    // the block's execution cost; what it does not exercise is seven transactions' effects
+    // accumulating — and what M20/M22 need for that is ONE LINE in the driver (one tester across
+    // the block, or a nullifier offset), not a new corpus.
     const names = programs();
     line('block.transactions', names.length);
     let hintedCrossings = 0;

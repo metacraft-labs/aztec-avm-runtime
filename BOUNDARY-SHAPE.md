@@ -92,23 +92,32 @@ parameter to carry one, which is M14's "block-pinned reads: not needed"), with a
 place of the socket.
 
 `vm2_wsdb/` is a barretenberg subdirectory **parallel to** `vm2/` — the same directory shape that
-hid `automine/` under `sequencer-client/`, `FuzzerContractDB` under `avm_fuzzer/`, and
-`WsdbIpcMerkleDB` itself from M14's first pass. It is the seventh instance.
+hid `automine/` under `sequencer-client/` and `FuzzerContractDB` under `avm_fuzzer/`. Those two
+and this one are the instances actually named in this campaign's write-ups; an earlier revision of
+this line called it "the seventh", which is a count no document enumerates and nothing asserts, so
+it is dropped rather than carried. `WsdbIpcMerkleDB` was in fact already pinned by M14
+(`verification/lib_m14_world_state.sh:129-136`), so M15 confirmed it rather than found it.
 
 The second reuse find is what makes §3 possible: **`HintingRawDB`**
 (`vm2/simulation/lib/hinting_dbs.hpp`) is upstream's own recording decorator over both DBs. It
-forwards every call and records it, which is why the hint record is a per-method tally of exactly
-the calls a chatty host would have had to answer.
+forwards every call it hints and records it, which is why the hint record is a per-method tally of
+those calls — see §3 for the four methods it does not hint.
 
 ---
 
-## 3. How many times a transaction crosses the boundary — a count, not an estimate
+## 3. How many times a transaction crosses the boundary — a measured lower bound
 
 `AvmProvingInputs.hints` is what `simulate_with_hinted_dbs` consumes. It exists so a hinted replay
-can answer every DB call the original simulation made, so it *is* a per-method tally of those
-calls. Eighteen of its categories map one-to-one onto methods of the two host interfaces, and
-`startingTreeRoots` is the one `get_tree_roots`. The mapping lives in
+can answer every DB call the original simulation made *whose answer it cannot derive*, so it is a
+per-method tally of the hinted ones. Eighteen of its categories map one-to-one onto methods of the
+two host interfaces, and `startingTreeRoots` is the one `get_tree_roots`. The mapping lives in
 `verification/wasm_host/_hint_crossings.mjs`.
+
+**The number below is the sum of the hint arrays' lengths, which makes it a lower bound rather than
+a total** — a correction to two earlier revisions of this section, which called it "a count, not an
+estimate". It is still measured rather than guessed; it is simply a bound. Where it is short is
+enumerated below the table, and the decision does not turn on it: even sixty crossings at the
+measured 19 ns is about a microsecond against milliseconds of work.
 
 | program | hinted bytes | DB crossings |
 |---|---|---|
@@ -120,25 +129,45 @@ calls. Eighteen of its categories map one-to-one onto methods of the two host in
 | storage | 191807 | 21 |
 | burn | 187651 | 22 |
 
-**`burn` executes 38,903 instructions and consults the host DBs twenty-two times.** The AVM's host
-surface is not read per instruction or per memory access. `PureMerkleDB` inside vm2 satisfies the
-*high-level* surface itself — storage reads and writes, siloing, note-hash uniqueness, L1-to-L2
-checks — and only the low-level misses reach the boundary.
+**`burn` executes 38,903 instructions and makes at least twenty-two hinted DB calls** — tens, not
+tens of thousands. That is the shape the decision rests on: the AVM's host surface is not read per
+instruction or per memory access. `PureMerkleDB` inside vm2 satisfies the *high-level* surface
+itself — storage reads and writes, siloing, note-hash uniqueness, L1-to-L2 checks — and only the
+low-level misses reach the boundary.
 
 The recorded **per-transaction DB crossing budget is 32**: the measured maximum of 22 plus the room
-one more nested call would need. It is a ceiling a regression crosses, not a target. A shape change
-that made the AVM consult the host per memory access would go through it by three orders of
-magnitude.
+one more nested call would need. It is a ceiling a regression crosses, not a target, and it is
+calibrated on the hinted count, so it is a bound on that quantity rather than on the true call
+count. A shape change that made the AVM consult the host per memory access would go through it by
+three orders of magnitude, which is what it is for.
 
-Three of the twenty-two interface methods have no hint category, and each absence is a statement
-rather than a gap:
+**Where the count is known to be short.** Three of the twenty-two interface methods have no hint
+category at all, and this section described each absence as meaning the method is never called.
+Two of those three descriptions were wrong. A fourth method, `get_tree_roots`, has a category that
+is a single object rather than an array, so it contributes exactly 1 however many times it is
+called. All four, verified against the fork at the anchor:
 
-- `pad_tree` — the AVM never pads. Padding is the block builder's operation, and M14 established
-  that upstream appends the L1-to-L2 bundle unpadded and pads exactly two trees.
+- `get_tree_roots` contributes **1**, because `startingTreeRoots` is a single object rather than an
+  array. It is in fact the *most-called* method on the interface.
+  `HintingRawMerkleDB::get_tree_roots` (`vm2/simulation/lib/hinting_dbs.hpp:57`) forwards and
+  records nothing, and `PureMerkleDB::get_tree_state()`
+  (`vm2/simulation/standalone/concrete_dbs.cpp:37-41`) calls it uncached from a dozen sites.
+  M14's own gdb instrumentation counted **104 of 164** calls into the reference DB as this method.
+- `pad_tree` **is called, twice per transaction.** `TxExecution::simulate` calls `pad_trees()`
+  unconditionally (`vm2/simulation/gadgets/tx_execution.cpp:311`, forwarded at `:678`) and
+  `PureMerkleDB::pad_trees()` pads the note-hash and nullifier trees
+  (`vm2/simulation/standalone/concrete_dbs.cpp:181-187`). What is true is that no `padTreeHints`
+  category exists — a replay derives the padding from the tree state it already holds. "The AVM
+  never pads" was M14's finding about the *block builder*, read one level too far.
+- `get_checkpoint_id` **is called, once per nested call.** The `Context` constructor takes it into
+  `checkpoint_id_at_creation` (`vm2/simulation/gadgets/context.hpp:45`) and
+  `vm2/simulation/gadgets/execution.cpp:1937` reads it again to assert the stack came back.
 - `add_contracts` — a write, performed when a transaction publishes a class. A replay does not need
-  a hint for it, so the count above is a count of the *reads and the stack moves*, and a lower
-  bound on `add_contracts`-heavy transactions.
-- `get_checkpoint_id` — an accessor the AVM does not call.
+  a hint for it, so the count above is short there too.
+
+A further caveat measured by mutation: deleting the `merkle.get_leaf_value` mapping row changes no
+program's total, because `getLeafValueHints` is empty for every corpus program. The maximum of 22
+is therefore taken over a corpus that leaves at least one of the twenty-two methods at zero calls.
 
 ### The other side of the boundary is the step stream, and it is already solved
 
@@ -219,14 +248,24 @@ with a checkpoint opened and committed around each.
 | DB crossings, whole block | 2 per tx (in + out) | **137** |
 | peak linear memory | 201 pages | 201 pages |
 
-**The corpus cannot commit seven transactions to one world state**, and that is a finding about the
-corpus rather than a limitation of the harness: all seven hand-assembled programs emit the *same*
+**Seven transactions cannot be committed to one world state as this harness drives them**, and the
+cause is M12's DRIVER, not the corpus — a correction to two earlier revisions of this section,
+which read the symptom as a property of the programs. All seven transactions carry the same first
 nullifier, `0x…deadbeef`, so committing one makes the next fail upstream's own
-`[NR_NULLIFIER_INSERTION] UNRECOVERABLE ERROR! Nullifier collision`. Every transaction therefore
-runs inside its own checkpoint pair and is reverted, and what is asserted is what that shape
-supports: the world state MOVED inside a transaction, came BACK on revert, and the checkpoint stack
-ends where it started. **M20 and M22 need a corpus with distinct nullifiers** before a block's
-effects can accumulate; this is where that requirement was found.
+`[NR_NULLIFIER_INSERTION] UNRECOVERABLE ERROR! Nullifier collision`. But that nullifier is not
+emitted by the programs at all: it is the tx-level non-revertible first nullifier, and upstream's
+`PublicTxSimulationTester` already makes it unique per transaction —
+`deadbeef + FF(tx_count); tx_count++`, with `tx_count` a per-instance member
+(`vm2/testing/public_tx_simulation_tester.cpp:216-219`, `.hpp:109`). M12's driver constructs a
+FRESH tester per program, deliberately, for transcript stability
+(`verification/m12/0001-test-vm2-AVM_REACTOR-*.patch:325,335-336`), which resets the counter to
+zero every time.
+
+Every transaction therefore runs inside its own checkpoint pair and is reverted, and what is
+asserted is what that shape supports: the world state MOVED inside a transaction, came BACK on
+revert, and the checkpoint stack ends where it started. **M20 and M22 need a one-line driver
+change** — one tester across the block, or a nullifier offset — and *not* a new corpus with
+distinct nullifiers, which is what this section used to export as a requirement.
 
 The block-level crossing count is the sum of the transactions' — 137, not a new order of magnitude
 — which is the property M23's facade needs.
@@ -244,7 +283,7 @@ byte, and the two shapes differ in both, so one number would hide the term the d
 
 | quantity | measured |
 |---|---|
-| null crossing (`avm_abi_version` x 50,000, median of 3) | **19 ns** per crossing |
+| null crossing (`avm_abi_version` x 200,000, median of 3) | **19 ns** per crossing |
 | transport of 50 x 1,951 B (alloc / copy / free) | 23 us |
 | transport of 50 x 191,807 B | 235 us |
 | host decode of a 174,613 B result (median of 3) | 824 us |
@@ -285,29 +324,38 @@ against BOTH trees — the pinned anchor's four trees and the anchor plus M14's 
 five — detecting which it has with a `requires`-expression rather than an `#ifdef`, so neither
 arm is told which one it is. Medians over 9 repetitions; microseconds.
 
+Each arm is run TWICE, in the order base / ext / ext / base, and the two runs are combined by
+taking the minimum of each value. That is an ABBA design and it replaces one in which each arm ran
+once with base always first — the arms are separate processes with separate heaps, and on this host
+the launch-order effect at 10,000 leaves is larger than anything the tree count could do. The two
+runs of an arm also give the measurement's own run-to-run spread, which is what decides where a
+cross-arm claim is made at all.
+
 The population is built the way execution builds it: nullifiers through
 `insert_indexed_leaves_nullifier_tree`, public-data writes through
 `insert_indexed_leaves_public_data_tree`, note hashes through `append_leaves`.
 
 | leaves inserted | create (5 trees) | commit | revert | create (4 trees) |
 |---|---|---|---|---|
-| 0 (genesis prefill only) | 26 us | 6 us | 10 us | 20 us |
-| 100 | 60 us | 14 us | 24 us | 52 us |
-| 1000 | 367 us | 67 us | 144 us | 391 us |
-| 10000 | 6086 us | 664 us | 2605 us | 10183 us |
+| 0 (genesis prefill only) | 25 us | 6 us | 9 us | 19 us |
+| 100 | 57 us | 12 us | 21 us | 52 us |
+| 1000 | 352 us | 66 us | 143 us | 383 us |
+| 10000 | 4133 us | 629 us | 2109 us | 4904 us |
 
-**It is O(state).** A ten-fold population costs **16.6x** more per `create_checkpoint`
-(6086 us at 10,000 leaves against 367 us at 1,000), and the decade below shows the same
-growth at **6.1x** (367 us against 60 us at 100). The four-tree arm shows it too — **26.0x** and
-**7.5x** over the same two decades — so this is a property of the design and not of M14's patch.
-O(changes) predicts a ratio of 1.0x at both, and the data refuses it four times over.
+**It is O(state).** A ten-fold population costs **11.7x** more per `create_checkpoint`
+(4133 us at 10,000 leaves against 352 us at 1,000), and the decade below shows the same
+growth at **6.2x** (352 us against 57 us at 100). The four-tree arm shows it too — **12.8x** and
+**7.4x** over the same two decades — so this is a property of the design and not of M14's patch.
+O(changes) predicts a ratio of 1.0x at both, and the data refuses it four times over. The check
+bounds all four ratios on both sides, at 4x and 100x; an earlier revision put the ceiling on one
+of the four and left the ratio that had broken the previous bound with no ceiling at all.
 
 **And there is a floor.** A freshly constructed database has already written the two indexed
 trees' genesis prefill — 128 leaves each, at heights 42 and 40 — so the FIRST checkpoint of a
-transaction that has done nothing at all costs **26 us**. An empty transaction is not free.
+transaction that has done nothing at all costs **25 us**, against 19 us for four trees. An empty transaction is not free.
 
 `commit` copies nothing — it pops — but popping a `State` destroys four or five hash maps node
-by node, so it is not free either: **67 us** at 1,000 leaves against **367 us** to create. They
+by node, so it is not free either: **66 us** at 1,000 leaves against **352 us** to create. They
 are timed apart for that reason; reporting one 'checkpoint cost' would merge a copy with a
 destructor.
 
@@ -316,21 +364,46 @@ opens a checkpoint per nested external call and `Execution::handle_exit_call` cl
 
 | depth | open + close, at 1,000 leaves |
 |---|---|
-| 1 | 423 us |
-| 4 | 1756 us |
-| 16 | 7650 us |
+| 1 | 420 us |
+| 4 | 1715 us |
+| 16 | 7074 us |
 
-**M14's fifth tree costs less than this measurement can resolve, and that is the answer.**
-The archive tree holds ONE leaf at genesis, so it contributes a handful of nodes to a copy of
-hundreds of thousands. `create_checkpoint` with five trees against four is 1.2x at 100 leaves,
-0.9x at 1,000 and 0.6x at 10,000 — **the sign is not stable**, and a fifth tree cannot make a copy
-cheaper. What the data supports is that the fifth tree does not change the COMPLEXITY; what it
-does not support is a figure for its cost.
+Linear in depth, which is what O(state)-per-checkpoint predicts: 4.1x and 4.1x for the two
+four-fold steps. The check bounds both steps at 2x and 8x — an earlier revision asserted only
+`>= 2x`, which passes on sqrt growth and on quadratic alike and so said nothing about linearity.
 
-The two arms' ABSOLUTE times at 10,000 leaves disagree by more than the tree count could explain
-and in the wrong direction — 10183 us for four trees against 6086 us for five — so no claim is made
-on their ratio at that population. The growth claim above survives it because a ratio taken
-WITHIN one arm shares that arm's conditions; a ratio across the arms does not.
+**M14's fifth tree costs a small constant, and it is measured at the two populations where it can
+be.** The archive tree holds ONE leaf at genesis, so the prediction is a fixed handful of
+microseconds that does not grow with the state — and that is what the two smallest populations
+show: **+6 us at population 0** (19 us to 25 us) and **+5 us at 100** (52 us to 57 us). Five
+independent ABBA measurements of these two binaries put it at 5 to 7 us at both populations, always
+positive, and never growing between them while the four-tree copy itself nearly triples. The
+check asserts the sign a fifth tree requires, that the addition is smaller than the four trees'
+own cost, that it is a handful of microseconds rather than hundreds, and that it does NOT grow
+while the four-tree copy does.
+
+At 1,000 and 10,000 leaves **no claim is made**, and none is asserted. The two arms are separate
+processes with separate heaps, and at those populations they differ by more — and in the direction
+a fifth tree cannot cause — than the fifth tree costs: 383 us against 352 us at 1,000, 4904 against
+4133 at 10,000. What licenses the claim at 0 and 100 is asserted instead, and it is the ABBA design
+that makes it available: the difference is positive in **both independent halves** of the pair —
++6 and +6 us at population 0, +5 and +5 us at 100 — so the sign replicates inside the run rather
+than being one draw. (An earlier form of that licence compared the difference against the arms'
+raw run-to-run spread, which is the wrong comparison: the estimate is of the two runs' MINIMUM and
+a single slow outlier moves the spread without moving it. It went red once, at 7 us against 7 us,
+on a measurement that was perfectly good.) For scale, at 10,000 leaves one binary's own two runs
+differ by **3,935 us**, against the 6 us being looked for.
+
+**How this was previously stated, and why it was wrong.** Two earlier revisions reported "the sign
+is not stable" — 1.2x at 100, 0.9x at 1,000, 0.6x at 10,000 — and read the instability as the
+measurement telling us the fifth tree's cost was below resolution. The check that carried it
+asserted `at least one has it FASTER, which a fifth tree cannot cause`, i.e. it required an
+impossible observation as its passing condition, and it voted with the 10,000-leaf cross-arm ratio
+that this very section declared unusable. The cleanest population, `cp.0`, was measured, printed,
+and excluded. The arms were also one run each with base always first, so arm was confounded with
+launch order — and on this host the order effect at 10,000 leaves is thousands of microseconds.
+The null is withdrawn; what replaces it is the positive constant above, plus an explicit refusal to
+claim anything at the two large populations.
 
 ### The disposition
 
@@ -405,10 +478,13 @@ for AVM-applied state.
   state, and §6 prices one: about 0.4 ms at 1,000 leaves and about 6 ms at 10,000, growing
   superlinearly. At developer scale that is affordable; the optimisation is what makes it stay
   affordable as the state grows, and it is what M23 should watch rather than the boundary.
-- **The corpus M20 and M22 will build on needs distinct nullifiers.** The seven hand-assembled
-  programs all emit `0x…deadbeef`, so no two of them can be committed to one world state — found
-  by trying, in §5's block measurement, which works around it by reverting every transaction. A
-  block builder cannot.
+- **M20 and M22 need a one-line change to M12's driver, not a new corpus.** Every transaction
+  carries the same first nullifier `0x…deadbeef`, so no two can be committed to one world state —
+  found by trying, in §5's block measurement, which works around it by reverting every transaction;
+  a block builder cannot. But upstream's `PublicTxSimulationTester` already emits
+  `deadbeef + tx_count` per transaction, and it is M12's driver constructing a fresh tester per
+  program that resets the counter. One tester across the block, or a nullifier offset, is the whole
+  fix. See §5.
 
 ### M25 — step-level tracing
 

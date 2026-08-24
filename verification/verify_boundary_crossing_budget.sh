@@ -1,19 +1,28 @@
 #!/usr/bin/env bash
 # verify_boundary_crossing_budget
 #
-# HOW MANY TIMES A TRANSACTION CROSSES THE BOUNDARY IN THE CHATTY SHAPE, AS A COUNT.
+# HOW MANY TIMES A TRANSACTION CROSSES THE BOUNDARY IN THE CHATTY SHAPE — A MEASURED LOWER BOUND.
 #
 # The milestone's premise is that "a TypeScript layer that drives them from outside turns every
 # read into a boundary round trip", and the whole decision turns on how many round trips that is.
 # M15 does not estimate it. It reads it out of upstream's own record.
 #
 # `AvmProvingInputs.hints` is what `AvmSimAPI::simulate_with_hinted_dbs` consumes, and it exists so
-# that a hinted replay can answer every DB call the original simulation made — so it is exactly a
-# per-METHOD tally of those calls. Eighteen of its categories map one-to-one onto methods of
-# `ContractDBInterface` and `LowLevelMerkleDBInterface`, and `startingTreeRoots` is the one
-# `get_tree_roots`. The mapping lives in `wasm_host/_hint_crossings.mjs` so the host and this check
-# cannot disagree about it, and the blob is produced by THIS milestone's own build of upstream's
-# own `avm_differential reactorinputs`.
+# that a hinted replay can answer every DB call the original simulation made *whose answer it
+# cannot derive* — so it is a per-METHOD tally of the HINTED calls. Eighteen of its categories map
+# one-to-one onto methods of `ContractDBInterface` and `LowLevelMerkleDBInterface`, and
+# `startingTreeRoots` is the one `get_tree_roots`. The mapping lives in
+# `wasm_host/_hint_crossings.mjs` so the host and this check cannot disagree about it, and the blob
+# is produced by THIS milestone's own build of upstream's own `avm_differential reactorinputs`.
+#
+# WHAT THE NUMBER IS, EXACTLY. It is the sum of the hint arrays' LENGTHS, so it is a LOWER BOUND on
+# the calls a host-implemented DB would answer, not a total. This header said "AS A COUNT" for two
+# revisions. Three of the interface's methods are called without being hinted — `get_tree_roots`
+# (the most-called one; unhinted and uncached), `pad_tree` (twice per transaction) and
+# `get_checkpoint_id` (once per nested call) — and `_hint_crossings.mjs` enumerates all four
+# unhinted methods with the evidence. The budget below is therefore a budget on the HINTED count,
+# which is what it is calibrated on, and the decision does not turn on the difference: even sixty
+# crossings at the measured 19 ns is about a microsecond against milliseconds of work.
 #
 # THE MAPPING IS ASSERTED TO BE COMPLETE IN BOTH DIRECTIONS, because a table that silently ignores
 # a hint category would under-count exactly the crossings a new AVM feature adds:
@@ -21,8 +30,8 @@
 #   * every hint category present in the blob is either mapped to a method or named in
 #     `NOT_CALL_TALLIES` — anything else comes back in `unmappedHintCategories` and this check
 #     requires that list to be empty;
-#   * every one of the twenty-two interface methods appears in the op table, and the three that
-#     have no hint category are named individually with the reason.
+#   * every one of the twenty-two interface methods appears in the op table, and the four that
+#     have no hint array of their own are named individually with the reason.
 #
 # THE BUDGET IS A CEILING A REGRESSION CROSSES, and it is asserted both ways. Upper, so a shape
 # change that made the AVM consult the host per memory access is caught. Lower, so a run in which
@@ -108,13 +117,15 @@ assert_true "and it is not so loose that a doubling would pass" \
 
 # ---------------------------------------------------------------------------
 # THE SHAPE OF THE COUNT IS THE FINDING, and it is asserted rather than left to the reader.
-# `burn` executes 38,903 instructions and consults the host a couple of dozen times, because
+# `burn` executes 38,903 instructions and makes a couple of dozen HINTED DB calls, because
 # `PureMerkleDB` inside vm2 satisfies the high-level surface itself and only the low-level misses
-# reach the boundary. If that ever stops being true — an AVM that consulted the host per memory
-# access — this is the assertion that says so.
+# reach the boundary. The shape — tens, not tens of thousands — is what the decision rests on, and
+# it survives the unhinted methods the header enumerates. If it ever stops being true, i.e. an AVM
+# that consulted the host per memory access, this is the assertion that says so, and it would say
+# so by three orders of magnitude.
 # ---------------------------------------------------------------------------
 BURN="$(m15_key "$OUT" crossings.burn.total)"
-assert_true "burn's 38,903 instructions cost fewer than fifty DB crossings" test "$BURN" -lt 50
+assert_true "burn's 38,903 instructions cost fewer than fifty hinted DB crossings" test "$BURN" -lt 50
 # The per-op breakdown is present and non-degenerate: at least six distinct methods are used, so
 # the total is not one method called n times.
 DISTINCT="$(grep -c "^crossings.burn.op\." "$OUT" || true)"
