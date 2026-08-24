@@ -95,10 +95,29 @@ function readMemoryImportLimits(buf) {
   return null;
 }
 
+// ---------------------------------------------------------------------------------------------
+// EXITING WITHOUT DISCARDING OUTPUT.
+//
+// `process.exit()` terminates immediately and DROPS anything still queued on stdout. When fd 1 is
+// a file Node writes synchronously and the hazard is invisible; when it is a pipe — a `| tee`, a
+// CI log collector, a harness that reads the child's output — it is not, and the observable is a
+// process that exits 0 having written a PREFIX of its transcript.
+//
+// That is the exact shape of M9's short V8 run: `wasm-v8.events` held 39,113 of 39,115 lines with
+// an exit status of 0, and the four assertions that then failed read like findings about the AVM
+// ("oob emitted no events") rather than like the I/O truncation they were. Draining first costs
+// nothing and removes the whole class.
+// ---------------------------------------------------------------------------------------------
+async function exitAfterFlush(code) {
+  await new Promise((resolve) => process.stdout.write('', resolve));
+  await new Promise((resolve) => process.stderr.write('', resolve));
+  process.exit(code);
+}
+
 const wasmPath = process.argv[2];
 if (!wasmPath) {
   console.error('usage: run_wasm_test_binary.mjs <module.wasm> [args...]');
-  process.exit(2);
+  await exitAfterFlush(2);
 }
 const guestArgs = process.argv.slice(3);
 const bytes = await readFile(wasmPath);
@@ -106,14 +125,14 @@ const bytes = await readFile(wasmPath);
 const limits = readMemoryImportLimits(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
 if (!limits) {
   console.error(`${wasmPath}: no imported memory — this host is for --import-memory modules`);
-  process.exit(2);
+  await exitAfterFlush(2);
 }
 if (limits.shared) {
   // A shared memory means the module came from a -pthread (wasm-threads) build and
   // will also want wasi thread_spawn, which node:wasi does not implement. Say so
   // rather than failing later with something that looks unrelated.
   console.error(`${wasmPath}: imports a SHARED memory (a threads build); this host is single-threaded`);
-  process.exit(3);
+  await exitAfterFlush(3);
 }
 const memory = new WebAssembly.Memory({
   initial: limits.min,
@@ -157,7 +176,7 @@ const missing = WebAssembly.Module.imports(module).filter(
 );
 if (missing.length) {
   console.error(`${wasmPath}: unsupported imports: ${missing.map((i) => `${i.module}.${i.name}`).join(', ')}`);
-  process.exit(4);
+  await exitAfterFlush(4);
 }
 
 let code;
@@ -167,6 +186,6 @@ try {
 } catch (e) {
   process.stdout.write('\n');
   console.error(`${wasmPath}: guest failed: ${e && e.message ? e.message : e}`);
-  process.exit(aborted === null ? 5 : 6);
+  await exitAfterFlush(aborted === null ? 5 : 6);
 }
-process.exit(code ?? 0);
+await exitAfterFlush(code ?? 0);

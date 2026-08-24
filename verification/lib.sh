@@ -17,6 +17,54 @@
 
 set -uo pipefail
 
+# ---------------------------------------------------------------------------
+# AMBIENT EXPORTED NAMES THAT COLLIDE WITH THESE SCRIPTS' OWN VARIABLES.
+#
+# A bash assignment to a name that is ALREADY EXPORTED KEEPS THE EXPORT ATTRIBUTE. That is the
+# whole bug, and it cost M11 sixty assertions.
+#
+# This environment exports `out` — direnv leaks a nix build environment, and `declare -p out` reads
+# `declare -x out=...`. `verify_submission_is_a_manual_step` then does `out="$(… --dry-run 2>&1)"`,
+# 738 KB of report, which therefore went INTO THE ENVIRONMENT, past Linux's MAX_ARG_STRLEN of
+# 128 KB, and every subsequent `exec` in that shell failed with E2BIG. The check scored 35
+# assertions instead of 95 and its only diagnostic was
+# `python3: Argument list too long` — which names neither the variable nor the cause. Two sibling
+# checks failed downstream of it for the same reason and were written up as network or upstream
+# problems.
+#
+# The rule applied here: POSIX reserves ALL-LOWERCASE names for applications, and every environment
+# variable these checks legitimately read is upper-case (HOME, PATH, TMPDIR, LD_LIBRARY_PATH,
+# M3_WORK, …). An exported all-lowercase name is therefore a leak from a surrounding build
+# environment, and it is exactly the namespace the check scripts use for their own locals. Measured
+# in this environment: `out`, `outputs`, `name`, `patches`, `phases`, `shell`, `stdenv`, `builder`
+# are all exported, and at least four of those are plausible names for a shell script's own
+# variable.
+#
+# DE-EXPORTED, NOT UNSET: the value stays readable for anything that wants it, and only the leak is
+# removed. `_`-prefixed names are left alone — bash owns `_`, and the campaign's own exported state
+# (`_WORK_DIR_LOCKS_HELD`) must survive.
+#
+# `test_large_assignment_survives_an_exported_name` proves both directions: the same 738 KB
+# assignment followed by an exec fails E2BIG WITHOUT this guard and succeeds with it, and the value
+# is still there afterwards.
+# `declare -x` rather than `compgen -e`, because the dev shells' bash reports
+# `compgen: command not found` — it is built without programmable completion — and a guard that
+# silently did nothing is the failure this whole comment is about. `declare -x` is a POSIX-mode-
+# proof builtin, and matching on the `declare -x ` prefix is what makes a value containing newlines
+# harmless: a continuation line cannot start with it.
+_deexport_ambient_lowercase() {
+  local n
+  while IFS= read -r n; do
+    [ -n "$n" ] && export -n "$n" 2>/dev/null
+  done < <(
+    declare -x | sed -n \
+      -e 's/^declare -x \([a-z][a-z0-9_]*\)=.*$/\1/p' \
+      -e 's/^declare -x \([a-z][a-z0-9_]*\)$/\1/p'
+  )
+  return 0
+}
+_deexport_ambient_lowercase
+
 if [ -z "${TEST_NAME:-}" ]; then
   echo "lib.sh: sourcing script must set TEST_NAME before sourcing" >&2
   exit 1
@@ -225,8 +273,30 @@ _work_dir_hold() { # <canonical-dir> ; returns 0 if held (or already held), 1 if
   }
   exec {fd}>"$dir/.work-dir.lock" || return 1
   if ! flock -n "$fd"; then
-    exec {fd}>&-
-    return 1
+    # A REFUSAL AND A LINGERING CHILD ARE DIFFERENT THINGS, AND CONFLATING THEM COST M17 A WHOLE
+    # RUN. The lock fd is inherited by every child this check spawns, so a grandchild that outlives
+    # the check — `nix develop`'s wrapper, a ninja job server, a ccache process — KEEPS THE LOCK
+    # after the process that took it has exited. Reproduced: a shell that takes the lock, forks a
+    # child and exits leaves the lock held until the child dies. In M17's first full run that made
+    # the check after the failing one report "another run already holds this work directory", naming
+    # a pid that was already gone, and the same thing cascaded through five more checks.
+    #
+    # So the two cases are separated by asking whether the recorded holder is still ALIVE. If it is,
+    # this is the concurrent run M15's review found and it is refused at once, which is the property
+    # that matters. If it is not, the lock is a leftover and is waited for, briefly and out loud,
+    # rather than turned into six false failures.
+    local owner_pid
+    owner_pid="$(awk 'NR==1 { print $2 }' "$dir/.work-dir.owner" 2>/dev/null)"
+    if [ -n "$owner_pid" ] && kill -0 "$owner_pid" 2>/dev/null; then
+      exec {fd}>&-
+      return 1
+    fi
+    printf '  --   the work directory'"'"'s recorded holder (pid %s) has exited but a child of it still holds the lock; waiting up to %ss\n' \
+      "${owner_pid:-unknown}" "${WORK_DIR_LOCK_WAIT:-90}"
+    if ! flock -w "${WORK_DIR_LOCK_WAIT:-90}" "$fd"; then
+      exec {fd}>&-
+      return 1
+    fi
   fi
   # Who holds it, for the diagnostic the NEXT run prints. Written after the lock is taken, so it
   # can never describe a holder that does not exist.

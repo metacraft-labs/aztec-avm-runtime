@@ -132,9 +132,106 @@ m3_build() {
 }
 
 # ---------------------------------------------------------------------------
+# UPSTREAM'S LMDB SCRATCH DIRECTORY, WHICH THIS CHECK USED TO INHERIT RATHER THAN PRODUCE.
+#
+# `crypto/merkle_tree/fixtures.hpp` and `lmdblib/fixtures.hpp` both hardcode
+# `/tmp/lmdb/<random_uint32>` as the directory a persisted-tree test runs in. That is upstream's
+# path, not ours, and NOTHING here used to touch it — so every run of these binaries inherited
+# whatever every previous run had left there. Two measurements say that is not benign:
+#
+#   * the suite LEAKS. Measured over three consecutive runs of
+#     `PersistedContentAddressedAppendOnlyTreeTest.*`, `/tmp/lmdb` went 0 -> 1 -> 2 -> 3 entries:
+#     one abandoned directory per run, forever, with nothing to notice it.
+#   * on 2026-08-24 this check failed with `crypto_merkle_tree_lmdb_tests` and
+#     `crypto_merkle_tree_tests` aborting (exit 134 / 135, glibc `corrupted size vs. prev_size`),
+#     on BOTH the base and the patched tree — so not the patch — with 797 leftover directories
+#     and 355 MB in `/tmp/lmdb`. It was reproduced once in isolation, the first failure being an
+#     `unwind_block` that returned success=false. Free space was measured and REFUTED as the cause
+#     (/tmp never below 6,424 MB; the suite's own peak use of `/tmp/lmdb` is 165 MB), as was
+#     machine load (32 cores idle, 53 GB available). After the leftovers were removed the test
+#     passed five consecutive times.
+#
+# A FOURTH candidate cause was raised in review and is refuted by ARITHMETIC rather than left open:
+# the obvious mechanism by which leftovers could matter is a NAME COLLISION — a fixture reopening a
+# directory a previous run left populated, which would show up as exactly the stale tree state that
+# `unwind_block` returning success=false looks like. It is not that. Both fixtures name the
+# directory `random_temp_directory()` -> `numeric::get_randomness().get_random_uint32()`, and
+# `get_randomness()` is barretenberg's CSPRNG-backed `RandomEngine` (getrandom(2) into a 1 MiB
+# thread-local buffer), NOT the deterministic `get_debug_randomness()` the same header also binds.
+# The names are therefore genuinely random over 2^32, so with the 797 leftovers that were present
+# the chance of any one test colliding is about 1.9e-7. A seeded PRNG would have made this the
+# answer; a CSPRNG makes it not the answer. The reported failure mode is glibc heap corruption
+# (`corrupted size vs. prev_size`) on the BASE tree — upstream's own code — which is where a cause
+# would have to be found, under ASAN or valgrind, and that is not this milestone's to do.
+#
+# The causal link is NOT established and this comment does not claim one. What is established is
+# that the check depended on state it did not produce, and that is fixed here rather than argued
+# about: the scratch is taken fresh, the number of abandoned directories found is REPORTED as a
+# measurement, and the number this run leaks is reported too. Both are assertions in
+# verify_merkle_lmdb_split_native_neutral, so the leak stays visible instead of accumulating for
+# another eight hundred runs.
+#
+# Taking it is safe because the directory is exclusively these binaries' own scratch — every entry
+# is a random-named LMDB environment created by a fixture's SetUp and deleted by its TearDown — and
+# because M3 holds its work directory under `flock`, so two M3 runs cannot be here at once.
+# ---------------------------------------------------------------------------
+M3_LMDB_SCRATCH="${M3_LMDB_SCRATCH:-/tmp/lmdb}"
+M3_LMDB_ABANDONED_FOUND=
+# The bound the neutrality check holds the leak to. MEASURED: ten abandoned directories across the
+# five binary runs the check makes, i.e. two per run. The bound is TWENTY and is deliberately not
+# the measurement — a budget equal to what was measured fails on any change and therefore gets
+# raised rather than read — while a suite that started leaking per TEST would produce about three
+# hundred and thirty and blow through it on the first run.
+M3_LMDB_LEAK_BOUND="${M3_LMDB_LEAK_BOUND:-20}"
+export M3_LMDB_SCRATCH M3_LMDB_LEAK_BOUND
+
+m3_lmdb_entries() {
+  ls -1 "$M3_LMDB_SCRATCH" 2>/dev/null | wc -l | tr -d '[:space:]'
+}
+
+m3_take_lmdb_scratch() {
+  M3_LMDB_ABANDONED_FOUND="$(m3_lmdb_entries)"
+  if [ "${M3_LMDB_ABANDONED_FOUND:-0}" -gt 0 ]; then
+    local aside="$M3_LMDB_SCRATCH.abandoned.$$"
+    mv "$M3_LMDB_SCRATCH" "$aside" 2>/dev/null \
+      || die "cannot take upstream's LMDB scratch directory $M3_LMDB_SCRATCH aside"
+    rm -rf "$aside"
+  fi
+  mkdir -p "$M3_LMDB_SCRATCH" \
+    || die "cannot create upstream's LMDB scratch directory $M3_LMDB_SCRATCH"
+}
+
+# ---------------------------------------------------------------------------
+# m3_failure_mode <exit-status> <out-file> -> ONE token naming HOW the run failed.
+#
+# "exits 0" is a true statement about a run and says nothing about which kind of wrong it was, and
+# this campaign has now twice spent an afternoon on the difference. A gtest binary that ABORTS
+# (SIGABRT out of glibc's heap checker) and one that runs to completion with failing EXPECTs both
+# come back non-zero; the first is an environment or memory-corruption problem and the second is a
+# statement about the code under test. One token separates them at the point of measurement.
+# ---------------------------------------------------------------------------
+m3_failure_mode() {
+  local status="$1" out="$2" sig name first
+  if [ "$status" -eq 0 ]; then printf 'clean\n'; return 0; fi
+  if [ "$status" -gt 128 ]; then
+    sig=$((status - 128))
+    name="$(kill -l "$sig" 2>/dev/null || printf '%s' "$sig")"
+    if grep -qE 'corrupted size vs\. prev_size|malloc\(\): |free\(\): |double free|Aborted' "$out" 2>/dev/null; then
+      printf 'signal-%s-after-heap-corruption\n' "$name"
+    else
+      printf 'signal-%s\n' "$name"
+    fi
+    return 0
+  fi
+  first="$(grep -m1 '^\[  FAILED  \] [A-Za-z]' "$out" 2>/dev/null | awk '{print $4}')"
+  if [ -n "$first" ]; then printf 'gtest-failed:%s\n' "$first"; return 0; fi
+  printf 'exit-%s\n' "$status"
+}
+
+# ---------------------------------------------------------------------------
 # m3_run_gtest <build-dir> <binary-name> <out-file>
 #
-# Runs a gtest binary and prints "<exit-status> <ran> <passed>" on stdout.
+# Runs a gtest binary and prints "<exit-status> <ran> <passed> <failure-mode>" on stdout.
 # `ran` / `passed` are `-` when the summary lines are absent, so a binary that
 # dies before printing them cannot be mistaken for one that ran zero tests.
 # ---------------------------------------------------------------------------
@@ -146,7 +243,7 @@ m3_run_gtest() {
   ran=$(grep -oE '^\[==========\] [0-9]+ tests? from [0-9]+ test suites? ran' "$out" \
         | grep -oE '[0-9]+' | head -1)
   passed=$(grep -oE '^\[  PASSED  \] [0-9]+ tests?' "$out" | grep -oE '[0-9]+' | head -1)
-  printf '%s %s %s\n' "$status" "${ran:--}" "${passed:--}"
+  printf '%s %s %s %s\n' "$status" "${ran:--}" "${passed:--}" "$(m3_failure_mode "$status" "$out")"
 }
 
 # ---------------------------------------------------------------------------

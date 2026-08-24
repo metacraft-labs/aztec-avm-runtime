@@ -123,7 +123,11 @@ for label in native v8; do
     native) e="$(m9_events_native)" ;;
     v8)     e="$(m9_events_v8)" ;;
   esac
-  assert_eq "[$label] the fallback run completed" "1" "$(m9_field "$e" avmEvents.done)"
+  # The RUN's completeness, not the AVM's behaviour: a transcript missing its terminal sentinel is
+  # a truncated run, and this says so with the line count rather than leaving the next reader to
+  # infer it from "oob emitted no events".
+  assert_eq "[$label] the fallback transcript is complete rather than truncated" \
+    "complete" "$(m9_completeness "$e" avmEvents.done)"
   assert_eq "[$label] it states its coverage" \
     "eight-hand-assembled-programs-per-record-the-upstream-ExecutionEvent-seam" \
     "$(m9_field "$e" avmEvents.coverage)"

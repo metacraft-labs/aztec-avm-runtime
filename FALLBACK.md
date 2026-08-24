@@ -66,7 +66,7 @@ the prose after it is what a reader needs.
 - reason: This one is TRUE and saying so is the point of evaluating conjuncts separately. Three of the thirteen block-level operations are classified absent at the anchor — reading the archive snapshot as lastArchive, updateArchive(header), and the genesis archive seed — and each was established by execution rather than by reading a header: M14's probe answers archive_in_tree_roots=0 because the compiler said so, append_leaves(ARCHIVE, ...) throws its own message, and the probe reports four genesis roots where Tier D has five. M14's disposition was DECISION: extend, and the extension exists.
 - conjunct: upstream declines the extension
 - verdict: unresolved
-- evidence: carry/series.json :: "status": "prepared"
+- evidence: carry/series.json :: x5 :: "status": "prepared"
 - reason: A patch that has not been offered has not been declined. The extension is prepared in full — the format-patch file, a PR.md written for an upstream audience with a Kind: line and a dated prior-art search, and a verify.sh with no skip path, all three in verification/m14/ — and nothing has been submitted. All five entries in carry/series.json read status prepared, codetracer-specs/upstream-bugs/ holds exactly five aztec-* directories and none of them is the world-state one, and M11 is partially_completed precisely because submission is a manual step that needs a person with push rights. So this conjunct is not false-because-they-accepted; it is unaskable, and it is recorded as unresolved rather than as a convenient false.
 - conjunct: the downstream carry proves too expensive to maintain
 - verdict: false

@@ -19,6 +19,14 @@ So the rules are about substance rather than shape:
     occur in that file. A needle is matched against the file with whitespace collapsed, so a claim
     may be a sentence even where the file wraps it; and it must be at least 20 characters, because
     a two-word needle resolves against anything;
+  * EVIDENCE MAY CARRY A MULTIPLICITY: `<path> :: x<N> :: <needle>` requires EXACTLY N
+    occurrences. That is not decoration. A conjunct whose reason says "all five entries read
+    prepared" is not supported by a needle that resolves if ONE of them does, and M16's T-2b was
+    exactly that: `carry/series.json :: "status": "prepared"` kept resolving against a manifest
+    that an aborted M11 check had left with one entry reading `accepted` and a fake
+    `example.invalid` URL. A substring needle that passes against corrupted data is the same family
+    as a needle that could never have failed. With `x5` the corruption takes the count to four and
+    the conjunct goes red;
   * a reason is at least 120 characters, which is not a quality bar but does refuse `false.`;
   * `conjunction: fired` if and only if EVERY conjunct is `true`. Both directions are checked: a
     conjunction marked not-fired with all-true conjuncts is rejected, and so is one marked fired
@@ -145,8 +153,14 @@ def main():
                     problems.append("trigger %d, conjunct %r: evidence is not '<path> :: <needle>'"
                                     % (num, text[:60]))
                 else:
-                    rel, needle = ev.split(" :: ", 1)
-                    rel, needle = rel.strip(), needle.strip()
+                    parts = ev.split(" :: ")
+                    if len(parts) >= 3 and re.fullmatch(r"x[0-9]+", parts[1].strip()):
+                        rel = parts[0].strip()
+                        want_n = int(parts[1].strip()[1:])
+                        needle = " :: ".join(parts[2:]).strip()
+                    else:
+                        rel, needle = ev.split(" :: ", 1)
+                        rel, needle, want_n = rel.strip(), needle.strip(), None
                     if len(needle) < MIN_NEEDLE:
                         problems.append(
                             "trigger %d, conjunct %r: the evidence needle is %d characters; a needle "
@@ -156,10 +170,21 @@ def main():
                     if body is None:
                         problems.append("trigger %d, conjunct %r: evidence names %s, which does not exist"
                                         % (num, text[:60], rel))
-                    elif normalise(needle) not in body:
-                        problems.append(
-                            "trigger %d, conjunct %r: the evidence needle is absent from %s: %r"
-                            % (num, text[:60], rel, needle[:80]))
+                    else:
+                        found = body.count(normalise(needle))
+                        measured.append(("trigger.%d.evidence.occurrences.%s"
+                                         % (num, re.sub(r"[^a-z0-9]+", "-", text[:40].lower()).strip("-")),
+                                         found))
+                        if want_n is None:
+                            if found == 0:
+                                problems.append(
+                                    "trigger %d, conjunct %r: the evidence needle is absent from %s: %r"
+                                    % (num, text[:60], rel, needle[:80]))
+                        elif found != want_n:
+                            problems.append(
+                                "trigger %d, conjunct %r: the evidence needle occurs %d time(s) in %s "
+                                "and the evidence requires exactly %d: %r"
+                                % (num, text[:60], found, rel, want_n, needle[:80]))
                 if len(got["reason"]) < MIN_REASON:
                     problems.append(
                         "trigger %d, conjunct %r: the reason is %d characters, which is too short to "

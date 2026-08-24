@@ -110,16 +110,27 @@ assert_false "before: there is no crypto_merkle_tree_lmdb_tests to run" \
 # RUN_RAN instead of printing it.
 RUN_RAN=
 run_and_assert() { # <label> <build-dir> <binary> <expected-count>
-  local label="$1" bdir="$2" bin="$3" want="$4" out r status ran passed
+  local label="$1" bdir="$2" bin="$3" want="$4" out r status ran passed mode
   out="$M3_WORK/run-$label-$bin.txt"
   r="$(m3_run_gtest "$bdir" "$bin" "$out")"
-  set -- $r; status="$1"; ran="$2"; passed="$3"
+  set -- $r; status="$1"; ran="$2"; passed="$3"; mode="$4"
   assert_eq "$label $bin: exits 0" 0 "$status"
+  # AND the specific failure mode, because "non-zero" does not distinguish a suite whose
+  # assertions failed from a binary the kernel killed, and those want different people looking at
+  # them. `clean` is the only passing token; the others name the signal, the heap-corruption
+  # signature or the first failing test.
+  assert_eq "$label $bin: and it fails in no particular way, because it does not fail" "clean" "$mode"
   assert_eq "$label $bin: tests ran" "$want" "$ran"
   assert_eq "$label $bin: tests passed" "$want" "$passed"
   [ "$status" -eq 0 ] || note "output: $out"
   case "$ran" in ''|*[!0-9]*) RUN_RAN=0 ;; *) RUN_RAN="$ran" ;; esac
 }
+
+# The scratch directory is TAKEN, not inherited — see lib_merkle_lmdb.sh for the measurements
+# behind that. What it found is reported here so an accumulation is visible rather than silent.
+m3_take_lmdb_scratch
+note "upstream's LMDB scratch $M3_LMDB_SCRATCH: $M3_LMDB_ABANDONED_FOUND abandoned director(ies) removed"
+assert_eq "the LMDB scratch directory is empty before the first binary runs" "0" "$(m3_lmdb_entries)"
 
 run_and_assert before "$BB" crypto_merkle_tree_tests 132;      before_cmt="$RUN_RAN"
 run_and_assert before "$BB" world_state_tests 33;              before_ws="$RUN_RAN"
@@ -132,6 +143,24 @@ run_and_assert after  "$BP" world_state_tests 33;              after_ws="$RUN_RA
 assert_eq "the merkle-tree suite is redistributed, not reduced: after == before" \
   "$before_cmt" "$((after_cmt + after_lmdb))"
 assert_eq "world_state_tests is untouched by the split" "$before_ws" "$after_ws"
+
+# THE LEAK, MEASURED. Upstream's persisted-tree fixtures abandon one `/tmp/lmdb/<random>` per run
+# of the suite, which is how 797 of them and 355 MB accumulated before anything noticed. The bound
+# is per BINARY RUN and this check makes five of them, so it is asserted as an upper bound rather
+# than an identity — a suite that started leaking per TEST would blow through it immediately, and a
+# suite that stopped leaking would still pass, which is the direction that should be free.
+M3_LMDB_LEAKED="$(m3_lmdb_entries)"
+note "upstream's LMDB scratch after five binary runs: $M3_LMDB_LEAKED abandoned director(ies)"
+# The reader is controlled before its answer is believed: an `ls | wc -l` that always said zero
+# would make the bound below a statement about nothing, and the pre-run assertion above already
+# expects zero, so the two would agree for the wrong reason.
+mkdir -p "$M3_LMDB_SCRATCH/m3-reader-control"
+assert_eq "the leftover reader counts a directory that is there" \
+  "$((M3_LMDB_LEAKED + 1))" "$(m3_lmdb_entries)"
+rmdir "$M3_LMDB_SCRATCH/m3-reader-control"
+assert_eq "…and stops counting it once it is gone" "$M3_LMDB_LEAKED" "$(m3_lmdb_entries)"
+assert_true "the suite's scratch leak stays inside its bound (measured 10 across five binary runs)" \
+  test "$M3_LMDB_LEAKED" -le "$M3_LMDB_LEAK_BOUND"
 
 # ---------------------------------------------------------------------------
 # The stronger statement: the same tests, not merely the same number of them

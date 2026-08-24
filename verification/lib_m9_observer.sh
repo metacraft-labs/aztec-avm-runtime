@@ -780,6 +780,30 @@ m9_field() {
   awk -v k="$key" '$1 == k { $1 = ""; sub(/^ /, ""); print; exit }' "$file"
 }
 
+# ---------------------------------------------------------------------------
+# m9_completeness <transcript> <sentinel-key> -> `complete`, or a token naming the truncation.
+#
+# WHY THIS EXISTS RATHER THAN A BARE `assert_eq … avmEvents.done`. M9's review found a V8 run that
+# EXITED 0 and left a transcript stopping part way through. The assertions that noticed were
+# `[v8] the fallback run completed  expected [1], got []` and `[v8] oob: upstream's own seam
+# emitted one event per instruction  expected [3], got []` — both of which read like findings about
+# the AVM, and one of which ("oob emitted no events") is a sentence somebody could spend an
+# afternoon investigating. The transcript was 39,113 lines of an expected 39,115.
+#
+# A missing terminal sentinel is not a fact about the AVM. It is a fact about the RUN, and the
+# token this returns says so, with the line count and the last key that did arrive, so the next
+# occurrence is diagnosed in one line. The underlying `process.exit()` hazard in the V8 host is
+# closed separately, in `wasm_host/run_wasm_test_binary.mjs`.
+# ---------------------------------------------------------------------------
+m9_completeness() {
+  local file="$1" sentinel="$2" lines last
+  [ -f "$file" ] || { printf 'absent\n'; return 0; }
+  if [ -n "$(m9_field "$file" "$sentinel")" ]; then printf 'complete\n'; return 0; fi
+  lines="$(wc -l <"$file" | tr -d '[:space:]')"
+  last="$(awk 'NF { k = $1 } END { print k }' "$file")"
+  printf 'truncated-after-%s-lines-last-key-%s\n' "${lines:-0}" "${last:-none}"
+}
+
 m9_expect_steps() {
   local var="M9_STEPS_$1"
   printf '%s\n' "${!var:-}"

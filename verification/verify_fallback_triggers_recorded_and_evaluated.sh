@@ -326,6 +326,60 @@ for ln in lines:
 sys.stdout.write(t.replace(sec,"".join(out),1))' \
   "must be evaluated conjunct by conjunct"
 
+# ---------------------------------------------------------------------------
+# THE T-2b DEFECT, REPRODUCED AND CLOSED.
+#
+# T-2b's needle used to be `carry/series.json :: "status": "prepared"`, resolved as a plain
+# SUBSTRING. Its reason says "All five entries in carry/series.json read status prepared" — a claim
+# about all five — and a substring needle is satisfied by one. That mattered rather than being
+# pedantry: `verify_accepted_patches_dropped_from_carry` mutates the tracked manifest to
+# `"status": "accepted"` with a `https://example.invalid/1` URL as a negative control, and when
+# M11's run aborted between the mutation and the restore the file was LEFT that way. T-2b kept
+# passing against it.
+#
+# The needle now carries a multiplicity — `:: x5 ::` — and the three assertions below are the two
+# directions plus the syntax itself, because a needle that quietly lost its `x5` would be back to
+# the substring match with nothing to say so.
+assert_contains "T-2b's evidence is multiplicity-bearing, so one entry cannot stand for five" \
+  'carry/series.json :: x5 :: ' "$(cat "$M16_DOC")"
+
+t2b_dir() { # <name> <status-for-entry-0> -> a repo-shaped dir whose carry manifest is a real FILE
+  local d="$SCRATCH/t2b$1"
+  mkdir -p "$d/carry"
+  for f in BOUNDARY-SHAPE.md WORLD-STATE.md; do ln -sf "$REPO_ROOT/$f" "$d/$f"; done
+  cp "$M16_DOC" "$d/FALLBACK.md"
+  python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+if sys.argv[3] != "prepared":
+    d["patches"][0]["ledger"].update(status=sys.argv[3], url="https://example.invalid/1")
+open(sys.argv[2], "w").write(json.dumps(d, indent=2, ensure_ascii=False) + "\n")' \
+    "$REPO_ROOT/carry/series.json" "$d/carry/series.json" "$2"
+  printf '%s' "$d"
+}
+
+T2B_CORRUPT="$(t2b_dir corrupt accepted)"
+T2B_CLEAN="$(t2b_dir clean prepared)"
+if cmp -s "$T2B_CORRUPT/carry/series.json" "$T2B_CLEAN/carry/series.json"; then
+  fail "the T-2b corruption changed nothing, so both controls below are vacuous"
+else
+  OUT="$(python3 "$M16_PARSER" "$T2B_CORRUPT" 2>&1)"
+  assert_contains "a manifest an aborted run left with one entry 'accepted' no longer satisfies T-2b" \
+    "the evidence needle occurs 4 time(s)" "$OUT"
+  OUT="$(python3 "$M16_PARSER" "$T2B_CLEAN" 2>&1)"
+  if printf '%s' "$OUT" | grep -q '^PROBLEM'; then
+    fail "the clean control ALSO fails, so the corrupt one proves nothing: $(printf '%s' "$OUT" | grep '^PROBLEM' | head -1)"
+  else
+    pass "…and the same directory with an uncorrupted manifest resolves, so that is a discrimination"
+  fi
+fi
+
+neg "an evidence multiplicity that the file does not satisfy" \
+  'import sys
+t=open(sys.argv[1],encoding="utf-8").read()
+sys.stdout.write(t.replace("carry/series.json :: x5 ::", "carry/series.json :: x4 ::", 1))' \
+  "the evidence requires exactly 4"
+
 neg "the outcome claiming not-required while a trigger fired" \
   'import sys
 t=open(sys.argv[1],encoding="utf-8").read()

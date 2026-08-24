@@ -36,6 +36,20 @@ tip="$(git -C "$FORK_ROOT" rev-parse upstream/next 2>/dev/null)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
+# THE MANIFEST IS THE TRACKED AUTHORITY FOR THE CARRY SET AND THIS CHECK MUTATES IT. It must
+# therefore be able to say, before it does, that what it is about to save is not already somebody
+# else's wreckage. An earlier version of this check restored the file with a plain `cp` AFTER the
+# probe, with nothing in between guarding an abort: when a run died between the two copies — M11's
+# E2BIG did exactly that — the file was left holding the probe's fake `accepted` status and its
+# `https://example.invalid/1` URL, and the next run read the corruption as fact. Worse, M16's
+# T-2b evidence needle was a SUBSTRING match on `"status": "prepared"`, so it kept passing against
+# a manifest in which one of the five entries said `accepted`.
+if grep -q 'example\.invalid' "$SERIES"; then
+  die "the carry set manifest already contains this check's own probe URL (example.invalid).
+       That is the wreckage of an aborted earlier run, not a real acceptance. Restore it with
+       'git -C $REPO_ROOT show HEAD:carry/series.json > $SERIES' and re-run."
+fi
+
 # The detector, lifted out of the tool by IMPORT rather than reimplemented here.
 # A check that re-writes the logic it is checking checks nothing.
 detect() { # <patch-file> -> prints "yes" or "no"
@@ -90,8 +104,19 @@ open(sys.argv[2], "w").write(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
 
 saved="$work/series-saved.json"
 cp "$SERIES" "$saved"
+
+# THE RESTORE IS ARMED BEFORE THE MUTATION, NOT AFTER IT, and it runs on a signal as well as on a
+# normal exit. Ordered restore-then-remove, because `$saved` lives inside `$work`: the previous
+# trap deleted the work directory and the copy inside it, so there was nothing left to restore
+# from even if anything had tried.
+trap 'cp -f "$saved" "$SERIES" 2>/dev/null || true; rm -rf "$work"' EXIT INT TERM HUP
 cp "$probe" "$SERIES"
-out="$(python3 "$REPO_ROOT/tools/rebase_upstream_patches.py" --no-fetch 2>&1)"
+
+# `harness_out`, not `out`: `out` is exported by the surrounding nix/direnv environment, and an
+# assignment to an already-exported name keeps the export attribute — which is how 738 KB of report
+# ended up in the environment and made every later exec fail E2BIG. lib.sh now de-exports such
+# names, and this one is renamed as well so the check does not depend on that guard alone.
+harness_out="$(python3 "$REPO_ROOT/tools/rebase_upstream_patches.py" --no-fetch 2>&1)"
 rc=$?
 cp "$saved" "$SERIES"
 
@@ -100,7 +125,7 @@ if [ "$rc" -ne 0 ]; then
 else
   fail "the harness exited 0 for a patch marked accepted that upstream does not contain"
 fi
-assert_contains "and it says so by name" "ledger says accepted, but upstream does not" "$out"
+assert_contains "and it says so by name" "ledger says accepted, but upstream does not" "$harness_out"
 
 # Restored exactly: a check that leaves the manifest mutated is worse than none.
 assert_eq "the probe left the carry set manifest exactly as it found it" \
