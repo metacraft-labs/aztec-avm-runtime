@@ -211,8 +211,16 @@ assert_eq "-Wfatal-errors means no ordinary ': error: ' line is emitted at all" 
   "$(grep -c ': error: ' "$rlog" 2>/dev/null || true)"
 failed_edges="$(grep -c '^FAILED:' "$rlog" 2>/dev/null || true)"
 assert_eq "exactly five build edges fail" 5 "$failed_edges"
-fatal_files="$(grep -oE '/barretenberg/cpp/src/barretenberg/vm2/[^:]+\.test\.cpp:[0-9]+:[0-9]+: fatal error' "$rlog" \
-  | sed -E 's|^/barretenberg/cpp/src/barretenberg/||; s|:[0-9]+:[0-9]+: fatal error$||' | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ $//')"
+# Anchored on `src/barretenberg/vm2/` and NOT on a leading `/barretenberg/cpp/src/...`, because the
+# form of the path in a compiler diagnostic is not ours to assume. From M14 the dev shells put
+# ccache on the compiler launcher path with CCACHE_BASEDIR=$HOME, and ccache rewrites an absolute
+# source path to one relative to the compile's working directory BEFORE handing it to the compiler:
+# what was `/home/…/barretenberg/cpp/src/barretenberg/vm2/x.test.cpp:1:2: fatal error` is now
+# `../src/barretenberg/vm2/x.test.cpp:1:2: fatal error`. The absolute form no longer occurs, this
+# extraction returned the empty list, and the assertion below failed on a build that had in fact
+# failed in exactly the five places it was supposed to. Both forms contain `src/barretenberg/vm2/`.
+fatal_files="$(grep -oE 'src/barretenberg/vm2/[^: ]+\.test\.cpp:[0-9]+:[0-9]+: fatal error' "$rlog" \
+  | sed -E 's|^src/barretenberg/||; s|:[0-9]+:[0-9]+: fatal error$||' | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ $//')"
 assert_eq "and they are exactly the five the overlay corrects" \
   "vm2/simulation/gadgets/indexed_tree_check.test.cpp vm2/simulation/gadgets/public_data_tree_check.test.cpp vm2/simulation/gadgets/update_check.test.cpp vm2/simulation/lib/call_stack_metadata_collector.test.cpp vm2/simulation/lib/hinting_dbs.test.cpp" \
   "$fatal_files"
