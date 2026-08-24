@@ -44,6 +44,9 @@ tested with `npm install`, with no barretenberg C++ build, no Rust/wasm-bindgen 
 | `fixtures/contracts/artifacts.json` | the six compiled Noir contracts and the public functions the corpus actually calls, derived from the sources rather than declared |
 | `fixtures/authored/` | Tier E — the two authored fixture families, each with the upstream claims that justify it, re-derived from the fork on every run |
 | `REUSE-INVENTORY.md` | **the reuse decision for every Aztec component this runtime touches**, with a reason — and a specific rejection reason wherever we build or replace |
+| `REACTOR-ABI.md` | the standalone `avm.wasm` reactor's export and import surface and its msgpack host ABI — M12's write-up |
+| `CONTRACT-DB.md` | the eight implementations of `ContractDBInterface` upstream has, the three dispositions, and the one taken — M13's write-up |
+| `WORLD-STATE.md` | what the in-memory reference world state covers of block production and what it does not: five implementations enumerated, thirteen operations classified, four dispositions worked in order — M14's write-up |
 | `PROVENANCE.md` | the machine-checked mapping of every vendored file to its upstream path and commit; the input `just check-drift` reads |
 | `pins.json` / `PINS.md` | the single authority for every upstream pin, and the policy for moving it |
 | `DRIFT.md` | the drift ledger: every place two pinned things disagree, opened when observed rather than when fixed |

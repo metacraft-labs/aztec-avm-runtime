@@ -510,3 +510,123 @@ jobs:
           name: avm-wasm-contract-db
           path: artifacts-m13
           retention-days: 30
+
+  world-state-block-coverage:
+    name: block-level world-state coverage and the compiler cache
+    runs-on: eph-linux-x64
+    # M14. TWO worktrees of the pinned anchor, and the only difference between them is M14's ONE
+    # patch — the archive tree on the in-memory reference world state. Deliberately NOT the
+    # AVM_WASM stack: the patch changes a component the AVM does not use, so it is built against
+    # pristine upstream where it is reviewable on its own terms, and both trees build upstream's own
+    # `world_state_tests` and `vm2_tests` natively. The real, lmdb-backed WorldState cannot run in
+    # wasm, so the comparison this milestone rests on is a native one.
+    #
+    # THE CACHE IS WHY THIS JOB IS AFFORDABLE. Both dev shells now put ccache on the compiler
+    # launcher path, so the second tree's build is almost entirely hits. CCACHE_DIR is set to a
+    # workspace path and restored between runs: a cold runner pays 327 s per `vm2_tests` and a warm
+    # one paid 9 s when it was measured, build directory deleted in between.
+    #
+    # STATUS, STATED PLAINLY: this job has never run, and neither has any job above it. They all
+    # still abort at `Generate CI token` on "Input required and not supplied: app-id", which M11
+    # recorded as undiagnosed after the `vars.` spelling did not fix it. So this job existing means
+    # it is wired and names the checks — not that a run has ever gated anything. WORLD-STATE.md says
+    # the same thing in prose.
+    #
+    # None of M14's eight checks times anything, so a busy runner costs time here rather than a
+    # wrong number.
+    timeout-minutes: 120
+    steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout aztec-avm-runtime
+        uses: actions/checkout@v4
+        with:
+          path: aztec-avm-runtime
+
+      - name: Clone the aztec-packages fork
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/aztec-packages
+          ref: aztec-avm-runtime
+          path: aztec-packages
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup Dev Environment
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Assert the series base commit is present
+        working-directory: aztec-packages
+        run: |
+          set -euo pipefail
+          git fetch --unshallow 2>/dev/null || true
+          git rev-parse --verify 233d8e0993^{commit}
+
+      - name: Assert M14's own patch and its prepared contribution are present
+        run: |
+          set -euo pipefail
+          # ONE patch, and the two documents a sixth upstream contribution needs. They live beside
+          # the checks rather than in codetracer-specs/upstream-bugs/, because that directory is
+          # enumerated by verify_carry_set_complete and every entry in it must equal a branch
+          # PUBLISHED on the fork's origin. See WORLD-STATE.md section 6.
+          for p in \
+            aztec-avm-runtime/verification/m14/0001-feat-world_state_reference-archive-tree-so-the-in-me.patch \
+            aztec-avm-runtime/verification/m14/PR.md \
+            aztec-avm-runtime/verification/m14/verify.sh \
+            aztec-avm-runtime/verification/m14/world_state_block_probe.cpp ; do
+            test -f "$p" || { echo "::error::missing M14 input: $p" >&2; exit 1; }
+          done
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          # The cache the dev shells' CCACHE_DIR points at when it is set from outside. A miss here
+          # costs time and nothing else: verify_compiler_cache_effective measures cold and warm in
+          # a PRIVATE cache directory of its own, so its result does not depend on this restoring.
+          path: ${{ github.workspace }}/ccache
+          key: avm-wasm-ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            avm-wasm-ccache-${{ runner.os }}-
+
+      - name: Build both trees and run the M14 checks
+        working-directory: aztec-avm-runtime
+        env:
+          # Not $TMPDIR: the two trees are several gigabytes and a tmpfs /tmp is the wrong place. A
+          # DIFFERENT directory from every other job's, so none of them can answer for another.
+          M14_WORK: ${{ github.workspace }}/m14-work
+          CCACHE_DIR: ${{ github.workspace }}/ccache
+        # See the M7 job: `shell: bash` supplies `-o pipefail`, which the default `bash -e {0}` does
+        # not, so `| tee` cannot swallow a failure.
+        shell: bash
+        run: dev-exec just verify-m14 2>&1 | tee verify-m14.log
+
+      - name: Collect the probe transcripts and the measurement record
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p artifacts-m14
+          cp aztec-avm-runtime/verify-m14.log artifacts-m14/ 2>/dev/null || true
+          for f in "${{ github.workspace }}"/m14-work/probe-*.txt \
+                   "${{ github.workspace }}"/m14-work/probe-*.txt.err \
+                   "${{ github.workspace }}"/m14-work/measured.env \
+                   "${{ github.workspace }}"/m14-work/nm.txt \
+                   "${{ github.workspace }}"/m14-work/ccache-scratch/*.txt ; do
+            [ -f "$f" ] && cp "$f" artifacts-m14/ || true
+          done
+          ls -la artifacts-m14
+
+      - name: Upload transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: avm-wasm-world-state-block-coverage
+          path: artifacts-m14
+          retention-days: 30

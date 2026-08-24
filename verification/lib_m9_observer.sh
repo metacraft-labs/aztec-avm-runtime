@@ -152,7 +152,11 @@ m9_require_idle_machine() {
 
   while : ; do
     busy=""
-    for name in ninja cmake cc1plus cc1 clang clang++ ld.lld lld rustc cargo make gcc g++; do
+    # `ccache` is in this list from M14 on, and it is not decoration. With the compiler cache wired
+    # into both dev shells, a competing build that is HITTING spawns no compiler at all — every
+    # process in it is named `ccache` — so a detector that named only compilers would have gone
+    # blind to exactly the kind of build the cache makes cheap enough to run beside a measurement.
+    for name in ninja cmake ccache cc1plus cc1 clang clang++ ld.lld lld rustc cargo make gcc g++; do
       for p in $(pgrep -x "$name" 2>/dev/null); do
         case "$self_tree" in *" $p "*) continue ;; esac
         busy="$busy $name($p)"

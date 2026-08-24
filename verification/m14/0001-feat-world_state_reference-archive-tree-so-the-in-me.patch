@@ -1,0 +1,564 @@
+From 4bcadb2bebf99f94cc19b22b33566855fa92b9df Mon Sep 17 00:00:00 2001
+From: Metacraft Labs <dev@metacraft-labs.com>
+Date: Mon, 24 Aug 2026 03:35:57 +0300
+Subject: [PATCH] feat(world_state_reference): archive tree, so the in-memory
+ reference covers every tree the WorldState has
+
+MemoryMerkleDB reproduces four of the WorldState's five trees. The fifth is the
+archive: the append-only tree of block-header hashes that world_state keeps
+beside the four, and the one every block advances.
+
+world_state/memory_merkle_db.test.cpp is the canonical-fidelity gate for this
+class -- it drives a real, file-backed WorldState and a MemoryMerkleDB through
+the same operations and requires them to agree after every step. It constructs
+the WorldState with five trees and compares four. A gate that omits a tree the
+real implementation has is a weaker gate, and this closes that.
+
+What the archive needs turns out to be what the class already has:
+
+  * It is append-only and shares DOM_SEP__MERKLE_HASH with the note-hash and
+    L1->L2 trees, which world_state/fork.hpp already records, so it is one more
+    MemoryAppendOnlyTree<aztec::AztecMerkleHashPolicy> at ARCHIVE_HEIGHT.
+  * Its genesis is one leaf. WorldState seeds it with the block-0 header hash
+    computed from the genesis state reference, so MemoryMerkleDB now computes
+    the same hash from its own four genesis snapshots. It is derived rather
+    than stored: the new test asserts it reproduces GENESIS_BLOCK_HEADER_HASH
+    and GENESIS_ARCHIVE_ROOT, so a change to any of the four trees moves this
+    value instead of silently agreeing with a copied constant.
+  * It lives inside the checkpointed State, so a reverted block puts the
+    archive back with the trees rather than leaving an archive leaf certifying
+    a state that was rolled back.
+
+update_archive() is added beside it, with WorldState::update_archive's check and
+its message: a header whose four-tree state reference is not the world state's
+current one is refused. TreeRoots::state_reference_equals() is that comparison,
+kept separate from operator== because a block header carries the four trees and
+not the fifth.
+
+The AVM is unaffected, deliberately. MerkleTreeId::ARCHIVE appears in vm2 only
+in a tree-name switch, and the AVM's own TreeSnapshots carries four trees and is
+column-serialised, so the archive is not part of the vm2 adapter's
+LowLevelMerkleDBInterface surface and nothing the AVM sees changes.
+
+Also states the prefill constants in the form they are actually derived in.
+DEFAULT_NULLIFIER_TREE_PREFILL and DEFAULT_PUBLIC_DATA_TREE_PREFILL were the
+literal 128 with a comment saying they match what the fuzzer initialises the
+WorldState with. They match more than that: @aztec/world-state's
+INITIAL_NULLIFIER_TREE_SIZE is 2 * MAX_NULLIFIERS_PER_TX and
+INITIAL_PUBLIC_DATA_TREE_SIZE is 2 * MAX_TOTAL_PUBLIC_DATA_UPDATE_REQUESTS_PER_TX,
+and both constants are 64. Writing them that way means a change to either
+protocol constant moves the reference's genesis with the production one.
+
+Tests: world_state_tests gains five cases -- the genesis archive against the
+published constants and against the real WorldState, three blocks of archive
+appends compared root, size, sibling path and leaf value, the state-reference
+refusal driven through EACH of the four StateReference trees in turn (the
+comparison is a conjunction, so one tree's mismatch is the only thing that
+exercises that tree's conjunct), the shared tree-id dispatch, and checkpoint
+revert and commit --
+and expect_roots_equal() now compares five snapshots, which puts the archive
+under the seven existing cases as well.
+---
+ .../world_state/memory_merkle_db.test.cpp     | 216 ++++++++++++++++++
+ .../memory_merkle_db.cpp                      |  74 +++++-
+ .../memory_merkle_db.hpp                      |  72 +++++-
+ 3 files changed, 352 insertions(+), 10 deletions(-)
+
+diff --git a/barretenberg/cpp/src/barretenberg/world_state/memory_merkle_db.test.cpp b/barretenberg/cpp/src/barretenberg/world_state/memory_merkle_db.test.cpp
+index 4a48753c6c5..f2f385fe8d2 100644
+--- a/barretenberg/cpp/src/barretenberg/world_state/memory_merkle_db.test.cpp
++++ b/barretenberg/cpp/src/barretenberg/world_state/memory_merkle_db.test.cpp
+@@ -18,6 +18,12 @@
+ // sibling paths, low-leaf lookups, indexed-leaf preimages and leaf values. WorldState is the source of
+ // truth for the AVM trees; MemoryMerkleDB exists to reproduce it in memory for the differential fuzzer,
+ // so any divergence here is a MemoryMerkleDB bug.
++//
++// The gate covers ALL FIVE trees the WorldState has, the archive included. The AVM never reads the
++// archive, but this test is not about the AVM: it is about whether the reference reproduces the real
++// world state, and a gate that omits a tree the real one has is a weaker gate. expect_roots_equal()
++// therefore compares five snapshots, which puts the archive under every test below and not only under
++// the three written for it.
+ 
+ namespace bb::world_state {
+ namespace {
+@@ -74,6 +80,16 @@ class MemoryMerkleDBEquivalenceTest : public ::testing::Test {
+         check_snapshot(MerkleTreeId::PUBLIC_DATA_TREE, mem_snap.public_data_tree);
+         check_snapshot(MerkleTreeId::NOTE_HASH_TREE, mem_snap.note_hash_tree);
+         check_snapshot(MerkleTreeId::L1_TO_L2_MESSAGE_TREE, mem_snap.l1_to_l2_message_tree);
++        check_snapshot(MerkleTreeId::ARCHIVE, mem_snap.archive_tree);
++    }
++
++    // Appends one block-header hash to both databases through each one's own archive entry point:
++    // WorldState::update_archive (which validates the block's state reference and then appends) and
++    // MemoryMerkleDB::update_archive (which does the same against its own four-tree snapshot).
++    void update_archive_on_both(const FF& block_header_hash)
++    {
++        ws->update_archive(ws->get_state_reference(revision()), block_header_hash);
++        mem->update_archive(mem->get_tree_roots(), block_header_hash);
+     }
+ 
+     void check_snapshot(MerkleTreeId tree_id, const TreeSnapshot& mem_snap)
+@@ -326,5 +342,205 @@ TEST_F(MemoryMerkleDBEquivalenceTest, MixedSequence)
+     expect_public_data_preimage_equal(PUBLIC_DATA_PREFILL);
+ }
+ 
++// The archive tree's genesis is not empty: the WorldState seeds it with the block-0 header hash, so
++// its size is 1 and its root is the published GENESIS_ARCHIVE_ROOT. A reference that started it empty
++// would be wrong from the first read, which is why this is asserted against upstream's own constants
++// as well as against the real world state.
++TEST_F(MemoryMerkleDBEquivalenceTest, GenesisArchiveMatchesPublishedConstants)
++{
++    const TreeRoots mem_snap = mem->get_tree_roots();
++    EXPECT_EQ(mem_snap.archive_tree.next_available_leaf_index, 1u);
++    EXPECT_EQ(mem_snap.archive_tree.root, bb::fr(GENESIS_ARCHIVE_ROOT));
++    EXPECT_EQ(mem->get_leaf_value(MerkleTreeId::ARCHIVE, 0), bb::fr(GENESIS_BLOCK_HEADER_HASH));
++
++    // The same two values out of the real world state, so the constants are not the only witness.
++    auto info = ws->get_tree_info(revision(), MerkleTreeId::ARCHIVE);
++    EXPECT_EQ(info.meta.root, mem_snap.archive_tree.root);
++    EXPECT_EQ(info.meta.size, mem_snap.archive_tree.next_available_leaf_index);
++    expect_leaf_value_equal(MerkleTreeId::ARCHIVE, 0);
++    expect_sibling_path_equal(MerkleTreeId::ARCHIVE, 0);
++
++    // And it is derived rather than stored: recomputing it from the four genesis snapshots reproduces
++    // the leaf, so a change to any of those four moves this hash instead of silently agreeing.
++    EXPECT_EQ(MemoryMerkleDB::compute_initial_block_header_hash(
++                  mem_snap, MemoryMerkleDB::DEFAULT_INITIAL_HEADER_GENERATOR_POINT,
++                  MemoryMerkleDB::DEFAULT_GENESIS_TIMESTAMP),
++              bb::fr(GENESIS_BLOCK_HEADER_HASH));
++}
++
++// Three blocks' worth of archive appends, each after real mutations to the other four trees, with the
++// roots, sizes, sibling paths and leaf values compared against the real world state at every step.
++TEST_F(MemoryMerkleDBEquivalenceTest, UpdateArchiveMatchesWorldState)
++{
++    for (uint64_t block = 1; block <= 3; ++block) {
++        NullifierLeafValue nullifier(FF(0x5000 + block));
++        ws->insert_indexed_leaves<NullifierLeafValue>(MerkleTreeId::NULLIFIER_TREE, { nullifier });
++        mem->insert_indexed_leaves_nullifier_tree(nullifier);
++
++        std::vector<FF> note_hashes{ FF(0x6000 + block) };
++        ws->append_leaves<FF>(MerkleTreeId::NOTE_HASH_TREE, note_hashes);
++        mem->append_leaves(MerkleTreeId::NOTE_HASH_TREE, note_hashes);
++
++        std::vector<FF> msgs{ FF(0x7000 + block) };
++        ws->append_leaves<FF>(MerkleTreeId::L1_TO_L2_MESSAGE_TREE, msgs);
++        mem->append_leaves(MerkleTreeId::L1_TO_L2_MESSAGE_TREE, msgs);
++
++        expect_roots_equal();
++        const TreeRoots before = mem->get_tree_roots();
++
++        // A stand-in for the block header hash. What is under test is the tree, not the header layout:
++        // the header's own hashing is asserted at genesis, where upstream publishes the value.
++        const FF block_header_hash = FF(0xB10C0000ULL + block);
++        update_archive_on_both(block_header_hash);
++
++        const TreeRoots after = mem->get_tree_roots();
++        // The archive moved and the other four did not: an append to the wrong tree would pass a
++        // comparison that only asserted "something changed".
++        EXPECT_NE(after.archive_tree.root, before.archive_tree.root);
++        EXPECT_EQ(after.archive_tree.next_available_leaf_index, before.archive_tree.next_available_leaf_index + 1);
++        EXPECT_TRUE(after.state_reference_equals(before));
++
++        // The archive's size is the block number plus one, which is the invariant upstream's own
++        // checkpoint builder checks after every updateArchive.
++        EXPECT_EQ(after.archive_tree.next_available_leaf_index, block + 1);
++
++        expect_roots_equal();
++        expect_leaf_value_equal(MerkleTreeId::ARCHIVE, block);
++        expect_sibling_path_equal(MerkleTreeId::ARCHIVE, block);
++        expect_sibling_path_equal(MerkleTreeId::ARCHIVE, 0);
++    }
++}
++
++// update_archive refuses a header whose state reference is not the world state's. Without this a
++// caller that drives the trees and the header separately writes an archive leaf certifying a state
++// that never existed, and every root involved still looks well-formed.
++TEST_F(MemoryMerkleDBEquivalenceTest, UpdateArchiveRejectsMismatchedStateReference)
++{
++    const TreeRoots stale = mem->get_tree_roots();
++
++    NullifierLeafValue nullifier(FF(0x9999));
++    ws->insert_indexed_leaves<NullifierLeafValue>(MerkleTreeId::NULLIFIER_TREE, { nullifier });
++    mem->insert_indexed_leaves_nullifier_tree(nullifier);
++    expect_roots_equal();
++
++    EXPECT_THROW(mem->update_archive(stale, FF(1234)), std::runtime_error);
++    // Refused, and nothing was written: the archive is still at genesis.
++    EXPECT_EQ(mem->get_tree_roots().archive_tree, stale.archive_tree);
++    EXPECT_EQ(mem->get_tree_roots().archive_tree.next_available_leaf_index, 1u);
++
++    // The current state reference is accepted, so the refusal above is about the argument and not
++    // about update_archive refusing everything.
++    update_archive_on_both(FF(1234));
++    EXPECT_EQ(mem->get_tree_roots().archive_tree.next_available_leaf_index, 2u);
++    expect_roots_equal();
++
++    // And EACH of the remaining three StateReference trees on its own. The comparison is a
++    // conjunction, so a mismatch in one tree is the only thing that discriminates that tree's
++    // conjunct: with the nullifier mismatch above as the only negative case, dropping
++    // `note_hash_tree ==`, `public_data_tree ==` or `l1_to_l2_message_tree ==` from
++    // state_reference_equals() passes every case in this suite. The suite's other use of the
++    // comparator is a positive one, which a weakened comparator only makes more likely to hold.
++    {
++        const TreeRoots before = mem->get_tree_roots();
++        std::vector<FF> note_hashes{ FF(0x7A11) };
++        ws->append_leaves<FF>(MerkleTreeId::NOTE_HASH_TREE, note_hashes);
++        mem->append_leaves(MerkleTreeId::NOTE_HASH_TREE, note_hashes);
++        expect_roots_equal();
++        EXPECT_THROW(mem->update_archive(before, FF(0x7A11)), std::runtime_error);
++        update_archive_on_both(FF(0x7A11));
++        expect_roots_equal();
++    }
++    {
++        const TreeRoots before = mem->get_tree_roots();
++        std::vector<FF> msgs{ FF(0x7A22) };
++        ws->append_leaves<FF>(MerkleTreeId::L1_TO_L2_MESSAGE_TREE, msgs);
++        mem->append_leaves(MerkleTreeId::L1_TO_L2_MESSAGE_TREE, msgs);
++        expect_roots_equal();
++        EXPECT_THROW(mem->update_archive(before, FF(0x7A22)), std::runtime_error);
++        update_archive_on_both(FF(0x7A22));
++        expect_roots_equal();
++    }
++    {
++        const TreeRoots before = mem->get_tree_roots();
++        PublicDataLeafValue write(FF(0x7A33), FF(7));
++        ws->insert_indexed_leaves<PublicDataLeafValue>(MerkleTreeId::PUBLIC_DATA_TREE, { write });
++        mem->insert_indexed_leaves_public_data_tree(write);
++        expect_roots_equal();
++        EXPECT_THROW(mem->update_archive(before, FF(0x7A33)), std::runtime_error);
++        update_archive_on_both(FF(0x7A33));
++        expect_roots_equal();
++    }
++    EXPECT_EQ(mem->get_tree_roots().archive_tree.next_available_leaf_index, 5u);
++}
++
++// The archive reached through the SHARED tree-id dispatch, which is the entry point a host export or
++// a LowLevelMerkleDBInterface-shaped caller uses, rather than through update_archive. Without this the
++// `case MerkleTreeId::ARCHIVE` arms of append_leaves, get_leaf_value and get_sibling_path are never
++// executed by any test: a mutation round found exactly that hole by turning the append into a no-op
++// and watching all eleven tests still pass.
++TEST_F(MemoryMerkleDBEquivalenceTest, ArchiveThroughTreeIdDispatch)
++{
++    const std::vector<FF> hashes{ FF(0xC0DE01), FF(0xC0DE02) };
++    ws->append_leaves<FF>(MerkleTreeId::ARCHIVE, hashes);
++    mem->append_leaves(MerkleTreeId::ARCHIVE, hashes);
++
++    expect_roots_equal();
++    EXPECT_EQ(mem->get_tree_roots().archive_tree.next_available_leaf_index, 3u);
++    for (index_t i = 0; i < 3; ++i) {
++        expect_leaf_value_equal(MerkleTreeId::ARCHIVE, i);
++        expect_sibling_path_equal(MerkleTreeId::ARCHIVE, i);
++    }
++    // The two appended leaves are the ones asked for, in order.
++    EXPECT_EQ(mem->get_leaf_value(MerkleTreeId::ARCHIVE, 1), hashes[0]);
++    EXPECT_EQ(mem->get_leaf_value(MerkleTreeId::ARCHIVE, 2), hashes[1]);
++
++    // The archive is append-only and is not padded: the real WorldState never pads it, and pad_tree
++    // must say so by name rather than silently advancing a size.
++    EXPECT_THROW(mem->pad_tree(MerkleTreeId::ARCHIVE, 1), std::runtime_error);
++    // Nor is it indexed.
++    EXPECT_THROW(mem->get_low_indexed_leaf(MerkleTreeId::ARCHIVE, FF(1)), std::runtime_error);
++}
++
++// The archive is inside the checkpointed State, so a reverted block puts it back with the other four.
++TEST_F(MemoryMerkleDBEquivalenceTest, ArchiveParticipatesInCheckpoints)
++{
++    const TreeRoots genesis = mem->get_tree_roots();
++
++    ws->checkpoint(world_state::CANONICAL_FORK_ID);
++    mem->create_checkpoint();
++    EXPECT_EQ(mem->get_checkpoint_id(), 1u);
++
++    std::vector<FF> note_hashes{ FF(0x11) };
++    ws->append_leaves<FF>(MerkleTreeId::NOTE_HASH_TREE, note_hashes);
++    mem->append_leaves(MerkleTreeId::NOTE_HASH_TREE, note_hashes);
++    update_archive_on_both(FF(0xAAAA));
++
++    const TreeRoots inside = mem->get_tree_roots();
++    // Inside the checkpoint the archive really is different, so the restore below is a comparison of
++    // two different states rather than of two copies of one.
++    EXPECT_NE(inside.archive_tree.root, genesis.archive_tree.root);
++    EXPECT_EQ(inside.archive_tree.next_available_leaf_index, 2u);
++    expect_roots_equal();
++
++    ws->revert_checkpoint(world_state::CANONICAL_FORK_ID);
++    mem->revert_checkpoint();
++    EXPECT_EQ(mem->get_checkpoint_id(), 0u);
++    EXPECT_EQ(mem->get_tree_roots(), genesis);
++    expect_roots_equal();
++    expect_sibling_path_equal(MerkleTreeId::ARCHIVE, 0);
++
++    // And a committed one is preserved.
++    ws->checkpoint(world_state::CANONICAL_FORK_ID);
++    mem->create_checkpoint();
++    update_archive_on_both(FF(0xBBBB));
++    const TreeRoots committed = mem->get_tree_roots();
++    ws->commit_checkpoint(world_state::CANONICAL_FORK_ID);
++    mem->commit_checkpoint();
++    EXPECT_EQ(mem->get_checkpoint_id(), 0u);
++    EXPECT_EQ(mem->get_tree_roots(), committed);
++    EXPECT_EQ(mem->get_tree_roots().archive_tree.next_available_leaf_index, 2u);
++    expect_roots_equal();
++}
++
+ } // namespace
+ } // namespace bb::world_state
+diff --git a/barretenberg/cpp/src/barretenberg/world_state_reference/memory_merkle_db.cpp b/barretenberg/cpp/src/barretenberg/world_state_reference/memory_merkle_db.cpp
+index 88c7af336ec..e2b7ab3bf3d 100644
+--- a/barretenberg/cpp/src/barretenberg/world_state_reference/memory_merkle_db.cpp
++++ b/barretenberg/cpp/src/barretenberg/world_state_reference/memory_merkle_db.cpp
+@@ -7,14 +7,64 @@
+ 
+ namespace bb::world_state {
+ 
+-MemoryMerkleDB::MemoryMerkleDB(size_t nullifier_tree_prefill, size_t public_data_tree_prefill)
++MemoryMerkleDB::MemoryMerkleDB(size_t nullifier_tree_prefill,
++                               size_t public_data_tree_prefill,
++                               uint32_t initial_header_generator_point,
++                               uint64_t genesis_timestamp)
+     : state_{
+         .nullifier_tree = NullifierTree(NULLIFIER_TREE_HEIGHT, nullifier_tree_prefill),
+         .public_data_tree = PublicDataTree(PUBLIC_DATA_TREE_HEIGHT, public_data_tree_prefill),
+         .note_hash_tree = NoteHashTree(NOTE_HASH_TREE_HEIGHT),
+         .l1_to_l2_message_tree = L1ToL2MessageTree(L1_TO_L2_MSG_TREE_HEIGHT),
++        .archive_tree = ArchiveTree(ARCHIVE_HEIGHT),
+     }
+-{}
++{
++    // Seeded in the body rather than in the initialiser list because the block-0 header hash is a
++    // function of the four trees' genesis snapshots, which do not exist until the list has run.
++    const FF genesis_block_header_hash =
++        compute_initial_block_header_hash(get_tree_roots(), initial_header_generator_point, genesis_timestamp);
++    const FF leaves[] = { genesis_block_header_hash };
++    append_leaves(MerkleTreeId::ARCHIVE, leaves);
++}
++
++FF MemoryMerkleDB::compute_initial_block_header_hash(const TreeRoots& initial_state_ref,
++                                                     uint32_t generator_point,
++                                                     uint64_t genesis_timestamp)
++{
++    // NOTE: this hash operation needs to match the one in
++    // noir-projects/noir-protocol-circuits/crates/types/src/abis/block_header.nr, and it is kept
++    // field for field alongside WorldState::compute_initial_block_header_hash.
++    return aztec::AztecMerkleHashPolicy::hash({
++        generator_point,
++        // last archive - which, at genesis, is all 0s
++        0, // root
++        0, // next_available_leaf_index
++        // state reference - the initial state for all the trees (except the archive tree)
++        initial_state_ref.l1_to_l2_message_tree.root,
++        initial_state_ref.l1_to_l2_message_tree.next_available_leaf_index,
++        initial_state_ref.note_hash_tree.root,
++        initial_state_ref.note_hash_tree.next_available_leaf_index,
++        initial_state_ref.nullifier_tree.root,
++        initial_state_ref.nullifier_tree.next_available_leaf_index,
++        initial_state_ref.public_data_tree.root,
++        initial_state_ref.public_data_tree.next_available_leaf_index,
++        0, // sponge_blob_hash
++        // global variables
++        0,                         // chain_id
++        0,                         // version
++        0,                         // block_number
++        0,                         // slot_number
++        bb::fr(genesis_timestamp), // timestamp
++        0,                         // coinbase
++        0,                         // fee_recipient
++        0,                         // gas_fee.fee_per_da_gas
++        0,                         // gas_fee.fee_per_l2_gas
++        // total fees
++        0,
++        // total mana used
++        0,
++    });
++}
+ 
+ TreeRoots MemoryMerkleDB::get_tree_roots() const
+ {
+@@ -23,6 +73,7 @@ TreeRoots MemoryMerkleDB::get_tree_roots() const
+         .note_hash_tree = state_.note_hash_tree.get_snapshot(),
+         .nullifier_tree = state_.nullifier_tree.get_snapshot(),
+         .public_data_tree = state_.public_data_tree.get_snapshot(),
++        .archive_tree = state_.archive_tree.get_snapshot(),
+     };
+ }
+ 
+@@ -37,6 +88,8 @@ SiblingPath MemoryMerkleDB::get_sibling_path(MerkleTreeId tree_id, index_t leaf_
+         return state_.note_hash_tree.get_sibling_path(leaf_index);
+     case MerkleTreeId::L1_TO_L2_MESSAGE_TREE:
+         return state_.l1_to_l2_message_tree.get_sibling_path(leaf_index);
++    case MerkleTreeId::ARCHIVE:
++        return state_.archive_tree.get_sibling_path(leaf_index);
+     default:
+         throw std::runtime_error("get_sibling_path: unsupported tree id " +
+                                  std::to_string(static_cast<uint64_t>(tree_id)));
+@@ -67,6 +120,8 @@ FF MemoryMerkleDB::get_leaf_value(MerkleTreeId tree_id, index_t leaf_index) cons
+         return state_.note_hash_tree.get_leaf_value(leaf_index);
+     case MerkleTreeId::L1_TO_L2_MESSAGE_TREE:
+         return state_.l1_to_l2_message_tree.get_leaf_value(leaf_index);
++    case MerkleTreeId::ARCHIVE:
++        return state_.archive_tree.get_leaf_value(leaf_index);
+     default:
+         throw std::runtime_error("get_leaf_value: unsupported tree id " +
+                                  std::to_string(static_cast<uint64_t>(tree_id)));
+@@ -104,8 +159,12 @@ void MemoryMerkleDB::append_leaves(MerkleTreeId tree_id, std::span<const FF> lea
+     case MerkleTreeId::L1_TO_L2_MESSAGE_TREE:
+         state_.l1_to_l2_message_tree.append_leaves(leaves);
+         break;
++    case MerkleTreeId::ARCHIVE:
++        state_.archive_tree.append_leaves(leaves);
++        break;
+     default:
+-        throw std::runtime_error("append_leaves is only supported for NOTE_HASH_TREE and L1_TO_L2_MESSAGE_TREE");
++        throw std::runtime_error(
++            "append_leaves is only supported for NOTE_HASH_TREE, L1_TO_L2_MESSAGE_TREE and ARCHIVE");
+     }
+ }
+ 
+@@ -123,6 +182,15 @@ void MemoryMerkleDB::pad_tree(MerkleTreeId tree_id, size_t num_leaves)
+     }
+ }
+ 
++void MemoryMerkleDB::update_archive(const TreeRoots& block_state_ref, const FF& block_header_hash)
++{
++    if (!get_tree_roots().state_reference_equals(block_state_ref)) {
++        throw std::runtime_error("Can't update archive tree: Block state does not match world state");
++    }
++    const FF leaves[] = { block_header_hash };
++    append_leaves(MerkleTreeId::ARCHIVE, leaves);
++}
++
+ void MemoryMerkleDB::create_checkpoint()
+ {
+     checkpoints_.push(state_);
+diff --git a/barretenberg/cpp/src/barretenberg/world_state_reference/memory_merkle_db.hpp b/barretenberg/cpp/src/barretenberg/world_state_reference/memory_merkle_db.hpp
+index 7178d6a3bf1..04da0106f13 100644
+--- a/barretenberg/cpp/src/barretenberg/world_state_reference/memory_merkle_db.hpp
++++ b/barretenberg/cpp/src/barretenberg/world_state_reference/memory_merkle_db.hpp
+@@ -6,6 +6,7 @@
+ #include <stack>
+ #include <vector>
+ 
++#include "barretenberg/aztec/aztec_constants.hpp"
+ #include "barretenberg/aztec/aztec_hash_policy.hpp"
+ #include "barretenberg/crypto/merkle_tree/indexed_tree/indexed_leaf.hpp"
+ #include "barretenberg/crypto/merkle_tree/response.hpp"
+@@ -42,7 +43,19 @@ struct TreeRoots {
+     TreeSnapshot note_hash_tree;
+     TreeSnapshot nullifier_tree;
+     TreeSnapshot public_data_tree;
++    // The archive tree is deliberately LAST and deliberately outside the four above: those four are
++    // the block header's StateReference, and the archive is the tree of block-header hashes over it.
++    TreeSnapshot archive_tree;
+     bool operator==(const TreeRoots& other) const = default;
++
++    // Equality over the four StateReference trees only, ignoring the archive. This is the comparison
++    // WorldState::update_archive performs before it appends (is_same_state_reference), and it is
++    // separate from operator== precisely because a block's header carries the four and not the fifth.
++    bool state_reference_equals(const TreeRoots& other) const
++    {
++        return l1_to_l2_message_tree == other.l1_to_l2_message_tree && note_hash_tree == other.note_hash_tree &&
++               nullifier_tree == other.nullifier_tree && public_data_tree == other.public_data_tree;
++    }
+ };
+ 
+ /**
+@@ -199,7 +212,7 @@ template <typename LeafType, typename HashingPolicy> class MemoryIndexedTree {
+ };
+ 
+ /**
+- * @brief Self-contained in-memory reference world state (four AVM trees).
++ * @brief Self-contained in-memory reference world state (the five WorldState trees).
+  *
+  * Holds the four AVM trees (note-hash and L1->L2 message as append-only, nullifier and public-data as
+  * indexed) at full protocol height, hashing nodes with the same domain-separated Poseidon2 policies as
+@@ -207,6 +220,15 @@ template <typename LeafType, typename HashingPolicy> class MemoryIndexedTree {
+  * It is vm2-free: it exposes its own tight method surface; the AVM's `LowLevelMerkleDBInterface` is
+  * satisfied by a thin adapter in vm2 that wraps this class.
+  *
++ * It also holds the ARCHIVE tree — the append-only tree of block-header hashes the WorldState keeps
++ * beside those four. The AVM never reads it (`MerkleTreeId::ARCHIVE` appears in vm2 only in a
++ * tree-name switch, and the AVM's own `TreeSnapshots` carries four trees), so the archive is NOT
++ * part of the adapter's `LowLevelMerkleDBInterface` surface and adding it here changes nothing the
++ * AVM sees. What it is for is BLOCK-level use, and for making this class a complete reference: the
++ * canonical-fidelity gate in world_state/memory_merkle_db.test.cpp drives this class and a real
++ * WorldState through the same operations, and a reference missing a tree the real one has is a
++ * weaker gate.
++ *
+  * Checkpoints deep-copy the whole tree state onto a stack and restore on revert, mirroring
+  * PureRawMerkleDB's checkpoint id semantics.
+  */
+@@ -217,14 +239,37 @@ class MemoryMerkleDB {
+         MemoryIndexedTree<crypto::merkle_tree::PublicDataLeafValue, aztec::PublicDataMerkleHashPolicy>;
+     using NoteHashTree = MemoryAppendOnlyTree<aztec::AztecMerkleHashPolicy>;
+     using L1ToL2MessageTree = MemoryAppendOnlyTree<aztec::AztecMerkleHashPolicy>;
+-
+-    // Genesis prefill counts for the indexed trees. These match the values the WorldState is initialized
+-    // with in the fuzzer.
+-    static constexpr size_t DEFAULT_NULLIFIER_TREE_PREFILL = 128;
+-    static constexpr size_t DEFAULT_PUBLIC_DATA_TREE_PREFILL = 128;
++    // The archive is append-only and shares the baseline separator with the other two append-only
++    // trees, which is what world_state/fork.hpp already records for the real implementation.
++    using ArchiveTree = MemoryAppendOnlyTree<aztec::AztecMerkleHashPolicy>;
++
++    // Genesis prefill counts for the indexed trees. These are the WorldState's own initial sizes, not
++    // a fuzzer-specific configuration: @aztec/world-state's INITIAL_NULLIFIER_TREE_SIZE is
++    // 2 * MAX_NULLIFIERS_PER_TX and INITIAL_PUBLIC_DATA_TREE_SIZE is
++    // 2 * MAX_TOTAL_PUBLIC_DATA_UPDATE_REQUESTS_PER_TX, and both of those protocol constants are 64.
++    static constexpr size_t DEFAULT_NULLIFIER_TREE_PREFILL = 2 * MAX_NULLIFIERS_PER_TX;
++    static constexpr size_t DEFAULT_PUBLIC_DATA_TREE_PREFILL = 2 * MAX_TOTAL_PUBLIC_DATA_UPDATE_REQUESTS_PER_TX;
++
++    // Genesis archive seeding. The WorldState seeds its archive tree with ONE leaf, the block-0
++    // header hash, computed from the genesis state reference; `initial_header_generator_point` and
++    // `genesis_timestamp` are the two inputs to that hash the WorldState also takes as parameters.
++    static constexpr uint32_t DEFAULT_INITIAL_HEADER_GENERATOR_POINT = DOM_SEP__BLOCK_HEADER_HASH;
++    static constexpr uint64_t DEFAULT_GENESIS_TIMESTAMP = 0;
+ 
+     MemoryMerkleDB(size_t nullifier_tree_prefill = DEFAULT_NULLIFIER_TREE_PREFILL,
+-                   size_t public_data_tree_prefill = DEFAULT_PUBLIC_DATA_TREE_PREFILL);
++                   size_t public_data_tree_prefill = DEFAULT_PUBLIC_DATA_TREE_PREFILL,
++                   uint32_t initial_header_generator_point = DEFAULT_INITIAL_HEADER_GENERATOR_POINT,
++                   uint64_t genesis_timestamp = DEFAULT_GENESIS_TIMESTAMP);
++
++    /**
++     * @brief The block-0 header hash, from a genesis state reference.
++     *
++     * Mirrors WorldState::compute_initial_block_header_hash field for field. The note there applies
++     * here too: this hash has to match block_header.nr's.
++     */
++    static FF compute_initial_block_header_hash(const TreeRoots& initial_state_ref,
++                                                uint32_t generator_point,
++                                                uint64_t genesis_timestamp);
+ 
+     TreeRoots get_tree_roots() const;
+ 
+@@ -241,6 +286,16 @@ class MemoryMerkleDB {
+     void append_leaves(MerkleTreeId tree_id, std::span<const FF> leaves);
+     void pad_tree(MerkleTreeId tree_id, size_t num_leaves);
+ 
++    /**
++     * @brief Appends a block-header hash to the archive, after checking the block's state reference.
++     *
++     * The check and the message are WorldState::update_archive's: appending a header whose four-tree
++     * state reference is not the world state's current one produces an archive that certifies a state
++     * that never existed, and it is exactly the mistake a caller driving the trees and the header
++     * separately makes. The comparison ignores the archive tree itself (state_reference_equals).
++     */
++    void update_archive(const TreeRoots& block_state_ref, const FF& block_header_hash);
++
+     void create_checkpoint();
+     void commit_checkpoint();
+     void revert_checkpoint();
+@@ -252,6 +307,9 @@ class MemoryMerkleDB {
+         PublicDataTree public_data_tree;
+         NoteHashTree note_hash_tree;
+         L1ToL2MessageTree l1_to_l2_message_tree;
++        // In State rather than beside it, so it is checkpointed with the other four for free: a
++        // reverted block has to put the archive back exactly as it puts the trees back.
++        ArchiveTree archive_tree;
+     };
+ 
+     State state_;
+-- 
+2.50.1
+

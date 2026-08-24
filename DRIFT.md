@@ -556,6 +556,51 @@ were absorbed silently.
   `aztec-avm-runtime/diffsim/decode_deployment_logs.mjs` (the upstream readers, driven from the
   pinned npm packages); `aztec-avm-runtime/CONTRACT-DB.md` "Why each candidate is or is not fit".
 
+---
+
+## D13 — the reference world state's genesis prefill is the protocol's, and its comment says it is the fuzzer's
+
+- id: D13
+- status: open
+- opened: 2026-08-24
+- milestone: M14 (found while settling the genesis-prefill question the milestone asks for by
+  comparison; the comparison is `test_reference_genesis_roots_versus_real_world_state`)
+- design-question: where does the in-memory reference's genesis come from, and does a change to a
+  protocol constant move it together with the production world state's?
+- sides: upstream at anchor `cpp` versus itself —
+  `barretenberg/cpp/src/barretenberg/world_state_reference/memory_merkle_db.hpp`'s comment on
+  `DEFAULT_NULLIFIER_TREE_PREFILL` / `DEFAULT_PUBLIC_DATA_TREE_PREFILL` against
+  `yarn-project/world-state/src/world-state-db/merkle_tree_db.ts`'s `INITIAL_NULLIFIER_TREE_SIZE`
+  and `INITIAL_PUBLIC_DATA_TREE_SIZE`.
+- what: The reference declares both prefills as the literal `128` with the comment "These match the
+  values the WorldState is initialized with **in the fuzzer**." They match considerably more than
+  that: the production world state defines `INITIAL_NULLIFIER_TREE_SIZE = 2 * MAX_NULLIFIERS_PER_TX`
+  and `INITIAL_PUBLIC_DATA_TREE_SIZE = 2 * MAX_TOTAL_PUBLIC_DATA_UPDATE_REQUESTS_PER_TX`, and both
+  protocol constants are 64 — themselves derived, in
+  `noir-projects/fnd/noir-protocol-circuits/crates/types/src/constants.nr`, as `1 << 6` from the
+  nullifier and public-data subtree heights. The fuzzer passes 128 because the protocol says 128,
+  not because it chose it. Measured three ways on this run: the generated header the C++ compiled
+  against carries 64 for both, Tier D's capture of the production `NativeWorldStateService` reports
+  genesis sizes of 128 for both indexed trees, and the reference executed reports 128 for both.
+- why it matters: it is a comment that is TRUE and NARROW, which is the shape that survives review.
+  Read literally it says the reference is configured to agree with a test harness, so a reader who
+  changed the fuzzer's configuration would expect to change this, and a reader who changed
+  `NULLIFIER_SUBTREE_HEIGHT` would not expect to have to. The second is the one that matters: a
+  protocol change would move the production world state's genesis and leave the reference's behind,
+  and the fidelity gate under `world_state/` would then be comparing two genesis states that were
+  never meant to be the same.
+- decision: Open, and fixed in M14's prepared patch rather than reported separately. The patch
+  restates both constants as `2 * MAX_NULLIFIERS_PER_TX` and
+  `2 * MAX_TOTAL_PUBLIC_DATA_UPDATE_REQUESTS_PER_TX` and rewrites the comment to say where the
+  numbers come from, so the derivation is in the source rather than in prose beside it. It closes
+  when that patch lands, or when upstream states the derivation some other way. It is deliberately
+  NOT filed on its own: it is two lines inside a change that has its own argument, and splitting it
+  out would be a drive-by.
+- evidence: `aztec-avm-runtime/verification/test_reference_genesis_roots_versus_real_world_state.sh`
+  section A (the generated header, the protocol source, the probe and Tier D compared four ways);
+  `aztec-avm-runtime/verification/m14/0001-feat-world_state_reference-archive-tree-so-the-in-me.patch`;
+  `aztec-avm-runtime/WORLD-STATE.md` section 4.
+
 <!-- END:drift -->
 
 ---

@@ -53,6 +53,7 @@
               pkgs.cmake
               pkgs.ninja
               pkgs.clang_20
+              pkgs.ccache
               pkgs.pkg-config
 
               # Utilities the spike scripts and bootstrap.sh reach for.
@@ -78,7 +79,24 @@
             );
 
             shellHook = ''
-              echo "aztec-avm-runtime: node $(node --version), yarn $(yarn --version), wasi-sdk $(cat ${wasi-sdk}/VERSION | head -1)"
+              # ---- compiler cache -------------------------------------------------
+              # The same six exports the fork's shell makes, with the same defaults and
+              # the same `:-` overridability, so a build that moves from one shell to
+              # the other does not silently lose the cache. The reasoning is written out
+              # once, in aztec-packages/flake.nix; the short version is that a cache on
+              # PATH but not on the compiler launcher path caches nothing while looking
+              # solved, that CCACHE_BASEDIR is what lets one upstream translation unit
+              # built in two different work directories share one entry, and that
+              # `%compiler% --version` is used instead of the `mtime` default because
+              # every binary in /nix/store has mtime 1970.
+              export CCACHE_DIR="''${CCACHE_DIR:-$HOME/.cache/ccache}"
+              export CCACHE_BASEDIR="''${CCACHE_BASEDIR:-$HOME}"
+              export CCACHE_MAXSIZE="''${CCACHE_MAXSIZE:-60G}"
+              export CCACHE_COMPILERCHECK="''${CCACHE_COMPILERCHECK:-%compiler% --version}"
+              export CMAKE_C_COMPILER_LAUNCHER="''${CMAKE_C_COMPILER_LAUNCHER:-ccache}"
+              export CMAKE_CXX_COMPILER_LAUNCHER="''${CMAKE_CXX_COMPILER_LAUNCHER:-ccache}"
+
+              echo "aztec-avm-runtime: node $(node --version), yarn $(yarn --version), wasi-sdk $(cat ${wasi-sdk}/VERSION | head -1), ccache $(ccache --version | head -1 | awk '{print $3}') at $CCACHE_DIR"
             '';
           };
         };

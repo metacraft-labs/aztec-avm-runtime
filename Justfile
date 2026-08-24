@@ -1090,3 +1090,107 @@ verify-m13:
       echo "verify-m13: all checks passed"
     fi
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M14 — block-level world-state coverage, and the compiler cache that made the
+# regression sweep runnable again.
+#
+# TWO worktrees of 233d8e0993 under $M14_WORK (default ~/.cache/aztec-m14-archive):
+# the pristine anchor, and the anchor plus M14's one patch. Upstream's own
+# `default` preset and upstream's own targets in each — `world_state_tests`,
+# which drives the real lmdb-backed WorldState and the in-memory reference side
+# by side, and `vm2_tests`, the 1,803-test neutrality denominator.
+#
+#   just verify-block-level-audit    verify_block_level_gap_audit_complete   (the check that BUILDS)
+#   just verify-archive-absence      test_archive_tree_absence_confirmed
+#   just verify-genesis-versus-world-state
+#                                    test_reference_genesis_roots_versus_real_world_state
+#   just verify-archive-roots        test_archive_tree_roots_match_real_world_state
+#   just verify-archive-checkpoints  test_archive_tree_participates_in_checkpoints
+#   just verify-block-zero-read      test_historical_block_zero_read_returns_genesis
+#   just verify-world-state-neutral  verify_world_state_reference_extension_native_neutral
+#   just verify-compiler-cache       verify_compiler_cache_effective
+#   just verify-m14                  all eight, in order
+#
+# The audit is the only one that builds. It writes $M14_WORK/measured.env and the
+# other seven read it; if it has not run they say so and fail rather than
+# building a tree of their own, because the neutrality control in
+# verify-compiler-cache needs the SAME pair of trees every other check measured.
+#
+# THE COMPILER CACHE IS NOT DECORATION AND NOT M14's SUBJECT — it is the reason
+# this milestone's regression sweep can be run at all. `pkgs.ccache` was in the
+# fork's shell from M0 and nothing invoked it; both shells now export
+# CMAKE_C_COMPILER_LAUNCHER, CMAKE_CXX_COMPILER_LAUNCHER, CCACHE_DIR,
+# CCACHE_BASEDIR, CCACHE_MAXSIZE and CCACHE_COMPILERCHECK. Measured on 32 cores
+# on upstream's own `vm2_tests`, build directory DELETED between the two passes so
+# what is measured is the cache and not ninja: 327 s cold with 639 misses and
+# 0 hits, 9 s warm with 639 direct hits and 0 misses, and the same sha256 out of
+# both. verify-compiler-cache re-measures that on a smaller target (eighteen
+# translation units, seconds rather than minutes) and asserts, separately, that
+# the cache CANNOT make two different trees look identical: M14's own two trees
+# built from different absolute paths against one warm cache give exactly ONE
+# miss — the number of changed translation units — with the CHANGED object
+# differing by digest and an UNTOUCHED one byte-identical across the trees.
+#
+# `just verify-m14` measured 459 assertions, 8/8, exit 0, per check
+# 130 / 31 / 59 / 53 / 31 / 37 / 59 / 59. The two vm2_tests runs in
+# verify-world-state-neutral are the long pole at about 6 minutes each; the whole
+# set is about 25 minutes against a warm cache.
+# ---------------------------------------------------------------------------
+
+# The audit: five implementations enumerated over the whole fork, thirteen operations classified.
+verify-block-level-audit:
+    @verification/verify_block_level_gap_audit_complete.sh
+
+# The archive's absence at the anchor, by execution rather than by reading a header.
+verify-archive-absence:
+    @verification/test_archive_tree_absence_confirmed.sh
+
+# Genesis: the reference, upstream's own constants, and Tier D's production capture.
+verify-genesis-versus-world-state:
+    @verification/test_reference_genesis_roots_versus_real_world_state.sh
+
+# Archive roots after a sequence of block-header appends, against the real WorldState.
+verify-archive-roots:
+    @verification/test_archive_tree_roots_match_real_world_state.sh
+
+# Create, revert and commit: the archive comes back and stays with the other four.
+verify-archive-checkpoints:
+    @verification/test_archive_tree_participates_in_checkpoints.sh
+
+# Block-pinned reads: not needed, and the sentinel executed rather than read.
+verify-block-zero-read:
+    @verification/test_historical_block_zero_read_returns_genesis.sh
+
+# Upstream's own vm2_tests and world_state_tests, same names and same results.
+verify-world-state-neutral:
+    @verification/verify_world_state_reference_extension_native_neutral.sh
+
+# The cache fires, and it cannot mask a base-versus-patched or a toolchain difference.
+verify-compiler-cache:
+    @verification/verify_compiler_cache_effective.sh
+
+# Run the whole M14 verification set; every check runs even if an earlier one fails.
+verify-m14:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_block_level_gap_audit_complete \
+      test_archive_tree_absence_confirmed \
+      test_reference_genesis_roots_versus_real_world_state \
+      test_archive_tree_roots_match_real_world_state \
+      test_archive_tree_participates_in_checkpoints \
+      test_historical_block_zero_read_returns_genesis \
+      verify_world_state_reference_extension_native_neutral \
+      verify_compiler_cache_effective
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m14: FAILED" >&2
+    else
+      echo "verify-m14: all checks passed"
+    fi
+    exit "$rc"
