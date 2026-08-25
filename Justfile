@@ -1554,3 +1554,92 @@ verify-m18:
       echo "verify-m18: all checks passed"
     fi
     exit "$rc"
+
+# M20 — Form A, externally-settled transactions
+# ---------------------------------------------------------------------------
+# Accept a transaction whose private half ran elsewhere and execute only its public half.
+#
+# THE THREE-PHASE MODEL, THE GAS ACCOUNTING AND THE ASYMMETRIC REVERT MODEL ARE INSIDE `avm.wasm`.
+# Upstream moved public transaction execution out of TypeScript between the two anchors:
+# `PublicTxContext` no longer exists and `PublicTxSimulator` no longer has a phase loop. So these
+# checks read the C++ at the pinned anchor for the model, and RUN the shipped module for the
+# behaviour. Nothing of M20's is a reimplementation of any of it.
+#
+# ONE ARM RUN, SHARED BY SIX CHECKS. `verification/lib_m20_form_a.sh` runs
+# `tools/run_form_a_arms.mjs` once into $M20_WORK/arms.json (default ~/.cache/aztec-m20-form-a)
+# and every check reads it, so the six cannot come to disagree about a number nothing changed.
+# It re-runs when the module, the runner or any orchestration source is newer; M20_ARMS_REFRESH=1
+# forces one. It needs a built avm.wasm carrying M13's contract-DB and merkle-DB seeding exports —
+# AVM_WASM_PATH, else this milestone's work directory, else M13's/M12's.
+#
+# COVERAGE, because a number quoted without one is how this campaign has been wrong before: SEVEN
+# arms over mock transactions whose calls address contracts that were never registered. That
+# reaches the checked-exception path deliberately and cheaply, and it is an INTEGRATION claim, not
+# a breadth one. Breadth is M7's 391 upstream tests; semantics is M19's three-way oracle.
+#
+#   just verify-form-a-roundtrip    e2e_form_a_external_tx_roundtrip
+#   just verify-form-a-provenance   test_provenance_not_consulted_during_execution   (DD-1)
+#   just verify-form-a-fee          test_fee_juice_debited_and_insufficiency_throws  (DD-2)
+#   just verify-form-a-teardown     e2e_form_a_teardown_revert_still_pays_fee
+#   just verify-form-a-asymmetry    test_nonrevertible_nullifier_collision_throws_tx_out
+#   just verify-form-a-runtime-bug  test_runtime_bug_not_reported_as_revert
+#   just verify-m20                 all seven — 233 assertions (61 / 39 / 29 / 35 / 43 / 17 / 9)
+
+# A serialized Tx deserializes, executes its public half on the wasm AVM, and lands its effects.
+verify-form-a-roundtrip:
+    @verification/e2e_form_a_external_tx_roundtrip.sh
+
+# DD-1: the execution path never observes provenance, proved by a tripwire with a mutation control.
+verify-form-a-provenance:
+    @verification/test_provenance_not_consulted_during_execution.sh
+
+# DD-2: skipFeeEnforcement defaults to false; a funded payer is debited, an unfunded one thrown out.
+verify-form-a-fee:
+    @verification/test_fee_juice_debited_and_insufficiency_throws.sh
+
+# A reverting teardown rolls back to post-setup, still lands, and still pays.
+verify-form-a-teardown:
+    @verification/e2e_form_a_teardown_revert_still_pays_fee.sh
+
+# A revertible-insertion nullifier collision is thrown out, while an APP_LOGIC revert is not.
+verify-form-a-asymmetry:
+    @verification/test_nonrevertible_nullifier_collision_throws_tx_out.sh
+
+# A trap is a runtime bug and is rethrown unchanged, never converted into a revert.
+verify-form-a-runtime-bug:
+    @verification/test_runtime_bug_not_reported_as_revert.sh
+
+# Every check this repository NAMES in a comment is a check that exists.
+#
+# M20's review found FIVE comments naming a verification check to reassure the reader that a
+# property was pinned. None of the five existed; THREE of the properties were not pinned at all,
+# including this milestone's third deliverable and D14's encoding-delta comparison. All five were
+# found by reading, one at a time, which is exactly how a sixth gets missed — so the rule is
+# mechanical now, total over `orchestration/src`, `node-host/src`, `verification/` and `tools/`,
+# with a declared exceptions list that cannot go dead and a planted name as its control.
+verify-named-checks:
+    @verification/verify_named_checks_exist.sh
+
+# Run the whole M20 verification set; every check runs even if an earlier one fails.
+verify-m20:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      e2e_form_a_external_tx_roundtrip \
+      test_provenance_not_consulted_during_execution \
+      test_fee_juice_debited_and_insufficiency_throws \
+      e2e_form_a_teardown_revert_still_pays_fee \
+      test_nonrevertible_nullifier_collision_throws_tx_out \
+      test_runtime_bug_not_reported_as_revert \
+      verify_named_checks_exist
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m20: FAILED" >&2
+    else
+      echo "verify-m20: all checks passed"
+    fi
+    exit "$rc"
