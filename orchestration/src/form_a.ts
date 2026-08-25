@@ -54,14 +54,23 @@ import { ProvenanceConsultedDuringExecution, sealProvenance } from './submitted_
 import type { SubmittedTx } from './submitted_tx.ts';
 
 /**
- * What became of a submitted transaction.
+ * What became of a submitted transaction, IN THE CHAIN'S OWN VOCABULARY.
  *
- * TWO MEMBERS, THREE OUTCOMES. `landed` and `rejected` are the two a caller RECEIVES; the third,
+ * THE TWO NAMES ARE UPSTREAM'S, NOT OURS, and that is the point — this is what a block explorer
+ * has to display. `stdlib/src/tx/processed_tx.ts` declares `ProcessedTx`, which carries a
+ * `revertCode` and may well have reverted, and `FailedTx = { tx, error }`, documented there as
+ * "a tx that failed to be processed by the sequencer public processor". `PublicProcessor.process`
+ * returns the two as separate arrays and logs "Processed N successful txs and M failed txs". So a
+ * transaction the AVM threw out is a FAILED transaction in Aztec's terminology, and one that ran
+ * and reverted is a PROCESSED one. An earlier revision of this file called them `landed` and
+ * `rejected`, which are words this protocol does not use anywhere.
+ *
+ * TWO MEMBERS, THREE OUTCOMES. `processed` and `failed` are the two a caller RECEIVES; the third,
  * `bug`, is not a value because it is a throw — an error this runtime does not recognise is
  * rethrown unchanged rather than described. Anything that reads this union as "there are two
  * outcomes" is reading it wrong, and the header above says why the direction is deliberate.
  */
-export type FormAOutcomeKind = 'landed' | 'rejected';
+export type FormAOutcomeKind = 'processed' | 'failed';
 
 /**
  * Which phase reverted, from the module's own four-valued code.
@@ -74,8 +83,8 @@ export type TxRevertPhase = 'none' | 'appLogic' | 'teardown' | 'both';
 /** The module's `RevertCode`, in the C++'s own order. Index is the raw value. */
 export const RAW_REVERT_PHASES: readonly TxRevertPhase[] = ['none', 'appLogic', 'teardown', 'both'];
 
-export interface FormALanded {
-  readonly kind: 'landed';
+export interface FormAProcessed {
+  readonly kind: 'processed';
   /**
    * THE RUNTIME'S OWN OUTCOME: the module's four-valued revert code, 0..3.
    *
@@ -105,17 +114,17 @@ export interface FormALanded {
   readonly result: PublicTxResult;
 }
 
-export interface FormARejected {
-  readonly kind: 'rejected';
+export interface FormAFailed {
+  readonly kind: 'failed';
   /** Which unrecoverable condition, as classified from the module's own message. */
-  readonly reason: RejectionReason;
+  readonly reason: FailureReason;
   /** The module's message, verbatim. */
   readonly message: string;
   /** The error the boundary threw, kept so nothing is lost by classifying it. */
   readonly cause: unknown;
 }
 
-export type FormAOutcome = FormALanded | FormARejected;
+export type FormAOutcome = FormAProcessed | FormAFailed;
 
 /**
  * The unrecoverable transaction-level conditions, each named for the C++ site that raises it.
@@ -126,7 +135,7 @@ export type FormAOutcome = FormALanded | FormARejected;
  * about revertible insertion soft-reverts. Keeping them distinct means a test can assert that the
  * REVERTIBLE one rejected rather than merely that something rejected.
  */
-export type RejectionReason =
+export type FailureReason =
   | 'nonRevertibleNullifierCollision'
   | 'revertibleNullifierCollision'
   | 'setupCallFailed'
@@ -143,7 +152,7 @@ export type RejectionReason =
  * source, so a rename upstream fails the check instead of silently disabling a branch here, and
  * `test_runtime_bug_not_reported_as_revert` asserts each one classifies as its own reason.
  */
-export const REJECTION_NEEDLES: ReadonlyArray<readonly [RejectionReason, string]> = [
+export const FAILURE_NEEDLES: ReadonlyArray<readonly [FailureReason, string]> = [
   // emit_nullifier: format("[", revertible ? "R" : "NR", "_NULLIFIER_INSERTION] UNRECOVERABLE …")
   ['nonRevertibleNullifierCollision', '[NR_NULLIFIER_INSERTION] UNRECOVERABLE ERROR! Nullifier collision:'],
   ['revertibleNullifierCollision', '[R_NULLIFIER_INSERTION] UNRECOVERABLE ERROR! Nullifier collision:'],
@@ -171,7 +180,7 @@ export const REJECTION_NEEDLES: ReadonlyArray<readonly [RejectionReason, string]
  * Returns `undefined` for "not a rejection", which the caller turns into a rethrow. That is the
  * safe direction and it is the reason this returns rather than throwing its own error type.
  */
-export function classifyBoundaryError(error: unknown): { reason: RejectionReason; message: string } | undefined {
+export function classifyBoundaryError(error: unknown): { reason: FailureReason; message: string } | undefined {
   const message = typeof (error as { message?: unknown })?.message === 'string'
     ? (error as { message: string }).message
     : undefined;
@@ -183,7 +192,7 @@ export function classifyBoundaryError(error: unknown): { reason: RejectionReason
   if ((error as { kind?: unknown })?.kind === 'trap') {
     return undefined;
   }
-  for (const [reason, needle] of REJECTION_NEEDLES) {
+  for (const [reason, needle] of FAILURE_NEEDLES) {
     if (message.includes(needle)) {
       return { reason, message };
     }
@@ -248,7 +257,7 @@ export async function executeExternallySettledTx(
     // Read AFTER the call and off the simulator, so it is the code for THIS simulation.
     const revertCode = simulator.rawRevertCode;
     const revertedIn = revertCode === undefined ? undefined : RAW_REVERT_PHASES[revertCode];
-    return { kind: 'landed', revertCode, revertedIn, result };
+    return { kind: 'processed', revertCode, revertedIn, result };
   } catch (error) {
     if (error instanceof ProvenanceConsultedDuringExecution) {
       // Never classified, never turned into a rejection: this is a defect in this runtime and it
@@ -260,7 +269,7 @@ export async function executeExternallySettledTx(
       // Unchanged, with its stack. Not wrapped, not re-typed, not turned into a revert.
       throw error;
     }
-    return { kind: 'rejected', reason: rejection.reason, message: rejection.message, cause: error };
+    return { kind: 'failed', reason: rejection.reason, message: rejection.message, cause: error };
   } finally {
     seal.release();
   }

@@ -86,7 +86,7 @@ assert_true "the teardown request makes the wire form larger, so the pair really
 # PART 3 — the public half executed, and the phase decided the outcome
 # ---------------------------------------------------------------------------
 
-assert_eq "an APP_LOGIC call that fails LANDS as a soft revert" "landed" \
+assert_eq "an APP_LOGIC call that fails LANDS as a soft revert" "processed" \
   "$(m20_arm appLogicOnlyFunded external.kind)"
 assert_eq "and its revert code is non-zero" "1" \
   "$(m20_arm appLogicOnlyFunded external.rawRevertCode)"
@@ -107,7 +107,7 @@ assert_eq "and it consumed the whole allocated L2 gas, which is what an exceptio
 assert_eq "the allocation is still upstream's MAX_PROCESSABLE_L2_GAS, so a bump is visible here" \
   "6540000" "$GAS_LIMIT_L2"
 
-assert_eq "THE SAME FAILING CALL IN SETUP throws the transaction out instead" "rejected" \
+assert_eq "THE SAME FAILING CALL IN SETUP throws the transaction out instead" "failed" \
   "$(m20_arm setupCallFails external.kind)"
 assert_eq "and names the SETUP arm of the C++ control flow" "setupCallFailed" \
   "$(m20_arm setupCallFails external.reason)"

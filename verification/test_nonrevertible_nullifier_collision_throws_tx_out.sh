@@ -130,8 +130,8 @@ assert_ge "pay_fee is called after the teardown catch, outside every try" 1 \
 
 NEEDLES="$(cd "$ORCH_DIR" && node --input-type=module -e "
 const m = await import('./src/index.ts');
-for (const [reason, needle] of m.REJECTION_NEEDLES) console.log(reason + '\t' + needle);
-" 2>&1)" || die "could not read REJECTION_NEEDLES: $NEEDLES"
+for (const [reason, needle] of m.FAILURE_NEEDLES) console.log(reason + '\t' + needle);
+" 2>&1)" || die "could not read FAILURE_NEEDLES: $NEEDLES"
 printf '%s\n' "$NEEDLES" | sed 's/^/      /'
 assert_eq "the classifier declares eight needles" "8" "$(printf '%s\n' "$NEEDLES" | grep -c .)"
 
@@ -164,19 +164,19 @@ assert_eq "a needle the C++ does not contain is not found by the same grep" "0" 
 m20_require_arms
 note "module $AVM_WASM_PATH"
 
-assert_eq "a NON-REVERTIBLE private nullifier collision throws the transaction out" "rejected" \
+assert_eq "a NON-REVERTIBLE private nullifier collision throws the transaction out" "failed" \
   "$(m20_arm nonRevertibleNullifierClash external.kind)"
 assert_eq "and is classified from the module's own [NR_...] message" \
   "nonRevertibleNullifierCollision" "$(m20_arm nonRevertibleNullifierClash external.reason)"
 
-assert_eq "A REVERTIBLE private nullifier collision ALSO throws the transaction out" "rejected" \
+assert_eq "A REVERTIBLE private nullifier collision ALSO throws the transaction out" "failed" \
   "$(m20_arm revertibleNullifierClash external.kind)"
 assert_eq "and is classified separately, so 'which phase' survives" \
   "revertibleNullifierCollision" "$(m20_arm revertibleNullifierClash external.reason)"
 
 # THE ARM THAT MAKES THE TWO ABOVE MEAN SOMETHING. Same tree, same phase, a failure of the same
 # kind — an exceptional halt from a checked exception — and it LANDS.
-assert_eq "an APP_LOGIC failure in the same phase LANDS as a soft revert" "landed" \
+assert_eq "an APP_LOGIC failure in the same phase LANDS as a soft revert" "processed" \
   "$(m20_arm appLogicOnlyFunded external.kind)"
 assert_eq "with a non-zero revert code" "1" "$(m20_arm appLogicOnlyFunded external.rawRevertCode)"
 
@@ -199,13 +199,13 @@ assert_true "the two collision arms are distinct transactions" \
 # PART 4 — a thrown-out transaction is not a reverted one, anywhere in our types
 # ---------------------------------------------------------------------------
 
-# `FormARejected` has no revert code and no result: a caller reaching for one gets `undefined`
+# `FormAFailed` has no revert code and no result: a caller reaching for one gets `undefined`
 # rather than a plausible zero.
 assert_eq "the rejected outcome carries no revertCode field" "0" \
-  "$(grep -c 'revertCode' <(sed -n '/export interface FormARejected/,/^}/p' "$ORCH_SRC/form_a.ts") || true)"
+  "$(grep -c 'revertCode' <(sed -n '/export interface FormAFailed/,/^}/p' "$ORCH_SRC/form_a.ts") || true)"
 assert_eq "and no result field" "0" \
-  "$(grep -c 'readonly result' <(sed -n '/export interface FormARejected/,/^}/p' "$ORCH_SRC/form_a.ts") || true)"
+  "$(grep -c 'readonly result' <(sed -n '/export interface FormAFailed/,/^}/p' "$ORCH_SRC/form_a.ts") || true)"
 assert_ge "while the landed outcome does carry the result" 1 \
-  "$(grep -c 'readonly result: PublicTxResult' <(sed -n '/export interface FormALanded/,/^}/p' "$ORCH_SRC/form_a.ts") || true)"
+  "$(grep -c 'readonly result: PublicTxResult' <(sed -n '/export interface FormAProcessed/,/^}/p' "$ORCH_SRC/form_a.ts") || true)"
 
 finish

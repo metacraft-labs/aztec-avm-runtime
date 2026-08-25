@@ -173,12 +173,12 @@ FEE_HEX="$(m20_arm appLogicOnlyFunded external.transactionFee)"
 FEE_DEC="$(python3 -c 'import sys; print(int(sys.argv[1], 16))' "$FEE_HEX")"
 note "funded arm: $BEFORE -> $AFTER, fee $FEE_DEC"
 
-assert_eq "the funded arm landed" "landed" "$(m20_arm appLogicOnlyFunded external.kind)"
+assert_eq "the funded arm landed" "processed" "$(m20_arm appLogicOnlyFunded external.kind)"
 assert_true "and paid a non-zero fee" test "$FEE_DEC" -gt 0
 assert_eq "and was debited by exactly that" "$FEE_DEC" \
   "$(python3 -c 'import sys; print(int(sys.argv[1]) - int(sys.argv[2]))' "$BEFORE" "$AFTER")"
 
-assert_eq "the SAME transaction unfunded is thrown out rather than landing" "rejected" \
+assert_eq "the SAME transaction unfunded is thrown out rather than landing" "failed" \
   "$(m20_arm appLogicOnlyUnfunded external.kind)"
 assert_eq "and names the C++'s own insufficient-balance error" "feePayerInsufficientBalance" \
   "$(m20_arm appLogicOnlyUnfunded external.reason)"

@@ -81,9 +81,9 @@ assert_true "the teardown request costs wire bytes, so the two are genuinely dif
 # PART 3 — it lands, it pays, and the revert code says teardown
 # ---------------------------------------------------------------------------
 
-assert_eq "the transaction with the reverting teardown LANDS" "landed" \
+assert_eq "the transaction with the reverting teardown LANDS" "processed" \
   "$(m20_arm teardownReverts external.kind)"
-assert_eq "and so does its partner, so landing is not what the teardown changed" "landed" \
+assert_eq "and so does its partner, so landing is not what the teardown changed" "processed" \
   "$(m20_arm noTeardown external.kind)"
 
 TD_RAW="$(m20_arm teardownReverts external.rawRevertCode)"
@@ -103,12 +103,12 @@ assert_true "so the raw code DOES discriminate the pair" test "$TD_RAW" != "$NT_
 # collapsed one only for consumers that demand that type. An earlier revision captured the raw code
 # in a closure the DRIVER hung on the boundary, which made "which phase reverted" a property of the
 # test harness rather than of the runtime — a consumer of `executeExternallySettledTx` still could
-# not tell a teardown revert from an app-logic one. `FormALanded` carries it now, so these are
+# not tell a teardown revert from an app-logic one. `FormAProcessed` carries it now, so these are
 # assertions about the shipped path.
-assert_ge "FormALanded declares the module's four-valued revert code as an outcome field" 1 \
-  "$(grep -c 'readonly revertCode: number | undefined;' <(sed -n '/export interface FormALanded/,/^}/p' "$ORCH_SRC/form_a.ts") || true)"
+assert_ge "FormAProcessed declares the module's four-valued revert code as an outcome field" 1 \
+  "$(grep -c 'readonly revertCode: number | undefined;' <(sed -n '/export interface FormAProcessed/,/^}/p' "$ORCH_SRC/form_a.ts") || true)"
 assert_ge "and the phase it names" 1 \
-  "$(grep -c 'readonly revertedIn: TxRevertPhase | undefined;' <(sed -n '/export interface FormALanded/,/^}/p' "$ORCH_SRC/form_a.ts") || true)"
+  "$(grep -c 'readonly revertedIn: TxRevertPhase | undefined;' <(sed -n '/export interface FormAProcessed/,/^}/p' "$ORCH_SRC/form_a.ts") || true)"
 assert_eq "the four phase names are the C++ RevertCode's own order" \
   "['none', 'appLogic', 'teardown', 'both']" \
   "$(grep -oE "\['none', 'appLogic', 'teardown', 'both'\]" "$ORCH_SRC/form_a.ts" | head -1)"

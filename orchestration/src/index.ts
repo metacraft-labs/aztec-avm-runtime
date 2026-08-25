@@ -104,13 +104,13 @@ export {
   executeExternallySettledTx,
   provenanceReadsDuring,
   type ExecuteOptions,
-  type FormALanded,
+  type FormAProcessed,
   type FormAOutcome,
   type FormAOutcomeKind,
-  type FormARejected,
+  type FormAFailed,
   type PublicTxSimulatorLike,
-  REJECTION_NEEDLES,
-  type RejectionReason,
+  FAILURE_NEEDLES,
+  type FailureReason,
 } from './form_a.ts';
 
 export {

@@ -47,9 +47,24 @@
 // the package is on npm, and `@aztec/simulator@5.0.0-nightly.20260626`, the exact tag this
 // orchestration already pins for `@aztec/stdlib`, `@aztec/foundation`, `@aztec/constants` and
 // `@aztec/protocol-contracts`, exports `./server` and ships the function in both
-// `dest/public/utils.js` and `src/public/utils.ts`. Importing it would be possible and would buy
-// nothing: it would add a dependency on a package this runtime otherwise does not need, in order
-// to reach a helper that upstream's own encoder does not use.
+// `dest/public/utils.js` and `src/public/utils.ts`.
+//
+// THE REAL REASON NOT TO IMPORT IT IS STRONGER THAN "IT WOULD BUY NOTHING", and an earlier
+// revision of this paragraph stopped one step short of it. `npm view @aztec/simulator@<pin>
+// dependencies` lists **`@aztec/native`** and **`@aztec/world-state`** as HARD dependencies — not
+// optional ones. So `npm i @aztec/simulator` puts the NAPI AVM and the LMDB-backed world-state
+// addon into this package's tree, which is exactly what DD-9 forbids and exactly what
+// `verify_differential_containment` asserts against in three places (the manifest, the `npm pack`
+// output and the import graph). Importing it to reach a seventeen-line switch would turn a green
+// containment check red, and correctly.
+//
+// THE OPTION THAT REMAINS OPEN is to VENDOR `simulator/src/public/utils.ts` — seventeen lines
+// whose only import is `@aztec/stdlib/tx`, which this package already depends on — through this
+// repository's own vendoring machinery (`PROVENANCE.md` + `tools/provenance.py` +
+// `verification/check_drift.sh`), which is a tool-enforced line-for-line pin with a header naming
+// the upstream path and commit. That is strictly better than the hand-rolled pin below and is
+// recorded as M20's outstanding task rather than done here, because a PROVENANCE row needs an
+// inventory justification and a drift-ledger entry to go with it.
 //
 // So `phaseCallRequests` below calls the same three accessors in the same order, and there is one
 // phase split in this runtime and it is upstream's. `e2e_form_a_external_tx_roundtrip` Part 6 pins

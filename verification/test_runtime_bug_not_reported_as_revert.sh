@@ -66,8 +66,8 @@ const cases = {};
 
 // POSITIVE — every declared needle must classify. Built from the needle table itself, wrapped the
 // way M17's AvmHostError wraps it, so this is not eight hand-typed strings that could drift.
-const { REJECTION_NEEDLES } = await import('./index.ts');
-cases.needlesClassified = REJECTION_NEEDLES.map(([reason, needle]) => {
+const { FAILURE_NEEDLES } = await import('./index.ts');
+cases.needlesClassified = FAILURE_NEEDLES.map(([reason, needle]) => {
   const wrapped = new Error(`avm_simulate failed with status 1: ${needle} 0x2a`);
   const got = classifyBoundaryError(wrapped);
   return [reason, got?.reason ?? 'UNCLASSIFIED'];
@@ -151,7 +151,7 @@ assert_eq "our own provenance tripwire is a defect, never a transaction outcome"
 assert_eq "an unclassified error is rethrown UNCHANGED — the same object, not a wrapper" \
   "same-object" "$(cfield rethrow)"
 assert_eq "while a recognised rejection becomes an outcome instead of a throw" \
-  "rejected:revertibleNullifierCollision" "$(cfield rejection)"
+  "failed:revertibleNullifierCollision" "$(cfield rejection)"
 
 # ---------------------------------------------------------------------------
 # PART 3 — a real trap, from the real module

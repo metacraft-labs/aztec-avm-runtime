@@ -65,18 +65,45 @@ assert_eq "PublicTxSimulatorLike.simulate takes a Tx, not a SubmittedTx" "1" \
 assert_eq "and upstream's own simulator, which we wrap, does too" "1" \
   "$(grep -c 'async simulate(tx: Tx): Promise<PublicTxResult>' "$ORCH_SRC/wasm_avm_public_tx_simulator.ts")"
 
-# `provenance` is mentioned in exactly the two files that are ABOUT it, plus the driver that
-# constructs the two values. Nowhere in the encoder, the simulator or the resident DB.
+# THE WORD `provenance` MEANS TWO DIFFERENT THINGS IN THIS REPOSITORY, and a bare `grep -w` for
+# it cannot tell them apart. DD-1's is a transaction's origin. The OTHER one is the vendoring
+# system — `PROVENANCE.md`, `tools/provenance.py`, `verify_provenance_complete` — and a comment
+# citing that machinery is not a use of the first at all. This assertion went red the moment
+# `tx_intake.ts` acquired a line reading "`PROVENANCE.md` + `tools/provenance.py`", which is
+# exactly the kind of false positive that gets a real check deleted.
+#
+# So the needle is the IDENTIFIER, not the word: `.provenance`, `provenance:`, `provenance)`,
+# `provenance,` or a declaration of it — the forms a TypeScript file uses to touch the field —
+# and never a bare occurrence inside a path or a prose citation. The two controls below are what
+# make that narrowing safe rather than a way of excusing hits.
+provenance_uses() { # <file>
+  grep -cE '(\.provenance\b|\bprovenance[:,)]|\bprovenance\s*=|\bprovenance\?)' "$1" || true
+}
+
 for forbidden in avm_inputs.ts wasm_avm_public_tx_simulator.ts resident_db.ts \
                  shipped_module_config.ts tx_intake.ts fee_juice.ts ; do
-  assert_eq "$forbidden never mentions provenance" "0" \
-    "$(grep -cw 'provenance' "$ORCH_SRC/$forbidden" || true)"
+  assert_eq "$forbidden never USES provenance (the identifier, not the word)" "0" \
+    "$(provenance_uses "$ORCH_SRC/$forbidden")"
 done
 
 # The control for that family of greps: a file that DOES mention it must be found by the same
 # command, or the six above are six greps that cannot match anything.
-assert_ge "and the same grep does find it where it belongs" 5 \
-  "$(grep -cw 'provenance' "$ORCH_SRC/submitted_tx.ts" || true)"
+# CONTROL 1 — the same needle over the file that is ABOUT the field must find it. A needle that
+# cannot match anything is not an assertion.
+assert_ge "and the same needle DOES find it where it belongs" 5 \
+  "$(provenance_uses "$ORCH_SRC/submitted_tx.ts")"
+
+# CONTROL 2 — the narrowing must not be a way of excusing a real use. A file that merely CITES the
+# vendoring machinery scores zero; the same file with one added `submitted.provenance` read scores
+# one. Both measured on a probe, so the discrimination is executed rather than argued.
+cite_probe="$SCRATCH/cite_only.ts"
+printf '// see PROVENANCE.md and tools/provenance.py for the vendoring rules\nexport const x = 1;\n' > "$cite_probe"
+assert_eq "a comment citing PROVENANCE.md and tools/provenance.py is NOT a use" "0" \
+  "$(provenance_uses "$cite_probe")"
+assert_eq "and the old bare-word grep DID count it, which is why it was narrowed" "1" \
+  "$(grep -cw 'provenance' "$cite_probe" || true)"
+printf 'export const y = (s: { provenance: string }) => s.provenance;\n' >> "$cite_probe"
+assert_ge "while one real read of the field IS counted" 1 "$(provenance_uses "$cite_probe")"
 
 # ---------------------------------------------------------------------------
 # PART 2 — observational: every trap fires, not just `get`
@@ -311,7 +338,7 @@ MUTATED_VERDICT="$(run_arm "$MUTATED")"
 note "pristine -> $PRISTINE_VERDICT"
 note "mutated  -> $MUTATED_VERDICT"
 
-assert_eq "the unmutated execution path lands without ever touching provenance" "returned:landed" \
+assert_eq "the unmutated execution path lands without ever touching provenance" "returned:processed" \
   "$PRISTINE_VERDICT"
 assert_eq "ONE added read inside the window trips the wire, naming the trap and the property" \
   "provenance-consulted-during-execution:get:kind" "$MUTATED_VERDICT"

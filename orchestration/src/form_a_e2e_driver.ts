@@ -228,9 +228,9 @@ async function runOne(
     let report: unknown;
     try {
       const outcome = await executeExternallySettledTx(submitted, simulator);
-      report = outcome.kind === 'landed'
+      report = outcome.kind === 'processed'
         ? {
-            kind: 'landed',
+            kind: 'processed',
             // THE RUNTIME'S OWN OUTCOME, off the outcome object rather than off a closure this
             // driver used to hang on the boundary. `form_a.ts` reports the module's four-valued
             // code because upstream's published type cannot carry it (DRIFT.md D18), and a driver
@@ -245,7 +245,7 @@ async function runOne(
             totalGas: outcome.result.gasUsed.totalGas.l2Gas,
             transactionFee: outcome.result.publicTxEffect?.transactionFee?.toString() ?? null,
           }
-        : { kind: 'rejected', reason: outcome.reason };
+        : { kind: 'failed', reason: outcome.reason };
     } catch (error) {
       report = { kind: 'threw', name: (error as Error).name, message: (error as Error).message.slice(0, 200) };
     }
