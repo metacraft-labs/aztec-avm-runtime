@@ -85,8 +85,12 @@ PUB_DEFS="$(grep -rlE 'class ForkCheckpoint\b' "$ORCH_DIR/node_modules/@aztec" 2
 note "definitions under the orchestration's own node_modules: ${PUB_DEFS:-<none>}"
 assert_eq "no package the orchestration installs ships a ForkCheckpoint" \
   "" "$(printf '%s' "$PUB_DEFS" | tr -d ' ')"
-assert_dir "and the tree that CAN answer the published-package question is installed" \
-  "$REPO_ROOT/diffsim/node_modules/@aztec/world-state"
+[ -d "$REPO_ROOT/diffsim/node_modules/@aztec/world-state" ] \
+  || die "the published @aztec/world-state is installed nowhere this check can read it, so the
+             published-package question cannot be asked — and asking it of the orchestration's own
+             node_modules, which deliberately excludes that package, is the vacuous form.
+             Remedy: cd $REPO_ROOT/diffsim && npm ci"
+pass "the tree that CAN answer the published-package question is installed"
 PUB_WS_DEFS="$(grep -rlE 'class ForkCheckpoint\b' \
   "$REPO_ROOT/diffsim/node_modules/@aztec/world-state/dest" 2>/dev/null | wc -l | tr -d ' ')"
 assert_ge "the PUBLISHED @aztec/world-state does ship one, so 'no published package has it' is false" \

@@ -142,6 +142,28 @@ do
   fi
 done
 
+# THE SCANNER'S OWN BLIND SPOT, exercised. Every assertion above is an ABSENCE, so the failure
+# that matters is a walker that cannot SEE an import. Its first version scanned for `//`
+# unconditionally, treating one inside a string literal as the start of a comment — so an import
+# on the same line as a URL was silently dropped. M18's review found it. The probe puts exactly
+# that shape in front of the walker and requires the import to still be reported.
+URLPROBE="$ORCH_SRC/.probe_urlcomment.ts"
+saved_url="$SCRATCH/index.ts.saved.url"
+cp "$ORCH_SRC/index.ts" "$saved_url"
+{
+  printf "export const collectorUrl = 'http://localhost:4318/v1/traces'; import '@aztec/foundation/log';\n"
+  printf "export const shipped = true;\n"
+} > "$URLPROBE"
+printf "\nexport { shipped } from './.probe_urlcomment.ts';\n" >> "$ORCH_SRC/index.ts"
+URLGRAPH="$SCRATCH/graph_urlprobe.json"
+m18_import_graph "$ORCH_DIR" ./src/index.ts "$URLGRAPH" >/dev/null 2>&1 || true
+cp "$saved_url" "$ORCH_SRC/index.ts"
+rm -f "$URLPROBE"
+assert_eq "an import sharing a line with a URL string is still seen by the walker" "yes" \
+  "$(m18_graph_has_package "$URLGRAPH" "@aztec/foundation" 2>/dev/null || echo "no")"
+assert_ge "…and that probe graph is a real walk rather than an empty one" 200 \
+  "$(m18_graph_modules "$URLGRAPH" 2>/dev/null || echo 0)"
+
 # The probe left nothing behind. This check writes inside the package it measures, so it says so
 # and proves it rather than hoping.
 assert_eq "the probe files are gone" "0" \

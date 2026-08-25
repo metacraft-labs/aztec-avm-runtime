@@ -80,15 +80,42 @@ const BUILTINS = new Set([
   'stream/promises', 'stream/web', 'timers/promises', 'util/types',
 ]);
 
-// Specifier extraction. Comments and strings are stripped first, crudely but
-// conservatively: a `//` inside a string literal would otherwise eat the rest of
-// the line and hide an import. The patterns then only accept LITERAL specifiers.
-function stripCommentsAndTemplates(src) {
+// Specifier extraction. Comments are removed first; STRING LITERALS ARE KEPT,
+// because the specifiers themselves are string literals — what the scanner has to
+// do is not mistake a `//` INSIDE one for the start of a comment. The first
+// version of this function did exactly that: it scanned for `//` unconditionally,
+// so `const u = 'http://host'; import 'koa';` lost the import and the graph came
+// back missing a package. That is the dangerous direction here, because every
+// assertion written against this walker is an ABSENCE. Found in M18's review.
+//
+// Quote tracking is deliberately simple — single, double and backtick, with
+// backslash escapes — and it does not try to understand regex literals or
+// template substitutions. Those can only make the scanner see MORE than is there,
+// which fails loudly, rather than less, which fails silently.
+function stripComments(src) {
   let out = '';
   let i = 0;
+  let quote = null;
   const n = src.length;
   while (i < n) {
     const c = src[i];
+    if (quote) {
+      out += c;
+      if (c === '\\' && i + 1 < n) {
+        out += src[i + 1];
+        i += 2;
+        continue;
+      }
+      if (c === quote) quote = null;
+      i++;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') {
+      quote = c;
+      out += c;
+      i++;
+      continue;
+    }
     if (c === '/' && src[i + 1] === '/') {
       while (i < n && src[i] !== '\n') i++;
       continue;
@@ -112,7 +139,7 @@ const DYNAMIC_COMPUTED_RE = /\bimport\s*\(\s*(?!['"])/g;
 const REQUIRE_RE = /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
 
 function specifiersOf(src) {
-  const clean = stripCommentsAndTemplates(src);
+  const clean = stripComments(src);
   const stat = new Set();
   const dyn = new Set();
   let m;
