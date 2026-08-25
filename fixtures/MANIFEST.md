@@ -112,6 +112,18 @@ are not vendored and not redistributed.
 - skeptic-cannot-conclude: That a comparison is a *good* comparison. The counter records that an assertion ran, not that it was capable of failing — D2's gas blindness is invisible to it, which is why D2 is a ledger entry rather than a number here.
 - inventory: RI-25
 
+### FX-29 — The three-way differential arm, and its measured divergence ledger
+- tier: A
+- family: Per-transaction comparison of the SHIPPED wasm AVM against both the native C++ AVM and the TypeScript interpreter, over upstream's own corpus drivers, from a pre-transaction state whose identity is asserted rather than arranged
+- where: diffsim/src/differential/three_way.test.ts, diffsim/src/public/public_tx_simulator/differential, fixtures/three-way-arm-counts.json, fixtures/differential-wasm-divergences.json
+- upstream-source: upstream's own fixture drivers (`token_test.ts`, `amm_test.ts`, `bulk_test.ts`, `custom_bytecode_tests.ts`) and `CppVsTsPublicTxSimulator` @ anchor `ts`, driven unedited; the wasm side is `avm.wasm` built from anchor `cpp` plus this repository's patch stack
+- capture: `cd diffsim && AVM_WASM_PATH=... RUN_THREE_WAY=1 npx jest src/differential`; counts and ledger via `python3 tools/measure_three_way.py`
+- licence: Apache-2.0 (output of Apache-2.0 code)
+- measured: 2026-08-25 — **30 transactions, 90 implementation-pair comparisons, 18 tests**. 21 of the 30 began with all four tree roots and all four leaf counts byte-identical between the two arms. 1 transaction agreed on every compared field. Eleven permanent fault injections — one per compared field, plus the pre-state proof, the input encoding and the TypeScript arm's presence — each turning the suite red.
+- skeptic-concludes: The artefact this runtime actually ships executes upstream's own corpus and agrees with the native C++ AVM and the TypeScript interpreter on revert code, teardown gas, every app-logic return value, the structured revert reason, and the AVM circuit public-inputs buffer byte for byte where both sides build one — and every disagreement is accounted for by an exact recorded VALUE with a DRIFT.md entry behind it, not by a field-level exemption.
+- skeptic-cannot-conclude: That the wasm AVM and the C++ AVM agree on METERED GAS. They do not: on 17 of the 30 transactions the wasm arm charges more L2 gas, and `publicTxEffect` and the tree roots follow it (DRIFT.md D15). That is a fact about the ORACLE'S AGE — 55 days and 2,005 commits between the two anchors, with 276 changed files under `vm2/` — and not about the wasm build, but nobody may quote this arm as "the wasm AVM agrees with the C++ AVM" until the two are pinned to the same AVM. Nor may the 30 be read as covering the corpus: they are four drivers, not the 246-transaction surface.
+- inventory: RI-62, RI-60, RI-25
+
 ### FX-04 — The cross-language msgpack golden
 - tier: A
 - family: A single byte-comparison pinning the widest serialization surface in the system — `AvmCircuitInputs(hints, publicInputs)` encoded in TypeScript against the file the C++ tests consume

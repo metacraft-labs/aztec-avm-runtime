@@ -601,6 +601,199 @@ were absorbed silently.
   `aztec-avm-runtime/verification/m14/0001-feat-world_state_reference-archive-tree-so-the-in-me.patch`;
   `aztec-avm-runtime/WORLD-STATE.md` section 4.
 
+## D14 — our own observation-hook patch made a msgpack field REQUIRED, so the patched module cannot decode upstream-encoded inputs
+
+- id: D14
+- status: open
+- opened: 2026-08-25
+- milestone: M19 (found by building the three-way arm; enforced per transaction by
+  `e2e_differential_wasm_vs_native_cpp`)
+- design-question: —
+- sides: `avm.wasm` as this campaign builds it (anchor `cpp` **plus** M9's observation-hook patch)
+  versus upstream's own `PublicSimulatorConfig` msgpack schema, which is what `@aztec/stdlib`'s
+  `serializeWithMessagePack` produces
+- what: M9's patch adds `bool collect_execution_steps` to `PublicSimulatorConfig` **and to its
+  `MSGPACK_CAMEL_CASE_FIELDS` list**. bb's msgpack reader treats a listed field as required, so the
+  patched module refuses any input map that lacks it: `avm_simulate failed with status 1: Missing
+  field collectExecutionSteps`. Every encoder that follows upstream's schema — including upstream's
+  own — produces exactly such a map.
+- why it matters: the patch is additive in C++ and M9 asserts that it is
+  (`verify_observation_hook_step_records_identical` pins the defaulted declaration line). **Nothing
+  asserted that it is additive ON THE WIRE**, and it is not. The reason the gap survived eight
+  milestones is structural and is the same shape as D12: until M19 nothing encoded these inputs
+  from TypeScript, so every host read a blob the same patched C++ had written. Encoder and decoder
+  were wrong together and every round trip closed. It matters for M19 specifically because the
+  differential's premise is that both arms were handed the same transaction, and a patch that
+  changes one arm's accepted wire format puts that premise at risk.
+- decision: Open, and handled by measurement rather than by a shrug. The three-way arm encodes
+  TWICE — once exactly as `CppPublicTxSimulator` would for the native arm, once with the declared
+  extra keys for the patched module — and asserts on EVERY transaction that the difference between
+  the two encodings is exactly the declared set (`PATCH_REQUIRED_CONFIG_FIELDS`, one boolean). The
+  delta is recomputed from the two encodings by a full recursive walk, not checked against the
+  expected list, so a second divergence appearing later fails the run instead of widening quietly.
+  It closes when M9's patch keeps the field out of the msgpack field list — which is a change to
+  that patch and a wasm rebuild, and belongs to the milestone that owns the patch.
+- evidence:
+  `aztec-avm-runtime/diffsim/src/public/public_tx_simulator/differential/encode_inputs.ts`
+  (`PATCH_REQUIRED_CONFIG_FIELDS`, `encodeForPatchedModule`, `encodingDifferences`);
+  `~/.cache/aztec-m18-orchestration/m12/barretenberg/cpp/src/barretenberg/vm2/common/avm_io.hpp:455,467`
+  (the field and its presence in the msgpack list, in the tree the shipped `avm.wasm` was built
+  from); `aztec-avm-runtime/verification/m9/0001-*.patch` (the patch that consumes it).
+
+## D15 — the wasm AVM and the NAPI oracle meter L2 gas differently: the two-month gap, measured
+
+- id: D15
+- status: open
+- opened: 2026-08-25
+- milestone: M19 (`e2e_differential_wasm_vs_native_cpp`, `e2e_differential_wasm_vs_ts_interpreter`)
+- design-question: OQ-15 (rejected: do not build `bb-avm-sim` IPC for the oracle), DD-12
+- sides: `avm.wasm` at anchor `cpp` `233d8e0993` (2026-08-19) versus the in-process NAPI AVM in
+  `@aztec/native` at pin `npm.deletion_era` `5.0.0-nightly.20260626`, which is anchor `ts`
+  `3a68d68ac2` (2026-06-25) — and, transitively, versus the TypeScript interpreter vendored from
+  the same anchor
+- what: over 30 transactions driven through all three implementations from a proved-identical
+  pre-transaction state, **17 disagree on metered L2 gas** and on everything downstream of it:
+  `gasUsed.totalGas`, `gasUsed.publicGas`, `gasUsed.billedGas`, `publicTxEffect` (which carries the
+  fee) and the resulting tree roots (which carry the fee-juice write). The wasm arm charges MORE in
+  every case. The measured deltas are +6, +9, +12, +15, +21, +54, +90, +387 and +3732 — **every one
+  an exact multiple of 3**.
+  What AGREES on all 30: `revertCode`, `gasUsed.teardownGas`, every app-logic return value, the
+  structured revert reason, and the AVM circuit public-inputs buffer byte for byte wherever both
+  sides built one. **12 of the 30 — the custom-bytecode unhappy paths — agree on every field of the
+  `wasm ↔ native-cpp` pair, including tree roots.** Scoped to that pair deliberately: those 12 still
+  differ from the TypeScript arm on `publicInputs.presence`, which is D16 and a configuration
+  asymmetry rather than a semantic one, and the generated
+  `fixtures/three-way-arm-counts.json` therefore records `transactionsAgreeingOnEveryField: 1` — the
+  one transaction in the `collectPublicInputs: true` arm, where D16 does not fire. "Twelve agree on
+  everything" unscoped is contradicted by that fixture; scoped to the pair the swap's safety turns
+  on, it is exact.
+- why it matters: this is DD-12's decay, no longer a prediction. It also means
+  `e2e_differential_wasm_vs_native_cpp` cannot be green *against this oracle* while the pins stand,
+  and the reason is the ORACLE, not the subject. M8 compares the wasm AVM against a native C++ AVM
+  built from the SAME tree and they agree byte for byte including tree roots; that is a much
+  narrower claim than "the wasm AVM agrees with the native C++ AVM", and the two must not be quoted
+  as one.
+- decision: Open, recorded, **not fixed and not worked around**. The obvious attribution is wrong
+  and is ruled out here rather than left available: 3 is `AVM_BITWISE_DYN_L2_GAS`, so D1 looks like
+  the cause, but D1's change (AND / OR / XOR losing their dynamic L2 gas) is present in the wasm's
+  anchor and absent from the oracle's, which makes the wasm arm charge LESS, not more.
+
+  **THE PER-OPCODE ATTRIBUTION IS ESTABLISHED, and M19's review established it.** Two earlier
+  sentences here were wrong and are corrected rather than softened: this entry said "about twenty
+  `AVM_*_GAS` constants differ" (it is THREE) and that "the exact per-opcode attribution is NOT
+  established" (a two-command diff establishes it). Measured over all 208/209 `AVM_*` globals in
+  `noir-projects/.../crates/types/src/constants.nr` at the two anchors, the only GAS-COST constants
+  that differ are:
+
+  | constant | anchor `ts` `3a68d68ac2` | anchor `cpp` `233d8e0993` |
+  |---|---|---|
+  | `AVM_BITWISE_DYN_L2_GAS` | 3 | removed (D1 — wasm charges LESS) |
+  | `AVM_CALLDATACOPY_DYN_L2_GAS` | 3 | **6** (wasm charges MORE, per word) |
+  | `AVM_RETURNDATACOPY_DYN_L2_GAS` | 3 | **6** (wasm charges MORE, per word) |
+
+  (plus `AVM_DYN_GAS_ID_BITWISE`, an id rather than a cost, and four non-gas constants.)
+  `vm2/common/gas.{cpp,hpp}` are BYTE-IDENTICAL between the anchors, and both anchors bind those
+  names at the same sites in `instruction_spec.cpp`. So the wasm arm charges **+3 per copied word**
+  of calldata and returndata. That accounts for the direction, for the granularity (and it also
+  demystifies "a multiple of 3": the whole anchor-`cpp` L2 schedule is denominated in threes, since
+  addressing resolution alone is 3 per operand, so ANY total-gas difference is), and for WHICH
+  transactions agree — the 13 that agree are the ones that halt exceptionally before copying
+  anything.
+
+  Confirmed by experiment rather than left as arithmetic. Giving the vendored TypeScript
+  interpreter the anchor-`cpp` values for exactly those three costs and changing nothing else makes
+  its metered L2 gas **byte-identical to the wasm arm's**: 1,152,536 = 1,152,536 (twice) and
+  2,446,917 = 2,446,917, the last being the +3,732 outlier, `daGas` equal in all three. (Only three
+  transactions reach the probe, because the parent harness's now-failing ts-vs-cpp assertion aborts
+  each test at its first transaction — the oracle is still anchor `ts`, which is the point.)
+
+  So an INDEPENDENT implementation, given the module's own anchor's gas schedule, reproduces the
+  wasm arm's number to the unit. The wasm build meters exactly what anchor `cpp` specifies; it is
+  the oracle that is two months behind. Corroborating, from inside M19's own run: upstream's
+  `CppVsTsPublicTxSimulator` asserts all four gas dimensions equal between the NAPI C++ AVM and the
+  TypeScript interpreter — two independent implementations, both at anchor `ts` — and that assertion
+  passes on every one of the 30 transactions. With M8's same-tree wasm-versus-native-C++ agreement
+  that is a complete 2x2: the difference tracks the ANCHOR, not the implementation and not the build.
+
+  What is still NOT decided is which side is RIGHT, and nothing here decides it. The three-way arm
+  enforces a measured ledger keyed on (pair, field): these fields are
+  in it under this entry, every other field is not, and a divergence in `revertCode`,
+  `publicInputs`, `appLogicReturnValues` or `revertReason` fails the run. It closes when the oracle
+  and the module are pinned to the same AVM, or when the per-opcode delta is attributed and either
+  side is shown to be wrong.
+- evidence: `aztec-avm-runtime/fixtures/differential-wasm-divergences.json` and
+  `fixtures/three-way-arm-counts.json` (both generated by `tools/measure_three_way.py`);
+  `aztec-avm-runtime/diffsim/src/differential/three_way.test.ts`; the constant diff, which is
+  `git show 3a68d68ac2:noir-projects/noir-protocol-circuits/crates/types/src/constants.nr` against
+  `git show 233d8e0993:noir-projects/fnd/noir-protocol-circuits/crates/types/src/constants.nr`
+  restricted to `pub global AVM_` — note the PATH MOVED between the anchors, so a diff of one path
+  reports the whole file as added and says nothing.
+
+## D16 — the TypeScript interpreter builds the AVM circuit public inputs unconditionally; the C++ and wasm AVMs honour `collectPublicInputs`
+
+- id: D16
+- status: accepted
+- opened: 2026-08-25
+- milestone: M19 (`e2e_differential_wasm_vs_ts_interpreter`)
+- design-question: —
+- sides: the vendored TypeScript `PublicTxSimulator` at anchor `ts` versus both C++ AVMs
+- what: with `collectPublicInputs: false` — the setting every apps-test in the corpus but
+  `avm_minimal` uses — the TypeScript arm still returns a populated `publicInputs`, and both C++
+  arms return `undefined`. Observed on **29 of 29** transactions.
+- why it matters: on its own it is a configuration asymmetry rather than a semantic divergence. It
+  matters because of what it would have done to the *byte-for-byte* assertion. Upstream's own
+  comparison is `if (cppResult.publicInputs !== undefined) assert(...)`, which silently skips; if
+  the three-way arm had folded presence into the same field, the one assertion M19 states as "byte
+  for byte" would have been satisfiable by an absence in almost every transaction in the corpus.
+- decision: Accepted, and split into two fields rather than excused. `publicInputs` is a real buffer
+  comparison that runs only when both sides built one — so it fires wherever `collectPublicInputs`
+  is set — and `publicInputs.presence` is a separate ledger entry. Neither can stand in for the
+  other. It closes if the TypeScript simulator is made to honour the flag, which is a change to
+  vendored code the campaign deliberately does not make (see D1's decision for the same reasoning).
+- evidence: `aztec-avm-runtime/diffsim/src/public/public_tx_simulator/differential/three_way_public_tx_simulator.ts`
+  (`COMPARED_FIELDS`, the two entries and the comment on the split);
+  `fixtures/differential-wasm-divergences.json`.
+
+## D17 — the shipped package's import graph reaches bb.js's native-addon loader, through upstream's own crypto
+
+- id: D17
+- status: open
+- opened: 2026-08-25
+- milestone: M19 (`verify_differential_containment`), and it is M27/M28's problem before it is
+  anyone else's
+- design-question: DD-9
+- sides: `orchestration/`'s static import graph versus DD-9's requirement that no reachable path of
+  ours defaults to a native AVM, and versus M19's containment deliverable ("the published package
+  has zero optional native dependencies")
+- what: MEASURED, walking `orchestration/src/index.ts` with `tools/import_graph.mjs`: **1,027
+  modules, 41 packages**. `@aztec/native` is NOT among them — that half of the requirement holds.
+  But `@aztec/bb.js` IS, 33 of its modules, and **five** of those are its Node backend —
+  `bb_backends/node/{index.js,native_shm.js,native_shm_async.js,native_socket.js,platform.js}` —
+  of which three locate and load `build/<platform>/nodejs_module.node`. (Five and not three: the
+  first count taken here was of the modules whose text mentions the addon, which is a different
+  question from which modules are reached. The check caught it.) The reaching import is not ours and not the AVM's: it is
+  `BarretenbergSync` in `@aztec/foundation`'s Poseidon, Pedersen, Grumpkin and AES, which
+  `@aztec/stdlib` needs and which the orchestration needs for hashing.
+- why it matters: M19's deliverable is phrased as "the published package has zero optional native
+  dependencies", and that is true of the MANIFEST — four dependencies, no `optionalDependencies` —
+  while being false of the GRAPH. The distinction is the whole reason both are measured here. It
+  matters most for M27 and M28: a browser bundle cannot contain a `.node` loader, and the fact that
+  a Node-condition resolution reaches one means the browser build's correctness rests on
+  `@aztec/bb.js`'s `browser` export condition rather than on anything this repository asserts.
+- decision: Open, and NOT worked around. The load is behind upstream's own platform detection with
+  a wasm fallback, so the package works today in Node without the addon present; that is a runtime
+  observation and not a containment property, and it is not written down here as if it were one.
+  What M19 does is pin it: `verify_differential_containment` asserts the reached bb.js
+  native-loader module count EXACTLY, so the surface cannot grow unnoticed, and asserts that the
+  reaching path is upstream's crypto rather than anything of ours. It closes when the browser
+  bundle is measured (M28) and either shows the loader absent under the `browser` condition, or the
+  dependency on `BarretenbergSync` is replaced.
+- evidence: `aztec-avm-runtime/verification/verify_differential_containment.sh` section 3;
+  `orchestration/node_modules/@aztec/foundation/dest/crypto/{pedersen/pedersen.wasm.js,grumpkin/index.js,aes128/index.js}`
+  (the `import { BarretenbergSync } from '@aztec/bb.js'` sites);
+  `@aztec/bb.js`'s `package.json` exports map, whose `.` has separate `require`, `browser` and
+  `default` conditions.
+
 <!-- END:drift -->
 
 ---
