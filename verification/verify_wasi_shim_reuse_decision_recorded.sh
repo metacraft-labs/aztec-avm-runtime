@@ -156,8 +156,15 @@ WITH_WASI="$(grep -rlE 'wasi_snapshot_preview1|node:wasi|proc_exit|fd_prestat_ge
 note "packages mentioning any WASI name: $(printf '%s' "$WITH_WASI" | tr '\n' ' ')"
 assert_eq "exactly two published packages mention a WASI name at all" "2" \
   "$(printf '%s\n' "$WITH_WASI" | grep -c .)"
-assert_true "…one of them is bb.js" printf '%s\n' "$WITH_WASI" | grep -qx 'bb.js'
-assert_true "…and the other is sqlite3mc-wasm" printf '%s\n' "$WITH_WASI" | grep -qx 'sqlite3mc-wasm'
+# THESE TWO ASSERTIONS DID NOT EXIST until M21. Written as
+# `assert_true "…" printf '%s\n' "$WITH_WASI" | grep -qx 'bb.js'`, the pipe binds to `assert_true`,
+# not to `printf`: the helper ran `printf` (which always succeeds), so the assertion could only
+# pass, and its own `ok` line went INTO `grep` — so it was not printed either, and the
+# `_ASSERTIONS` increment happened in a subshell and was lost. This check reported 48 assertions
+# and its transcript went straight from "exactly two published packages mention a WASI name at all"
+# to "sqlite3mc-wasm's vendored glue is where its WASI names are". See lib.sh's string predicates.
+assert_true "…one of them is bb.js" str_has_line "$WITH_WASI" 'bb.js'
+assert_true "…and the other is sqlite3mc-wasm" str_has_line "$WITH_WASI" 'sqlite3mc-wasm'
 # sqlite3mc-wasm covers eight of the eleven, which is closer than bb.js and still not it.
 SQL="$NM/sqlite3mc-wasm/vendor/jswasm/sqlite3.mjs"
 assert_file "sqlite3mc-wasm's vendored glue is where its WASI names are" "$SQL"

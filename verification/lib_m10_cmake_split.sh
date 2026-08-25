@@ -321,7 +321,7 @@ m10_preset_count() { m10_preset_names "$1" | wc -w | tr -d ' '; }
 # text. DIES through m6_graph_nodes if the graph cannot be generated.
 # ---------------------------------------------------------------------------
 m10_graph_has() { # <nodes-blob> <name>
-  printf '%s\n' "$1" | grep -qxF "$2" && echo 1 || echo 0
+  str_has_line "$1" "$2" && echo 1 || echo 0
 }
 
 # ---------------------------------------------------------------------------

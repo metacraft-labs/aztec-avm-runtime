@@ -232,7 +232,7 @@ header_control() { # <description> <sed-expression>
     fail "$desc — the mutation changed nothing; the control is vacuous"
   else
     out="$(python3 "$PROV" headers --check 2>&1)"
-    if printf '%s' "$out" | grep -qF "$victim"; then
+    if str_has_sub "$out" "$victim"; then
       pass "$desc — rejected"
     else
       fail "$desc — ACCEPTED; the header check is too weak"

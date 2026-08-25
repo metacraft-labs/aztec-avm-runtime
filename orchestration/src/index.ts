@@ -84,12 +84,43 @@ export {
 export {
   ProvenanceConsultedDuringExecution,
   externalTx,
+  locallyExecutedTx,
   locallyOriginatedTx,
   sealProvenance,
+  type ExternalTxProvenance,
+  type LocalTxProvenance,
+  type LocallyExecutedTxProvenance,
+  type PrivateExecutionSummary,
+  type PrivateTraceHandle,
   type ProvenanceSeal,
   type SubmittedTx,
   type TxProvenance,
 } from './submitted_tx.ts';
+
+// M21 — Form B. NOTE WHAT IS NOT HERE: no second execution entry point. Form B PRODUCES a
+// `SubmittedTx<Tx>` and hands it to `executeExternallySettledTx` above, which is provenance-blind
+// by construction, so the outcome vocabulary is one vocabulary — `processed` / `failed` — and not
+// two. `e2e_form_b_local_tx_roundtrip` section 5 asserts it by running BOTH provenances through
+// that one function and comparing the outcome shapes.
+export {
+  PRIVATE_SIMULATORS,
+  originateLocalTx,
+  publicOnlyPrivateExecution,
+  summarisePrivateExecution,
+  txFromTail,
+} from './form_b.ts';
+
+// M21 — OQ-1. §8.4: NO TYPE NAMED `AztecNode` IS EXPORTED HERE and nothing below is shaped like
+// one. `AztecNode` at the anchor declares 62 methods; what Form B needs is one, and upstream
+// itself says so with `Pick<AztecNode, 'findLeavesIndexes'>`.
+export {
+  ALLOWED_SURFACE,
+  ResidentSettledReadSource,
+  SETTLED_READ_TREES,
+  SettledReadSourceSurfaceExceeded,
+  strictSurface,
+  type SettledLeafIndexSource,
+} from './settled_read_source.ts';
 
 export {
   TxIntakeError,

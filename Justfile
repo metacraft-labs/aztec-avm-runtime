@@ -1643,3 +1643,96 @@ verify-m20:
       echo "verify-m20: all checks passed"
     fi
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M21 — Form B: locally-originated transactions
+#
+#   just verify-oq1                verify_oq1_aztec_node_methods_enumerated
+#   just verify-oq2                verify_oq2_pxe_embedding_decision_recorded
+#   just verify-form-b-roundtrip   e2e_form_b_local_tx_roundtrip
+#   just verify-adapter-surface    test_aztec_node_adapter_surface_minimal
+#   just verify-no-node-type       test_no_aztec_node_type_exported
+#   just verify-txe-prior-art      verify_txe_private_flow_prior_art_consulted
+#   just verify-no-pipe-predicates verify_no_pipeline_predicates
+#   just verify-truncation-uniform verify_transcript_truncation_detection_uniform
+#   just verify-m21                all of them, in order
+#
+# NOTHING HERE BUILDS. Form B's steps 3 and 4 are `@aztec/stdlib/tx`, which `orchestration/` already
+# depends on, so the probes need no module and no work tree — they run against the published
+# packages and against the fork at the pinned anchor. That is a fact about how little of this
+# milestone was ours to write, not a gap: the two arms that would need `avm.wasm` are M20's, already
+# measured over seven arms twice each, and re-running them here would be a second place for one
+# number to live.
+#
+# `verify-oq2` NEEDS THE NETWORK. It resolves `@aztec/pxe` and `@aztec/simulator` against the
+# registry and reads their dependency lists, because the campaign recorded one of them as
+# unpublished twice while it was published. Without the registry it FAILS rather than passing on a
+# recorded answer.
+#
+# The last two are not Form B's: they are the two items M20's review left owed, and they belong to
+# the whole tree rather than to any one milestone. They are run here because M21 is where they were
+# done.
+#
+# `verify_named_checks_exist` IS DELIBERATELY NOT IN THIS LIST, and the reason is the campaign's own
+# counter defect. It is M20's check and `verify-m20` runs it; running it here too would add its 9
+# assertions to two milestone totals and to the campaign total twice, which is exactly how M1 came
+# out at 316 when it is 141. It still covers M21 — it scans the WHOLE tree, so a comment in
+# `form_b.ts` naming a check that does not exist goes red in `verify-m20`, and one did.
+# ---------------------------------------------------------------------------
+
+# OQ-1: every node.* call reachable from generateSimulatedProvingResult, re-derived from the anchor.
+verify-oq1:
+    @verification/verify_oq1_aztec_node_methods_enumerated.sh
+
+# OQ-2: the embed-versus-vendor decision, with its dependency lists measured live. NEEDS NETWORK.
+verify-oq2:
+    @verification/verify_oq2_pxe_embedding_decision_recorded.sh
+
+# A tail becomes the Tx upstream would have built, and goes through M20's one execution window.
+verify-form-b-roundtrip:
+    @verification/e2e_form_b_local_tx_roundtrip.sh
+
+# Anything outside the enumerated adapter surface throws, on `get` and on `in`.
+verify-adapter-surface:
+    @verification/test_aztec_node_adapter_surface_minimal.sh
+
+# §8.4: no exported type named AztecNode, and nothing shaped like one.
+verify-no-node-type:
+    @verification/test_no_aztec_node_type_exported.sh
+
+# TXE's private-execution-to-Tx flow, and the five things consulting it changed.
+verify-txe-prior-art:
+    @verification/verify_txe_private_flow_prior_art_consulted.sh
+
+# No `printf … | grep -q` predicate survives anywhere; the five builtin replacements are exercised.
+verify-no-pipe-predicates:
+    @verification/verify_no_pipeline_predicates.sh
+
+# One implementation of "is this transcript complete", and every comparer refuses on an incomplete one.
+verify-truncation-uniform:
+    @verification/verify_transcript_truncation_detection_uniform.sh
+
+# Run the whole M21 verification set; every check runs even if an earlier one fails.
+verify-m21:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_oq1_aztec_node_methods_enumerated \
+      verify_oq2_pxe_embedding_decision_recorded \
+      test_no_aztec_node_type_exported \
+      test_aztec_node_adapter_surface_minimal \
+      e2e_form_b_local_tx_roundtrip \
+      verify_txe_private_flow_prior_art_consulted \
+      verify_no_pipeline_predicates \
+      verify_transcript_truncation_detection_uniform
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m21: FAILED" >&2
+    else
+      echo "verify-m21: all checks passed"
+    fi
+    exit "$rc"

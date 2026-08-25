@@ -88,7 +88,7 @@ assert_eq "…with the same number of records on each side" \
 # The first and last record carry every field, so a formatter that dropped one could not agree.
 FIELDS='^ctx=[0-9]+ pc=[0-9]+ op=[0-9]+ l2=[0-9]+ da=[0-9]+ addr=0x[0-9a-f]{64}$'
 assert_matches() { # <description> <extended-regex> <value>
-  if printf '%s' "$3" | grep -qE "$2"; then pass "$1  [$3]"; else fail "$1  [$3] does not match $2"; fi
+  if str_has_line_re "$3" "$2"; then pass "$1  [$3]"; else fail "$1  [$3] does not match $2"; fi
 }
 assert_matches "the first record carries every field" "$FIELDS" "$(f steps.first)"
 assert_matches "…and so does the last" "$FIELDS" "$(f steps.last)"

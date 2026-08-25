@@ -83,7 +83,8 @@ if [ "$run_rc" -ne 0 ]; then
   grep -v '^\[' "$ERR" | tail -10
 fi
 assert_file "and produced a transcript" "$OUT"
-assert_eq "which finished" "1" "$(m12_field "$OUT" reactor.done)"
+require_complete_transcript "$OUT" reactor.done "the reactor's"
+assert_eq "which finished" "complete" "$(transcript_completeness "$OUT" reactor.done)"
 assert_eq "the ABI version the module reports" "1" "$(m12_field "$OUT" reactor.version)"
 assert_eq "it used the host-provided-DB entry point" "simulate" "$(m12_field "$OUT" reactor.entryPoint)"
 assert_eq "for the seven corpus programs" "$M12_EXPECTED_PROGRAMS" \

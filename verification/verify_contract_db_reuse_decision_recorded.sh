@@ -155,7 +155,7 @@ assert_file "the decision is written down" "$M13_WRITEUP"
 writeup="$(cat "$M13_WRITEUP" 2>/dev/null)"
 named=0
 for cls in $(printf '%s\n' "$impls" | awk '{print $1}'); do
-  if printf '%s' "$writeup" | grep -qw -- "$cls"; then
+  if str_has_word "$writeup" "$cls"; then
     named=$((named + 1))
   else
     fail "CONTRACT-DB.md does not name the implementation $cls"
@@ -237,7 +237,7 @@ assert_eq "the reactor exports forty-nine names" "$M13_EXPECTED_EXPORT_COUNT" \
   "$(printf '%s\n' "$exports" | grep -c . || true)"
 missing_new=0
 for sym in $M13_NEW_EXPORTS; do
-  if printf '%s\n' "$exports" | grep -qx -- "$sym"; then :; else
+  if str_has_line "$exports" "$sym"; then :; else
     fail "the reactor does not export $sym"
     missing_new=$((missing_new + 1))
   fi
@@ -247,7 +247,7 @@ assert_eq "all ten of M13's exports are present, by name" "0" "$missing_new"
 # a count.
 dropped=0
 for sym in $M12_EXPECTED_EXPORTS; do
-  printf '%s\n' "$exports" | grep -qx -- "$sym" || { fail "M12's export $sym is gone"; dropped=$((dropped + 1)); }
+  str_has_line "$exports" "$sym" || { fail "M12's export $sym is gone"; dropped=$((dropped + 1)); }
 done
 assert_eq "every one of M12's thirty-nine exports survives" "0" "$dropped"
 
@@ -311,7 +311,7 @@ assert_eq "the overlay adds exactly twelve tests to upstream's own binary" \
 missing_unit=0
 listed="$(gtest_list | awk '/^[A-Za-z].*\.$/ { suite = $1; next } /^  [A-Za-z]/ { print suite $1 }')"
 for tn in $M13_UNIT_TESTS; do
-  printf '%s\n' "$listed" | grep -qx -- "$tn" || { fail "the overlay's test $tn is not in the binary"; missing_unit=$((missing_unit + 1)); }
+  str_has_line "$listed" "$tn" || { fail "the overlay's test $tn is not in the binary"; missing_unit=$((missing_unit + 1)); }
 done
 assert_eq "all twelve of the overlay's tests are present, by name" "0" "$missing_unit"
 

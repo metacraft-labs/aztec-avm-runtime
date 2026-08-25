@@ -99,7 +99,7 @@ N_TS_ROWS_LIVE=0
 while IFS= read -r p; do
   case "$p" in *apps_tests/*.test.ts) ;; *) continue ;; esac
   body="$(m18_anchor_file "$p" 2>/dev/null || true)"
-  printf '%s\n' "$body" | grep -q "useCppSimulator" || continue
+  str_has_sub "$body" "useCppSimulator" || continue
   N_TABLES=$((N_TABLES + 1))
   N_TS_ROWS=$((N_TS_ROWS + $(printf '%s\n' "$body" | grep -c "useCppSimulator: false" || true)))
   # AND THE SAME COUNT WITH COMMENTS STRIPPED. This file's own third defect was a grep that

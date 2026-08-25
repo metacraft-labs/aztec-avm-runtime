@@ -81,6 +81,15 @@ EXCEPTIONS = {
     # declared, with the file that is allowed to say them.
     "verify_form_a_arms_are_distinguishable": "historical: never existed; form_a_e2e_driver.ts now names the three things that do guard it",
     "verify_form_a_encoding_delta_is_one_named_key": "historical: never existed; the property is e2e_form_a_external_tx_roundtrip Part 8",
+    # NAMED AS ABSENT, WHICH IS A DIFFERENT THING FROM NAMED AS EXISTING. M21's milestone entry
+    # `test_form_b_tx_matches_pxe_bytes` is `pending`: it would compare this runtime's transaction
+    # against one PXE itself produced, and PXE cannot be installed here (OQ-2). `form_b.ts` cites it
+    # in the sentence that says it DOES NOT EXIST, because the determinism of the first nullifier is
+    # for its benefit and a future reader has to know why the constant is there. This is exactly the
+    # distinction M20's review had to make five times in the other direction — the defect is a
+    # comment that says a check pins something when it does not, and a comment that says a check is
+    # absent is the cure rather than the disease. It stops being an exception when the entry lands.
+    "test_form_b_tx_matches_pxe_bytes": "M21's pending entry, cited by form_b.ts in the sentence that says it does not exist",
 }
 
 verification = os.path.join(repo, "verification")

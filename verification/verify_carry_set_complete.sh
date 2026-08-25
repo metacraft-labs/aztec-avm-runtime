@@ -42,12 +42,64 @@ assert_eq "the carry set has five patches" "5" "$n_ids"
 orders="$(python3 -c 'import json,sys;print(",".join(str(p["order"]) for p in json.load(open(sys.argv[1]))["patches"]))' "$SERIES")"
 assert_eq "the orders are 1..5 in sequence" "1,2,3,4,5" "$orders"
 
-# Every aztec-* entry in upstream-bugs is in the carry set. Derived from the
-# directory rather than from a list here, so adding a sixth contribution and
-# forgetting the manifest is a FAILURE and not a silent omission.
+# Every aztec-* entry in upstream-bugs is in the carry set OR is declared not-carried. Derived from
+# the directory rather than from a list here, so adding a sixth contribution and forgetting the
+# manifest is a FAILURE and not a silent omission.
+#
+# WHY `not_carried` EXISTS, AND WHY IT IS IN series.json RATHER THAN HERE. This assertion went RED
+# at HEAD, and not because anything was forgotten: M20 prepared a SIXTH contribution
+# (`aztec-revert-code-four-values`, DRIFT.md D18) and DELIBERATELY did not enrol it — the carry set
+# is the patches this runtime CARRIES DOWNSTREAM if upstream declines them, and that one is
+# unrelated to the wasm work, is not depended on (the runtime reports the module's raw revert code
+# itself) and is the user's decision to file. Enrolling it to make a check green would price a carry
+# that does not exist. So "on disk" and "carried" are two different sets, and the second is a subset
+# of the first with the difference DECLARED, one reason per entry, in the manifest that is already
+# the single source for everything else here.
+#
+# IT WENT RED BECAUSE THE ENTRY WAS COMMITTED AFTER THE SWEEP THAT REPORTED M11 GREEN
+# (codetracer-specs `5ec32ac1`). That is the second instance of this exact pattern — M19 committed a
+# pin-carrying fixture after its own sweep and M1 went red the same way — and it is worth the
+# sentence: a sweep is a measurement of the tree at the moment it ran.
 on_disk="$(cd "$BUGS" && ls -d aztec-*/ 2>/dev/null | sed 's#/$##' | sort | tr '\n' ' ')"
 in_set="$(python3 -c 'import json,sys;print(" ".join(sorted(p["entry"] for p in json.load(open(sys.argv[1]))["patches"])) + " ")' "$SERIES")"
-assert_eq "every aztec-* entry on disk is in the carry set" "$on_disk" "$in_set"
+not_carried="$(python3 -c 'import json,sys;print(" ".join(sorted(k for k in json.load(open(sys.argv[1])).get("not_carried", {}) if not k.startswith("_"))) + " ")' "$SERIES")"
+carried_or_declared="$(printf '%s%s' "$in_set" "$not_carried" | tr ' ' '\n' | grep -c . || true)"
+note "on disk: $on_disk"
+note "carried: $in_set"
+note "declared not-carried: $not_carried"
+accounted="$( { printf '%s' "$in_set"; printf '%s' "$not_carried"; } | tr ' ' '\n' | grep -v '^$' | sort | tr '\n' ' ')"
+assert_eq "every aztec-* entry on disk is either in the carry set or declared not-carried" \
+  "$on_disk" "$accounted"
+
+# BOTH DIRECTIONS, so the exemption list cannot outlive what it excuses and cannot hide a real
+# omission.
+for nc in $not_carried; do
+  assert_dir "the declared not-carried entry $nc still exists on disk" "$BUGS/$nc"
+  reason="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["not_carried"].get(sys.argv[2], ""))' \
+            "$SERIES" "$nc")"
+  assert_ge "…and its reason is stated rather than implied" 80 "${#reason}"
+  if str_has_sub "$in_set" " $nc "; then both=yes; else both=no; fi
+  assert_eq "…and it is NOT also in the carry set, so the two sets are disjoint" "no" "$both"
+done
+assert_ge "the not-carried list is non-empty, so the arm above is exercised rather than dead" 1 \
+  "$(printf '%s' "$not_carried" | tr ' ' '\n' | grep -c . || true)"
+
+# THE MUTATION CONTROL. Dropping a genuinely-carried entry from the manifest must still FAIL, or
+# the exemption above would be a way to make any omission green. Computed over a doctored copy; the
+# tree's own manifest is never written to.
+DOCTORED="$(python3 - "$SERIES" <<'PYEOF'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["patches"] = d["patches"][1:]
+print(" ".join(sorted(p["entry"] for p in d["patches"])) + " ")
+PYEOF
+)"
+doctored_accounted="$( { printf '%s' "$DOCTORED"; printf '%s' "$not_carried"; } | tr ' ' '\n' | grep -v '^$' | sort | tr '\n' ' ')"
+assert_true "dropping a carried entry from the manifest still disagrees with the disk" \
+  test "$on_disk" != "$doctored_accounted"
+assert_eq "…and the doctored set is one shorter, so the mutation did something" \
+  "$((carried_or_declared - 1))" \
+  "$(printf '%s' "$doctored_accounted" | tr ' ' '\n' | grep -c . || true)"
 
 base_commit="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["base"]["commit"])' "$SERIES")"
 pins_commit="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["anchors"]["cpp"]["commit"])' "$REPO_ROOT/pins.json")"

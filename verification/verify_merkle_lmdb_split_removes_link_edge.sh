@@ -99,8 +99,8 @@ assert_eq "after: exactly these targets link lmdblib" \
 
 # Exact-line matching, so "crypto_merkle_tree -> lmdblib" can never be satisfied
 # by "crypto_merkle_tree_lmdb -> lmdblib".
-edge_before() { printf '%s\n' "$graph_before" | grep -qxF "$1"; }
-edge_after()  { printf '%s\n' "$graph_after"  | grep -qxF "$1"; }
+edge_before() { str_has_line "$graph_before" "$1"; }
+edge_after()  { str_has_line "$graph_after"  "$1"; }
 
 assert_true  "before: the graph carries [crypto_merkle_tree -> lmdblib]" \
   edge_before "crypto_merkle_tree -> lmdblib"

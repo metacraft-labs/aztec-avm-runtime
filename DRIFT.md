@@ -829,7 +829,7 @@ were absorbed silently.
   not move. It is deliberately NOT enrolled in the five-patch carry set: that set is closed, this
   is unrelated to the wasm work, and taking a sixth is the user's decision. Meanwhile, and
   independently, this is A DELIBERATE DEPARTURE FROM UPSTREAM'S PUBLISHED TYPE, recorded here as
-  one. **This runtime reports the module's four-valued code as its own outcome** — `FormALanded`
+  one. **This runtime reports the module's four-valued code as its own outcome** — `FormAProcessed`
   carries `revertCode` (0..3) and `revertedIn` (`none` / `appLogic` / `teardown` / `both`) — and
   carries upstream's collapsed `RevertCode` on `result` only for consumers that demand that type.
   The reason is the deliverable's own wording: M20 must preserve the asymmetric revert model
@@ -858,9 +858,70 @@ were absorbed silently.
   `toRevertCodeEnum`); `barretenberg/cpp/src/barretenberg/vm2/simulation/gadgets/tx_execution.cpp`
   at anchor `cpp` (`RevertCode::BOTH_REVERTED` in the teardown catch);
   `aztec-avm-runtime/verification/e2e_form_a_teardown_revert_still_pays_fee.sh` part 3;
-  `aztec-avm-runtime/orchestration/src/form_a.ts` (`FormALanded.revertCode`,
-  `FormALanded.revertedIn`, `TxRevertPhase`, `RAW_REVERT_PHASES`);
+  `aztec-avm-runtime/orchestration/src/form_a.ts` (`FormAProcessed.revertCode`,
+  `FormAProcessed.revertedIn`, `TxRevertPhase`, `RAW_REVERT_PHASES`);
   `aztec-avm-runtime/orchestration/src/wasm_avm_public_tx_simulator.ts` (`rawRevertCode`).
+
+## D19 — the V8/WASI guest stdout truncates, twice, on runs that exit 0 and whose stderr is complete
+
+- id: D19
+- status: open
+- opened: 2026-08-25
+- milestone: M21 (the detection made uniform; the trigger is not established)
+- design-question: —
+- sides: what the guest WROTE to fd 1 versus what the transcript file CONTAINS, on the same run —
+  so it is a disagreement between two things that both exist, which is what makes it drift rather
+  than a gap
+- what: TWO SIGHTINGS, in two different milestones, on two different programs, both under Node's
+  V8 with `node:wasi`.
+
+  1. M9, `verify_observation_hook_step_records_identical`: the V8 step transcript stopped inside
+     `burn` at record **16,719 of 38,915**, `oob` produced no records at all, and the terminal
+     `avmSteps.done` sentinel never arrived. Native and wasmtime produced the full 39,086 records
+     in the same run. An earlier instance of the same shape in the same check is recorded in its
+     own comment at 39,113 lines of 39,115.
+  2. M8, `test_revert_program_does_not_trap_module` (found during M20's review): the re-run
+     transcript held **259 lines of 1,318**, its first 259 BYTE-IDENTICAL to the reference and
+     then simply stopping mid-record. The very next run of the same command on the same idle
+     machine produced all 1,318.
+
+  Common to both: the process **exited 0**, the guest's **stderr was complete** and included the
+  output of the programs whose stdout was missing, so the guest ran every program to the end. It is
+  not a timeout (`M7_RUN_TIMEOUT` is 900 s; the block ran in under four minutes) and not stale
+  artefacts. What is established is that the loss is on the guest's WASI `fd_write` path, which
+  does not go through `process.stdout` and is therefore NOT covered by the `exitAfterFlush` drain
+  `93d8255` added to the host — that drain does not truncate for the host's own writes, reproduced
+  at 40,000 lines through a pipe and to a file.
+- why it matters: a truncated transcript compared against a complete one produces a page of
+  differences that read as findings about the interpreter. M9's sighting produced **32 red
+  assertions** with names like "oob recorded no steps" and "burn's last record is not the
+  instruction that exhausted the gas"; M8's produced "the module does not reproduce its own
+  transcript". None of those sentences is true of the AVM. The campaign's own note: a check that
+  can produce 32 red assertions from one truncated pipe will eventually be believed.
+- decision: Open. **THE TRIGGER IS NOT ESTABLISHED** and nothing here should be read as a fix.
+  What M21 did is make the DETECTION uniform, because the question was being asked in seven
+  different spellings — `m9_completeness`, `m17_completeness`, two `tail -1` comparisons, an
+  `assert_contains` on a sentinel line, and two `assert_eq`s on a field accessor — of which only
+  two REFUSED and five merely asserted. All seven now reach one implementation,
+  `transcript_completeness` in `lib.sh`, and every check that goes on to compare transcripts calls
+  `require_complete_transcript` first, which DIES naming the truncation, the line counts and where
+  stderr will be. One precondition failure instead of thirty-two assertion failures.
+  What was RULED OUT rather than assumed: the host's own `process.stdout` drain (reproduced
+  complete at 40,000 lines both through a pipe and to a file), a timeout, and stale artefacts. What
+  was NOT tested and remains the open question: whether the loss depends on the sink being a pipe
+  rather than a file, on writeback or memory pressure from a build finishing seconds earlier (M9's
+  run began seconds after M8's build), or on a short `uv_fs_write` on a non-blocking fd 1. A third
+  sighting should record the sink, the line count, the last key that arrived and what else the
+  machine was doing, which is what the refusal now prints.
+  **Do NOT attribute this to `93d8255`** — M9's review did, on the reasoning that M9 had not been
+  re-run since that commit, and the idle-machine control refuted it.
+- evidence: `aztec-avm-runtime/verification/lib.sh` (`transcript_completeness`,
+  `require_complete_transcript`);
+  `aztec-avm-runtime/verification/verify_transcript_truncation_detection_uniform.sh`;
+  `aztec-avm-runtime/verification/verify_observation_hook_step_records_identical.sh` (the
+  three-transcript precondition); `aztec-avm-runtime/verification/lib_m9_observer.sh`
+  (`m9_completeness`'s comment, which records the 39,113-of-39,115 instance);
+  `aztec-avm-runtime/verification/test_revert_program_does_not_trap_module.sh`.
 
 <!-- END:drift -->
 

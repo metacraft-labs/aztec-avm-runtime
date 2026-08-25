@@ -157,6 +157,188 @@ assert_not_contains() { # <description> <needle> <haystack>
   esac
 }
 
+# ---------------------------------------------------------------------------
+# STRING PREDICATES THAT ARE NOT PIPELINES.
+#
+# `printf '%s\n' "$x" | grep -q NEEDLE` is a DEFECT in this shell, and it has now bitten this
+# campaign in three distinct ways. Every one of them is silent.
+#
+#   1. THE PIPE BINDS TO THE HELPER, NOT TO `printf`.
+#      `assert_true "…" printf '%s\n' "$x" | grep -qx 'y'` parses as
+#      `{ assert_true "…" printf '%s\n' "$x" ; } | grep -qx 'y'`. `assert_true` runs `printf`,
+#      which always succeeds, so the assertion can only pass — and its `ok` line goes INTO grep, so
+#      it is not even printed, and the `_ASSERTIONS` increment happens in the subshell and is lost.
+#      Reproduced here before it was fixed: three such assertions, one of them on a needle that
+#      cannot match and one on an EMPTY haystack, produced `TOTAL 0 assertion(s), 0 failure(s)`.
+#      Two live instances were in `verify_wasi_shim_reuse_decision_recorded.sh` (M17), invisible in
+#      its own transcript between two neighbouring `ok` lines.
+#
+#   2. UNDER `pipefail`, THE PIPELINE'S STATUS IS THE WRITER'S SIGNAL RATHER THAN THE READER'S
+#      VERDICT. `grep -q` exits at its FIRST match; if `printf` is still writing it takes SIGPIPE
+#      and the pipeline's status becomes 141, so the `if` takes the ELSE branch whatever the string
+#      says. It is SIZE-DEPENDENT: below the 64 KiB pipe buffer `printf` finishes first and there is
+#      no signal at all. `verify_upstream_world_state_reference_gate_green` was latent for eight
+#      milestones and detonated the moment M20 grew `avm-wasm.yml` past 64 KiB.
+#
+#   3. Even where neither bites, the predicate forks two processes to answer a question bash can
+#      answer with a `case`.
+#
+# `<<<` is NOT a fix for (2) — the shell becomes the writer and takes the signal instead.
+# These five helpers are pure builtins: no pipeline, no subshell, no temporary file, no size
+# dependence. `verify_no_pipeline_predicates.sh` asserts that no check-shell line in this tree uses
+# the old shape, and exercises every helper here against a haystack larger than the pipe buffer.
+#
+# Each mirrors one `grep -q` spelling exactly:
+#   str_has_line   <hay> <line>  = grep -qxF   (whole line, fixed string)
+#   str_has_sub    <hay> <sub>   = grep -qF    (substring anywhere, fixed string)
+#   str_has_word   <hay> <word>  = grep -qw    (fixed string on word boundaries)
+#   str_has_re     <hay> <ere>   = an ERE over the WHOLE string (`^`/`$` are string ends)
+#   str_has_line_re <hay> <ere>  = grep -qE    (an ERE tried against each LINE separately)
+# The last distinction is load-bearing: bash's `=~` has no REG_NEWLINE, so `^` and `$` in
+# `[[ $s =~ ^x$ ]]` anchor to the ends of the whole string and NOT to each line, and translating a
+# `grep -qE '^foo$'` into `str_has_re` would silently stop matching.
+# ---------------------------------------------------------------------------
+
+str_has_line() { # <haystack> <line> -- whole-line fixed-string match; grep -qxF
+  [ -n "$1" ] || return 1
+  case $'\n'"$1"$'\n' in (*$'\n'"$2"$'\n'*) return 0 ;; esac
+  return 1
+}
+
+str_has_sub() { # <haystack> <needle> -- fixed-string substring; grep -qF
+  case "$1" in (*"$2"*) return 0 ;; esac
+  return 1
+}
+
+_str_escape_ere() { # <literal> -> the same text as an ERE that matches only itself
+  local s="$1" out="" i c
+  for (( i = 0; i < ${#s}; i++ )); do
+    c="${s:i:1}"
+    case "$c" in
+      # Spelled as an alternation of single-character patterns rather than as one bracket
+      # expression: inside a `case` glob a `]` closes the bracket and a `)` closes the pattern, so
+      # `[\\.^$*+?()[\]{}|]` PARSES but escapes only `]` — measured, and it is exactly the
+      # "the scanner around the needle counts too" failure this campaign keeps meeting.
+      ( '\' | '.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|' )
+        out="$out\\$c" ;;
+      ( * ) out="$out$c" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+str_has_word() { # <haystack> <word> -- fixed string on word boundaries; grep -qw
+  # The word is ESCAPED into an ERE rather than interpolated, so a needle containing `.`, `+` or
+  # `[` cannot silently widen the match — the campaign has been bitten fourteen times by a needle
+  # that matched more than it named.
+  # The boundary class `[^[:alnum:]_]` contains the newline, so a word at the start or end of a
+  # LINE is bounded by it exactly as `grep -w` would have it, and `^`/`$` cover the two string ends.
+  local w
+  [ -n "$2" ] || return 1
+  w="$(_str_escape_ere "$2")"
+  [[ $1 =~ (^|[^[:alnum:]_])$w($|[^[:alnum:]_]) ]]
+}
+
+str_has_re() { # <haystack> <ere> -- ERE over the WHOLE string; `^`/`$` are the string's ends
+  [[ $1 =~ $2 ]]
+}
+
+str_has_line_re() { # <haystack> <ere> -- ERE tried against each LINE; grep -qE
+  local re="$2" line
+  local -a _lines=()
+  local _had_f=0
+  [ -n "$1" ] || return 1
+  # A pattern that matches the empty string matches EVERY line, which is what `grep -E ''` does,
+  # so answer that case before splitting — it is also the one case in which dropping empty lines
+  # below could change the answer.
+  if [[ "" =~ $re ]]; then return 0; fi
+  # Split on newlines with the shell's own field splitting: no pipeline, no subshell, no here-string
+  # (which would make the SHELL the writer), and linear rather than the quadratic cost of peeling
+  # one line at a time off the front of a large string — measured 8.1 s versus 0.01 s on 199 KB.
+  case $- in (*f*) _had_f=1 ;; esac
+  set -f
+  local IFS=$'\n'
+  _lines=($1)
+  [ "$_had_f" = 1 ] || set +f
+  for line in "${_lines[@]}"; do
+    [[ $line =~ $re ]] && return 0
+  done
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# TRANSCRIPT COMPLETENESS — ONE IMPLEMENTATION, BECAUSE THERE WERE THREE.
+#
+# The V8/WASI stdout truncation has TWO recorded sightings and no established trigger: M9's
+# observation-hook transcript stopped inside `burn` at record 16,719 of 38,915, and M8's
+# `revert-rerun.transcript` held 259 lines of 1,318 — in both cases the prefix was byte-identical
+# to the reference and then simply stopped, stderr was complete, and the next run passed. It is a
+# fact about the RUN. A check that compares transcripts without asking that question first turns it
+# into dozens of red assertions with names like "oob recorded no steps", every one of which reads
+# like a discovery about the interpreter and none of which is.
+#
+# Until the trigger is known, the DETECTION is what has to be uniform, and it was not: M9 had
+# `m9_completeness`, M17 had `m17_completeness` — the same seven lines, independently written — and
+# M8's `test_revert_program_does_not_trap_module` had a third spelling inlined as a pair of
+# `tail -1` comparisons. Three implementations are three chances for the next transcript check to
+# be written without one. Both milestone helpers now delegate here, and
+# `verify_transcript_truncation_detection_uniform.sh` asserts that every check that compares a
+# transcript reaches this function.
+#
+# `absent` and `truncated-…` are DIFFERENT ANSWERS on purpose: a missing file is a broken run, a
+# truncated one is this flake, and collapsing them would hide which happened.
+# ---------------------------------------------------------------------------
+transcript_completeness() { # <file> <sentinel> -> complete | absent | empty | truncated-after-N-lines-last-key-K
+  local file="$1" sentinel="$2" lines last
+  [ -f "$file" ] || { printf 'absent\n'; return 0; }
+  # EMPTY IS ITS OWN ANSWER, and it is not a nicety. A run that never started — a module that would
+  # not resolve, a binary that is not there — leaves a zero-byte transcript, and reporting that as
+  # `truncated-after-0-lines` makes the refusal below tell the reader about a V8/WASI stdout flake
+  # that had nothing to do with it. Found by this happening: M21's first surface probe failed with
+  # `ERR_MODULE_NOT_FOUND` and the refusal printed the truncation story over it. Misattributing a
+  # failure is exactly what this whole mechanism exists to stop, so it must not do it itself.
+  [ -s "$file" ] || { printf 'empty\n'; return 0; }
+  if awk -v k="$sentinel" '$1 == k { found = 1; exit } END { exit found ? 0 : 1 }' "$file"; then
+    printf 'complete\n'; return 0
+  fi
+  lines="$(wc -l <"$file" | tr -d '[:space:]')"
+  last="$(awk 'NF { k = $1 } END { print k }' "$file")"
+  printf 'truncated-after-%s-lines-last-key-%s\n' "${lines:-0}" "${last:-none}"
+}
+
+# require_complete_transcript <file> <sentinel-key> <role> [<reference-file>]
+#
+# The refusal. Dies naming the truncation, the line counts and where stderr will be, instead of
+# letting the caller emit a diff. The role is the caller's word for which transcript this is
+# ("the re-run", "the reference"), because "a transcript is incomplete" does not say which.
+require_complete_transcript() {
+  local file="$1" sentinel="$2" role="$3" ref="${4:-}" verdict refnote=""
+  verdict="$(transcript_completeness "$file" "$sentinel")"
+  [ "$verdict" = complete ] && return 0
+  # THREE DIFFERENT FAILURES, THREE DIFFERENT MESSAGES. Collapsing them is how a check comes to
+  # tell the reader about a flake that is not what happened.
+  case "$verdict" in
+    (absent)
+      die "$role transcript $file DOES NOT EXIST (expected sentinel '$sentinel').
+     The run that should have written it did not get that far. Look at the run's own stderr and at
+     whatever was supposed to produce this file; this is not the truncation flake." ;;
+    (empty)
+      die "$role transcript $file is EMPTY (expected sentinel '$sentinel').
+     The process produced no stdout at all, which means it did not start rather than that it
+     stopped part way — a module that would not resolve, a binary that is not there, a shell that
+     died before exec. Read the run's stderr. This is NOT the V8/WASI truncation, and saying so is
+     the point: a zero-line transcript reported as a truncation sends the next reader after the
+     wrong thing." ;;
+  esac
+  [ -z "$ref" ] || [ ! -f "$ref" ] || refnote="
+     the reference $ref has $(wc -l <"$ref" | tr -d '[:space:]') line(s)."
+  die "$role transcript $file is INCOMPLETE: $verdict (expected sentinel '$sentinel').$refnote
+     This is the V8/WASI stdout truncation — two sightings, M9 and M8, trigger unestablished. The
+     guest's stderr is normally COMPLETE, which is the signature; a short stdout with a complete
+     stderr is a fact about the RUN and not about the module. The comparison is refused rather
+     than reported as a divergence. Re-run this check."
+}
+
 assert_file() { # <description> <path>
   local desc="$1" path="$2"
   if [ -f "$path" ]; then

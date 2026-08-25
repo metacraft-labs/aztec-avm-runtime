@@ -158,6 +158,31 @@ assert_eq "the wasmtime run exited 0" "0" "$?"
 
 m8_require_artifacts "$(m9_steps_native)" "$(m9_steps_v8)" "$(m9_steps_wasmtime)"
 
+# THE TRUNCATION IS A PRECONDITION HERE NOW, WHICH IS THE FIX THE BRIEF RECORDS AS OUTSTANDING.
+#
+# This check produced 798 assertions, 3 pass / 4 FAIL and 32 failing assertions once, and all 32
+# had one cause: the V8 step transcript stopped inside `burn` at record 16,719 of 38,915 and the
+# terminal `avmSteps.done` sentinel never arrived. Stderr was complete, so the guest had run every
+# program to the end. The failures were named "oob recorded no steps" and "burn's last record is
+# not the instruction that exhausted the gas" — each reads like a discovery about the interpreter
+# and none of them is. `_steps_compare.py` DOES detect the truncation, but it detects it as a
+# `FAIL` line among dozens of others, which is precisely the shape that gets believed.
+#
+# So the question is asked BEFORE the comparator runs, of all three transcripts, through lib.sh's
+# single implementation. One precondition failure naming the truncation, instead of 32 assertions
+# naming the AVM. The comparator's own truncation detection stays exactly as it is — the control at
+# "a truncated run is rejected" below depends on it, and that control is about the COMPARATOR.
+for _which in native v8 wasmtime; do
+  case "$_which" in
+    (native)   _tf="$(m9_steps_native)" ;;
+    (v8)       _tf="$(m9_steps_v8)" ;;
+    (wasmtime) _tf="$(m9_steps_wasmtime)" ;;
+  esac
+  require_complete_transcript "$_tf" avmSteps.done "the $_which step" "$(m9_steps_native)"
+  assert_eq "the $_which step transcript is complete, so what follows is about the AVM" \
+    "complete" "$(transcript_completeness "$_tf" avmSteps.done)"
+done
+
 # The streams really are separate, and that is asserted in BOTH directions rather than being a
 # claim about silence: `common/log.cpp` sets bb_log_level = VERBOSE unconditionally under __wasm__
 # and INFO otherwise, so the wasm run logs on fd 2 and the native one does not.

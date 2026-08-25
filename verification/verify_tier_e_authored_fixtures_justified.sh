@@ -135,14 +135,18 @@ assert_true "claim 2 is stated in the family README" grep -q "deadline-test-skip
 HEADER="$(at "$CPP" yarn-project/stdlib/src/rollup/checkpoint_header.ts)"
 assert_ge "checkpoint_header.ts read at the cpp anchor" 100 "$(printf '%s\n' "$HEADER" | grep -c . || true)"
 assert_true "claim 3: CheckpointHeader.random hardcodes Date.now() as the timestamp" \
-  bash -c "printf '%s\n' \"\$0\" | grep -q 'timestamp: BigInt(Math.floor(Date.now() / 1000))'" "$HEADER"
+  str_has_sub "$HEADER" 'timestamp: BigInt(Math.floor(Date.now() / 1000))'
 assert_true "claim 3 is stated in the family README" grep -q "random-header-constant-timestamp" "$BLOCK_LOOP"
 
 # Claim 4 — TXE's advanceBlocksBy does not advance the clock.
 TXE="$(at "$CPP" yarn-project/txe/src/oracle/txe_oracle_top_level_context.ts)"
 assert_ge "the TXE top-level context read at the cpp anchor" 500 "$(printf '%s\n' "$TXE" | grep -c . || true)"
+# Newlines folded to spaces the way the `tr` this replaced did, so a declaration that upstream
+# wraps across lines is still found. The whole file went through `bash -c "$0"` before, which is a
+# 128 KiB argument ceiling (measured: E2BIG at 133,892 bytes, status 126) on a file that grows.
+TXE_FLAT="${TXE//$'\n'/ }"
 assert_true "claim 4: advanceBlocksBy is a bare loop over mineBlock" \
-  bash -c "printf '%s\n' \"\$0\" | tr '\n' ' ' | grep -q 'async advanceBlocksBy(blocks: number)'" "$TXE"
+  str_has_sub "$TXE_FLAT" 'async advanceBlocksBy(blocks: number)'
 TS_MUTATIONS="$(printf '%s\n' "$TXE" | grep -c 'this.nextBlockTimestamp +=\|this.nextBlockTimestamp =' || true)"
 assert_eq "claim 4: nextBlockTimestamp is mutated in exactly one place" "1" "${TS_MUTATIONS:-0}"
 assert_true "claim 4 is stated in the family README" grep -q "txe-advance-blocks-shares-timestamp" "$BLOCK_LOOP"
@@ -168,9 +172,9 @@ assert_true "claim 1 is stated in the family README" grep -q "no-ct-artifacts-up
 SIM="$(at "$TS" yarn-project/simulator/src/public/avm/avm_simulator.ts)"
 assert_ge "avm_simulator.ts read at the ts anchor" 100 "$(printf '%s\n' "$SIM" | grep -c . || true)"
 assert_true "claim 2: the hook's whole signature is (string, Gas)" \
-  bash -c "printf '%s\n' \"\$0\" | grep -q 'tallyInstructionFunction = (_b: string, _c: Gas) => {}'" "$SIM"
+  str_has_sub "$SIM" 'tallyInstructionFunction = (_b: string, _c: Gas) => {}'
 assert_true "claim 2: it is called once per instruction with a class name" \
-  bash -c "printf '%s\n' \"\$0\" | grep -q 'tallyInstructionFunction(instruction.constructor.name, gasUsed)'" "$SIM"
+  str_has_sub "$SIM" 'tallyInstructionFunction(instruction.constructor.name, gasUsed)'
 assert_true "claim 2 is stated in the family README" grep -q "tally-hook-carries-name-and-gas-only" "$TRACE"
 
 # Claim 3 — the per-instruction C++ observer is ours, not upstream's.

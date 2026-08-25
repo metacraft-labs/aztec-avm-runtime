@@ -131,14 +131,10 @@ m17_field() {
 # ends with a `<mode>.done 1` sentinel and prints nothing after it, so a transcript missing it was
 # TRUNCATED and not short. Returns `complete` or a token naming the truncation.
 # ---------------------------------------------------------------------------
-m17_completeness() {
-  local file="$1" mode="$2" lines last
-  [ -f "$file" ] || { printf 'absent\n'; return 0; }
-  if [ -n "$(m17_field "$file" "$mode.done")" ]; then printf 'complete\n'; return 0; fi
-  lines="$(wc -l <"$file" | tr -d '[:space:]')"
-  last="$(awk 'NF { k = $1 } END { print k }' "$file")"
-  printf 'truncated-after-%s-lines-last-key-%s\n' "${lines:-0}" "${last:-none}"
-}
+# Delegates to lib.sh's `transcript_completeness`; see the note there on why there is now one
+# implementation instead of three. The mode-to-sentinel spelling stays here, because that is M17's
+# CLI contract rather than a property of transcripts.
+m17_completeness() { transcript_completeness "$1" "$2.done"; }
 
 # ---------------------------------------------------------------------------
 # m17_reactor_abi_wasi_imports

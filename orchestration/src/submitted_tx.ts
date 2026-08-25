@@ -69,16 +69,84 @@
 // firing, which is the campaign's most-repeated defect: an assertion that cannot fail.
 
 /**
+ * What ran the private half, when this runtime did.
+ *
+ * M21's deliverable. It is a SUMMARY and not the `PrivateExecutionResult` itself, deliberately:
+ * the result is a large object graph that a consumer would then be able to read out of provenance,
+ * and DD-1's whole point is that provenance is metadata beside the transaction rather than a
+ * second channel into it. What a caller legitimately wants to know afterwards is what was run and
+ * with what, and those are here.
+ */
+export interface PrivateExecutionSummary {
+  /** The entrypoint's contract address, as a string. */
+  readonly contract: string;
+  /** The entrypoint's function selector, as a string. */
+  readonly selector: string;
+  /** How many nested private calls the execution produced, the entrypoint not counted. */
+  readonly nestedCalls: number;
+  /** How many enqueued public calls came out of it — Form B's link into the Form A path. */
+  readonly publicCalls: number;
+  /**
+   * Which circuit simulator ran it. `wasm` is `WASMSimulator` over `@aztec/noir-acvm_js`.
+   * A string rather than an enum because M27's browser host and a future native arm are different
+   * implementations rather than members of a closed set this package owns.
+   */
+  readonly simulator: string;
+}
+
+/**
+ * The handle M26 consumes. Opaque HERE on purpose.
+ *
+ * M26 owns what a private trace is; this milestone owns only the fact that a locally-originated
+ * transaction can carry one and an externally-settled one cannot. Declaring the shape now would be
+ * this campaign's own recurring defect in a new place — a type written from a deliverable's wording
+ * rather than from the thing it describes.
+ */
+export interface PrivateTraceHandle {
+  /** Identifies the trace to whatever produced it. */
+  readonly id: string;
+}
+
+/** M20's arm: the private half ran somewhere else and we were handed the result. */
+export interface ExternalTxProvenance {
+  readonly kind: 'external';
+}
+
+/**
+ * M21's arm.
+ *
+ * `privateExecution` IS OPTIONAL HERE AND REQUIRED WHERE IT MATTERS, and the split is deliberate.
+ *
+ * M20 runs all seven Form A arms under BOTH provenances, to prove that execution cannot see the
+ * discriminant. Those `local` arms have no private execution — there was none — so making the
+ * field required on this type would make the provenance-blindness suite unbuildable, and the
+ * obvious workaround (a placeholder summary) would be a lie in a field a consumer reads.
+ *
+ * So the requirement lives on `LocallyExecutedTxProvenance` below, which is what Form B's producer
+ * RETURNS. A path that runs a private half cannot omit the summary, because its own return type
+ * carries it; a path that merely wants the discriminant can still have it.
+ * `e2e_form_b_local_tx_roundtrip` section 4 asserts that the produced object always has the field,
+ * by executing rather than by trusting the type, with M20's discriminant-only constructor and an
+ * external transaction beside it as the two controls that it is not simply there by default.
+ */
+export interface LocalTxProvenance {
+  readonly kind: 'local';
+  readonly privateExecution?: PrivateExecutionSummary;
+  readonly privateTrace?: PrivateTraceHandle;
+}
+
+/** The narrowed local arm: what Form B produces, with the summary required. */
+export interface LocallyExecutedTxProvenance extends LocalTxProvenance {
+  readonly privateExecution: PrivateExecutionSummary;
+}
+
+/**
  * How a transaction reached this runtime.
  *
- * `external` is M20's — the private half ran somewhere else and we were handed the result.
- * `local` is M21's, declared here so that M21 adds a case rather than a type, and so that the
- * provenance-blindness property can be tested TODAY with two distinct values rather than with one
- * value and an argument. M21's own fields (`privateExecution`, an optional `privateTrace` handle
- * that M26 consumes) are not invented here; the shape below is the minimum that lets the
- * discriminant be exercised.
+ * `external` is M20's, `local` is M21's. The discriminant is what execution must not be able to
+ * see; everything hanging off `local` is for the consumer that receives the outcome.
  */
-export type TxProvenance = { readonly kind: 'external' } | { readonly kind: 'local' };
+export type TxProvenance = ExternalTxProvenance | LocalTxProvenance;
 
 /** The boundary type. The `Tx` is upstream's, unmodified and unwrapped. */
 export interface SubmittedTx<T = unknown> {
@@ -184,7 +252,31 @@ export function externalTx<T>(tx: T): SubmittedTx<T> {
   return { tx, provenance: { kind: 'external' } };
 }
 
-/** Declared here so M21 does not have to widen the type it is testing against. */
+/**
+ * The DISCRIMINANT-ONLY local constructor, which is what M20's provenance-blindness arms use.
+ *
+ * It carries no private execution because there was none: these are Form A transactions submitted
+ * under `local` provenance to prove the execution path cannot tell the two apart. Giving them a
+ * placeholder summary would put a fabricated value in a field a consumer reads.
+ */
 export function locallyOriginatedTx<T>(tx: T): SubmittedTx<T> {
   return { tx, provenance: { kind: 'local' } };
+}
+
+/**
+ * M21's constructor: a transaction whose private half THIS runtime ran.
+ *
+ * The summary is a required parameter rather than an optional one, so the Form B path cannot
+ * produce a `local` transaction that has forgotten to say what it executed.
+ */
+export function locallyExecutedTx<T>(
+  tx: T,
+  privateExecution: PrivateExecutionSummary,
+  privateTrace?: PrivateTraceHandle,
+): SubmittedTx<T> & { readonly provenance: LocallyExecutedTxProvenance } {
+  const provenance: LocallyExecutedTxProvenance =
+    privateTrace === undefined
+      ? { kind: 'local', privateExecution }
+      : { kind: 'local', privateExecution, privateTrace };
+  return { tx, provenance };
 }

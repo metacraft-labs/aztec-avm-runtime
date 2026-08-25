@@ -84,8 +84,12 @@ rc=$?
 # unconditionally, and a merged comparison mismatched 1,308 of 1,308 lines when M8 tried it.
 note "driver exit $rc, $(grep -c . "$OUT" || true) line(s) of stdout, $(grep -c . "$ERR" || true) of stderr"
 assert_eq "the driver exited 0" "0" "$rc"
-assert_contains "and reached its own sentinel, so the output is not a truncation" \
-  "roundtrip.done 1" "$(cat "$OUT")"
+# The completeness question, asked through lib.sh's ONE implementation rather than a fourth
+# spelling of it — and REFUSED rather than merely asserted, because everything below reads fields
+# out of this file and a truncated one produces a page of absences that look like decode defects.
+require_complete_transcript "$OUT" roundtrip.done "the roundtrip driver's"
+assert_eq "and reached its own sentinel, so the output is not a truncation" \
+  "complete" "$(transcript_completeness "$OUT" roundtrip.done)"
 
 val() { # <key> -> the value the driver printed for it
   awk -v k="$1" '$1 == k { $1 = ""; sub(/^ /, ""); print; exit }' "$OUT"

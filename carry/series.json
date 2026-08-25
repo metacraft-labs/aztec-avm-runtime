@@ -33,7 +33,7 @@
   "base": {
     "commit": "233d8e099336c1773b89e939100af047ed9c4f71",
     "short": "233d8e0993",
-    "source": "pins.json anchors.cpp — this file does not declare the pin, it names it"
+    "source": "pins.json anchors.cpp \u2014 this file does not declare the pin, it names it"
   },
   "fork": {
     "remote": "https://github.com/metacraft-labs/aztec-packages.git",
@@ -66,7 +66,7 @@
         "lmdblib dependency",
         "BB_LITE"
       ],
-      "carry_note": "Largest of the five and the only one that moves paths: 35 files, 9 renames, 1 deletion. Renames are cheap to carry — upstream has no version of the new path to move under us — but expensive to rebase if upstream edits the old path, and the audit-scope document it updates is a file upstream also maintains."
+      "carry_note": "Largest of the five and the only one that moves paths: 35 files, 9 renames, 1 deletion. Renames are cheap to carry \u2014 upstream has no version of the new path to move under us \u2014 but expensive to rebase if upstream edits the old path, and the audit-scope document it updates is a file upstream also maintains."
     },
     {
       "id": "p2",
@@ -116,7 +116,7 @@
         "shift-count-overflow",
         "wasm32 vm2 portability"
       ],
-      "carry_note": "One file, +3 / -1, one hunk — the cheapest thing in the set to carry. Two upstream commits touched its lines in the twelve months before the base."
+      "carry_note": "One file, +3 / -1, one hunk \u2014 the cheapest thing in the set to carry. Two upstream commits touched its lines in the twelve months before the base."
     },
     {
       "id": "p4",
@@ -141,7 +141,7 @@
         "per-instruction observation vm2",
         "ExecutionEvent emitter hook"
       ],
-      "carry_note": "Two new headers and one new .cpp, which cost nothing to carry, plus edits to four files upstream owns. `simulation_helper.cpp` is the hot one — 16 commits landed on the lines this patch touches in twelve months, the highest in the whole series, and higher than `hybrid_execution.cpp`'s 4, which the spike had named as THE risk."
+      "carry_note": "Two new headers and one new .cpp, which cost nothing to carry, plus edits to four files upstream owns. `simulation_helper.cpp` is the hot one \u2014 16 commits landed on the lines this patch touches in twelve months, the highest in the whole series, and higher than `hybrid_execution.cpp`'s 4, which the spike had named as THE risk."
     },
     {
       "id": "p5",
@@ -173,5 +173,19 @@
       ],
       "carry_note": "Five CMake files and three C++ files. The one with no independent merit, and the one most likely to be carried forever. Its exposure is concentrated in `src/CMakeLists.txt` (9 commits on the carried lines in twelve months) and `cmake/arch.cmake` (5). Both are files upstream restructures rather than tweaks, which is the shape of conflict that needs a person rather than a three-way merge."
     }
-  ]
+  ],
+  "not_carried": {
+    "_comment": [
+      "CANDIDATE CONTRIBUTIONS THAT ARE DELIBERATELY NOT IN THE CARRY SET.",
+      "The carry set is the five patches this runtime CARRIES DOWNSTREAM if upstream declines them.",
+      "An entry can exist under upstream-bugs/ without being one: a contribution we would like upstream",
+      "to take, but which this runtime does not depend on and would not carry. Enrolling one anyway",
+      "would price a carry that does not exist and would put it in `carry-exposure`'s ledger.",
+      "verify_carry_set_complete compares the entries ON DISK, minus these, against the manifest \u2014 in",
+      "both directions, so an entry listed here that no longer exists FAILS, and an entry on disk that",
+      "is in neither list FAILS. This is an exemption list with a reason per line, which is the only",
+      "kind this campaign accepts."
+    ],
+    "aztec-revert-code-four-values": "M20's sixth candidate contribution (DRIFT.md D18): upstream's published RevertCodeEnum collapses the AVM's four-valued revert code to two. It is unrelated to the wasm work the five carry, this runtime does not depend on it landing \u2014 it reports the module's raw code itself \u2014 and taking a sixth is the user's decision. Committed in codetracer-specs 5ec32ac1, AFTER M20's own sweep, which is why that sweep did not see this."
+  }
 }

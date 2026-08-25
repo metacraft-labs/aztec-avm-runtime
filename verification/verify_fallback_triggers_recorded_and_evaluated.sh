@@ -191,7 +191,7 @@ while [ "$i" -lt 7 ]; do
     continue
   fi
   OUT="$(python3 "$M16_PARSER" "$d" 2>&1)"
-  if printf '%s' "$OUT" | grep -q '^PROBLEM .*evidence needle is absent'; then
+  if str_has_line_re "$OUT" '^PROBLEM .*evidence needle is absent'; then
     pass "conjunct $i: fabricating its evidence is REJECTED, so that conjunct is load-bearing"
   else
     fail "conjunct $i: fabricating its evidence was ACCEPTED — that conjunct's evidence is decorative"
@@ -224,7 +224,7 @@ PY
     continue
   fi
   OUT="$(python3 "$M16_PARSER" "$d" 2>&1)"
-  if printf '%s' "$OUT" | grep -q "^PROBLEM trigger $t records every conjunct as true"; then
+  if str_has_line_re "$OUT" "^PROBLEM trigger $t records every conjunct as true"; then
     pass "trigger $t: all-conjuncts-true with 'not-fired' is REJECTED"
   else
     fail "trigger $t: all-conjuncts-true with 'not-fired' was ACCEPTED"
@@ -254,7 +254,7 @@ PY
     continue
   fi
   OUT="$(python3 "$M16_PARSER" "$d" 2>&1)"
-  if printf '%s' "$OUT" | grep -q "^PROBLEM trigger $t records the conjunction as fired"; then
+  if str_has_line_re "$OUT" "^PROBLEM trigger $t records the conjunction as fired"; then
     pass "trigger $t: 'fired' on conjuncts that are not all true is REJECTED"
   else
     fail "trigger $t: 'fired' on conjuncts that are not all true was ACCEPTED"
@@ -273,7 +273,7 @@ neg() { # <description> <python-mutation-on-stdin-name> <expected PROBLEM substr
     return
   fi
   out="$(python3 "$M16_PARSER" "$d" 2>&1)"
-  if printf '%s' "$out" | grep -qF "$expect"; then
+  if str_has_sub "$out" "$expect"; then
     pass "$desc — rejected"
   else
     fail "$desc — ACCEPTED; the parser is too weak. Got: $(printf '%s' "$out" | grep '^PROBLEM' | head -3 | tr '\n' ' ')"
@@ -367,7 +367,7 @@ else
   assert_contains "a manifest an aborted run left with one entry 'accepted' no longer satisfies T-2b" \
     "the evidence needle occurs 4 time(s)" "$OUT"
   OUT="$(python3 "$M16_PARSER" "$T2B_CLEAN" 2>&1)"
-  if printf '%s' "$OUT" | grep -q '^PROBLEM'; then
+  if str_has_line_re "$OUT" '^PROBLEM'; then
     fail "the clean control ALSO fails, so the corrupt one proves nothing: $(printf '%s' "$OUT" | grep '^PROBLEM' | head -1)"
   else
     pass "…and the same directory with an uncorrupted manifest resolves, so that is a discrimination"

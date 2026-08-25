@@ -137,7 +137,7 @@ export interface ArmReport {
   readonly arm: string;
   /** Whether the tx carried a public call in each phase, read off the DESERIALIZED transaction. */
   readonly shape: unknown;
-  /** `landed` / `rejected` / `threw`, once per provenance. */
+  /** `processed` / `failed` / `threw`, once per provenance. */
   readonly external: unknown;
   readonly local: unknown;
   /** True when the two provenances produced the same JSON. The DD-1 claim, through the module. */

@@ -222,8 +222,23 @@ assert_true "verify.sh is executable" test -x "$M14_PR_VERIFY"
 assert_contains "PR.md is written for an upstream audience, with a Kind line" \
   "**Kind:**" "$(cat "$M14_PR_MD" 2>/dev/null)"
 assert_contains "and says plainly that it is not filed" "not filed" "$(cat "$M14_PR_MD" 2>/dev/null)"
-assert_eq "the carry set still has exactly five aztec-* entries, so M11 is untouched" "5" \
-  "$(cd "$M6_UPSTREAM_BUGS" && ls -d aztec-*/ 2>/dev/null | wc -l)"
+# THE CARRY SET, NOT THE DIRECTORY. This counted `ls -d aztec-*/` and asserted 5, and it went RED
+# at HEAD when M20 prepared a SIXTH candidate contribution (`aztec-revert-code-four-values`) and
+# deliberately did not enrol it — committed in codetracer-specs `5ec32ac1`, AFTER the sweep that
+# reported M14 green. The property this line is for is "M14's contribution did not get filed into
+# the carry set", and the carry set is `carry/series.json`'s `patches`, not the contents of a
+# directory that also holds candidates nobody carries. Read from the manifest, which is the single
+# source `verify_carry_set_complete` holds the directory to.
+assert_eq "the carry set still has exactly five patches, so M11 is untouched" "5" \
+  "$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["patches"]))' "$REPO_ROOT/carry/series.json")"
+# …and the entries on disk that are NOT in it are declared, one reason each, rather than merely
+# uncounted — so "six directories, five patches" is a stated difference and not a discrepancy.
+assert_eq "every on-disk entry outside the carry set is declared not-carried" \
+  "$(cd "$M6_UPSTREAM_BUGS" && ls -d aztec-*/ 2>/dev/null | wc -l)" \
+  "$(python3 -c 'import json,sys
+d = json.load(open(sys.argv[1]))
+print(len(d["patches"]) + len([k for k in d.get("not_carried", {}) if not k.startswith("_")]))' \
+     "$REPO_ROOT/carry/series.json")"
 assert_false "and this contribution is NOT among them" \
   test -e "$M6_UPSTREAM_BUGS/aztec-world-state-reference-block-coverage"
 assert_contains "the write-up records why it is not, and what promoting it needs" \

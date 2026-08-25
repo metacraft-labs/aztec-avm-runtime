@@ -71,7 +71,7 @@ M18_TEST_PATTERN='\.test\.ts$|/test/|/tests/|/testing/|/fixtures/|/apps_tests/|/
 export M18_TEST_PATTERN
 
 m18_is_test_path() { # <path>
-  printf '%s\n' "$1" | grep -qE "$M18_TEST_PATTERN"
+  str_has_line_re "$1" "$M18_TEST_PATTERN"
 }
 
 # The import-graph walker, with its work landing in M18's own directory.

@@ -52,7 +52,9 @@ for label in native v8 wasmtime; do
 
   # First: this transcript really is a complete run of a tree carrying the patch. Never depend on
   # state you did not produce without asserting it.
-  assert_eq "[$label] the run completed" "1" "$(m9_field "$t" avmSteps.done)"
+  require_complete_transcript "$t" avmSteps.done "[$label] the step"
+  assert_eq "[$label] the run completed" "complete" \
+    "$(transcript_completeness "$t" avmSteps.done)"
   assert_eq "[$label] the tree carried the observer patch" "1" \
     "$(m9_field "$t" avmSteps.observerCompiledIn)"
   assert_eq "[$label] all eight programs ran" "$M9_EXPECTED_PROGRAMS" \

@@ -42,7 +42,7 @@ exports="$(m19_module_exports)"
 assert_ge "the module declares a plausible number of exports" 20 "$(printf '%s\n' "$exports" | wc -l)"
 missing=0
 for sym in $M19_REQUIRED_EXPORTS; do
-  printf '%s\n' "$exports" | grep -qx "$sym" || { fail "the module exports $sym"; missing=$((missing + 1)); }
+  str_has_line "$exports" "$sym" || { fail "the module exports $sym"; missing=$((missing + 1)); }
 done
 [ "$missing" -eq 0 ] && pass "the module exports all $(printf '%s\n' $M19_REQUIRED_EXPORTS | wc -l) entry points the three-way arm calls"
 # The negative half: a name that is NOT an export must not be found, or the loop above would pass

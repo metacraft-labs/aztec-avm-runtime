@@ -33,6 +33,13 @@ WT_T="$(m8_wasmtime_transcript)"
 WASM_BIN="$(m8_wasm_bin avm_differential)"
 m8_require_artifacts "$NATIVE_T" "$V8_T" "$WASM_BIN"
 
+# The truncation, refused before anything is compared, through lib.sh's ONE implementation. This
+# check compares two transcripts line for line; a short one produces a diff that reads as a
+# native-versus-wasm divergence, which is the exact misattribution M8 already made once with
+# `revert-rerun.transcript` at 259 lines of 1,318.
+require_complete_transcript "$NATIVE_T" avmDifferential.done "the native"
+require_complete_transcript "$V8_T"     avmDifferential.done "the V8" "$NATIVE_T"
+
 # ---------------------------------------------------------------------------
 echo "== 1. native versus wasm on V8, the shipped binary unmodified"
 # ---------------------------------------------------------------------------
@@ -64,7 +71,9 @@ m8_run_wasmtime "$WASM_BIN" "$WT_T" "$(m8_wasmtime_stderr)"
 WT_RC=$?
 assert_eq "the merged module runs to completion on wasmtime" "0" "$WT_RC"
 m8_require_artifacts "$WT_T"
-assert_eq "the wasmtime transcript ran to completion" "avmDifferential.done 1" "$(tail -1 "$WT_T")"
+require_complete_transcript "$WT_T" avmDifferential.done "the wasmtime" "$NATIVE_T"
+assert_eq "the wasmtime transcript ran to completion" "complete" \
+  "$(transcript_completeness "$WT_T" avmDifferential.done)"
 
 python3 "$M8_TRANSCRIPT_COMPARE" "$NATIVE_T" "$WT_T" "$M8_PEAK_PAGE_BUDGET" \
   >"$M8_WORK/compare-wasmtime.report" 2>/dev/null

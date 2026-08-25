@@ -119,7 +119,7 @@ assert_contains "it reports its own success line" \
 # verify.sh column-pads the binary name, so match on the pair rather than on a
 # literal run of spaces.
 verify_reported() { # <binary> <count>
-  printf '%s\n' "$full_out" | grep -qE "^[[:space:]]*$1[[:space:]]+ran=$2[[:space:]]+passed=$2[[:space:]]+expected=$2[[:space:]]+ok$"
+  str_has_line_re "$full_out" "^[[:space:]]*$1[[:space:]]+ran=$2[[:space:]]+passed=$2[[:space:]]+expected=$2[[:space:]]+ok$"
 }
 assert_true "verify.sh measured crypto_merkle_tree_tests ran=36 passed=36 ok" \
   verify_reported crypto_merkle_tree_tests 36

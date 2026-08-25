@@ -795,14 +795,13 @@ m9_field() {
 # occurrence is diagnosed in one line. The underlying `process.exit()` hazard in the V8 host is
 # closed separately, in `wasm_host/run_wasm_test_binary.mjs`.
 # ---------------------------------------------------------------------------
-m9_completeness() {
-  local file="$1" sentinel="$2" lines last
-  [ -f "$file" ] || { printf 'absent\n'; return 0; }
-  if [ -n "$(m9_field "$file" "$sentinel")" ]; then printf 'complete\n'; return 0; fi
-  lines="$(wc -l <"$file" | tr -d '[:space:]')"
-  last="$(awk 'NF { k = $1 } END { print k }' "$file")"
-  printf 'truncated-after-%s-lines-last-key-%s\n' "${lines:-0}" "${last:-none}"
-}
+# ONE IMPLEMENTATION, IN lib.sh. This was seven lines here and the same seven in
+# `lib_m17_node_host.sh`, with a third spelling inlined in M8's
+# `test_revert_program_does_not_trap_module`. The truncation has two sightings across two
+# milestones and no established trigger, so the DETECTION is what must be uniform; three
+# independent copies are three chances for the next transcript check to be written without one.
+# The name stays because M9's checks and this campaign's prose both cite it.
+m9_completeness() { transcript_completeness "$1" "$2"; }
 
 m9_expect_steps() {
   local var="M9_STEPS_$1"

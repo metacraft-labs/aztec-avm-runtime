@@ -91,7 +91,7 @@ neg() { # <description> <sed-expression>
     return
   fi
   out="$(python3 "$PARSER" "$tmp" "$REQUIRED_SLUGS" 2>&1)"
-  if printf '%s' "$out" | grep -q '^PROBLEM '; then
+  if str_has_line_re "$out" '^PROBLEM '; then
     pass "$desc — rejected"
   else
     fail "$desc — ACCEPTED; the check is too weak"

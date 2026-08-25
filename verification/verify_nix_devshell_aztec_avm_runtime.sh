@@ -64,10 +64,10 @@ assert_prefix "wasi-sdk is release 33"          "33."            "$(get wasi_sdk
 assert_prefix "wasmtime is present"             "wasmtime "      "$(get wasmtime_version)"
 assert_prefix "binaryen (wasm-opt) is present"  "wasm-opt versio" "$(get wasmopt_version)"
 assert_true   "wabt (wasm2wat) reports a version" \
-  bash -c "printf '%s' '$(get wasm2wat_version)' | grep -Eq '^[0-9]+\\.[0-9]+'"
+  str_has_re "$(get wasm2wat_version)" '^[0-9]+\.[0-9]+'
 assert_prefix "cmake is present"                "cmake version " "$(get cmake_version)"
 assert_true   "ninja reports a version" \
-  bash -c "printf '%s' '$(get ninja_version)' | grep -Eq '^[0-9]+\\.[0-9]+'"
+  str_has_re "$(get ninja_version)" '^[0-9]+\.[0-9]+'
 
 # clang 20 is in the shell for NATIVE compilation. `clang` on PATH is
 # deliberately wasi-sdk's (22.x, the wasm cross compiler), so the clang-20

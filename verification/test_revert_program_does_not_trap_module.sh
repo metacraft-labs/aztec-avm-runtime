@@ -98,22 +98,18 @@ assert_eq "the wasm module exits 0 with the revert program in the run" "0" "$?"
 # The transcript ends with a sentinel the driver prints last. If it is absent, the run is
 # incomplete and this check REFUSES to compare, dying with the truncation named, rather than
 # emitting a diff that reads like a discovery about the interpreter.
-RERUN_DONE="$(tail -1 "$RERUN_T" 2>/dev/null || true)"
-REF_DONE="$(tail -1 "$V8_T" 2>/dev/null || true)"
-if [ "$REF_DONE" != "avmDifferential.done 1" ]; then
-  die "the REFERENCE transcript $V8_T is incomplete (last line: '$REF_DONE').
-     Nothing can be concluded by comparing against it. Re-run: just avm-differential"
-fi
-if [ "$RERUN_DONE" != "avmDifferential.done 1" ]; then
-  die "the re-run transcript $RERUN_T is INCOMPLETE — $(wc -l < "$RERUN_T") line(s), last line
-     '$RERUN_DONE', against $(wc -l < "$V8_T") in the reference. The guest's stdout was truncated;
-     stderr in $RERUN_E will normally be complete, which is the signature. This is a fact about
-     the RUN, not about the module, so the comparison is refused rather than reported as a
-     divergence. Re-run this check."
-fi
+# THE REFUSAL IS lib.sh's NOW, not a third spelling of it. M9 had `m9_completeness`, M17 had
+# `m17_completeness`, and this was `tail -1` compared against a literal — the same question asked
+# three ways, which is three chances to write the next transcript check without asking it at all.
+# `transcript_completeness` answers `complete` / `absent` / `truncated-after-N-lines-last-key-K`,
+# and `absent` is a different answer from `truncated` on purpose.
+require_complete_transcript "$V8_T"    avmDifferential.done "the REFERENCE"
+require_complete_transcript "$RERUN_T" avmDifferential.done "the re-run" "$V8_T"
 # Both transcripts are complete, so a difference now IS a difference.
 assert_eq "the re-run transcript is complete, so the comparison below is about the module" \
-  "avmDifferential.done 1" "$RERUN_DONE"
+  "complete" "$(transcript_completeness "$RERUN_T" avmDifferential.done)"
+assert_eq "…and so is the reference it is compared against" \
+  "complete" "$(transcript_completeness "$V8_T" avmDifferential.done)"
 assert_eq "and it has the same number of records as the reference" "$(wc -l < "$V8_T")" \
   "$(wc -l < "$RERUN_T")"
 assert_true "…and reproduces the transcript exactly" cmp -s "$RERUN_T" "$V8_T"

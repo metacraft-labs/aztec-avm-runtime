@@ -147,7 +147,7 @@ done
 # this was the only unanchored one.
 overlap=0
 for forbidden in $M6_FORBIDDEN_MODULES; do
-  if printf '%s' "$bbapi_deps" | grep -qw -- "$forbidden"; then
+  if str_has_word "$bbapi_deps" "$forbidden"; then
     overlap=$((overlap + 1)); note "bbapi depends on '$forbidden', which vm2_sim's closure excludes"
   fi
 done

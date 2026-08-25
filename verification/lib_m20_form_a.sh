@@ -115,7 +115,7 @@ m20_require_module() {
   local want
   while IFS= read -r want; do
     [ -n "$want" ] || continue
-    printf '%s\n' "$have" | grep -qx -- "$want" || missing="$missing $want"
+    str_has_line "$have" "$want" || missing="$missing $want"
   done <<< "$M20_REQUIRED_EXPORTS"
   [ -z "$missing" ] || die "the module at $AVM_WASM_PATH is missing:$missing
              M20 seeds the resident merkle DB, so a module without those exports cannot run
