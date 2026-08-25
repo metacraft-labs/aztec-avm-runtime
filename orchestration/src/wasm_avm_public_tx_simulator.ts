@@ -151,6 +151,11 @@ export class WasmAvmPublicTxSimulator {
   private readonly globalVariables: GlobalVariables;
   private readonly encodeInputs: (tx: Tx, globals: GlobalVariables) => Uint8Array;
   private readonly decodeResult: (result: unknown) => PublicTxResult;
+  // THE MODULE'S OWN FOUR-VALUED REVERT CODE, KEPT RATHER THAN DISCARDED. `boundary.simulate`
+  // returns it beside the result and this class used to throw it away, which meant the only code
+  // a caller could see was the one `PublicTxResult` carries — and upstream's published
+  // `RevertCode` narrows four values to two (DRIFT.md D18). "Which phase reverted" died here.
+  private lastRawRevertCode: number | undefined;
 
   constructor(
     boundary: AvmBoundary,
@@ -183,7 +188,20 @@ export class WasmAvmPublicTxSimulator {
   async simulate(tx: Tx): Promise<PublicTxResult> {
     const input = this.encodeInputs(tx, this.globalVariables);
     const outcome = this.boundary.simulate(input, this.dbs.contractDb, this.dbs.merkleDb);
+    this.lastRawRevertCode = outcome.revertCode;
     return await Promise.resolve(this.decodeResult(outcome.result));
+  }
+
+  /**
+   * The module's own revert code from the last `simulate`, before upstream's type narrows it.
+   *
+   * `undefined` until a simulation has happened, which is deliberate: a caller that reads it
+   * without having run one gets nothing rather than a plausible zero, and zero is a meaningful
+   * value here (OK). See DRIFT.md D18 — this runtime reports the four-valued code as its outcome
+   * and carries upstream's collapsed one only for consumers that demand that type.
+   */
+  get rawRevertCode(): number | undefined {
+    return this.lastRawRevertCode;
   }
 
   /** Boundary crossings since construction. Differenced by callers that assert a budget. */

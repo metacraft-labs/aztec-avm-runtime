@@ -76,3 +76,56 @@ export {
   encodeFastSimulationInputs,
   residentWorldStateRevision,
 } from './avm_inputs.ts';
+
+// M20 — Form A. Note what is NOT exported: nothing takes or returns a `SubmittedTx` except
+// `executeExternallySettledTx`, and the simulator interface below it takes a `Tx`. DD-1 is an
+// export-surface property as well as a runtime one — a consumer cannot hand provenance to
+// anything that executes, because no executing export accepts it.
+export {
+  ProvenanceConsultedDuringExecution,
+  externalTx,
+  locallyOriginatedTx,
+  sealProvenance,
+  type ProvenanceSeal,
+  type SubmittedTx,
+  type TxProvenance,
+} from './submitted_tx.ts';
+
+export {
+  TxIntakeError,
+  phaseCallRequests,
+  txFromBuffer,
+  validateTxShape,
+  type TxShape,
+} from './tx_intake.ts';
+
+export {
+  classifyBoundaryError,
+  executeExternallySettledTx,
+  provenanceReadsDuring,
+  type ExecuteOptions,
+  type FormALanded,
+  type FormAOutcome,
+  type FormAOutcomeKind,
+  type FormARejected,
+  type PublicTxSimulatorLike,
+  REJECTION_NEEDLES,
+  type RejectionReason,
+} from './form_a.ts';
+
+export {
+  computeFeePayerBalanceLeafSlot,
+  defaultPublicSimulatorConfig,
+  feeJuiceBalanceLeafSlot,
+  feeJuiceBalanceStorageSlot,
+  fundFeeJuice,
+  type ResidentPublicDataTree,
+} from './fee_juice.ts';
+
+export { ResidentMerkleDb, type BlobCallable } from './resident_db.ts';
+
+export {
+  PATCH_REQUIRED_CONFIG_FIELDS,
+  encodeForShippedModule,
+  encodeForShippedModuleOnly,
+} from './shipped_module_config.ts';
