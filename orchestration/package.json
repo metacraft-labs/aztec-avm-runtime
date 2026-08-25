@@ -1,0 +1,45 @@
+{
+  "name": "@aztec-avm-runtime/orchestration",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Aztec's own public transaction orchestration, over the wasm AVM",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "//": [
+    "WHAT IS AND IS NOT IN THIS PACKAGE, corrected in M18's review because the first version of",
+    "this note said the opposite. The three-phase transaction model, the state manager, the block",
+    "processor, the side-effect trace, the DB interfaces and the public DB sources are NOT",
+    "vendored here. REUSE-INVENTORY RI-19..RI-23 record the DECISION to vendor them; the files",
+    "are not under src/ and @aztec/simulator is not a dependency, because upstream does not",
+    "publish it. What this package is today is the SEAM and its two encoders — a simulator over",
+    "the wasm AVM, the copied checkpoint, the telemetry replacement and the named configurations.",
+    "Running a transaction through upstream's own PublicProcessor still needs RI-19..RI-23 to be",
+    "carried out; see M18's outstanding tasks.",
+    "",
+    "WHAT IS HERE IS UPSTREAM'S. The msgpack encoder for the AVM's own input schema is — it is",
+    "`serializeWithMessagePack` in @aztec/stdlib/avm, which is what CppPublicTxSimulator calls",
+    "on exactly this type. What is ours is the transport: where CppPublicTxSimulator hands the",
+    "encoded blob to @aztec/native's `avmSimulate`, WasmAvmPublicTxSimulator hands it to",
+    "avm.wasm through @aztec-avm-runtime/node-host.",
+    "",
+    "@aztec/telemetry-client is DELIBERATELY ABSENT from the dependency list. It is replaced",
+    "by src/telemetry.ts, and the reason is measured rather than assumed: see that file.",
+    "",
+    "@aztec/native and @aztec/world-state are DELIBERATELY ABSENT too. The first is the C++",
+    "AVM over NAPI, which DD-9 says no public export of ours may reach; the second is an",
+    "LMDB-backed native addon, replaced by Aztec's own world_state_reference compiled into",
+    "avm.wasm (RI-27). ForkCheckpoint, the one production import that package supplied to this",
+    "subtree, is copied into src/fork_checkpoint.ts."
+  ],
+  "dependencies": {
+    "@aztec/constants": "5.0.0-nightly.20260626",
+    "@aztec/foundation": "5.0.0-nightly.20260626",
+    "@aztec/protocol-contracts": "5.0.0-nightly.20260626",
+    "@aztec/stdlib": "5.0.0-nightly.20260626"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

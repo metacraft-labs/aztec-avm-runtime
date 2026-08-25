@@ -968,3 +968,140 @@ jobs:
           name: node-host
           path: artifacts-m17
           retention-days: 30
+
+  orchestration:
+    name: TypeScript orchestration over the wasm interpreter
+    runs-on: eph-linux-x64
+    # M18. Four of the five checks build nothing: they read the fork at the TypeScript anchor
+    # 3a68d68ac2, the published @aztec/* packages, and orchestration/. The fifth builds what M12's
+    # job builds — the same nine-patch tree — in ITS OWN work directory, and runs the whole corpus
+    # through it so that upstream's own PublicTxResult is constructed from bytes a wasm build of
+    # upstream's C++ produced. Budget as generously as M17's for the same reason: a CI runner
+    # starts with a cold ccache.
+    #
+    # IT NEEDS THE ANCHOR UNSHALLOWED. Three of the four non-building checks read files out of the
+    # fork with `git show 3a68d68ac2:<path>` — the ForkCheckpoint enumeration, the DD-9
+    # re-derivation and the useCppSimulator inversion — and a shallow clone would fail them for a
+    # reason that has nothing to do with what they check.
+    #
+    # IT NEEDS TWO npm INSTALLS AND THEY ARE DIFFERENT DEPENDENCIES. `orchestration/` is the
+    # package under test and its lockfile is tracked. `diffsim/`'s tree is where
+    # @aztec/telemetry-client is installed — deliberately NOT a dependency of the orchestration,
+    # which is the thing verify_no_telemetry_client_in_import_graph asserts — so the reuse
+    # enumeration reads the package from there and dies with that remedy rather than skipping.
+    #
+    # STATUS, STATED PLAINLY: this job has never run, and neither has any job above it. They all
+    # still abort at `Generate CI token` on "Input required and not supplied: app-id", which M11
+    # recorded as undiagnosed and which the `vars.` spelling did not fix. So this job existing
+    # means it is wired and names the checks — not that a run has ever gated anything.
+    timeout-minutes: 120
+    steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout aztec-avm-runtime
+        uses: actions/checkout@v4
+        with:
+          path: aztec-avm-runtime
+
+      - name: Clone the aztec-packages fork
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/aztec-packages
+          ref: aztec-avm-runtime
+          path: aztec-packages
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Clone codetracer-specs (the prepared patch series)
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-specs
+          ref: latest
+          path: codetracer-specs
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup Dev Environment
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Assert both anchors are present
+        working-directory: aztec-packages
+        run: |
+          set -euo pipefail
+          git fetch --unshallow 2>/dev/null || true
+          # The C++ anchor, which the build needs, and the TypeScript anchor, which every
+          # enumeration reads. Named separately so a failure says which one is missing.
+          git rev-parse --verify 233d8e0993^{commit}
+          git rev-parse --verify 3a68d68ac2^{commit}
+
+      - name: Assert M18's own inputs are present
+        run: |
+          set -euo pipefail
+          for p in \
+            aztec-avm-runtime/orchestration/package.json \
+            aztec-avm-runtime/orchestration/package-lock.json \
+            aztec-avm-runtime/orchestration/tsconfig.json \
+            aztec-avm-runtime/orchestration/src/index.ts \
+            aztec-avm-runtime/orchestration/src/fork_checkpoint.ts \
+            aztec-avm-runtime/orchestration/src/telemetry.ts \
+            aztec-avm-runtime/orchestration/src/simulator_selection.ts \
+            aztec-avm-runtime/orchestration/src/wasm_avm_public_tx_simulator.ts \
+            aztec-avm-runtime/orchestration/src/avm_inputs.ts \
+            aztec-avm-runtime/orchestration/src/roundtrip_cli.ts \
+            aztec-avm-runtime/tools/import_graph.mjs \
+            aztec-avm-runtime/verification/lib_m18_orchestration.sh \
+            aztec-avm-runtime/verification/_fork_checkpoint_residual.py ; do
+            test -f "$p" || { echo "::error::missing M18 input: $p" >&2; exit 1; }
+          done
+
+      - name: Install the orchestration's own packages
+        working-directory: aztec-avm-runtime/orchestration
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tail -20
+
+      - name: Install the published @aztec packages the reuse enumeration reads
+        working-directory: aztec-avm-runtime/diffsim
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tail -20
+
+      - name: Type-check the orchestration package
+        working-directory: aztec-avm-runtime
+        shell: bash
+        run: dev-exec just typecheck-orchestration
+
+      - name: Build avm.wasm and run the orchestration checks
+        working-directory: aztec-avm-runtime
+        env:
+          # Not $TMPDIR. Its own directory, not M12's or M17's, so no two jobs rebuild the tree
+          # under each other.
+          M18_WORK: ${{ github.workspace }}/m18-work
+        shell: bash
+        run: dev-exec just verify-m18 2>&1 | tee verify-m18.log
+
+      - name: Collect the round-trip transcript
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p artifacts-m18
+          cp aztec-avm-runtime/verify-m18.log artifacts-m18/ 2>/dev/null || true
+          for f in "${{ github.workspace }}"/m18-work/roundtrip.out \
+                   "${{ github.workspace }}"/m18-work/roundtrip.err \
+                   "${{ github.workspace }}"/m18-work/m17-measured.env ; do
+            [ -f "$f" ] && cp "$f" artifacts-m18/ || true
+          done
+          ls -la artifacts-m18
+
+      - name: Upload the orchestration artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: orchestration
+          path: artifacts-m18
+          retention-days: 30

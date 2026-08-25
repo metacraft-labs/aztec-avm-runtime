@@ -1,0 +1,44 @@
+{
+  "//": [
+    "Type-checking only, like node-host: Node 24 runs the .ts sources by stripping types, so",
+    "there is no emit step and no build artefact to keep in sync.",
+    "",
+    "`erasableSyntaxOnly` refuses enums, namespaces and parameter properties — anything Node's",
+    "stripper cannot erase — so a source that type-checks is a source Node can run.",
+    "`verbatimModuleSyntax` forces `import type` on type-only imports, which is the other half",
+    "of the same property, and is also what keeps a type-only import out of the emitted import",
+    "graph that verify_no_telemetry_client_in_import_graph walks.",
+    "",
+    "Unlike node-host this package DOES have dependencies, and they are @aztec/* only: the",
+    "orchestration, the schemas and the encoder are upstream's. `skipLibCheck` is true here and",
+    "false there, because these are third-party .d.ts files whose own errors are not ours to fix",
+    "and would make this a check about @aztec/stdlib's typings."
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "NodeNext",
+    "moduleResolution": "nodenext",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": false,
+    "noEmit": true,
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": []
+  },
+  "//include": [
+    "node-host's type declarations are pulled in because src/roundtrip_cli.ts imports that",
+    "package by relative path, so tsc compiles ITS sources under THIS project. Without them,",
+    "`wasi.getImportObject()` in node-host/src/loader.ts is `object` and the build fails with a",
+    "TS2339 that is about node-host's environment rather than about anything here. node-host has",
+    "no @types/node either; the three Node APIs it uses are declared in that directory."
+  ],
+  "include": ["src/**/*.ts", "../node-host/types/**/*.d.ts"]
+}

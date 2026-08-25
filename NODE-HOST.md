@@ -307,7 +307,34 @@ ever gated anything. The check asserts the former and this paragraph states the 
 - **Encoding.** This package decodes and never encodes. Every blob crossing into the module is
   produced by upstream's own msgpack packers in C++; a JavaScript encoder of ours would be a second
   implementation of upstream's schemas, and two implementations of an encoding are two things that
-  can disagree. The same argument runs inside this repository: `node-host/src/msgpack.ts` is the
+  can disagree.
+
+  **Corrected in M18, because the rule above was being applied more widely than it says.** It is
+  a claim about *this package*, and it is a claim about writing a *second* implementation — not
+  about whether a TypeScript encoder exists. Applied as though it were the latter, it shaped work:
+  M12 grew a `reactorinputs` mode in C++ so that per-program msgpack blobs could be emitted as hex
+  and read back, and every host since has taken its inputs from that file rather than encoding.
+  Upstream's encoder is not a second implementation, so the rule never reached it.
+
+  (M18's review adds one correction to its own correction: an earlier draft of this paragraph
+  attributed to this document the sentence "there is no TypeScript encoder for the AVM's input
+  schemas", and to M17's write-up the claim that it was M18's load-bearing constraint. Neither is
+  in the record — `git log -S` finds no revision of this file that ever contained the sentence,
+  and M17's "Out of scope: Encoding" entry says only what the paragraph above says. The finding
+  stands on the behaviour; it does not need the quotation and no longer carries it.)
+
+  Upstream ships an encoder, in the package the orchestration already depends on:
+  `serializeWithMessagePack` in `@aztec/stdlib/avm`, which is what `CppPublicTxSimulator` calls on
+  `AvmFastSimulationInputs` before handing the buffer to `@aztec/native`. `@aztec-avm-runtime/orchestration`
+  uses it (REUSE-INVENTORY RI-60); *this* package still does not, and still has no dependencies,
+  which is the property the paragraph exists to state.
+
+  One consequence is worth recording here rather than only in M18, because it is a fact about this
+  package's decoder: **`node-host/src/msgpack.ts` and `@aztec/stdlib/avm`'s decoder are not
+  interchangeable.** Handing `PublicTxResult.fromPlainObject` this package's decode of a real
+  `avm.wasm` result is REFUSED — `BaseField`'s constructor accepts a `Buffer` and rejects a plain
+  `Uint8Array`. Both decoders are correct for their own purpose; a caller that wants upstream's
+  types must use upstream's decoder. The same argument runs inside this repository: `node-host/src/msgpack.ts` is the
   **one** decoder, and `verification/wasm_host/reactor_lib.mjs` — which M13 had already extracted so
   that M12's and M13's hosts could not disagree — **re-exports** it rather than keeping a third copy.
   Node runs the `.ts` source directly, so there is no build step between the two.

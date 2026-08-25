@@ -920,8 +920,12 @@ carry-report:
     @python3 tools/make_fork_branches.py --report
 
 # Replay the carry set onto a fresh upstream fetch; non-zero if any patch stops applying.
+# The replay CHECKS OUT the whole upstream tree (451 MB), so it takes a work directory
+# under ~/.cache like every other multi-hundred-megabyte step. It used to land in
+# `tempfile.mkdtemp()`'s default and died there with ENOSPC on a tmpfs /tmp.
 rebase-upstream-patches:
-    @python3 tools/rebase_upstream_patches.py --json carry/rebase.json
+    @python3 tools/rebase_upstream_patches.py --json carry/rebase.json \
+        --work "${M11_WORK:-$HOME/.cache/aztec-m11-rebase}"
 
 # Re-measure what the whole set costs if upstream accepts none of it.
 carry-exposure:
@@ -1429,5 +1433,71 @@ verify-m17:
       echo "verify-m17: FAILED" >&2
     else
       echo "verify-m17: all checks passed"
+    fi
+    exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M18 — TypeScript orchestration over the wasm interpreter
+#
+#   just verify-orchestration-reuse  verify_orchestration_reuse_enumerated
+#   just verify-no-telemetry         verify_no_telemetry_client_in_import_graph
+#   just verify-no-cpp-default       test_public_processor_never_defaults_to_cpp
+#   just verify-ts-config            verify_ts_simulator_configuration_named_not_inverted
+#   just verify-halves-compose       e2e_ts_wasm_result_decodes_as_upstream_types  (needs avm.wasm)
+#   just verify-m18                  all of them, in order
+#
+# NONE OF THESE BUILDS. `verify-halves-compose` needs `avm.wasm` and M12's reactor inputs, and it
+# builds them through M12's own machinery if they are not on record — it never invents, defaults
+# or skips. The other four read the fork at the TypeScript anchor, the published @aztec/*
+# packages and `orchestration/`, and each dies with the command that fixes it rather than
+# reporting zero problems against a tree it could not read.
+#
+# `orchestration/` needs its packages installed: `cd orchestration && npm ci`. That is a
+# precondition on state this repository does not vendor, the same one M17 recorded for diffsim.
+# ---------------------------------------------------------------------------
+
+# ForkCheckpoint and telemetry: both justifications enumerated over the whole fork, by subdirectory.
+verify-orchestration-reuse:
+    @verification/verify_orchestration_reuse_enumerated.sh
+
+# The shipped import graph, walked module by module: no telemetry, no prom-client, no native addon.
+verify-no-telemetry:
+    @verification/verify_no_telemetry_client_in_import_graph.sh
+
+# DD-9: no public export, and no argument, reaches the C++ AVM.
+verify-no-cpp-default:
+    @verification/test_public_processor_never_defaults_to_cpp.sh
+
+# The `(TS Simulator)` inversion, re-derived upstream and fixed here as a named configuration.
+verify-ts-config:
+    @verification/verify_ts_simulator_configuration_named_not_inverted.sh
+
+# The two halves together: avm.wasm's bytes read by upstream's own TypeScript types.
+verify-halves-compose:
+    @verification/e2e_ts_wasm_result_decodes_as_upstream_types.sh
+
+# Type-check the orchestration package against the nix-pinned tsc.
+typecheck-orchestration:
+    @cd orchestration && tsc -p tsconfig.json && echo "orchestration: type-checks"
+
+# Run the whole M18 verification set; every check runs even if an earlier one fails.
+verify-m18:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_orchestration_reuse_enumerated \
+      verify_no_telemetry_client_in_import_graph \
+      test_public_processor_never_defaults_to_cpp \
+      verify_ts_simulator_configuration_named_not_inverted \
+      e2e_ts_wasm_result_decodes_as_upstream_types
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m18: FAILED" >&2
+    else
+      echo "verify-m18: all checks passed"
     fi
     exit "$rc"
