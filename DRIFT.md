@@ -794,6 +794,63 @@ were absorbed silently.
   `@aztec/bb.js`'s `package.json` exports map, whose `.` has separate `require`, `browser` and
   `default` conditions.
 
+## D18 — upstream's published `RevertCode` narrows the AVM's four-valued revert code to two, so "which phase reverted" does not survive `PublicTxResult`
+
+- id: D18
+- status: open
+- opened: 2026-08-25
+- milestone: M20 (found by running Form A's teardown pair; pinned in both directions by
+  `e2e_form_a_teardown_revert_still_pays_fee`)
+- design-question: —
+- sides: the C++ `RevertCode` compiled into `avm.wasm` (anchor `cpp`) versus the published
+  `@aztec/stdlib` `RevertCode` at the `deletion_era` nightly, which is what
+  `PublicTxResult.fromPlainObject` constructs
+- what: the AVM distinguishes `OK`, `APP_LOGIC_REVERTED`, `TEARDOWN_REVERTED` and `BOTH_REVERTED`,
+  and `TxExecution::simulate` sets the third or fourth depending on whether app logic had already
+  reverted. The published TypeScript declares `RevertCodeEnum` with only `OK = 0` and
+  `REVERTED = 1`, and `toRevertCodeEnum` is literally `return value >= 1 ? 1 : 0`. Measured on one
+  call, on the same result buffer: the raw msgpack field reads **3**, M17's `TxOutcome.revertCode`
+  reads **3**, and `PublicTxResult.revertCode.getCode()` reads **1**.
+- why it matters: M20's asymmetric revert model is about WHICH phase reverted, and a check reading
+  upstream's typed value cannot tell a teardown revert from an app-logic one — the two arms of the
+  teardown pair, identical but for the teardown request, are indistinguishable through it. That is
+  the "printed literal" shape: an assertion beside a value that cannot move. It is also the reason
+  M17's `TxOutcome` earns its keep as a separate type rather than as a staging post on the way to
+  `PublicTxResult`.
+- decision: Open, and A DELIBERATE DEPARTURE FROM UPSTREAM'S PUBLISHED TYPE, recorded here as
+  one. **This runtime reports the module's four-valued code as its own outcome** — `FormALanded`
+  carries `revertCode` (0..3) and `revertedIn` (`none` / `appLogic` / `teardown` / `both`) — and
+  carries upstream's collapsed `RevertCode` on `result` only for consumers that demand that type.
+  The reason is the deliverable's own wording: M20 must preserve the asymmetric revert model
+  *exactly*, and a two-valued code cannot express which phase reverted, so honouring upstream's
+  type as the runtime's outcome would silently destroy the property the milestone exists to
+  preserve. Nothing of ours RE-IMPLEMENTS `RevertCode`; the four-valued value is the module's own,
+  read off the boundary and passed through.
+
+  The departure is bounded and stated: `result` is untouched and remains the authority for gas,
+  the public tx effect and the transaction fee; only the revert code has a second, wider spelling
+  beside it, and the wider one is documented as this runtime's.
+
+  An earlier revision captured the raw code in a closure the *driver* hung on the boundary. That
+  made "which phase reverted" a property of the test harness rather than of the runtime — a
+  consumer of `executeExternallySettledTx` still could not tell a teardown revert from an
+  app-logic one. `WasmAvmPublicTxSimulator` keeps it now and `form_a.ts` reports it, so the
+  assertions are about the shipped path.
+
+  Pinned in both directions, so the day the published type widens the entry closes rather than
+  drifting: the teardown check asserts raw 3 versus raw 1, typed 1 versus typed 1, the NAMED
+  phases `both` versus `appLogic`, that the named phase discriminates the pair where the typed
+  code cannot, and that upstream's `toRevertCodeEnum` is still `value >= 1 ? 1 : 0` with only two
+  enum members. Whether the narrowing is deliberate upstream is upstream's question; the
+  four-valued code is what a block builder needs, so it is worth asking.
+- evidence: `orchestration/node_modules/@aztec/stdlib/dest/avm/revert_code.js` (`RevertCodeEnum`,
+  `toRevertCodeEnum`); `barretenberg/cpp/src/barretenberg/vm2/simulation/gadgets/tx_execution.cpp`
+  at anchor `cpp` (`RevertCode::BOTH_REVERTED` in the teardown catch);
+  `aztec-avm-runtime/verification/e2e_form_a_teardown_revert_still_pays_fee.sh` part 3;
+  `aztec-avm-runtime/orchestration/src/form_a.ts` (`FormALanded.revertCode`,
+  `FormALanded.revertedIn`, `TxRevertPhase`, `RAW_REVERT_PHASES`);
+  `aztec-avm-runtime/orchestration/src/wasm_avm_public_tx_simulator.ts` (`rawRevertCode`).
+
 <!-- END:drift -->
 
 ---
