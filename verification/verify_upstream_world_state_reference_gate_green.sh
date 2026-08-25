@@ -236,11 +236,39 @@ print(sum(1 for r in rows if r.get("conclusion") == "success"))' 2>/dev/null)"
 case "$WF_SUCCESSES" in
   ''|*[!0-9]*) die "could not count the successful runs (got: $WF_SUCCESSES)" ;;
 esac
-if printf '%s' "$WF" | grep -q "has never run"; then
-  WF_CLAIM="never-run"
-else
-  WF_CLAIM="has-run"
-fi
+# THE PREDICATE IS COMPUTED WITHOUT A PIPE, AND THAT IS NOT STYLE.
+#
+# This was `if printf '%s' "$WF" | grep -q "has never run"`, and `lib.sh` sets `pipefail`. `grep -q`
+# exits at its FIRST match; `printf` is then still writing, gets SIGPIPE, and the pipeline's status
+# becomes 141 rather than grep's 0 — so the `if` takes the ELSE branch and the claim reads
+# "has-run" no matter what the file says.
+#
+# It was latent for eight milestones because it depends on SIZE. While `avm-wasm.yml` was under the
+# 64 KiB pipe buffer, `printf` finished before `grep` exited and there was no SIGPIPE. M20's CI
+# diagnosis grew the file from 59,102 bytes to 96,423, it crossed the buffer, and this assertion
+# went red claiming the workflow said it had run — while the workflow says "has never run" NINE
+# times. Reproduced in all three directions: with pipefail at 96 KiB the pipeline exits 141 and the
+# claim is has-run; without pipefail it is never-run; with pipefail at the 59 KiB version it is
+# never-run.
+#
+# `case` is a builtin pattern match: no pipeline, no subshell, no buffer, no size dependence.
+#
+# The predicate's own controls, both directions, so it cannot go back to being unable to say "no".
+# Written as ASSERTIONS rather than as bare `fail` guards: a control that prints nothing when it
+# passes is a control nobody can audit, and it does not appear in the count either.
+claim_of() { # <text> -> never-run | has-run, by the SAME predicate as above
+  case "$1" in
+    *"has never run"*) printf 'never-run\n' ;;
+    *)                 printf 'has-run\n' ;;
+  esac
+}
+assert_eq "control: the claim predicate recognises the phrase it looks for" "never-run" \
+  "$(claim_of "a workflow comment that says this job has never run")"
+assert_eq "control: and does NOT match text that lacks it" "has-run" \
+  "$(claim_of "a workflow comment that says nothing of the sort")"
+WF_CLAIM="$(claim_of "$WF")"
+assert_ge "the workflow is large enough that a piped predicate would have been size-dependent" \
+  65536 "$(wc -c < "$WORKFLOW")"
 if [ "$WF_SUCCESSES" -eq 0 ]; then WF_REALITY="never-run"; else WF_REALITY="has-run"; fi
 note "GitHub reports $WF_SUCCESSES successful run(s) of avm-wasm.yml"
 assert_eq "the workflow's recorded state agrees with its actual run history on GitHub" \
