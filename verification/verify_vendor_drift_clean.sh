@@ -50,7 +50,18 @@ assert_ge "check-drift made a meaningful number of assertions" 15 "$n_ok"
 assert_not_contains "check-drift printed no SKIP line" "SKIP" "$out"
 
 # ---- 2. negative controls --------------------------------------------------
-SANDBOX_BASE="$(mktemp -d)"
+# NOT `mktemp -d`, which lands in $TMPDIR. On this host $TMPDIR is a quota-limited tmpfs where
+# `df` reports gigabytes free and a write fails anyway with EDQUOT — the campaign brief has said
+# so since M3, and this check is the heaviest offender because it stages the whole tracked tree
+# (1,427 files) once as a template and again per negative control. Measured by M21's review: with
+# another agent's build occupying /tmp, `verify_vendor_drift_clean` died mid-copy with
+# `cp: error copying …: Disk quota exceeded`, emitted NO summary line at all, and took M1 from 151
+# to 141 with no failure printed — a red that says nothing about vendor drift. The same run with
+# TMPDIR under ~/.cache is 10 assertions, 0 failures. A work directory this check owns is the fix.
+M1_WORK="${M1_WORK:-$HOME/.cache/aztec-m1-vendor-drift}"
+mkdir -p "$M1_WORK" || die "could not create the work directory $M1_WORK"
+SANDBOX_BASE="$(mktemp -d "$M1_WORK/sandbox.XXXXXX")" \
+  || die "could not create a sandbox under $M1_WORK"
 trap 'rm -rf "$SANDBOX_BASE"' EXIT
 
 # A pristine template, copied per control. Tracked files + the M1 additions.
