@@ -35,44 +35,29 @@
 //      calls would be executed twice or not at all, and the AVM would report a consistent result
 //      for a transaction nobody submitted.
 //
-// WHY THE PHASE COUNT IS CHECKED AGAINST UPSTREAM'S OWN SPLITTER RATHER THAN AGAINST A CONSTANT.
-// `getCallRequestsWithCalldataByPhase` (`@aztec/simulator/server`, `simulator/src/public/utils.ts`)
-// is a switch over exactly three `Tx` accessors, and `AvmTxHint.fromTx` — which is what actually
-// runs — calls those same three accessors directly.
+// THE PHASE SPLIT IS UPSTREAM'S FUNCTION, VENDORED — not a second spelling of it.
 //
-// THE HELPER IS OFF THE EXECUTION PATH, WHICH IS THE REASON NOT TO CALL IT. At the anchor its only
-// callers are the two p2p transaction validators (`fee_payer_balance.ts`, `phases_validator.ts`);
-// nothing in the public execution path goes through it. An earlier revision of this comment gave
-// a second reason — that `@aztec/simulator` is not published — and that reason is FALSE, measured:
-// the package is on npm, and `@aztec/simulator@5.0.0-nightly.20260626`, the exact tag this
-// orchestration already pins for `@aztec/stdlib`, `@aztec/foundation`, `@aztec/constants` and
-// `@aztec/protocol-contracts`, exports `./server` and ships the function in both
-// `dest/public/utils.js` and `src/public/utils.ts`.
+// `getCallRequestsWithCalldataByPhase` is a switch over exactly three `Tx` accessors, and
+// `AvmTxHint.fromTx` — which is what actually runs — calls those same three directly. So there
+// must be ONE phase split in this runtime and it must be upstream's.
 //
-// THE REAL REASON NOT TO IMPORT IT IS STRONGER THAN "IT WOULD BUY NOTHING", and an earlier
-// revision of this paragraph stopped one step short of it. `npm view @aztec/simulator@<pin>
-// dependencies` lists **`@aztec/native`** and **`@aztec/world-state`** as HARD dependencies — not
-// optional ones. So `npm i @aztec/simulator` puts the NAPI AVM and the LMDB-backed world-state
-// addon into this package's tree, which is exactly what DD-9 forbids and exactly what
-// `verify_differential_containment` asserts against in three places (the manifest, the `npm pack`
-// output and the import graph). Importing it to reach a seventeen-line switch would turn a green
-// containment check red, and correctly.
+// WHY NOT `npm i @aztec/simulator`. The package IS published, at this package's own pinned
+// nightly, exporting `./server` — an earlier revision of this comment said otherwise and was
+// wrong. What rules it out is its dependency list: `@aztec/native` and `@aztec/world-state` are
+// HARD dependencies, so importing it to reach a seventeen-line switch would pull the NAPI AVM and
+// the LMDB world state into the shipped tree. DD-9 forbids that and
+// `verify_differential_containment` asserts against it in three places.
 //
-// THE OPTION THAT REMAINS OPEN is to VENDOR `simulator/src/public/utils.ts` — seventeen lines
-// whose only import is `@aztec/stdlib/tx`, which this package already depends on — through this
-// repository's own vendoring machinery (`PROVENANCE.md` + `tools/provenance.py` +
-// `verification/check_drift.sh`), which is a tool-enforced line-for-line pin with a header naming
-// the upstream path and commit. That is strictly better than the hand-rolled pin below and is
-// recorded as M20's outstanding task rather than done here, because a PROVENANCE row needs an
-// inventory justification and a drift-ledger entry to go with it.
-//
-// So `phaseCallRequests` below calls the same three accessors in the same order, and there is one
-// phase split in this runtime and it is upstream's. `e2e_form_a_external_tx_roundtrip` Part 6 pins
-// the equivalence: our switch body is compared line for line against upstream's at the anchor, and
-// each of the three accessors is asserted to be called by `AvmTxHint.fromTx` too. The day upstream
-// changes the switch, that check goes red rather than this file drifting.
+// WHY NOT OUR OWN COPY EITHER. M20 first wrote one, with a hand-rolled line-for-line comparison
+// living in a single check. Vendoring replaces that with `check_drift.sh` — the same pin, enforced
+// by machinery this repository already runs over 742 other files, with a generated provenance
+// header naming the upstream path and commit and a REUSE-INVENTORY justification
+// (`verify_provenance_complete` fails without one). `phaseCallRequests` below is now a one-line
+// delegation kept only so callers have a name in this module's vocabulary.
 
 import { Tx, TxExecutionPhase } from '@aztec/stdlib/tx';
+
+import { getCallRequestsWithCalldataByPhase } from './vendor/simulator_public_utils.ts';
 
 /** A transaction rejected at intake. Never a revert: nothing has executed. */
 export class TxIntakeError extends Error {
@@ -93,18 +78,7 @@ export class TxIntakeError extends Error {
  * TEARDOWN   <- getTeardownPublicCallRequestWithCalldata()   (0 or 1)
  */
 export function phaseCallRequests(tx: Tx, phase: TxExecutionPhase): unknown[] {
-  switch (phase) {
-    case TxExecutionPhase.SETUP:
-      return tx.getNonRevertiblePublicCallRequestsWithCalldata();
-    case TxExecutionPhase.APP_LOGIC:
-      return tx.getRevertiblePublicCallRequestsWithCalldata();
-    case TxExecutionPhase.TEARDOWN: {
-      const request = tx.getTeardownPublicCallRequestWithCalldata();
-      return request ? [request] : [];
-    }
-    default:
-      throw new TxIntakeError('phase', `unknown phase: ${String(phase)}`);
-  }
+  return getCallRequestsWithCalldataByPhase(tx, phase) as unknown[];
 }
 
 /** What the shape check found, whether or not it rejected. */

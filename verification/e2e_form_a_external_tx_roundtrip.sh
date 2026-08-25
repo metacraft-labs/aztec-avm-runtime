@@ -155,114 +155,87 @@ assert_eq "no arm produced an unclassified throw" "none" "$THREW"
 # PART 6 — the three phases are wired to upstream's own call sources
 # ---------------------------------------------------------------------------
 #
-# M20's third deliverable. It had NO check at all: `tx_intake.ts` cited a
-# `test_phase_sources_match_upstream_helper` that does not exist, and nothing in `verification/`
-# so much as mentioned `getCallRequestsWithCalldataByPhase`, `phaseCallRequests`, or any of the
-# three accessors. A comment claiming a property is pinned, over a property nothing pins, is worse
-# than no comment: it tells the next reader to stop looking.
+# M20's third deliverable. THE SHAPE OF THIS CHECK CHANGED WHEN THE SPLITTER WAS VENDORED, and the
+# change is the point rather than an adjustment.
 #
-# WHAT IS COMPARED, AND WHY IT IS THE SWITCH BODY. `getCallRequestsWithCalldataByPhase` exists
-# unchanged in `@aztec/simulator`, but it is NOT on the execution path — its only callers at the
-# anchor are the two p2p tx validators. What actually runs is `AvmTxHint.fromTx`, which calls the
-# same three `Tx` accessors directly. So the equivalence worth pinning is between OUR splitter and
-# UPSTREAM'S, and between both and what the encoder calls.
+# The first version compared OUR hand-written switch against upstream's, line for line, here. That
+# was a real pin, but it was a pin this one check owned: a second spelling of a three-armed switch,
+# held in step by a comparison living in a single file. `simulator/src/public/utils.ts` is now
+# VENDORED — `orchestration/src/vendor/simulator_public_utils.ts`, PROVENANCE row F9, RI-63 — so
+# the pin is `check_drift.sh`'s, which this repository already runs over 742 other files and which
+# fails on any divergence PROVENANCE.md does not enumerate.
 #
-# EXACT LINES, NOT FRAGMENTS. This campaign has shipped a pin that matched changed lines against a
-# regex of substrings and excused `this.depth = depth + 1` because it contained `this.depth =
-# depth`. The two switch bodies are compared line for line after leading-whitespace normalisation,
-# with the mutation control being that a single differing line fails.
+# WHAT IS LEFT FOR THIS CHECK is therefore not the switch's text but the three claims drift cannot
+# make: that the vendored file is the one actually CALLED, that this package holds no second
+# splitter of its own, and that upstream's ENCODER reaches the same three accessors — which is the
+# equivalence that makes the vendored helper the right thing to have vendored.
 
-UPSTREAM_SPLITTER="$SCRATCH/upstream_utils.ts"
-m20_anchor_file yarn-project/simulator/src/public/utils.ts > "$UPSTREAM_SPLITTER"
+VENDORED="$ORCH_SRC/vendor/simulator_public_utils.ts"
+assert_file "upstream's splitter is vendored here" "$VENDORED"
+assert_ge "and carries a generated provenance header naming its upstream path" 1 \
+  "$(grep -c 'upstream-path:   yarn-project/simulator/src/public/utils.ts' "$VENDORED")"
+assert_ge "and the commit it was taken from" 1 \
+  "$(grep -c "upstream-commit: $M20_CPP_ANCHOR" "$VENDORED")"
+
+# It is BYTE-IDENTICAL to upstream's file at that commit once the generated header is stripped.
+# `check-drift` asserts this too; it is repeated here because a reader of THIS check should not
+# have to take a different check's word for the property this part is named after.
+UPSTREAM_UTILS="$SCRATCH/upstream_utils.ts"
+m20_anchor_file yarn-project/simulator/src/public/utils.ts > "$UPSTREAM_UTILS"
+STRIPPED="$SCRATCH/vendored_stripped.ts"
+sed '/^\/\/ BEGIN VENDORED-PROVENANCE/,/^\/\/ END VENDORED-PROVENANCE/d' "$VENDORED" \
+  | sed '/./,$!d' > "$STRIPPED"
+assert_ge "upstream's file was read from the anchor and is not empty" 10 "$(wc -l < "$UPSTREAM_UTILS")"
+assert_eq "the vendored body is byte-identical to upstream's at the anchor" "0" \
+  "$(cmp -s "$STRIPPED" "$UPSTREAM_UTILS" && echo 0 || echo 1)"
+
+# CONTROL — the comparison can fail. One changed character in a COPY is caught; the tree's own
+# file is never touched.
+MUT="$SCRATCH/mutated_body.ts"
+sed 's/TxExecutionPhase.APP_LOGIC/TxExecutionPhase.SETUP/' "$STRIPPED" > "$MUT"
+assert_eq "and one changed phase arm in a copy is caught by the same comparison" "1" \
+  "$(cmp -s "$MUT" "$UPSTREAM_UTILS" && echo 0 || echo 1)"
+assert_eq "the mutation really did change the copy, so the control is not vacuous" "1" \
+  "$(cmp -s "$MUT" "$STRIPPED" && echo 0 || echo 1)"
+
+# THE VENDORED FUNCTION IS THE ONE CALLED, and this package has no second splitter.
+assert_ge "tx_intake.ts imports the vendored splitter" 1 \
+  "$(grep -cE "^import \{ getCallRequestsWithCalldataByPhase \} from './vendor/simulator_public_utils.ts';" "$ORCH_SRC/tx_intake.ts")"
+assert_ge "and phaseCallRequests delegates to it" 1 \
+  "$(grep -c 'return getCallRequestsWithCalldataByPhase(tx, phase)' "$ORCH_SRC/tx_intake.ts")"
+assert_eq "and holds no switch on the phase of its own" "0" \
+  "$(grep -c 'switch (phase)' "$ORCH_SRC/tx_intake.ts" || true)"
+# The control for that absence: the vendored file DOES contain one, so the needle is real.
+assert_ge "while the vendored file does contain exactly that switch" 1 \
+  "$(grep -c 'switch (phase)' "$VENDORED")"
+
+# UPSTREAM'S ENCODER REACHES THE SAME THREE ACCESSORS. This is why vendoring this particular
+# function is right rather than arbitrary: `AvmTxHint.fromTx` is what actually runs, and it calls
+# the three that the vendored switch dispatches to.
 AVM_TS="$SCRATCH/avm.ts"
 m20_anchor_file yarn-project/stdlib/src/avm/avm.ts > "$AVM_TS"
-assert_ge "upstream's splitter was read from the anchor" 10 "$(wc -l < "$UPSTREAM_SPLITTER")"
-assert_ge "and stdlib's avm.ts, which carries AvmTxHint.fromTx" 500 "$(wc -l < "$AVM_TS")"
-
-# The switch body of each, from `switch (phase) {` to the line before `default:`.
-switch_body() { # <file> <function-signature-needle>
-  python3 - "$1" "$2" <<'PY'
-import re, sys
+assert_ge "stdlib's avm.ts was read from the anchor" 500 "$(wc -l < "$AVM_TS")"
+FROM_TX="$(python3 - "$AVM_TS" <<'PY'
+import sys
 text = open(sys.argv[1]).read()
-start = text.find(sys.argv[2])
-if start < 0:
-    print("SIGNATURE-NOT-FOUND"); raise SystemExit
-body = text[start:]
-begin = body.find("switch (phase) {")
-end = body.find("default:")
-if begin < 0 or end < 0 or end < begin:
-    print("SWITCH-NOT-FOUND"); raise SystemExit
-lines = [l.strip() for l in body[begin:end].split("\n")]
-print("\n".join(l for l in lines if l))
+i = text.find('static fromTx(tx: Tx, gasFees: GasFees): AvmTxHint {')
+print('SIGNATURE-NOT-FOUND' if i < 0 else text[i:i + 900])
 PY
-}
-
-OURS="$(switch_body "$ORCH_SRC/tx_intake.ts" 'export function phaseCallRequests')"
-THEIRS="$(switch_body "$UPSTREAM_SPLITTER" 'export function getCallRequestsWithCalldataByPhase')"
-printf '%s\n' "$THEIRS" | sed 's/^/      /'
-
-assert_true "our splitter's switch body was extracted" \
-  test "$OURS" != "SIGNATURE-NOT-FOUND" -a "$OURS" != "SWITCH-NOT-FOUND"
-assert_true "and upstream's" \
-  test "$THEIRS" != "SIGNATURE-NOT-FOUND" -a "$THEIRS" != "SWITCH-NOT-FOUND"
-assert_ge "and neither is empty, so the comparison below has two sides" 6 \
-  "$(printf '%s\n' "$OURS" | grep -c .)"
-assert_eq "phaseCallRequests' switch body is upstream's, line for line" "$THEIRS" "$OURS"
-
-# THE PIN'S OWN CONTROLS, and the second is the one that matters: a pin that compares the WRONG
-# REGION passes on anything. Three things are shown, over doctored copies rather than by argument.
-#
-#   (a) the extracted region really is the switch body — it names all three phases;
-#   (b) a change to UPSTREAM's switch is caught, not just a change to ours. The mutation that
-#       proves our side is a source edit; this one doctors upstream's file and requires the
-#       comparison to move, so "would it fail if upstream's changed" is answered by measurement;
-#   (c) a change OUTSIDE the switch — in the function's signature or its default arm — is NOT
-#       caught, which is the honest boundary of what this pin claims and stops it from being read
-#       as "the two functions are identical".
-assert_ge "the extracted region is the switch body: it names all three phases" 3 \
-  "$(printf '%s\n' "$THEIRS" | grep -c 'TxExecutionPhase\.\(SETUP\|APP_LOGIC\|TEARDOWN\)')"
-
-DOCTORED="$SCRATCH/upstream_utils_doctored.ts"
-sed 's|return tx.getNonRevertiblePublicCallRequestsWithCalldata();|return tx.getRevertiblePublicCallRequestsWithCalldata();|' \
-  "$UPSTREAM_SPLITTER" > "$DOCTORED"
-assert_true "the doctored upstream copy really differs from the original" \
-  test -n "$(cmp -s "$UPSTREAM_SPLITTER" "$DOCTORED" || echo differs)"
-DOCTORED_BODY="$(switch_body "$DOCTORED" 'export function getCallRequestsWithCalldataByPhase')"
-assert_true "a change to UPSTREAM's switch body would fail this pin" \
-  test "$DOCTORED_BODY" != "$OURS"
-
-OUTSIDE="$SCRATCH/upstream_utils_outside.ts"
-sed 's|throw new Error(`Unknown phase: ${phase}`);|throw new Error("something else entirely");|' \
-  "$UPSTREAM_SPLITTER" > "$OUTSIDE"
-assert_true "the outside-the-switch edit really was applied" \
-  test -n "$(cmp -s "$UPSTREAM_SPLITTER" "$OUTSIDE" || echo differs)"
-assert_eq "while a change OUTSIDE the switch is deliberately NOT caught, which is what this pin claims" \
-  "$OURS" "$(switch_body "$OUTSIDE" 'export function getCallRequestsWithCalldataByPhase')"
-
-# The equivalence that matters at runtime: the ENCODER calls the same three accessors, so there is
-# one phase split in this runtime and it is upstream's.
+)"
+assert_true "AvmTxHint.fromTx was located by signature" \
+  test "$FROM_TX" != "SIGNATURE-NOT-FOUND"
 for accessor in getNonRevertiblePublicCallRequestsWithCalldata \
                 getRevertiblePublicCallRequestsWithCalldata \
                 getTeardownPublicCallRequestWithCalldata ; do
-  assert_ge "AvmTxHint.fromTx — what actually runs — calls $accessor" 1 \
-    "$(grep -c "tx\.$accessor()" "$AVM_TS")"
-  assert_ge "and so does our phaseCallRequests" 1 \
-    "$(grep -c "tx\.$accessor()" "$ORCH_SRC/tx_intake.ts")"
+  assert_ge "the encoder calls tx.$accessor()" 1 \
+    "$(printf '%s\n' "$FROM_TX" | grep -cF "tx.$accessor()")"
+  assert_ge "and so does the vendored splitter" 1 \
+    "$(grep -cF "tx.$accessor()" "$VENDORED")"
 done
-
-# THE CONTROL for those six greps: an accessor spelling upstream does NOT use must not be found by
-# the same command in either file, or all six are greps that match anything.
-assert_eq "an accessor upstream does not have is found in neither file" "0|0" \
-  "$(grep -c 'tx\.getPublicCallRequestsWithCalldata()' "$AVM_TS" || true)|$(grep -c 'tx\.getPublicCallRequestsWithCalldata()' "$ORCH_SRC/tx_intake.ts" || true)"
-
-# And the deliverable's own caveat, asserted rather than asserted-about: upstream's named helper is
-# off the execution path. Its only callers at the anchor are the two p2p validators.
-CALLERS="$(cd "$FORK_ROOT" && git grep -lw 'getCallRequestsWithCalldataByPhase' "$M20_CPP_ANCHOR" \
-  -- yarn-project | sed 's/^[0-9a-f]*://' | grep -v '^yarn-project/simulator/src/public/' | sort)"
-printf '%s\n' "$CALLERS" | sed 's/^/      /'
-assert_eq "upstream's named phase helper is called only from the two p2p tx validators" \
-  "yarn-project/p2p/src/msg_validators/tx_validator/fee_payer_balance.ts
-yarn-project/p2p/src/msg_validators/tx_validator/phases_validator.ts" "$CALLERS"
+# The control: an accessor that exists on Tx but is NOT part of the phase split must be absent
+# from both, or the six assertions above would pass for any method name.
+assert_eq "an accessor outside the phase split appears in neither" "0|0" \
+  "$(printf '%s\n' "$FROM_TX" | grep -cF 'tx.getPublicCallRequestsWithCalldata()')|$(grep -cF 'tx.getPublicCallRequestsWithCalldata()' "$VENDORED")"
 
 # ---------------------------------------------------------------------------
 # PART 7 — the shared arm run really is shared

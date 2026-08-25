@@ -86,6 +86,7 @@ because no prefix rule would produce it.
 | F6 | reference/trees-and-state/noir-protocol-circuits-ABOUT.md | noir-projects/fnd/noir-protocol-circuits/ABOUT.md | cpp | Apache-2.0 | RI-47 |
 | F7 | fixtures/wasm-parity/vm2_spike-sources/spike_fixtures.cpp | barretenberg/cpp/src/barretenberg/vm2/testing/fixtures.cpp | cpp | Apache-2.0 | RI-16 |
 | F8 | reference/LICENSE.aztec-packages.Apache-2.0 | LICENSE | cpp | Apache-2.0 | RI-47 |
+| F9 | orchestration/src/vendor/simulator_public_utils.ts | yarn-project/simulator/src/public/utils.ts | cpp | Apache-2.0 | RI-63 |
 <!-- END:files -->
 
 <!-- BEGIN:exempt -->

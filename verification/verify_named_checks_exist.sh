@@ -80,7 +80,6 @@ EXCEPTIONS = {
     # defect; leaving it unexcepted would make this check red forever. Both are wrong, so they are
     # declared, with the file that is allowed to say them.
     "verify_form_a_arms_are_distinguishable": "historical: never existed; form_a_e2e_driver.ts now names the three things that do guard it",
-    "test_phase_sources_match_upstream_helper": "historical: never existed; the property is e2e_form_a_external_tx_roundtrip Part 6",
     "verify_form_a_encoding_delta_is_one_named_key": "historical: never existed; the property is e2e_form_a_external_tx_roundtrip Part 8",
 }
 

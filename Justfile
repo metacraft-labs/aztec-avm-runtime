@@ -1583,7 +1583,7 @@ verify-m18:
 #   just verify-form-a-teardown     e2e_form_a_teardown_revert_still_pays_fee
 #   just verify-form-a-asymmetry    test_nonrevertible_nullifier_collision_throws_tx_out
 #   just verify-form-a-runtime-bug  test_runtime_bug_not_reported_as_revert
-#   just verify-m20                 all seven — 236 assertions (61 / 42 / 29 / 35 / 43 / 17 / 9)
+#   just verify-m20                 all seven — 237 assertions (62 / 42 / 29 / 35 / 43 / 17 / 9)
 
 # A serialized Tx deserializes, executes its public half on the wasm AVM, and lands its effects.
 verify-form-a-roundtrip:

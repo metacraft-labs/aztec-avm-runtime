@@ -817,7 +817,18 @@ were absorbed silently.
   the "printed literal" shape: an assertion beside a value that cannot move. It is also the reason
   M17's `TxOutcome` earns its keep as a separate type rather than as a staging post on the way to
   `PublicTxResult`.
-- decision: Open, and A DELIBERATE DEPARTURE FROM UPSTREAM'S PUBLISHED TYPE, recorded here as
+- decision: Open, and now also a PREPARED CONTRIBUTION —
+  `codetracer-specs/upstream-bugs/aztec-revert-code-four-values/` (`PR.md`, `verify.sh`, one patch
+  against the `cpp` anchor). `verify.sh` is **18 assertions, 0 failures** and it EXECUTES the
+  narrowing rather than reading it: the extracted `toRevertCodeEnum` answers `0,1,1,1` before the
+  patch and `0,1,2,3` after. The gating fact that makes it offerable at all is that **the protocol
+  already reserves the room** — the tx blob start marker packs the revert code with
+  `REVERT_CODE_BIT_SIZE = 8` and constrains it with `assert_max_bit_size::<8>()`
+  (`noir-projects/fnd/noir-protocol-circuits/crates/types/src/blob_data/tx_blob_data.nr`), so all
+  four values are already circuit-legal, `toBuffer` already writes a byte, and the wire width does
+  not move. It is deliberately NOT enrolled in the five-patch carry set: that set is closed, this
+  is unrelated to the wasm work, and taking a sixth is the user's decision. Meanwhile, and
+  independently, this is A DELIBERATE DEPARTURE FROM UPSTREAM'S PUBLISHED TYPE, recorded here as
   one. **This runtime reports the module's four-valued code as its own outcome** — `FormALanded`
   carries `revertCode` (0..3) and `revertedIn` (`none` / `appLogic` / `teardown` / `both`) — and
   carries upstream's collapsed `RevertCode` on `result` only for consumers that demand that type.
