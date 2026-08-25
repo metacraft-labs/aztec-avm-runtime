@@ -109,11 +109,47 @@ run_avm_differential.sh|a runner rather than a check — it has its own exit-sta
 EOF
 )"
 
+# A CITATION IS NOT A CALL, and this check was one comment away from not knowing the difference.
+#
+# Found by M21's review, by mutation: delete every `require_complete_transcript` CALL from
+# `verify_native_wasm_transcripts_identical.sh` and leave ONE mention of the name in a comment, and
+# both this census and section 3's refusal list stayed green — 36 assertions, 0 failures. The
+# comparer no longer refused, and nothing said so. Deleting the name outright WAS caught, so the
+# needle worked exactly until somebody wrote the word down.
+#
+# That is the campaign's "a citation counted as a call", and M21 met it twice in one session: the
+# other instance is `Tx.create` in `form_b.ts`, which WAS narrowed to a call shape. This is the
+# sibling that was not. `test_no_aztec_node_type_exported`'s own description states the rule — "a
+# citation is the opposite of a dependency" — so the rule was written down here and applied there.
+#
+# The needle is therefore comment-stripped and call-shaped: the name must begin a command, or be
+# the first word of a command substitution, and it must be followed by whitespace or a quote rather
+# than by more identifier characters. Section 2's control below plants both directions.
+#
+# Measured before the narrowing and after: the census is 30 / 22 / 8 either way, because all eight
+# reaching files call it as well as mentioning it. The fix closes the hole without moving a number,
+# which is the only way to tell a narrowing from a re-pin.
+# Written with `lib.sh`'s builtin line predicate rather than as `grep -v … | grep -q …`, and that
+# is this milestone's OWN rule rather than style: `verify_no_pipeline_predicates` pins the number of
+# surviving `| grep -q` lines in the tree at exactly five, by name. The first draft of these two
+# helpers used the pipe and would have taken that count to seven — a check written in this session
+# breaking the check written beside it in the same session. Caught by re-reading the rule, and the
+# proof is that both checks are green together.
+uncommented() { # <file> -> its lines with whole-line comments removed
+  grep -vE '^[[:space:]]*#' "$1" || true
+}
+reaches_shared() { # <file> -> true if it CALLS transcript_completeness or require_complete_transcript
+  str_has_line_re "$(uncommented "$1")" "(^|[^A-Za-z0-9_])($REFUSAL|$SHARED)([[:space:]\"']|\$)"
+}
+reaches_refusal() { # <file> -> true if it CALLS require_complete_transcript
+  str_has_line_re "$(uncommented "$1")" "(^|[^A-Za-z0-9_])$REFUSAL([[:space:]\"']|\$)"
+}
+
 MISSING=""
 N_MISSING=0
 while IFS= read -r f; do
   [ -n "$f" ] || continue
-  if grep -qF "$SHARED" "$f" || grep -qF "$REFUSAL" "$f"; then continue; fi
+  if reaches_shared "$f"; then continue; fi
   MISSING="$MISSING $(basename "$f")"
   N_MISSING=$((N_MISSING + 1))
 done <<EOF
@@ -121,7 +157,7 @@ $POP
 EOF
 # THIS IS A CENSUS PINNED AS A NUMBER, NOT A CLAIM THAT THE TREE IS CLEAN.
 #
-# 22 of the 28 do not reach the shared implementation. They are not all defects — several read one
+# 22 of the 30 do not reach the shared implementation. They are not all defects — several read one
 # field from a driver's output and never compare anything, so a truncation there produces one
 # missing value rather than a page of false divergences — but several DO read thirty fields after a
 # sentinel assertion of their own spelling, and those are the eighth, ninth and tenth spellings of
@@ -136,6 +172,35 @@ note "not reaching the shared implementation:$MISSING"
 assert_eq "the set that does not reach it is exactly the recorded size" "22" "$N_MISSING"
 assert_eq "…and the eight that DO are the five comparers, the node-host runs and M21's two probes" \
   "8" "$((N_POP - N_MISSING))"
+
+# THE NEEDLE IS A THING UNDER TEST, in both directions. A file that only MENTIONS the name must not
+# count as reaching it, and a file that CALLS it must. Without the first of these, the census above
+# is satisfied by a comment — measured, on this very check, before the narrowing.
+NEEDLE_PROBE="$REPO_ROOT/verification/.m21-needle-probe"
+rm -rf "$NEEDLE_PROBE"; mkdir -p "$NEEDLE_PROBE"
+trap 'rm -rf "$NEEDLE_PROBE"' EXIT
+{ printf '%s\n' '#!/usr/bin/env bash'
+  printf '%s\n' "# NOTE: this check used to call $REFUSAL before comparing."
+  printf '%s\n' 'echo avmSteps.done'; } >"$NEEDLE_PROBE/mention_only.sh"
+{ printf '%s\n' '#!/usr/bin/env bash'
+  printf '%s\n' "$REFUSAL \"\$OUT\" avmSteps.done \"the run's\""; } >"$NEEDLE_PROBE/calls_it.sh"
+{ printf '%s\n' '#!/usr/bin/env bash'
+  printf '%s\n' "V=\"\$($SHARED \"\$OUT\" avmSteps.done)\""; } >"$NEEDLE_PROBE/calls_shared.sh"
+{ printf '%s\n' '#!/usr/bin/env bash'
+  printf '%s\n' "${REFUSAL}_disabled \"\$OUT\" avmSteps.done"; } >"$NEEDLE_PROBE/renamed_away.sh"
+assert_false "a file that only MENTIONS the refusal in a comment does NOT count as reaching it" \
+  reaches_shared "$NEEDLE_PROBE/mention_only.sh"
+assert_true "…while one that CALLS it does" reaches_shared "$NEEDLE_PROBE/calls_it.sh"
+assert_true "…and so does one that calls the shared implementation directly" \
+  reaches_shared "$NEEDLE_PROBE/calls_shared.sh"
+assert_false "…and a longer identifier that merely STARTS with the name does not" \
+  reaches_shared "$NEEDLE_PROBE/renamed_away.sh"
+assert_false "the refusal needle likewise refuses a comment" \
+  reaches_refusal "$NEEDLE_PROBE/mention_only.sh"
+assert_true "…and accepts a call" reaches_refusal "$NEEDLE_PROBE/calls_it.sh"
+assert_false "…and the shared implementation alone is not the refusal" \
+  reaches_refusal "$NEEDLE_PROBE/calls_shared.sh"
+rm -rf "$NEEDLE_PROBE"; trap - EXIT
 
 # Both directions on the exception list.
 while IFS= read -r row; do
@@ -162,7 +227,7 @@ e2e_ts_wasm_result_decodes_as_upstream_types.sh"
 while IFS= read -r name; do
   [ -n "$name" ] || continue
   assert_true "$name refuses on an incomplete transcript rather than asserting about it" \
-    grep -qF "$REFUSAL" "$V/$name"
+    reaches_refusal "$V/$name"
 done <<EOF
 $COMPARERS
 EOF
