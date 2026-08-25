@@ -10,7 +10,7 @@
 # THE PRECONDITIONS ARE PRECONDITIONS, NOT SKIPS. A check that cannot see the anchor, or that has
 # no installed packages to walk an import graph over, DIES with the command that fixes it. It
 # never reports "0 problems found" against a tree it could not read — which is the shape of
-# vacuous assertion this campaign has now found twenty times.
+# vacuous assertion this campaign has now found twenty-one times.
 
 M18_WORK="${M18_WORK:-$HOME/.cache/aztec-m18-orchestration}"
 export M18_WORK

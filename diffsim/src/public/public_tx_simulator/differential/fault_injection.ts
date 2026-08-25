@@ -11,7 +11,7 @@
 // ADDED HERE — no upstream counterpart.
 //
 // THE CONTROLS. A differential that has never been observed to fail is indistinguishable from one
-// that cannot, and this campaign has shipped twenty assertions that could not fail. So the arm
+// that cannot, and this campaign has shipped twenty-one assertions that could not fail. So the arm
 // carries permanent, named fault injection: `M19_INJECT_DIVERGENCE=<name>` perturbs ONE thing on
 // the wasm side just before the comparison, and `e2e_differential_wasm_vs_native_cpp` runs the arm
 // once per name and requires it to go RED with at least one failing test. It does not require the
