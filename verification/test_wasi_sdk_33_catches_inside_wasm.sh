@@ -56,11 +56,44 @@ note "wasi-sdk 33: $SDK33  ($(head -1 "$SDK33/VERSION"))"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+# HERMETIC PATH, AND IT IS LOAD-BEARING RATHER THAN TIDY.
+#
+# Found by M19's review, running the campaign sweep from inside this repository's OWN dev shell —
+# the one `.envrc` exists to give every developer and the one CI's `dev-exec` uses. The check went
+# red on `the flagged module emits the standardised try_table  expected [21], got [19]`, and nothing
+# in the tree had changed: the toolchain store path, the probe's sha256 and the flags were all
+# identical to the last green run.
+#
+# The cause is that clang's WebAssembly driver runs `wasm-opt` after `wasm-ld` at -O2 IF IT FINDS
+# ONE ON PATH. In a plain shell there is none, so the module is as linked: 377,548 bytes, 139
+# functions, a `name` section, and 21 `try_table`. Inside the dev shell binaryen is on PATH, so the
+# same command produces 326,743 bytes, 57 functions, no `name` section, a `DataCount` section — and
+# 19 `try_table`. Reproduced byte-for-byte in both directions: putting binaryen's bin on a plain
+# shell's PATH yields the dev shell's exact module, and restricting PATH here yields the plain one.
+#
+# So the comment below this function — "the toolchain comes from a recorded release hash and the
+# flags are fixed, so these counts are reproducible" — was FALSE. The counts also depended on
+# whether an unrelated tool happened to be on PATH, which is the campaign's own "never depend on
+# state you did not produce" in its purest form: every sweep before this one ran `just verify-m4`
+# from a shell that happened not to have binaryen in it.
+#
+# Restricting PATH to the SDK's own bin directory makes the emitted encoding a property of the
+# recorded toolchain alone, which is what the assertion was always meant to be about.
+M4_LINK_PATH="$SDK33/bin"
+
 link() { # <out> <flags...>
   local out="$1"; shift
-  "$SDK33/bin/clang++" --target=wasm32-wasip1 -O2 "$@" "$M4_PROBE" -o "$WORK/$out" \
-    >"$WORK/$out.log" 2>&1
+  env PATH="$M4_LINK_PATH" "$SDK33/bin/clang++" --target=wasm32-wasip1 -O2 "$@" "$M4_PROBE" \
+    -o "$WORK/$out" >"$WORK/$out.log" 2>&1
 }
+
+# The hermeticity is asserted, not hoped for: the restricted PATH must contain the compiler and
+# must NOT contain the post-link optimiser. Both halves, because a PATH that reached neither would
+# also produce a stable number — by failing to compile at all.
+assert_true "the link PATH contains the pinned compiler" \
+  test -x "$M4_LINK_PATH/clang++"
+assert_eq "and it does NOT reach a wasm-opt, which is what makes the emitted encoding reproducible" \
+  "" "$(PATH="$M4_LINK_PATH" command -v wasm-opt 2>/dev/null || true)"
 
 # ---------------------------------------------------------------------------
 # POSITIVE: the full recipe links, runs, and catches.
@@ -141,10 +174,12 @@ assert_eq "omitting -wasm-use-legacy-eh=false still LINKS" "0" "$RC_LEGACY"
 # rather than on a runtime's error message alone.
 GOOD_WAT="$(m4_in_devshell 'wasm2wat --enable-all "$1" 2>/dev/null | grep -cE "^[[:space:]]*try_table"' "$WORK/good.wasm")"
 LEGACY_TRY="$(m4_in_devshell 'wasm2wat --enable-all "$1" 2>/dev/null | grep -cE "^[[:space:]]*try([[:space:]]|$)"' "$WORK/legacy.wasm")"
-# Pinned, not merely non-zero: the toolchain comes from a recorded release hash and
-# the flags are fixed, so these counts are reproducible, and pinning them is what
-# makes "the encoding is read out of the artefacts" mean the encoding and not just
-# "some instruction was found".
+# Pinned, not merely non-zero: the toolchain comes from a recorded release hash, the
+# flags are fixed AND the link PATH is restricted so no post-link optimiser can run —
+# see `link()` above for the third of those, which was missing and made these counts
+# depend on the shell the check was invoked from. With all three, the counts are
+# reproducible, and pinning them is what makes "the encoding is read out of the
+# artefacts" mean the encoding and not just "some instruction was found".
 assert_eq "the flagged module emits the standardised try_table" "21" "$GOOD_WAT"
 assert_eq "the unflagged module emits the LEGACY try instruction" "5" "$LEGACY_TRY"
 # And the assertion that actually explains why one runs and the other does not: with

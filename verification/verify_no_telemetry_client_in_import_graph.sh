@@ -18,10 +18,11 @@
 # separately and this check asserts their COUNT — a computed `import()` appearing in the shipped
 # graph is a hole in the measurement and must be a failure, not a silent omission.
 #
-# THE ASSERTION IS A CONJUNCTION OF FIVE, and each conjunct gets a negative case: a probe module
+# THE ASSERTION IS A CONJUNCTION OF SEVEN, and each conjunct gets a negative case: a probe module
 # that imports exactly that package is walked through the same walker and must be caught. A
-# conjunction whose parts have never been made to fail individually is one assertion wearing five
-# hats.
+# conjunction whose parts have never been made to fail individually is one assertion wearing seven
+# hats. Seven and not five: two of them had no negative case until the M19 review, and they were
+# the two whose absence could not fail — see the note above the probe list.
 #
 # Run: just verify-no-telemetry
 
@@ -63,7 +64,7 @@ PACKAGES="$(m18_graph_packages "$GRAPH" | grep -c . || true)"
 note "the shipped graph is $MODULES modules across $PACKAGES packages"
 
 # THE GRAPH IS NOT EMPTY. Every assertion below is an absence, and an absence over an empty set
-# is the vacuous-assertion family this campaign has now found fifteen times. Both sides are
+# is the vacuous-assertion family this campaign has now found twenty times. Both sides are
 # pinned: a real module count, and the presence of the packages the orchestration MUST reach.
 assert_ge "the graph is a real closure and not an empty one" 200 "$MODULES"
 for want in @aztec/stdlib @aztec/foundation @aztec/protocol-contracts; do
@@ -119,12 +120,22 @@ probe_finds() { # <package-specifier> <package-name>
   printf '%s\n' "$found"
 }
 
+# ONE PROBE PER FORBIDDEN PACKAGE, and the last two were missing until the M19 review. `FORBIDDEN`
+# carries seven names; this list carried five. `@aztec/native` and `@aztec/world-state` were
+# asserted absent with no negative case at all — and they are the two that are NOT INSTALLED in
+# `orchestration/node_modules`, so an import of either is MODULE_NOT_FOUND, lands in `unresolvable`,
+# and never enters `packages`. The absence could not fail. (M19's own containment check had the
+# same hole and it was proved by mutation there: with `import * as x from "@aztec/native";` in a
+# reached module, the assertion still printed `ok … [0]`.) Both ARE installed in `diffsim/`, so the
+# first branch below walks that tree, which is exactly the case this loop was already built for.
 for probe in \
   "@aztec/telemetry-client:@aztec/telemetry-client" \
   "koa:koa" \
   "prom-client:prom-client" \
   "systeminformation:systeminformation" \
-  "@opentelemetry/host-metrics:@opentelemetry/host-metrics"
+  "@opentelemetry/host-metrics:@opentelemetry/host-metrics" \
+  "@aztec/native:@aztec/native" \
+  "@aztec/world-state:@aztec/world-state"
 do
   spec="${probe%%:*}"; name="${probe#*:}"
   if [ -d "$REPO_ROOT/diffsim/node_modules/$name" ] && [ ! -d "$ORCH_DIR/node_modules/$name" ]; then
