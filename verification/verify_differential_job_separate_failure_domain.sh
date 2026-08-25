@@ -96,7 +96,54 @@ assert_ge "something does import the arm, so this enumeration is not empty" 1 \
   "$(printf '%s\n' "$importers" | grep -c . )"
 outside="$(printf '%s\n' "$importers" | grep -v '^differential/' | grep -v '^public/public_tx_simulator/differential/' || true)"
 assert_eq "and nothing outside the arm's own directories imports it" "" "$outside"
-assert_eq "the shipped package does not import it either" "0" \
-  "$(cd "$REPO_ROOT" && grep -rl 'public_tx_simulator/differential/' orchestration/src node-host/src 2>/dev/null | wc -l)"
+# THE SHIPPED PACKAGE DOES NOT IMPORT IT EITHER — and this is asked of IMPORTS rather than of
+# text, which is the correction M20 forced.
+#
+# The first version of this assertion was `grep -rl 'public_tx_simulator/differential/'` over
+# `orchestration/src` and `node-host/src`, counting FILES THAT MENTION THE PATH. That is not the
+# question. M20 added two files whose comments cite `.../differential/encode_inputs.ts` and
+# `.../differential/resident_avm.ts` by path — deliberately, because those are the prior
+# implementations a reader should go and look at — and the check went red on a repository in which
+# nothing new is imported at all. A citation is the OPPOSITE of a dependency: it is how a reader
+# finds the thing we did not depend on.
+#
+# So the needle is now import-shaped: the path must appear inside an `import`/`export ... from` or
+# a `require(`. Both controls below are necessary, and in opposite directions: without the first,
+# a needle that matched nothing would pass; without the second, the original defect comes straight
+# back.
+import_hits() { # <dir...>
+  ( cd "$REPO_ROOT" && grep -rlE "(from|import|require\\()[[:space:]]*['\"][^'\"]*public_tx_simulator/differential/" "$@" 2>/dev/null | wc -l )
+}
+
+assert_eq "the shipped package does not IMPORT the arm" "0" \
+  "$(import_hits orchestration/src node-host/src)"
+
+# CONTROL 1 — the same needle over `diffsim/src`, where the one real cross-directory importer
+# lives, must find it. A needle that cannot match anything is not an assertion.
+#
+# `diffsim/src/differential/three_way.test.ts` is that importer:
+# `from '../public/public_tx_simulator/differential/three_way_tester.ts'`. Note that the arm's own
+# INTERNAL imports are relative (`./encode_inputs.ts`) and do NOT carry the path segment, which is
+# why this control points at `diffsim/src` rather than at the arm's directory — pointing it at the
+# directory is how it first failed, and that failure was the control working.
+assert_ge "and the same needle DOES find the arm's cross-directory importer" 1 \
+  "$(import_hits diffsim/src)"
+
+# CONTROL 2 — a file that MENTIONS the path in a comment must NOT be counted, which is precisely
+# what the previous spelling got wrong.
+probe_dir="$M19_WORK/importprobe"
+rm -rf "$probe_dir"; mkdir -p "$probe_dir"
+printf '// see diffsim/src/public/public_tx_simulator/differential/encode_inputs.ts for why\nexport const x = 1;\n' \
+  > "$probe_dir/comment_only.ts"
+mentions="$(cd "$REPO_ROOT" && grep -rl 'public_tx_simulator/differential/' "$probe_dir" 2>/dev/null | wc -l)"
+imports="$(import_hits "$probe_dir")"
+assert_eq "a comment citing the path IS found by the old text grep" "1" "$mentions"
+assert_eq "and is NOT counted by the import-shaped one" "0" "$imports"
+# CONTROL 3 — and a real import in the same directory IS counted, so control 2 is not passing
+# because the probe directory is unreadable.
+printf "import { encodeForPatchedModule } from './public_tx_simulator/differential/encode_inputs.ts';\nexport const y = encodeForPatchedModule;\n" \
+  > "$probe_dir/real_import.ts"
+assert_eq "while a real import in the same directory is" "1" "$(import_hits "$probe_dir/real_import.ts")"
+rm -rf "$probe_dir"
 
 finish
