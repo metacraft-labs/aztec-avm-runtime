@@ -1,0 +1,181 @@
+name: CI token probe
+
+# WHY THIS FILE EXISTS
+#
+# Nine declared jobs in `avm-wasm.yml` and one in `carry.yml` have never reached a
+# check. Every one of them aborts at `Generate CI token` with
+#
+#     Error: Input required and not supplied: app-id
+#
+# and the `with:` echo above that error shows that `private-key` is missing TOO —
+# the action names only `app-id` because that is the first required input it reads.
+# So the failing thing is not one variable: it is the whole organisation-level
+# variables-and-secrets set arriving empty in THIS repository, while the same
+# organisation, the same runner group, the same label, the same `@v1` action and
+# the same `vars.`/`secrets.` spelling resolve fine in `metacraft-labs/codetracer-ci`.
+#
+# Everything the REST API can decide has been decided and it decided nothing: the
+# org variable reads `visibility: all`, both repositories' `organization-variables`
+# and `organization-secrets` lists are identical, `actions/permissions`,
+# `permissions/access` and `permissions/workflow` are identical, both repositories
+# are private, non-forks, in a `free`-plan org, and neither carries a shadowing
+# repository variable or secret. So this probe asks the runner, which is the only
+# thing left that can answer.
+#
+# It is a probe, so it prints. It is also a CHECK, so it fails: the last step exits
+# non-zero unless the app id resolves. It must be capable of failing in BOTH
+# directions, which is what the CONTROL below is for.
+#
+# THE CONTROL. `secrets.GITHUB_TOKEN` is minted by the runner for every job and can
+# never be empty. If the probe reported "org secrets are empty" it would be
+# indistinguishable from "the secrets context is broken / my expressions are wrong /
+# I misspelled the name" — three explanations with very different remedies. Asserting
+# that GITHUB_TOKEN is non-empty separates them: with the control green, an empty
+# org secret is a fact about the ORGANISATION-TO-REPOSITORY grant; with the control
+# red, the probe is measuring itself and says so instead of accusing the org.
+#
+# The second control is the `ubuntu-latest` job. It is the same expressions on a
+# GitHub-hosted runner, so if the self-hosted `eph-linux-x64` runner group were
+# somehow implicated the two jobs would disagree. If they agree, the runner is
+# exonerated by measurement rather than by argument.
+#
+# Delete this workflow once `Generate CI token` resolves. It is deliberately on its
+# own branch trigger so it cannot add noise to `dev`.
+
+on:
+  push:
+    branches:
+      - "ci/token-probe"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: contexts on ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [eph-linux-x64, ubuntu-latest]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      # Spelled exactly as `codetracer-ci`'s job is: a checkout FIRST, then the
+      # token step, same `id`. `codetracer-ci` places the token step second and
+      # this repository places it first; that is the only ordering difference
+      # between the two, so the probe removes it rather than reasoning about it.
+      - name: Checkout aztec-avm-runtime
+        uses: actions/checkout@v4
+
+      - name: Report the vars and secrets contexts
+        id: contexts
+        shell: bash
+        env:
+          # Values, not expressions-in-`run`: `run:` interpolation splices text
+          # into the script, and a value with a quote in it would then be a shell
+          # bug rather than a datum. Everything below is read from the
+          # environment.
+          VARS_JSON: ${{ toJSON(vars) }}
+          SECRETS_JSON: ${{ toJSON(secrets) }}
+          APP_ID_NONEMPTY: ${{ vars.CI_TOKEN_PROVIDER_APP_ID != '' }}
+          APP_ID_LEN_PROBE: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          PRIVATE_KEY_NONEMPTY: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY != '' }}
+          OTHER_ORG_SECRET_NONEMPTY: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS != '' }}
+          # THE CONTROL: minted per job, cannot be empty.
+          GITHUB_TOKEN_NONEMPTY: ${{ secrets.GITHUB_TOKEN != '' }}
+          # The pre-M11 spelling, kept so the probe can say whether a repository
+          # secret of that name exists after all.
+          APP_ID_AS_SECRET_NONEMPTY: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID != '' }}
+        run: |
+          set -euo pipefail
+
+          echo "=== identity ==="
+          echo "repository       = ${{ github.repository }}"
+          echo "repository_owner = ${{ github.repository_owner }}"
+          echo "event_name       = ${{ github.event_name }}"
+          echo "ref              = ${{ github.ref }}"
+          echo "actor            = ${{ github.actor }}"
+          echo "triggering_actor = ${{ github.triggering_actor }}"
+          echo "runner label     = ${{ matrix.runner }}"
+          echo "runner name      = ${RUNNER_NAME:-<unset>}"
+
+          echo
+          echo "=== the control (must be true; if it is false this probe is measuring itself) ==="
+          echo "secrets.GITHUB_TOKEN != ''                    = ${GITHUB_TOKEN_NONEMPTY}"
+
+          echo
+          echo "=== the subject ==="
+          echo "vars.CI_TOKEN_PROVIDER_APP_ID != ''           = ${APP_ID_NONEMPTY}"
+          echo "vars.CI_TOKEN_PROVIDER_APP_ID length          = ${#APP_ID_LEN_PROBE}"
+          echo "secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY != ''   = ${PRIVATE_KEY_NONEMPTY}"
+          echo "secrets.GH_READ_METACRAFT_PRIVATE_REPOS != '' = ${OTHER_ORG_SECRET_NONEMPTY}"
+          echo "secrets.CI_TOKEN_PROVIDER_APP_ID != ''        = ${APP_ID_AS_SECRET_NONEMPTY}"
+
+          echo
+          echo "=== toJSON(vars) — variable values are not masked, so this is the key list AND the values ==="
+          printf '%s\n' "${VARS_JSON}"
+
+          echo
+          echo "=== toJSON(secrets) — values are masked to ***, so this is the key list ==="
+          printf '%s\n' "${SECRETS_JSON}"
+
+          {
+            echo "app_id_nonempty=${APP_ID_NONEMPTY}"
+            echo "private_key_nonempty=${PRIVATE_KEY_NONEMPTY}"
+            echo "github_token_nonempty=${GITHUB_TOKEN_NONEMPTY}"
+          } >> "$GITHUB_OUTPUT"
+
+      # The step as `codetracer-ci` spells it, allowed to fail so the summary below
+      # still runs and so the run carries both arms rather than one.
+      - name: Generate GitHub App token (codetracer-ci's spelling)
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Verdict
+        shell: bash
+        env:
+          APP_ID_NONEMPTY: ${{ steps.contexts.outputs.app_id_nonempty }}
+          PRIVATE_KEY_NONEMPTY: ${{ steps.contexts.outputs.private_key_nonempty }}
+          GITHUB_TOKEN_NONEMPTY: ${{ steps.contexts.outputs.github_token_nonempty }}
+          TOKEN_STEP: ${{ steps.app-token.outcome }}
+        run: |
+          set -euo pipefail
+          rc=0
+
+          # Control first. A red control means the probe cannot speak about the org.
+          if [ "${GITHUB_TOKEN_NONEMPTY}" != "true" ]; then
+            echo "::error::CONTROL FAILED: secrets.GITHUB_TOKEN is empty. The secrets context" \
+                 "itself is not being populated, so nothing this probe says about organisation" \
+                 "secrets is trustworthy. Do not conclude anything about the org from this run."
+            exit 2
+          fi
+          echo "control ok: secrets.GITHUB_TOKEN is non-empty"
+
+          if [ "${APP_ID_NONEMPTY}" != "true" ]; then
+            echo "::error::vars.CI_TOKEN_PROVIDER_APP_ID is EMPTY in this repository while the" \
+                 "control is green, so the organisation variable is not reaching this repository."
+            rc=1
+          else
+            echo "vars.CI_TOKEN_PROVIDER_APP_ID resolved"
+          fi
+
+          if [ "${PRIVATE_KEY_NONEMPTY}" != "true" ]; then
+            echo "::error::secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY is EMPTY in this repository" \
+                 "while the control is green."
+            rc=1
+          else
+            echo "secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY resolved"
+          fi
+
+          echo "create-github-app-token outcome = ${TOKEN_STEP}"
+          if [ "${TOKEN_STEP}" != "success" ]; then
+            rc=1
+          fi
+
+          exit "$rc"
