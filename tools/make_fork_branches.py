@@ -49,6 +49,52 @@ WORKSPACE_ROOT = REPO_ROOT.parent
 DEFAULT_FORK = WORKSPACE_ROOT / "aztec-packages"
 DEFAULT_SPECS = WORKSPACE_ROOT / "codetracer-specs"
 
+# Each branch is built in a FULL CHECKOUT of the upstream tree (451 MB), five of them
+# in sequence plus the downstream branch. That is not a scratch file and it must not
+# default to `tempfile.mkdtemp()`: this workstation's /tmp is a quota-limited tmpfs
+# where `df` reports 6.7 GB free and the next write fails at 356 MiB with
+# `Disk quota exceeded`, and the checkout died there — reported, by the code below,
+# as "no such patch id". Same `<M>_WORK` convention as every other heavy step, and the
+# same default the Justfile already passed.
+DEFAULT_WORK = Path(os.environ.get("M11_WORK") or (Path.home() / ".cache" / "aztec-m11-branches"))
+WORK_MIN_GB = 4
+
+
+def prepare_work(work: Path) -> Path:
+    """Create the branch builder's work directory, or fail saying why and what to do."""
+    try:
+        work.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise SystemExit("make-fork-branches: cannot create the work directory %s: %s\n"
+                         "  Point M11_WORK (or --work) at a directory with room." % (work, exc))
+    if not os.access(work, os.W_OK):
+        raise SystemExit("make-fork-branches: the work directory is not writable: %s" % work)
+    st = os.statvfs(work)
+    avail = (st.f_bavail * st.f_frsize) / (1024.0 ** 3)
+    if avail < WORK_MIN_GB:
+        raise SystemExit(
+            "make-fork-branches: the work directory has %.1f GB free and this builds six\n"
+            "  checkouts of the upstream tree, which needs about %d GB: %s\n"
+            "  Point M11_WORK (or --work) somewhere with room."
+            % (avail, WORK_MIN_GB, work))
+    # Free space and a quota are different questions; only a write answers the second.
+    probe = work / (".write-probe.%d" % os.getpid())
+    try:
+        with open(probe, "wb") as fh:
+            fh.write(b"\0" * (4 * 1024 * 1024))
+            fh.flush()
+            os.fsync(fh.fileno())
+    except OSError as exc:
+        probe.unlink(missing_ok=True)
+        raise SystemExit(
+            "make-fork-branches: the work directory reports %.1f GB free and refuses a 4 MB\n"
+            "  write: %s\n  %s\n"
+            "  That is a quota, not a full filesystem. Point M11_WORK (or --work) elsewhere."
+            % (avail, work, exc))
+    finally:
+        probe.unlink(missing_ok=True)
+    return work
+
 
 class Failure(Exception):
     pass
@@ -153,7 +199,10 @@ def main() -> int:
     ap.add_argument("--fork", default=str(DEFAULT_FORK), help="path to the aztec-packages fork")
     ap.add_argument("--specs", default=str(DEFAULT_SPECS),
                     help="path to codetracer-specs (holds upstream-bugs/)")
-    ap.add_argument("--work", default=None, help="scratch worktree root (default: a temp dir)")
+    ap.add_argument("--work", default=str(DEFAULT_WORK),
+                    help="scratch worktree root. NOT /tmp: each branch is a full checkout "
+                         "of the upstream tree (default: $M11_WORK or "
+                         "~/.cache/aztec-m11-branches)")
     ap.add_argument("--push", action="store_true", help="push the branches to the fork's origin")
     ap.add_argument("--report", action="store_true",
                     help="print the dependency structure and exit without building")
@@ -206,8 +255,7 @@ def main() -> int:
 
     base_tree = git(fork, "rev-parse", base + "^{tree}")
 
-    work_root = Path(args.work) if args.work else Path(tempfile.mkdtemp(prefix="carry-branches-"))
-    work_root.mkdir(parents=True, exist_ok=True)
+    work_root = prepare_work(Path(args.work).expanduser().resolve())
     made: list[tuple[str, str, list[str]]] = []
     failures = 0
 
@@ -218,9 +266,11 @@ def main() -> int:
             return None
 
     try:
+        matched_print_sha = False
         for p in patches:
             if args.print_sha and p["id"] != args.print_sha:
                 continue
+            matched_print_sha = True
             # A branch carries its APPLY prerequisites because git am would be
             # rejected without them, and its BUILD prerequisites because a branch
             # that cannot be compiled is not reviewable. Both sets come from
@@ -288,7 +338,16 @@ def main() -> int:
                   % (p["branch"], head[:12], len(stack), " ".join(stack)))
 
         if args.print_sha:
-            print("error: no such patch id: %s" % args.print_sha, file=sys.stderr)
+            # These are two different failures and they used to print as one. A
+            # checkout that dies of a disk quota reported as "no such patch id: p1"
+            # sends the reader to look at series.json, which is correct and has
+            # nothing to do with it; the caller (submit/_lib.sh) then reports that
+            # the patch does not exist. Say which one happened.
+            if matched_print_sha:
+                print("error: %s is in the carry set but its branch could not be rebuilt; "
+                      "see the FAIL line above" % args.print_sha, file=sys.stderr)
+            else:
+                print("error: no such patch id: %s" % args.print_sha, file=sys.stderr)
             return 1
 
         # The downstream development branch: the fork's own branch, which carries
@@ -336,8 +395,10 @@ def main() -> int:
             print("pushing %d branch(es) to origin: %s" % (len(names), " ".join(names)))
             print(git(fork, "push", "--force-with-lease", "origin", *names))
     finally:
-        if not args.work:
-            shutil.rmtree(work_root, ignore_errors=True)
+        # The work root is a NAMED directory now, not a temp dir this process invented,
+        # so it is not removed: the per-branch subdirectories are, by build_branch's own
+        # `worktree remove`, and the root is the milestone's <M>_WORK.
+        pass
 
     if args.check:
         print("checked 6 branch(es) against their patches, %d failure(s)" % failures)

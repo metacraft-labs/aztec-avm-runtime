@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -41,6 +42,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SERIES = REPO_ROOT / "carry" / "series.json"
 EXPOSURE = REPO_ROOT / "carry" / "exposure.json"
 REBASE = REPO_ROOT / "carry" / "rebase.json"
+OVERLAP = REPO_ROOT / "carry" / "overlap.json"
 OUT = REPO_ROOT / "CARRY-LEDGER.md"
 
 STATUS_MEANING = {
@@ -57,6 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--series", type=Path, default=SERIES)
     ap.add_argument("--exposure", type=Path, default=EXPOSURE)
     ap.add_argument("--rebase", type=Path, default=REBASE)
+    ap.add_argument("--overlap", type=Path, default=OVERLAP)
     ap.add_argument("--output", type=Path, default=OUT,
                     help="where to write; '-' writes to stdout")
     args = ap.parse_args(argv)
@@ -64,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
     series = json.loads(args.series.read_text())
     exposure = json.loads(args.exposure.read_text()) if args.exposure.is_file() else None
     rebase = json.loads(args.rebase.read_text()) if args.rebase.is_file() else None
+    overlap = json.loads(args.overlap.read_text()) if args.overlap.is_file() else None
     patches = sorted(series["patches"], key=lambda p: p["order"])
 
     L: list[str] = []
@@ -251,6 +255,43 @@ def main(argv: list[str] | None = None) -> int:
     else:
         w("**No replay recorded yet.** Run `just rebase-upstream-patches`.")
         w("")
+
+    w("### Overlap with upstream's own changes")
+    w("")
+    w("Applying is one question and BUILDING is another. M6 and M10 build the AVM_WASM tree")
+    w("and run upstream's own native suites from the base plus this stack, and that evidence")
+    w("describes the REBASED tree only under an argument. The argument used to be that")
+    w("upstream had touched no path this series modifies. It has, so the argument is now")
+    w("three conjuncts, checked by `verify_carry_set_applies_to_upstream_head`: upstream has")
+    w("changed nothing under `barretenberg/cpp`, which is what both builds compile; every")
+    w("overlap outside that tree is acknowledged below; and the two sets of changed lines are")
+    w("disjoint per file. An overlap INSIDE `barretenberg/cpp` cannot be acknowledged at all.")
+    w("")
+    if overlap is None:
+        w("**No acknowledgement file.** `carry/overlap.json` is missing.")
+        w("")
+    elif not overlap.get("acknowledged"):
+        w("No path upstream has changed since the base is a path this series modifies.")
+        w("")
+    else:
+        ranges = (exposure or {}).get("union_pre_ranges", {})
+        w("| Path | Patch | Upstream changes | This series changes | Acknowledged at |")
+        w("| --- | --- | --- | --- | --- |")
+        for path, e in sorted(overlap["acknowledged"].items()):
+            ours = ", ".join("%d-%d" % (a, b) for a, b in ranges.get(path, [])) or "n/a"
+            m = re.search(r"at base lines ([0-9]+\.\.[0-9]+)", e.get("reason", ""))
+            theirs = m.group(1).replace("..", "-") if m else "see below"
+            w("| `%s` | %s | lines %s | lines %s | `%s` |"
+              % (path, ", ".join(e.get("patch", [])), theirs, ours,
+                 (e.get("acknowledged_at_tip") or "")[:10]))
+        w("")
+        for path, e in sorted(overlap["acknowledged"].items()):
+            w("**`%s`** — %s" % (path, e.get("reason", "")))
+            w("")
+            w("*Why it does not reach the build.* %s" % e.get("why_it_does_not_reach_the_build", ""))
+            w("")
+            w("*If it stops holding.* %s" % e.get("consequence_if_it_stops_holding", ""))
+            w("")
 
     w("## Filing")
     w("")

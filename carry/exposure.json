@@ -7,8 +7,8 @@
   "sum_of_per_patch_hunks": 80,
   "base": "233d8e099336c1773b89e939100af047ed9c4f71",
   "base_date": "2026-08-19",
-  "upstream_tip": "127dec3ec90a33a9c4edaf3d7fee8baa96276580",
-  "upstream_tip_date": "2026-08-21",
+  "upstream_tip": "44a57f8c4a109dea155892aef3f46a56d7a9ad29",
+  "upstream_tip_date": "2026-08-24",
   "churn_window": [
     "2025-08-19",
     "2026-08-19"
@@ -144,6 +144,458 @@
     "build-images/src/Dockerfile",
     "scripts/setup-container.sh"
   ],
+  "union_pre_ranges": {
+    "barretenberg/cpp/CMakeLists.txt": [
+      [
+        31,
+        32
+      ],
+      [
+        63,
+        64
+      ]
+    ],
+    "barretenberg/cpp/CMakePresets.json": [
+      [
+        408,
+        408
+      ],
+      [
+        427,
+        428
+      ]
+    ],
+    "barretenberg/cpp/cmake/arch.cmake": [
+      [
+        5,
+        5
+      ]
+    ],
+    "barretenberg/cpp/cmake/threading.cmake": [
+      [
+        6,
+        7
+      ]
+    ],
+    "barretenberg/cpp/scripts/audit/audit_scopes/merkle_tree_audit_scope.md": [
+      [
+        16,
+        18
+      ],
+      [
+        21,
+        21
+      ],
+      [
+        26,
+        26
+      ],
+      [
+        29,
+        29
+      ],
+      [
+        40,
+        45
+      ],
+      [
+        52,
+        52
+      ]
+    ],
+    "barretenberg/cpp/scripts/merkle_tree_tests.sh": [
+      [
+        7,
+        8
+      ],
+      [
+        12,
+        12
+      ],
+      [
+        13,
+        14
+      ]
+    ],
+    "barretenberg/cpp/src/CMakeLists.txt": [
+      [
+        122,
+        123
+      ],
+      [
+        124,
+        125
+      ],
+      [
+        128,
+        129
+      ],
+      [
+        130,
+        131
+      ],
+      [
+        223,
+        223
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/benchmark/append_only_tree_bench/CMakeLists.txt": [
+      [
+        1,
+        1
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/benchmark/append_only_tree_bench/append_only_tree.bench.cpp": [
+      [
+        2,
+        2
+      ],
+      [
+        6,
+        6
+      ],
+      [
+        8,
+        8
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/benchmark/indexed_tree_bench/CMakeLists.txt": [
+      [
+        1,
+        1
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/benchmark/indexed_tree_bench/indexed_tree.bench.cpp": [
+      [
+        4,
+        4
+      ],
+      [
+        6,
+        7
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/crypto/CMakeLists.txt": [
+      [
+        15,
+        15
+      ],
+      [
+        17,
+        18
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/crypto/merkle_tree/CMakeLists.txt": [
+      [
+        1,
+        1
+      ],
+      [
+        4,
+        4
+      ],
+      [
+        6,
+        7
+      ],
+      [
+        13,
+        13
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/crypto/merkle_tree/fixtures.hpp": [
+      [
+        10,
+        10
+      ],
+      [
+        28,
+        28
+      ],
+      [
+        65,
+        73
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/crypto/merkle_tree/node_store/content_addressed_cache.hpp": [
+      [
+        10,
+        10
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/crypto/merkle_tree/response.hpp": [
+      [
+        11,
+        11
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/crypto/merkle_tree/types.hpp": [
+      [
+        10,
+        11
+      ],
+      [
+        16,
+        16
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/lmdblib/lmdb_database.cpp": [
+      [
+        62,
+        62
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/lmdblib/types.hpp": [
+      [
+        2,
+        3
+      ],
+      [
+        8,
+        9
+      ],
+      [
+        22,
+        69
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/vm2/common/avm_io.cpp": [
+      [
+        6,
+        7
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/vm2/common/avm_io.hpp": [
+      [
+        454,
+        455
+      ],
+      [
+        465,
+        466
+      ],
+      [
+        538,
+        539
+      ],
+      [
+        559,
+        560
+      ],
+      [
+        570,
+        571
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/vm2/simulation/gadgets/execution.hpp": [
+      [
+        32,
+        33
+      ],
+      [
+        72,
+        72
+      ],
+      [
+        93,
+        94
+      ],
+      [
+        262,
+        263
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/vm2/simulation/gadgets/to_radix.cpp": [
+      [
+        53,
+        53
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/vm2/simulation/lib/contract_crypto.cpp": [
+      [
+        61,
+        61
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/vm2/simulation/lib/indexed_memory_tree.hpp": [
+      [
+        20,
+        20
+      ],
+      [
+        22,
+        22
+      ],
+      [
+        121,
+        121
+      ],
+      [
+        124,
+        124
+      ],
+      [
+        128,
+        128
+      ],
+      [
+        130,
+        130
+      ],
+      [
+        153,
+        153
+      ],
+      [
+        156,
+        156
+      ],
+      [
+        166,
+        166
+      ],
+      [
+        170,
+        170
+      ],
+      [
+        172,
+        173
+      ],
+      [
+        179,
+        179
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/hybrid_execution.cpp": [
+      [
+        10,
+        11
+      ],
+      [
+        37,
+        38
+      ],
+      [
+        39,
+        40
+      ],
+      [
+        51,
+        52
+      ],
+      [
+        93,
+        94
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/vm2/simulation_helper.cpp": [
+      [
+        17,
+        18
+      ],
+      [
+        497,
+        498
+      ],
+      [
+        518,
+        518
+      ],
+      [
+        552,
+        553
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/world_state/CMakeLists.txt": [
+      [
+        1,
+        1
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/world_state/fork.hpp": [
+      [
+        4,
+        6
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/world_state/types.hpp": [
+      [
+        9,
+        9
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/world_state/world_state.cpp": [
+      [
+        3,
+        3
+      ],
+      [
+        7,
+        7
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/world_state/world_state.hpp": [
+      [
+        4,
+        4
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        9,
+        9
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/world_state/world_state_stores.hpp": [
+      [
+        3,
+        3
+      ]
+    ],
+    "barretenberg/cpp/src/barretenberg/world_state_reference/memory_merkle_db.hpp": [
+      [
+        108,
+        108
+      ],
+      [
+        130,
+        131
+      ],
+      [
+        134,
+        134
+      ],
+      [
+        152,
+        152
+      ]
+    ],
+    "bootstrap.sh": [
+      [
+        18,
+        18
+      ]
+    ],
+    "build-images/src/Dockerfile": [
+      [
+        125,
+        128
+      ]
+    ],
+    "scripts/setup-container.sh": [
+      [
+        144,
+        144
+      ],
+      [
+        148,
+        151
+      ]
+    ]
+  },
   "by_category_files": {
     "cmake": 11,
     "other": 2,
@@ -230,7 +682,7 @@
     "barretenberg/cpp/src/barretenberg/world_state/world_state.hpp": 0,
     "barretenberg/cpp/src/barretenberg/world_state/world_state_stores.hpp": 0,
     "barretenberg/cpp/src/barretenberg/world_state_reference/memory_merkle_db.hpp": 0,
-    "bootstrap.sh": 0,
+    "bootstrap.sh": 1,
     "build-images/src/Dockerfile": 0,
     "scripts/setup-container.sh": 0
   },

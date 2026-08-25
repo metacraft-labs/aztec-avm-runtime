@@ -62,7 +62,7 @@ RENDER="$REPO_ROOT/tools/render_carry_ledger.py"
 
 # The state this check must not disturb, recorded before it does anything. Compared
 # against ITSELF at the end — see the header.
-TRACKED_INPUTS="CARRY-LEDGER.md carry/series.json carry/exposure.json carry/rebase.json"
+TRACKED_INPUTS="CARRY-LEDGER.md carry/series.json carry/exposure.json carry/rebase.json carry/overlap.json"
 # shellcheck disable=SC2086
 status_before="$(cd "$REPO_ROOT" && git status --porcelain -- $TRACKED_INPUTS 2>/dev/null)"
 # shellcheck disable=SC2086

@@ -165,7 +165,7 @@ which files. It exits non-zero if any patch we still carry stops applying. CI ru
 weekly and on every change to the series, so the cost is a dated failure rather than
 a discovery during an emergency.
 
-Last recorded replay, onto `upstream/next` (127dec3ec9), 3 commit(s) past the base:
+Last recorded replay, onto `upstream/next` (44a57f8c4a), 7 commit(s) past the base:
 
 | Patch | Result |
 | --- | --- |
@@ -174,6 +174,27 @@ Last recorded replay, onto `upstream/next` (127dec3ec9), 3 commit(s) past the ba
 | `p3` | applies |
 | `p4` | applies |
 | `p5` | applies |
+
+### Overlap with upstream's own changes
+
+Applying is one question and BUILDING is another. M6 and M10 build the AVM_WASM tree
+and run upstream's own native suites from the base plus this stack, and that evidence
+describes the REBASED tree only under an argument. The argument used to be that
+upstream had touched no path this series modifies. It has, so the argument is now
+three conjuncts, checked by `verify_carry_set_applies_to_upstream_head`: upstream has
+changed nothing under `barretenberg/cpp`, which is what both builds compile; every
+overlap outside that tree is acknowledged below; and the two sets of changed lines are
+disjoint per file. An overlap INSIDE `barretenberg/cpp` cannot be acknowledged at all.
+
+| Path | Patch | Upstream changes | This series changes | Acknowledged at |
+| --- | --- | --- | --- | --- |
+| `bootstrap.sh` | p2 | lines 876-1073 | lines 18-18 | `44a57f8c4a` |
+
+**`bootstrap.sh`** — Upstream's commit 539fc58613b (`chore: remove labs-owned deploy workflows and scenario/kind/bench machinery`) deletes 198 lines of `ci-network-*` arms from the top-level `case "$cmd"` dispatch, at base lines 876..1073. Patch 2 changes one line at base line 18, in the exported-version prologue: `expected_abs_wasi_version` 27.0 -> 33.0, plus a `WASI_SDK_PREFIX` default. The two regions are ~850 lines apart and the check computes that rather than taking this sentence's word for it.
+
+*Why it does not reach the build.* Neither M6's AVM_WASM build nor M10's native suites execute `bootstrap.sh`. Both configure inside `barretenberg/cpp` under the fork's own `nix develop`, and the wasi-sdk they use comes from the dev shell - `verify_avm_wasm_build.sh` asserts `WASI_SDK_PREFIX` resolves into the nix store, which is the assertion that makes this more than an assumption. `bootstrap.sh`'s pin is upstream's own developer-provisioning gate; it is what patch 2 has to move for UPSTREAM's builds, and it is not an input to ours.
+
+*If it stops holding.* If upstream edits the prologue this patch touches, the blobs move, this entry expires and the check goes red - and the right response is a rebase of patch 2, not a new entry.
 
 ## Filing
 

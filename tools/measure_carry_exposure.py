@@ -143,6 +143,42 @@ def line_churn(fork: Path, base: str, path: str, ranges: list[tuple[int, int]],
     return len(seen), True
 
 
+def pre_image_ranges(fork: Path, old_tree: str, new_tree: str,
+                     paths: list[str]) -> dict[str, list[list[int]]]:
+    """Per path, the BASE-relative line ranges the whole set changes.
+
+    `-U0`, so a hunk header's `-a,b` is exactly the lines that move rather than
+    those lines plus three of context on each side. These are in the same
+    coordinate system as `git diff -U0 <base> <upstream tip>` — both pre-images
+    are the base — which is the only reason the two can be intersected at all.
+
+    A per-PATCH hunk header could not be used for this: patch 5's pre-image is the
+    base plus patches 1, 2 and 3, so its line numbers are in a different tree's
+    coordinates. The endpoint diff has one pre-image and it is the base.
+    """
+    out: dict[str, list[list[int]]] = {}
+    for path in paths:
+        text = run(["git", "-C", str(fork), "diff", "-U0", old_tree, new_tree,
+                    "--", path])
+        ranges: list[list[int]] = []
+        for line in text.splitlines():
+            m = re.match(r"^@@ -(\d+)(?:,(\d+))? ", line)
+            if not m:
+                continue
+            start = int(m.group(1))
+            count = int(m.group(2) if m.group(2) is not None else 1)
+            if count == 0:
+                # A pure insertion: `-a,0` means "after line a". It occupies no
+                # pre-image line, so it is recorded as the single-line seam a and
+                # a+1 straddle — dropping it would let an insertion sit inside a
+                # region upstream deleted and be reported as disjoint.
+                ranges.append([start, start + 1])
+            else:
+                ranges.append([start, start + count - 1])
+        out[path] = ranges
+    return out
+
+
 def endpoint_diff(fork: Path, base: str, patch_files: list[Path]) -> dict[str, dict]:
     """What the whole set changes, as git sees it.
 
@@ -205,7 +241,7 @@ def endpoint_diff(fork: Path, base: str, patch_files: list[Path]) -> dict[str, d
             kind = {"A": "new", "D": "deleted"}.get(code[0], "modified")
         out.setdefault(path, {"added": 0, "removed": 0, "kind": kind})
         out[path]["kind"] = kind
-    return out
+    return out, base_tree, final_tree
 
 
 def churn(fork: Path, paths: list[str], since: str, until: str) -> dict[str, int]:
@@ -215,6 +251,25 @@ def churn(fork: Path, paths: list[str], since: str, until: str) -> dict[str, int
         text = run(["git", "-C", str(fork), "rev-list", "--count",
                     "--since=%s" % since, "--until=%s" % until,
                     "upstream/next", "--", p])
+        out[p] = int(text.strip() or 0)
+    return out
+
+
+def churn_between(fork: Path, paths: list[str], base: str, tip: str) -> dict[str, int]:
+    """Commits touching each path between two REVISIONS, not two dates.
+
+    `--until=<tip's date>` is midnight at the start of that day, so a commit made
+    later on the tip's own day is outside the window — and the tip is always such a
+    commit when upstream has just moved. That is how this report came to say
+    `bootstrap.sh: 0 since the base` on a day when upstream's newest commit had
+    changed `bootstrap.sh` and the intersection test in
+    verify_carry_set_applies_to_upstream_head was naming it as an overlap. Two
+    figures in one document disagreeing about one fact; the range form cannot.
+    """
+    out: dict[str, int] = {}
+    for p in paths:
+        text = run(["git", "-C", str(fork), "rev-list", "--count",
+                    "%s..%s" % (base, tip), "--", p])
         out[p] = int(text.strip() or 0)
     return out
 
@@ -240,7 +295,7 @@ def main() -> int:
     window_start = (date.fromisoformat(base_date) - timedelta(days=365)).isoformat()
 
     ordered = sorted(series["patches"], key=lambda p: p["order"])
-    endpoint = endpoint_diff(
+    endpoint, base_tree, final_tree = endpoint_diff(
         fork, base,
         [specs / "upstream-bugs" / p["entry"] / p["patch"] for p in ordered])
 
@@ -287,7 +342,7 @@ def main() -> int:
     deleted = sorted(p for p, i in endpoint.items() if i["kind"] == "deleted")
 
     before = churn(fork, modified, window_start, base_date)
-    after = churn(fork, modified, base_date, tip_date)
+    after = churn_between(fork, modified, base, tip)
 
     hunk_churn: dict[str, int] = {}
     unmeasurable: list[str] = []
@@ -337,6 +392,10 @@ def main() -> int:
         "files_renamed": len(renamed),
         "files_deleted": len(deleted),
         "modified_paths": modified,
+        # Base-relative line ranges, per modified path. Read by
+        # verify_carry_set_applies_to_upstream_head to decide whether an overlap
+        # with upstream's own changes is a REGION overlap or only a FILE one.
+        "union_pre_ranges": pre_image_ranges(fork, base_tree, final_tree, modified),
         "by_category_files": dict(totals_by_cat),
         "by_category_lines": dict(lines_by_cat),
         "churn_12mo_before_base": before,

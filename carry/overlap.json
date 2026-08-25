@@ -1,0 +1,17 @@
+{
+  "_what": "Paths upstream has changed since the base that the carry set ALSO modifies.",
+  "_why": "verify_carry_set_applies_to_upstream_head used to require this set to be EMPTY, because an empty intersection is a sufficient condition for M6's and M10's build evidence to describe the rebased tree. It stopped being empty. Each remaining overlap has to be decided rather than tolerated, and the decision is recorded here so it can expire: the entry names the blob ids of upstream's versions of the path before and after its change, and the check refuses the entry the moment either moves. An entry can never excuse an overlap under the tree the evidence compiles - that class is rejected by verification/_carry_overlap.py before it looks at this file at all.",
+  "_maintenance": "When a new overlap appears, the check FAILS and names it. Adding an entry here is a decision that the overlap does not reach either build, and it is only half the work: the reason has to be true, and the two mechanical conjuncts (outside the build tree, disjoint line regions) are checked, not read.",
+  "acknowledged": {
+    "bootstrap.sh": {
+      "patch": ["p2"],
+      "upstream_before": "15c88c779d9a832a08094bd2d6465620bc4c2dba",
+      "upstream_after": "189faea6f4680613b278aaaa790116da9a411c5d",
+      "acknowledged_at_tip": "44a57f8c4a109dea155892aef3f46a56d7a9ad29",
+      "acknowledged_on": "2026-08-25",
+      "reason": "Upstream's commit 539fc58613b (`chore: remove labs-owned deploy workflows and scenario/kind/bench machinery`) deletes 198 lines of `ci-network-*` arms from the top-level `case \"$cmd\"` dispatch, at base lines 876..1073. Patch 2 changes one line at base line 18, in the exported-version prologue: `expected_abs_wasi_version` 27.0 -> 33.0, plus a `WASI_SDK_PREFIX` default. The two regions are ~850 lines apart and the check computes that rather than taking this sentence's word for it.",
+      "why_it_does_not_reach_the_build": "Neither M6's AVM_WASM build nor M10's native suites execute `bootstrap.sh`. Both configure inside `barretenberg/cpp` under the fork's own `nix develop`, and the wasi-sdk they use comes from the dev shell - `verify_avm_wasm_build.sh` asserts `WASI_SDK_PREFIX` resolves into the nix store, which is the assertion that makes this more than an assumption. `bootstrap.sh`'s pin is upstream's own developer-provisioning gate; it is what patch 2 has to move for UPSTREAM's builds, and it is not an input to ours.",
+      "consequence_if_it_stops_holding": "If upstream edits the prologue this patch touches, the blobs move, this entry expires and the check goes red - and the right response is a rebase of patch 2, not a new entry."
+    }
+  }
+}
