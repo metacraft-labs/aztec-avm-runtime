@@ -1105,3 +1105,119 @@ jobs:
           name: orchestration
           path: artifacts-m18
           retention-days: 30
+
+  differential-oracle:
+    name: three-way differential — wasm AVM vs native C++ AVM vs TypeScript interpreter
+    runs-on: eph-linux-x64
+    # M19. A SEPARATE FAILURE DOMAIN, and that is a requirement rather than a convenience.
+    #
+    # This job compares the shipped wasm AVM against an oracle that is DELIBERATELY OUT OF DATE:
+    # the in-process NAPI AVM in the 5.0.0 npm line, which is anchor `ts` — sixty days and 2,012
+    # commits behind upstream's tip, with 276 changed files under vm2/ in between (DRIFT.md D6,
+    # D15; `just version-gap` prints the numbers on every run of this job). An oracle like that
+    # will eventually disagree for reasons that are facts about the oracle, and when it does, the
+    # browser bundle, the unit suites, the app tests and the world-state fidelity suites must not
+    # go red with it.
+    #
+    # `needs:` is therefore EMPTY on purpose, and no other job in this workflow names this one.
+    # `verify_differential_job_separate_failure_domain` asserts both directions against the parsed
+    # YAML rather than against a comment, because a job named in a comment is not a job.
+    #
+    # CONTAINMENT. Nothing this job installs reaches the published package. `@aztec/native` is a
+    # dependency of `diffsim/` alone; `orchestration/`, which is what ships, has four dependencies
+    # and none of them is native. `verify_differential_containment` asserts that against `npm pack`
+    # output and against the shipped import graph, not against this comment.
+    #
+    # STATUS, STATED PLAINLY: this job has never run, and neither has any job above it. They all
+    # still abort at `Generate CI token` on "Input required and not supplied: app-id".
+    timeout-minutes: 120
+    steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout aztec-avm-runtime
+        uses: actions/checkout@v4
+        with:
+          path: aztec-avm-runtime
+
+      - name: Clone the aztec-packages fork
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/aztec-packages
+          ref: aztec-avm-runtime
+          path: aztec-packages
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Clone codetracer-specs (the prepared patch series)
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-specs
+          ref: latest
+          path: codetracer-specs
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup Dev Environment
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        with:
+          env-flavor: nix
+
+      - name: Install diffsim's packages (this is where the NAPI oracle lives)
+        working-directory: aztec-avm-runtime/diffsim
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tail -20
+
+      - name: THE VERSION GAP (DD-12)
+        working-directory: aztec-avm-runtime
+        shell: bash
+        # Printed BEFORE the comparison, every run, and it fails the job when the gap crosses the
+        # recorded threshold. A green differential against an oracle nobody has looked at in a year
+        # is the worst kind of decay available, and this is the thing that makes the decay visible.
+        run: dev-exec just version-gap
+
+      - name: Build avm.wasm and run the three-way differential
+        working-directory: aztec-avm-runtime
+        env:
+          M19_WORK: ${{ github.workspace }}/m19-work
+        shell: bash
+        run: dev-exec just verify-m19 2>&1 | tee verify-m19.log
+
+      - name: THE HEADLINE — differential comparisons, not tests
+        if: always()
+        working-directory: aztec-avm-runtime
+        shell: bash
+        # The deliverable, literally: the number CI reports is the COMPARISON count. It is printed
+        # in its own step so it is the line a reader finds first, and it exits non-zero when the
+        # surface falls below the recorded floor.
+        run: dev-exec just report-comparisons
+
+      - name: Collect the differential artefacts
+        if: always()
+        # `shell: bash` and not the default. GitHub's default is `bash -e {0}`, under which a
+        # pipeline reports the LAST command's status — so a step that pipes can report success
+        # after its real work failed. Every piping step in this job declares it, and
+        # `verify_differential_job_separate_failure_domain` asserts that against the parsed YAML.
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p artifacts-m19
+          cp aztec-avm-runtime/verify-m19.log artifacts-m19/ 2>/dev/null || true
+          cp aztec-avm-runtime/fixtures/three-way-arm-counts.json artifacts-m19/ 2>/dev/null || true
+          cp aztec-avm-runtime/fixtures/differential-wasm-divergences.json artifacts-m19/ 2>/dev/null || true
+          for f in "${{ github.workspace }}"/m19-work/clean.log \
+                   "${{ github.workspace }}"/m19-work/counted.log ; do
+            [ -f "$f" ] && cp "$f" artifacts-m19/ || true
+          done
+          ls -la artifacts-m19
+
+      - name: Upload the differential artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: differential-oracle
+          path: artifacts-m19
+          retention-days: 30
