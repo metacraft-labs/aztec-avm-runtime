@@ -289,9 +289,19 @@ export async function instantiateAvm(compiled: CompiledAvm, options: Instantiate
     returnOnExit: true,
   });
 
+  // `getImportObject()`'s RETURN TYPE depends on which declaration of `node:wasi` wins, and this
+  // package is compiled under two projects that answer differently. Its own `types/` declares it
+  // as `{ wasi_snapshot_preview1: … }`; @types/node, which is present in any project that
+  // depends on the @aztec packages, declares it as `object`. Under the second, reading the
+  // property is TS2339 — found when `orchestration/` type-checked these sources for M18. The
+  // shape is asserted here once, so the value is the same under either declaration and neither
+  // project has to be told which one to believe.
+  const importObject = wasi.getImportObject() as {
+    wasi_snapshot_preview1: Record<string, unknown>;
+  };
   const supplied: Record<string, Record<string, unknown>> = {
     env: { memory },
-    wasi_snapshot_preview1: wasi.getImportObject().wasi_snapshot_preview1,
+    wasi_snapshot_preview1: importObject.wasi_snapshot_preview1,
   };
 
   const unknown = WebAssembly.Module.imports(compiled.module)
