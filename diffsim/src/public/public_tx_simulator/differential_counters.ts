@@ -47,7 +47,33 @@ export interface DifferentialComparisonRecord {
    * that must never be folded into the comparison count.
    */
   revertReasonCompared: boolean;
+  /**
+   * Which implementation PAIRS were asserted on for this transaction, as
+   * `orchestration/src/simulator_selection.ts` names them.
+   *
+   * ADDED IN M19, and it is the distinction that keeps the headline honest a second time. A
+   * transaction is one comparison; a transaction compared by a three-way harness asserts on TWO
+   * pairs. Folding the two into one number would inflate the corpus's coverage by counting the
+   * same transaction twice, and reporting only the pair count would hide which arms ran. Both are
+   * reported, and neither is derivable from the other once some transactions are two-way and some
+   * are three-way.
+   *
+   * Absent in records written before M19; the aggregator defaults those to the two-way pair.
+   */
+  pairs?: string[];
+  /**
+   * Whether the two arms' trees were byte-identical before this transaction ran.
+   *
+   * Absent for the two-way harness, which has one world and therefore no such question to ask.
+   * Present and measured for the three-way arm, where the pre-state is held by two different
+   * implementations and its identity is the load-bearing claim of the whole arm. Reported as a
+   * count, never asserted to be all of them: DRIFT.md D15 is live and carries a divergence forward.
+   */
+  preStateIdentical?: boolean;
 }
+
+/** The pair a two-way `CppVsTsPublicTxSimulator` comparison asserts on. */
+export const DEFAULT_PAIR = 'typescript-interpreter:native-cpp-avm';
 
 /**
  * Where the records go. Unset in every normal run, including CI's default `npm test`.
@@ -73,12 +99,19 @@ function jestState(): { file: string; test: string } {
 }
 
 /** Record one completed differential comparison. A no-op unless the sink directory is set. */
-export function recordDifferentialComparison(revertReasonCompared: boolean): void {
+export function recordDifferentialComparison(
+  revertReasonCompared: boolean,
+  pairs: string[] = [DEFAULT_PAIR],
+  preStateIdentical?: boolean,
+): void {
   const dir = process.env[COUNTER_DIR_ENV];
   if (!dir) {
     return;
   }
   const { file, test } = jestState();
-  const record: DifferentialComparisonRecord = { file, test, revertReasonCompared };
+  const record: DifferentialComparisonRecord = { file, test, revertReasonCompared, pairs };
+  if (preStateIdentical !== undefined) {
+    record.preStateIdentical = preStateIdentical;
+  }
   appendFileSync(join(dir, `${process.pid}.jsonl`), JSON.stringify(record) + '\n');
 }

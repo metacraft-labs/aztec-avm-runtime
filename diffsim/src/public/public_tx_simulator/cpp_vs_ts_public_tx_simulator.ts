@@ -43,6 +43,13 @@ import type {
 export class CppVsTsPublicTxSimulator extends PublicTxSimulator implements PublicTxSimulatorInterface {
   protected override log: Logger;
 
+  // ---- LOCAL ADDITION — aztec-avm-runtime, edit class `three-way-differential`.
+  // The TypeScript interpreter's result for the transaction this method is running, kept so that
+  // M19's third arm can compare against it. Upstream discards it after the C++ comparison because
+  // upstream has only two arms; a subclass cannot reach a local. Nothing upstream reads this, and
+  // the two-way path is unchanged whether it is read or not.
+  protected lastTsResult: PublicTxResult | undefined;
+
   constructor(
     merkleTree: MerkleTreeWriteOperations,
     contractsDB: PublicContractsDB,
@@ -72,12 +79,14 @@ export class CppVsTsPublicTxSimulator extends PublicTxSimulator implements Publi
     // create checkpoint for ws
     let tsResult: PublicTxResult | undefined;
     let tsStateRef: StateReference | undefined;
+    this.lastTsResult = undefined;
     await this.merkleTree.createCheckpoint();
     this.contractsDB.createCheckpoint();
     try {
       // Run the full TypeScript simulation using the parent class
       // This will modify the merkle tree with the transaction's state changes
       tsResult = await super.simulate(tx);
+      this.lastTsResult = tsResult; // LOCAL ADDITION `three-way-differential`; see the field.
       this.log.debug(`TS simulation completed for tx ${txHash}`);
 
       tsStateRef = await this.merkleTree.getStateReference(); // capture tree roots for later comparsion
