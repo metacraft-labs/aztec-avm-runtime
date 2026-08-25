@@ -290,6 +290,16 @@ while IFS= read -r path; do
   assert_ge "$path: the exposure measurement independently reports upstream commits on it since the base" \
     1 "$since"
 
+  # The acknowledgement declares the region upstream changed, and it must be the region this check
+  # just computed. CARRY-LEDGER.md's `Upstream changes` column is rendered from that field; before
+  # it existed the column was scraped out of the entry's `reason` with a regex for one phrasing, so
+  # a true reason worded any other way rendered as `see below` — which is a number derived from a
+  # sentence, the thing this campaign has been bitten by four times. Now it is data, and this is
+  # what stops the data from drifting away from the measurement.
+  declared_ur="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["acknowledged"].get(sys.argv[2],{}).get("upstream_ranges","<none>"))' "$ACK" "$path")"
+  assert_eq "$path: the acknowledgement declares the region upstream changed, and it is the one measured" \
+    "$ur" "$declared_ur"
+
   ack_tip="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["acknowledged"].get(sys.argv[2],{}).get("acknowledged_at_tip",""))' "$ACK" "$path")"
   if [ -n "$ack_tip" ] && git -C "$FORK_ROOT" merge-base --is-ancestor "$ack_tip" "$tip" 2>/dev/null; then
     pass "$path: the acknowledgement was made at a commit in upstream's history at or before the tip  [$ack_tip]"

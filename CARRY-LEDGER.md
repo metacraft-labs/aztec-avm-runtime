@@ -165,7 +165,7 @@ which files. It exits non-zero if any patch we still carry stops applying. CI ru
 weekly and on every change to the series, so the cost is a dated failure rather than
 a discovery during an emergency.
 
-Last recorded replay, onto `upstream/next` (44a57f8c4a), 7 commit(s) past the base:
+Last recorded replay, onto `upstream/next` (142dfcf4b2), 12 commit(s) past the base:
 
 | Patch | Result |
 | --- | --- |
@@ -189,12 +189,26 @@ disjoint per file. An overlap INSIDE `barretenberg/cpp` cannot be acknowledged a
 | Path | Patch | Upstream changes | This series changes | Acknowledged at |
 | --- | --- | --- | --- | --- |
 | `bootstrap.sh` | p2 | lines 876-1073 | lines 18-18 | `44a57f8c4a` |
+| `build-images/src/Dockerfile` | p2 | lines 47-47 | lines 125-128 | `142dfcf4b2` |
+| `scripts/setup-container.sh` | p2 | lines 165-166, 167-167 | lines 144-144, 148-151 | `142dfcf4b2` |
 
 **`bootstrap.sh`** — Upstream's commit 539fc58613b (`chore: remove labs-owned deploy workflows and scenario/kind/bench machinery`) deletes 198 lines of `ci-network-*` arms from the top-level `case "$cmd"` dispatch, at base lines 876..1073. Patch 2 changes one line at base line 18, in the exported-version prologue: `expected_abs_wasi_version` 27.0 -> 33.0, plus a `WASI_SDK_PREFIX` default. The two regions are ~850 lines apart and the check computes that rather than taking this sentence's word for it.
 
 *Why it does not reach the build.* Neither M6's AVM_WASM build nor M10's native suites execute `bootstrap.sh`. Both configure inside `barretenberg/cpp` under the fork's own `nix develop`, and the wasi-sdk they use comes from the dev shell - `verify_avm_wasm_build.sh` asserts `WASI_SDK_PREFIX` resolves into the nix store, which is the assertion that makes this more than an assumption. `bootstrap.sh`'s pin is upstream's own developer-provisioning gate; it is what patch 2 has to move for UPSTREAM's builds, and it is not an input to ours.
 
 *If it stops holding.* If upstream edits the prologue this patch touches, the blobs move, this entry expires and the check goes red - and the right response is a rebase of patch 2, not a new entry.
+
+**`build-images/src/Dockerfile`** — Upstream's commit fd64d8ef9c7 (`fix: copy foundry binaries instead of moving foundryup symlinks`) changes one line at base line 47, inside the `RUN curl -L https://foundry.paradigm.xyz | bash` layer: `mv $FOUNDRY_BIN_DIR/$t` -> `cp -Lp $FOUNDRY_BIN_DIR/$t`. Patch 2 changes base lines 125..128, the wasi-sdk layer, moving the download from wasi-sdk-27.0 to 33.0 and adding a `WASI_SDK_PREFIX` default. Two different layers, ~78 lines apart, and the check computes the disjointness rather than taking this sentence's word for it.
+
+*Why it does not reach the build.* This Dockerfile builds upstream's CI image. Neither M6's AVM_WASM build nor M10's native suites run in it or read it: both configure inside `barretenberg/cpp` under the fork's own `nix develop`, and the wasi-sdk they use comes from the dev shell — `verify_avm_wasm_build.sh` asserts `WASI_SDK_PREFIX` resolves into the nix store, which is the assertion that makes this more than an assumption. The line upstream changed installs `forge`/`cast`/`anvil`/`chisel`, which no C++ target links, includes or executes.
+
+*If it stops holding.* If upstream edits the wasi-sdk layer this patch touches, the blobs move, this entry expires and the check goes red — and the right response is a rebase of patch 2, not a new entry.
+
+**`scripts/setup-container.sh`** — The same upstream commit, fd64d8ef9c7, applied to the non-Docker path: base lines 165..167, `mv $HOME/.foundry/bin/$t` -> `cp -Lp $HOME/.foundry/bin/$t` plus a two-line comment. Patch 2 changes base lines 144 and 148..151, SECTION 5 (`wasi-sdk`), moving the install from 27 to 33. SECTION 5 and the foundry section are adjacent but disjoint, and the check computes that.
+
+*Why it does not reach the build.* `scripts/setup-container.sh` provisions upstream's dev container. This runtime does not use it: M6 and M10 configure in `barretenberg/cpp` under the fork's `nix develop`, and `verify_avm_wasm_build.sh` asserts the wasi-sdk in use resolves into the nix store rather than into `/opt/wasi-sdk`, which is the path this script writes. Upstream's change is to the foundry install, which neither build reads.
+
+*If it stops holding.* If upstream edits SECTION 5, the blobs move, this entry expires and the check goes red — and the right response is a rebase of patch 2, not a new entry.
 
 ## Filing
 

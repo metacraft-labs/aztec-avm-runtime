@@ -1,17 +1,65 @@
 {
   "_what": "Paths upstream has changed since the base that the carry set ALSO modifies.",
   "_why": "verify_carry_set_applies_to_upstream_head used to require this set to be EMPTY, because an empty intersection is a sufficient condition for M6's and M10's build evidence to describe the rebased tree. It stopped being empty. Each remaining overlap has to be decided rather than tolerated, and the decision is recorded here so it can expire: the entry names the blob ids of upstream's versions of the path before and after its change, and the check refuses the entry the moment either moves. An entry can never excuse an overlap under the tree the evidence compiles - that class is rejected by verification/_carry_overlap.py before it looks at this file at all.",
-  "_maintenance": "When a new overlap appears, the check FAILS and names it. Adding an entry here is a decision that the overlap does not reach either build, and it is only half the work: the reason has to be true, and the two mechanical conjuncts (outside the build tree, disjoint line regions) are checked, not read.",
+  "_maintenance": "When a new overlap appears, the check FAILS and names it. Adding an entry here is a decision that the overlap does not reach either build, and it is only half the work: the reason has to be true, and the two mechanical conjuncts (outside the build tree, disjoint line regions) are checked, not read. `upstream_ranges` is the region upstream changed, as data rather than as a sentence: CARRY-LEDGER.md's `Upstream changes` column used to be scraped out of `reason` with a regex for the phrase `at base lines N..M`, so a true reason worded any other way rendered as `see below`. The check asserts the declared ranges equal the ones it computes, so this field cannot drift from the measurement either.",
   "acknowledged": {
     "bootstrap.sh": {
-      "patch": ["p2"],
+      "patch": [
+        "p2"
+      ],
       "upstream_before": "15c88c779d9a832a08094bd2d6465620bc4c2dba",
       "upstream_after": "189faea6f4680613b278aaaa790116da9a411c5d",
+      "upstream_ranges": [
+        [
+          876,
+          1073
+        ]
+      ],
       "acknowledged_at_tip": "44a57f8c4a109dea155892aef3f46a56d7a9ad29",
       "acknowledged_on": "2026-08-25",
       "reason": "Upstream's commit 539fc58613b (`chore: remove labs-owned deploy workflows and scenario/kind/bench machinery`) deletes 198 lines of `ci-network-*` arms from the top-level `case \"$cmd\"` dispatch, at base lines 876..1073. Patch 2 changes one line at base line 18, in the exported-version prologue: `expected_abs_wasi_version` 27.0 -> 33.0, plus a `WASI_SDK_PREFIX` default. The two regions are ~850 lines apart and the check computes that rather than taking this sentence's word for it.",
       "why_it_does_not_reach_the_build": "Neither M6's AVM_WASM build nor M10's native suites execute `bootstrap.sh`. Both configure inside `barretenberg/cpp` under the fork's own `nix develop`, and the wasi-sdk they use comes from the dev shell - `verify_avm_wasm_build.sh` asserts `WASI_SDK_PREFIX` resolves into the nix store, which is the assertion that makes this more than an assumption. `bootstrap.sh`'s pin is upstream's own developer-provisioning gate; it is what patch 2 has to move for UPSTREAM's builds, and it is not an input to ours.",
       "consequence_if_it_stops_holding": "If upstream edits the prologue this patch touches, the blobs move, this entry expires and the check goes red - and the right response is a rebase of patch 2, not a new entry."
+    },
+    "build-images/src/Dockerfile": {
+      "patch": [
+        "p2"
+      ],
+      "upstream_before": "f8fe7b302dff0a1a0d09eb10a9270e8ffdbe113a",
+      "upstream_after": "875b10c476558e80568774812b42e78c18204a79",
+      "upstream_ranges": [
+        [
+          47,
+          47
+        ]
+      ],
+      "acknowledged_at_tip": "142dfcf4b2b5430a0c160490d376f085f377966a",
+      "acknowledged_on": "2026-08-26",
+      "reason": "Upstream's commit fd64d8ef9c7 (`fix: copy foundry binaries instead of moving foundryup symlinks`) changes one line at base line 47, inside the `RUN curl -L https://foundry.paradigm.xyz | bash` layer: `mv $FOUNDRY_BIN_DIR/$t` -> `cp -Lp $FOUNDRY_BIN_DIR/$t`. Patch 2 changes base lines 125..128, the wasi-sdk layer, moving the download from wasi-sdk-27.0 to 33.0 and adding a `WASI_SDK_PREFIX` default. Two different layers, ~78 lines apart, and the check computes the disjointness rather than taking this sentence's word for it.",
+      "why_it_does_not_reach_the_build": "This Dockerfile builds upstream's CI image. Neither M6's AVM_WASM build nor M10's native suites run in it or read it: both configure inside `barretenberg/cpp` under the fork's own `nix develop`, and the wasi-sdk they use comes from the dev shell \u2014 `verify_avm_wasm_build.sh` asserts `WASI_SDK_PREFIX` resolves into the nix store, which is the assertion that makes this more than an assumption. The line upstream changed installs `forge`/`cast`/`anvil`/`chisel`, which no C++ target links, includes or executes.",
+      "consequence_if_it_stops_holding": "If upstream edits the wasi-sdk layer this patch touches, the blobs move, this entry expires and the check goes red \u2014 and the right response is a rebase of patch 2, not a new entry."
+    },
+    "scripts/setup-container.sh": {
+      "patch": [
+        "p2"
+      ],
+      "upstream_before": "21674696a802a3b37482e1183c0b70cfc82d54ac",
+      "upstream_after": "ba11374a27a61b7c1265117be04c3410ac1ec2a6",
+      "upstream_ranges": [
+        [
+          165,
+          166
+        ],
+        [
+          167,
+          167
+        ]
+      ],
+      "acknowledged_at_tip": "142dfcf4b2b5430a0c160490d376f085f377966a",
+      "acknowledged_on": "2026-08-26",
+      "reason": "The same upstream commit, fd64d8ef9c7, applied to the non-Docker path: base lines 165..167, `mv $HOME/.foundry/bin/$t` -> `cp -Lp $HOME/.foundry/bin/$t` plus a two-line comment. Patch 2 changes base lines 144 and 148..151, SECTION 5 (`wasi-sdk`), moving the install from 27 to 33. SECTION 5 and the foundry section are adjacent but disjoint, and the check computes that.",
+      "why_it_does_not_reach_the_build": "`scripts/setup-container.sh` provisions upstream's dev container. This runtime does not use it: M6 and M10 configure in `barretenberg/cpp` under the fork's `nix develop`, and `verify_avm_wasm_build.sh` asserts the wasi-sdk in use resolves into the nix store rather than into `/opt/wasi-sdk`, which is the path this script writes. Upstream's change is to the foundry install, which neither build reads.",
+      "consequence_if_it_stops_holding": "If upstream edits SECTION 5, the blobs move, this entry expires and the check goes red \u2014 and the right response is a rebase of patch 2, not a new entry."
     }
   }
 }

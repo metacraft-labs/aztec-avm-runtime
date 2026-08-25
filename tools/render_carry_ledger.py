@@ -279,8 +279,18 @@ def main(argv: list[str] | None = None) -> int:
         w("| --- | --- | --- | --- | --- |")
         for path, e in sorted(overlap["acknowledged"].items()):
             ours = ", ".join("%d-%d" % (a, b) for a, b in ranges.get(path, [])) or "n/a"
-            m = re.search(r"at base lines ([0-9]+\.\.[0-9]+)", e.get("reason", ""))
-            theirs = m.group(1).replace("..", "-") if m else "see below"
+            # DATA FIRST, PROSE ONLY AS A FALLBACK. This column used to be scraped out of the
+            # entry's `reason` with a regex for the phrase `at base lines N..M`, so an entry whose
+            # reason was true but worded differently rendered as `see below` — two of the three did,
+            # the moment a second overlap was acknowledged. `upstream_ranges` carries the region as
+            # data, and `verify_carry_set_applies_to_upstream_head` asserts it equals the range the
+            # decision procedure computes, so it cannot drift from the measurement.
+            declared = e.get("upstream_ranges")
+            if declared:
+                theirs = ", ".join("%d-%d" % (a, b) for a, b in declared)
+            else:
+                m = re.search(r"at base lines ([0-9]+\.\.[0-9]+)", e.get("reason", ""))
+                theirs = m.group(1).replace("..", "-") if m else "see below"
             w("| `%s` | %s | lines %s | lines %s | `%s` |"
               % (path, ", ".join(e.get("patch", [])), theirs, ours,
                  (e.get("acknowledged_at_tip") or "")[:10]))
