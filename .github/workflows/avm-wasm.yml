@@ -14,6 +14,83 @@ name: AVM_WASM
 # fails the job. `just verify-m7` runs all six checks even if an earlier one
 # fails, and exits non-zero if any did, so one run reports everything that broke.
 
+# THE CI TOKEN, DIAGNOSED — 2026-08-25
+#
+# Every job in this file and in `carry.yml` has aborted at `Generate CI token`
+# on `Input required and not supplied: app-id` since the workflows were written.
+# M11 recorded it as undiagnosed; M20 measured it. The account below is the
+# measurement, so that the next reader does not re-run the refuted hypotheses.
+#
+# WHAT THE ERROR HID. The action names only the FIRST required input it finds
+# missing. The `with:` echo one line above the stack trace is the datum, and it
+# read:
+#
+#     ##[group]Run actions/create-github-app-token@v1
+#     with:
+#       owner: metacraft-labs
+#       github-api-url: https://api.github.com
+#
+# `private-key` is absent there TOO. So it was never "one variable spelled
+# wrong": nothing organisation-level was arriving at all.
+#
+# WHAT THE RUNNER SAID. A probe on branch `ci/token-probe` printed the contexts
+# themselves (run 32841097268): `toJSON(vars)` was `{}` and `toJSON(secrets)`
+# was `{"github_token": "***"}`, with `secrets.GITHUB_TOKEN != ''` as the
+# control, green. A green control is what makes that a fact about the
+# organisation-to-repository grant rather than about the probe.
+#
+# WHY THE OBVIOUS COMPARISON MISLED. `metacraft-labs/codetracer-ci` is private,
+# in the same organisation, on the same runner group and label, using the same
+# `@v1` action and the same `vars.` spelling — and its token step succeeds. That
+# looked like a refutation of every organisation-level explanation. It is not,
+# because `codetracer-ci` does not read the organisation variable: it has a
+# REPOSITORY variable of the same name, and a repository secret for the key.
+# So does `codetracer-native-recorder`; `codetracer-launcher` carries repository
+# secrets for both. Every private repository in this organisation that mints a
+# token carries its own copies. `aztec-avm-runtime`, created 2026-08-21, is the
+# one that never got them.
+#
+# WHY THE REST API DID NOT CATCH IT. `GET /repos/{owner}/{repo}/actions/
+# organization-variables` lists `CI_TOKEN_PROVIDER_APP_ID` for this repository,
+# and `organization-secrets` lists both organisation secrets. Those endpoints
+# report what the organisation DECLARED (`visibility: all`) and not what the
+# runner DELIVERS. Read as "what this repository will get", they are a question
+# asked of a tree that cannot answer it the other way. `toJSON(vars)` on the
+# runner is the tree that can.
+#
+# THE RULE THAT FITS EVERY OBSERVATION. `metacraft-labs` is on the `free` plan,
+# where organisation variables and secrets reach PUBLIC repositories only. Every
+# private repository here works around it with repository-level copies.
+#
+# PROVED BOTH WAYS. A repository variable `CI_TOKEN_PROVIDER_APP_ID = 3115338`
+# was then set on this repository and the identical probe re-run at the same
+# commit (run 32841465463): `toJSON(vars)` became non-empty, the action echoed
+# `app-id: 3115338`, `toJSON(secrets)` was unchanged, and the error moved to
+# `Input required and not supplied: private-key`. One variable changed; the
+# failure moved exactly one input along.
+#
+# WHAT IS STILL MISSING, AND WHO CAN SUPPLY IT. A REPOSITORY secret
+# `CI_TOKEN_PROVIDER_PRIVATE_KEY` holding the CI app's private key. Secret
+# plaintext is not readable through the API by anyone, organisation owners
+# included, so this is the user's step and no agent can take it:
+#
+#     gh secret set CI_TOKEN_PROVIDER_PRIVATE_KEY \
+#       --repo metacraft-labs/aztec-avm-runtime < ci-app-private-key.pem
+#
+# Until then every job still stops at the token, one input later than before.
+# The `Assert the CI-token inputs are present` step in front of each
+# `Generate CI token` says so in those words rather than as a node stack trace.
+#
+# NOT THE FIX: `.github/sibling-repos`. M7 and M8 recorded its absence as a
+# deterministic failure. It is not one, and adding it would BREAK these jobs:
+# `clone-siblings` resolves each sibling's revision from a workspace lock in
+# `metacraft-labs/metacraft-manifests` keyed by the host commit, that repository
+# declares no `aztec-avm-runtime` project and holds no lock for any commit of
+# it, and the action fails loudly on a commit with no lock rather than falling
+# back to a branch tip. These jobs clone their two siblings explicitly with
+# `clone-repo` at refs they name, which is why `clone-siblings` prints
+# "no cross-repo siblings to clone" and succeeds today.
+
 on:
   push:
     branches: [dev, main]
@@ -39,6 +116,43 @@ jobs:
     # slow runner reports a real failure instead of a timeout.
     timeout-minutes: 120
     steps:
+      # PREFLIGHT, and it is here because its absence cost this campaign nine
+      # milestones of CI. `create-github-app-token` fails with a node stack
+      # trace naming only the FIRST input it finds missing, which read for
+      # months as a problem with `app-id` when both inputs were empty. This
+      # step names both, and names the remedy.
+      #
+      # THE CONTROL. `secrets.GITHUB_TOKEN` is minted by the runner for every
+      # job and cannot be empty. Without it, "the repository secret is empty"
+      # would be indistinguishable from "the secrets context is not being
+      # populated" and from "these expressions are misspelled" — three
+      # explanations with three different remedies. With it green, an empty
+      # `CI_TOKEN_PROVIDER_*` is a statement about this repository's
+      # configuration; with it red, this step says so and refuses to blame the
+      # configuration.
+      - name: Assert the CI-token inputs are present
+        shell: bash
+        env:
+          APP_ID_PRESENT: ${{ vars.CI_TOKEN_PROVIDER_APP_ID != '' }}
+          PRIVATE_KEY_PRESENT: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY != '' }}
+          CONTROL_PRESENT: ${{ secrets.GITHUB_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          if [ "${CONTROL_PRESENT}" != "true" ]; then
+            echo "::error::CONTROL FAILED: secrets.GITHUB_TOKEN is empty, so the secrets context is not being populated at all. Nothing this step says about repository configuration is trustworthy; fix the runner or the workflow before reading the messages below."
+            exit 2
+          fi
+          rc=0
+          if [ "${APP_ID_PRESENT}" != "true" ]; then
+            echo "::error::vars.CI_TOKEN_PROVIDER_APP_ID is empty. Organisation variables do not reach private repositories in this organisation (see THE CI TOKEN, DIAGNOSED at the top of this workflow); set a REPOSITORY variable: gh variable set CI_TOKEN_PROVIDER_APP_ID --repo metacraft-labs/aztec-avm-runtime --body 3115338"
+            rc=1
+          fi
+          if [ "${PRIVATE_KEY_PRESENT}" != "true" ]; then
+            echo "::error::secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY is empty. Organisation secrets do not reach private repositories in this organisation; set a REPOSITORY secret: gh secret set CI_TOKEN_PROVIDER_PRIVATE_KEY --repo metacraft-labs/aztec-avm-runtime < ci-app-private-key.pem"
+            rc=1
+          fi
+          exit "$rc"
+
       - name: Generate CI token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -171,24 +285,67 @@ jobs:
     #     the flake in the cwd of the step that calls it, and every `dev-exec` step below sets
     #     `working-directory: aztec-avm-runtime`, which is where `flake.nix` is.
     #
-    # A FOURTH failure, which nobody had recorded, showed up on the first real run and is fixed
-    # here: `app-id` read `secrets.CI_TOKEN_PROVIDER_APP_ID`, and that identifier is an
-    # organisation VARIABLE rather than a secret, so `create-github-app-token` aborted on
-    # "Input required and not supplied: app-id" before any step of substance ran. It is
-    # `vars.CI_TOKEN_PROVIDER_APP_ID` now, which is what every other repository in the
-    # organisation uses.
+    # A FOURTH failure, which nobody had recorded, showed up on the first real run: `app-id`
+    # read `secrets.CI_TOKEN_PROVIDER_APP_ID` where the organisation holds a VARIABLE of that
+    # name. The spelling was changed to `vars.CI_TOKEN_PROVIDER_APP_ID` and it did not help,
+    # because — as the FIFTH below records — neither spelling resolves here. Note that the claim
+    # written beside that change, that `vars.` is "what every other repository in the
+    # organisation uses", is FALSE: `codetracer-launcher` spells both inputs `secrets.`, and
+    # `codetracer-ci` reads a REPOSITORY variable rather than the organisation one. The
+    # organisation runs both conventions and neither reaches this repository from the
+    # organisation level.
     #
-    # A FIFTH, and it is the one currently blocking: the `vars.` spelling did NOT fix it. Runners
-    # do pick both jobs up (group `nixos self-hosted`), `Set up job` succeeds, and `Generate CI
-    # token` still aborts on "Input required and not supplied: app-id" — 40s for this job, 41s
-    # for `carry.yml`. The organisation variable exists and reads `visibility: all`, so the cause
-    # is not the spelling. Undiagnosed, and recorded as such rather than guessed at.
+    # A FIFTH, and it is the one still blocking, though it is no longer undiagnosed: this
+    # repository receives NO organisation variable and NO organisation secret. Runners do pick
+    # every job up (group `nixos self-hosted`) and `Set up job` succeeds; the token step then
+    # finds both of its inputs empty. The full measurement, its control, and the one step the
+    # user must take are under THE CI TOKEN, DIAGNOSED at the top of this file. `visibility:
+    # all` on the organisation variable is a declaration, not a delivery, and reading it as one
+    # is what kept this open.
     #
     # Whoever watches the first run should still expect to learn something: no assessment above
-    # is a substitute for a green run, and this job — like the one above — still **has never run**
-    # to completion. Nothing downstream of `Generate CI token` has ever executed.
+    # is a substitute for a green run, and this job — like every job in this file — still **has
+    # never run** to completion. Nothing downstream of `Generate CI token` has ever executed, so
+    # no check in this repository has ever been exercised in the environment it is declared for.
     timeout-minutes: 120
     steps:
+      # PREFLIGHT, and it is here because its absence cost this campaign nine
+      # milestones of CI. `create-github-app-token` fails with a node stack
+      # trace naming only the FIRST input it finds missing, which read for
+      # months as a problem with `app-id` when both inputs were empty. This
+      # step names both, and names the remedy.
+      #
+      # THE CONTROL. `secrets.GITHUB_TOKEN` is minted by the runner for every
+      # job and cannot be empty. Without it, "the repository secret is empty"
+      # would be indistinguishable from "the secrets context is not being
+      # populated" and from "these expressions are misspelled" — three
+      # explanations with three different remedies. With it green, an empty
+      # `CI_TOKEN_PROVIDER_*` is a statement about this repository's
+      # configuration; with it red, this step says so and refuses to blame the
+      # configuration.
+      - name: Assert the CI-token inputs are present
+        shell: bash
+        env:
+          APP_ID_PRESENT: ${{ vars.CI_TOKEN_PROVIDER_APP_ID != '' }}
+          PRIVATE_KEY_PRESENT: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY != '' }}
+          CONTROL_PRESENT: ${{ secrets.GITHUB_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          if [ "${CONTROL_PRESENT}" != "true" ]; then
+            echo "::error::CONTROL FAILED: secrets.GITHUB_TOKEN is empty, so the secrets context is not being populated at all. Nothing this step says about repository configuration is trustworthy; fix the runner or the workflow before reading the messages below."
+            exit 2
+          fi
+          rc=0
+          if [ "${APP_ID_PRESENT}" != "true" ]; then
+            echo "::error::vars.CI_TOKEN_PROVIDER_APP_ID is empty. Organisation variables do not reach private repositories in this organisation (see THE CI TOKEN, DIAGNOSED at the top of this workflow); set a REPOSITORY variable: gh variable set CI_TOKEN_PROVIDER_APP_ID --repo metacraft-labs/aztec-avm-runtime --body 3115338"
+            rc=1
+          fi
+          if [ "${PRIVATE_KEY_PRESENT}" != "true" ]; then
+            echo "::error::secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY is empty. Organisation secrets do not reach private repositories in this organisation; set a REPOSITORY secret: gh secret set CI_TOKEN_PROVIDER_PRIVATE_KEY --repo metacraft-labs/aztec-avm-runtime < ci-app-private-key.pem"
+            rc=1
+          fi
+          exit "$rc"
+
       - name: Generate CI token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -292,12 +449,13 @@ jobs:
     # barretenberg's proving stack in this campaign took about nine minutes on its own, so budget
     # generously rather than tightly; the cap below is generous for that reason.
     #
-    # STATUS, STATED PLAINLY: this job has never run, and neither has either job above it. Both of
-    # those still abort at `Generate CI token` on "Input required and not supplied: app-id", which
-    # M11 recorded as undiagnosed after the `vars.` spelling did not fix it. So "the size budget is
-    # enforced in CI" means the job exists, is wired and names the check — not that a run has ever
-    # gated anything. `verify_avm_wasm_size_budget` asserts the former and REACTOR-ABI.md states
-    # the latter.
+    # STATUS, STATED PLAINLY: this job has never run, and neither has any job above it. They all
+    # still stop at the CI token, which is now DIAGNOSED — see THE CI TOKEN, DIAGNOSED at the
+    # top of this file, and the remaining blocker is a repository-level
+    # `CI_TOKEN_PROVIDER_PRIVATE_KEY` only the user can set. So "the size budget is enforced in
+    # CI" means the job exists, is wired and names the check — not that a run has ever gated
+    # anything. `verify_avm_wasm_size_budget` asserts the former and REACTOR-ABI.md states the
+    # latter.
     #
     # ONE OF THE SIX CHECKS TIMES TWO CALL PATTERNS. `test_avm_reactor_step_stream_batching` waits
     # for the machine to go idle and exits 3 rather than reporting a number measured beside a
@@ -305,6 +463,43 @@ jobs:
     # a wrong ratio.
     timeout-minutes: 120
     steps:
+      # PREFLIGHT, and it is here because its absence cost this campaign nine
+      # milestones of CI. `create-github-app-token` fails with a node stack
+      # trace naming only the FIRST input it finds missing, which read for
+      # months as a problem with `app-id` when both inputs were empty. This
+      # step names both, and names the remedy.
+      #
+      # THE CONTROL. `secrets.GITHUB_TOKEN` is minted by the runner for every
+      # job and cannot be empty. Without it, "the repository secret is empty"
+      # would be indistinguishable from "the secrets context is not being
+      # populated" and from "these expressions are misspelled" — three
+      # explanations with three different remedies. With it green, an empty
+      # `CI_TOKEN_PROVIDER_*` is a statement about this repository's
+      # configuration; with it red, this step says so and refuses to blame the
+      # configuration.
+      - name: Assert the CI-token inputs are present
+        shell: bash
+        env:
+          APP_ID_PRESENT: ${{ vars.CI_TOKEN_PROVIDER_APP_ID != '' }}
+          PRIVATE_KEY_PRESENT: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY != '' }}
+          CONTROL_PRESENT: ${{ secrets.GITHUB_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          if [ "${CONTROL_PRESENT}" != "true" ]; then
+            echo "::error::CONTROL FAILED: secrets.GITHUB_TOKEN is empty, so the secrets context is not being populated at all. Nothing this step says about repository configuration is trustworthy; fix the runner or the workflow before reading the messages below."
+            exit 2
+          fi
+          rc=0
+          if [ "${APP_ID_PRESENT}" != "true" ]; then
+            echo "::error::vars.CI_TOKEN_PROVIDER_APP_ID is empty. Organisation variables do not reach private repositories in this organisation (see THE CI TOKEN, DIAGNOSED at the top of this workflow); set a REPOSITORY variable: gh variable set CI_TOKEN_PROVIDER_APP_ID --repo metacraft-labs/aztec-avm-runtime --body 3115338"
+            rc=1
+          fi
+          if [ "${PRIVATE_KEY_PRESENT}" != "true" ]; then
+            echo "::error::secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY is empty. Organisation secrets do not reach private repositories in this organisation; set a REPOSITORY secret: gh secret set CI_TOKEN_PROVIDER_PRIVATE_KEY --repo metacraft-labs/aztec-avm-runtime < ci-app-private-key.pem"
+            rc=1
+          fi
+          exit "$rc"
+
       - name: Generate CI token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -409,15 +604,53 @@ jobs:
     # "additive" means anything.
     #
     # STATUS, STATED PLAINLY: this job has never run, and neither has any job above it. They all
-    # still abort at `Generate CI token` on "Input required and not supplied: app-id", which M11
-    # recorded as undiagnosed after the `vars.` spelling did not fix it. So this job existing means
-    # it is wired and names the check — not that a run has ever gated anything. CONTRACT-DB.md says
+    # still stop at the CI token, which is now DIAGNOSED — see THE CI TOKEN, DIAGNOSED at the
+    # top of this file, and the remaining blocker is a repository-level
+    # `CI_TOKEN_PROVIDER_PRIVATE_KEY` only the user can set. So this job existing means it is
+    # wired and names the check — not that a run has ever gated anything. CONTRACT-DB.md says
     # the same thing in prose.
     #
     # None of M13's six checks times anything, so a busy runner costs time here rather than a wrong
     # number; the reactor job's step-batching caveat does not apply.
     timeout-minutes: 120
     steps:
+      # PREFLIGHT, and it is here because its absence cost this campaign nine
+      # milestones of CI. `create-github-app-token` fails with a node stack
+      # trace naming only the FIRST input it finds missing, which read for
+      # months as a problem with `app-id` when both inputs were empty. This
+      # step names both, and names the remedy.
+      #
+      # THE CONTROL. `secrets.GITHUB_TOKEN` is minted by the runner for every
+      # job and cannot be empty. Without it, "the repository secret is empty"
+      # would be indistinguishable from "the secrets context is not being
+      # populated" and from "these expressions are misspelled" — three
+      # explanations with three different remedies. With it green, an empty
+      # `CI_TOKEN_PROVIDER_*` is a statement about this repository's
+      # configuration; with it red, this step says so and refuses to blame the
+      # configuration.
+      - name: Assert the CI-token inputs are present
+        shell: bash
+        env:
+          APP_ID_PRESENT: ${{ vars.CI_TOKEN_PROVIDER_APP_ID != '' }}
+          PRIVATE_KEY_PRESENT: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY != '' }}
+          CONTROL_PRESENT: ${{ secrets.GITHUB_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          if [ "${CONTROL_PRESENT}" != "true" ]; then
+            echo "::error::CONTROL FAILED: secrets.GITHUB_TOKEN is empty, so the secrets context is not being populated at all. Nothing this step says about repository configuration is trustworthy; fix the runner or the workflow before reading the messages below."
+            exit 2
+          fi
+          rc=0
+          if [ "${APP_ID_PRESENT}" != "true" ]; then
+            echo "::error::vars.CI_TOKEN_PROVIDER_APP_ID is empty. Organisation variables do not reach private repositories in this organisation (see THE CI TOKEN, DIAGNOSED at the top of this workflow); set a REPOSITORY variable: gh variable set CI_TOKEN_PROVIDER_APP_ID --repo metacraft-labs/aztec-avm-runtime --body 3115338"
+            rc=1
+          fi
+          if [ "${PRIVATE_KEY_PRESENT}" != "true" ]; then
+            echo "::error::secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY is empty. Organisation secrets do not reach private repositories in this organisation; set a REPOSITORY secret: gh secret set CI_TOKEN_PROVIDER_PRIVATE_KEY --repo metacraft-labs/aztec-avm-runtime < ci-app-private-key.pem"
+            rc=1
+          fi
+          exit "$rc"
+
       - name: Generate CI token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -527,15 +760,53 @@ jobs:
     # one paid 9 s when it was measured, build directory deleted in between.
     #
     # STATUS, STATED PLAINLY: this job has never run, and neither has any job above it. They all
-    # still abort at `Generate CI token` on "Input required and not supplied: app-id", which M11
-    # recorded as undiagnosed after the `vars.` spelling did not fix it. So this job existing means
-    # it is wired and names the checks — not that a run has ever gated anything. WORLD-STATE.md says
+    # still stop at the CI token, which is now DIAGNOSED — see THE CI TOKEN, DIAGNOSED at the
+    # top of this file, and the remaining blocker is a repository-level
+    # `CI_TOKEN_PROVIDER_PRIVATE_KEY` only the user can set. So this job existing means it is
+    # wired and names the checks — not that a run has ever gated anything. WORLD-STATE.md says
     # the same thing in prose.
     #
     # None of M14's eight checks times anything, so a busy runner costs time here rather than a
     # wrong number.
     timeout-minutes: 120
     steps:
+      # PREFLIGHT, and it is here because its absence cost this campaign nine
+      # milestones of CI. `create-github-app-token` fails with a node stack
+      # trace naming only the FIRST input it finds missing, which read for
+      # months as a problem with `app-id` when both inputs were empty. This
+      # step names both, and names the remedy.
+      #
+      # THE CONTROL. `secrets.GITHUB_TOKEN` is minted by the runner for every
+      # job and cannot be empty. Without it, "the repository secret is empty"
+      # would be indistinguishable from "the secrets context is not being
+      # populated" and from "these expressions are misspelled" — three
+      # explanations with three different remedies. With it green, an empty
+      # `CI_TOKEN_PROVIDER_*` is a statement about this repository's
+      # configuration; with it red, this step says so and refuses to blame the
+      # configuration.
+      - name: Assert the CI-token inputs are present
+        shell: bash
+        env:
+          APP_ID_PRESENT: ${{ vars.CI_TOKEN_PROVIDER_APP_ID != '' }}
+          PRIVATE_KEY_PRESENT: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY != '' }}
+          CONTROL_PRESENT: ${{ secrets.GITHUB_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          if [ "${CONTROL_PRESENT}" != "true" ]; then
+            echo "::error::CONTROL FAILED: secrets.GITHUB_TOKEN is empty, so the secrets context is not being populated at all. Nothing this step says about repository configuration is trustworthy; fix the runner or the workflow before reading the messages below."
+            exit 2
+          fi
+          rc=0
+          if [ "${APP_ID_PRESENT}" != "true" ]; then
+            echo "::error::vars.CI_TOKEN_PROVIDER_APP_ID is empty. Organisation variables do not reach private repositories in this organisation (see THE CI TOKEN, DIAGNOSED at the top of this workflow); set a REPOSITORY variable: gh variable set CI_TOKEN_PROVIDER_APP_ID --repo metacraft-labs/aztec-avm-runtime --body 3115338"
+            rc=1
+          fi
+          if [ "${PRIVATE_KEY_PRESENT}" != "true" ]; then
+            echo "::error::secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY is empty. Organisation secrets do not reach private repositories in this organisation; set a REPOSITORY secret: gh secret set CI_TOKEN_PROVIDER_PRIVATE_KEY --repo metacraft-labs/aztec-avm-runtime < ci-app-private-key.pem"
+            rc=1
+          fi
+          exit "$rc"
+
       - name: Generate CI token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -647,12 +918,50 @@ jobs:
     # which is bounded to a range wide enough to be a sanity check rather than a budget.
     #
     # STATUS, STATED PLAINLY: this job has never run, and neither has any job above it. They all
-    # still abort at `Generate CI token` on "Input required and not supplied: app-id", which M11
-    # recorded as undiagnosed after the `vars.` spelling did not fix it. So this job existing means
-    # it is wired and names the checks — not that a run has ever gated anything. BOUNDARY-SHAPE.md
+    # still stop at the CI token, which is now DIAGNOSED — see THE CI TOKEN, DIAGNOSED at the
+    # top of this file, and the remaining blocker is a repository-level
+    # `CI_TOKEN_PROVIDER_PRIVATE_KEY` only the user can set. So this job existing means it is
+    # wired and names the checks — not that a run has ever gated anything. BOUNDARY-SHAPE.md
     # says the same thing in prose.
     timeout-minutes: 120
     steps:
+      # PREFLIGHT, and it is here because its absence cost this campaign nine
+      # milestones of CI. `create-github-app-token` fails with a node stack
+      # trace naming only the FIRST input it finds missing, which read for
+      # months as a problem with `app-id` when both inputs were empty. This
+      # step names both, and names the remedy.
+      #
+      # THE CONTROL. `secrets.GITHUB_TOKEN` is minted by the runner for every
+      # job and cannot be empty. Without it, "the repository secret is empty"
+      # would be indistinguishable from "the secrets context is not being
+      # populated" and from "these expressions are misspelled" — three
+      # explanations with three different remedies. With it green, an empty
+      # `CI_TOKEN_PROVIDER_*` is a statement about this repository's
+      # configuration; with it red, this step says so and refuses to blame the
+      # configuration.
+      - name: Assert the CI-token inputs are present
+        shell: bash
+        env:
+          APP_ID_PRESENT: ${{ vars.CI_TOKEN_PROVIDER_APP_ID != '' }}
+          PRIVATE_KEY_PRESENT: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY != '' }}
+          CONTROL_PRESENT: ${{ secrets.GITHUB_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          if [ "${CONTROL_PRESENT}" != "true" ]; then
+            echo "::error::CONTROL FAILED: secrets.GITHUB_TOKEN is empty, so the secrets context is not being populated at all. Nothing this step says about repository configuration is trustworthy; fix the runner or the workflow before reading the messages below."
+            exit 2
+          fi
+          rc=0
+          if [ "${APP_ID_PRESENT}" != "true" ]; then
+            echo "::error::vars.CI_TOKEN_PROVIDER_APP_ID is empty. Organisation variables do not reach private repositories in this organisation (see THE CI TOKEN, DIAGNOSED at the top of this workflow); set a REPOSITORY variable: gh variable set CI_TOKEN_PROVIDER_APP_ID --repo metacraft-labs/aztec-avm-runtime --body 3115338"
+            rc=1
+          fi
+          if [ "${PRIVATE_KEY_PRESENT}" != "true" ]; then
+            echo "::error::secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY is empty. Organisation secrets do not reach private repositories in this organisation; set a REPOSITORY secret: gh secret set CI_TOKEN_PROVIDER_PRIVATE_KEY --repo metacraft-labs/aztec-avm-runtime < ci-app-private-key.pem"
+            rc=1
+          fi
+          exit "$rc"
+
       - name: Generate CI token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -763,11 +1072,49 @@ jobs:
     # npm_exceptions entry for exactly that reason.
     #
     # STATUS, STATED PLAINLY: this job has never run, and neither has any job above it. They all
-    # still abort at `Generate CI token` on "Input required and not supplied: app-id", which M11
-    # recorded as undiagnosed after the `vars.` spelling did not fix it. So this job existing means
-    # it is wired and names the checks — not that a run has ever gated anything.
+    # still stop at the CI token, which is now DIAGNOSED — see THE CI TOKEN, DIAGNOSED at the
+    # top of this file, and the remaining blocker is a repository-level
+    # `CI_TOKEN_PROVIDER_PRIVATE_KEY` only the user can set. So this job existing means it is
+    # wired and names the checks — not that a run has ever gated anything.
     timeout-minutes: 30
     steps:
+      # PREFLIGHT, and it is here because its absence cost this campaign nine
+      # milestones of CI. `create-github-app-token` fails with a node stack
+      # trace naming only the FIRST input it finds missing, which read for
+      # months as a problem with `app-id` when both inputs were empty. This
+      # step names both, and names the remedy.
+      #
+      # THE CONTROL. `secrets.GITHUB_TOKEN` is minted by the runner for every
+      # job and cannot be empty. Without it, "the repository secret is empty"
+      # would be indistinguishable from "the secrets context is not being
+      # populated" and from "these expressions are misspelled" — three
+      # explanations with three different remedies. With it green, an empty
+      # `CI_TOKEN_PROVIDER_*` is a statement about this repository's
+      # configuration; with it red, this step says so and refuses to blame the
+      # configuration.
+      - name: Assert the CI-token inputs are present
+        shell: bash
+        env:
+          APP_ID_PRESENT: ${{ vars.CI_TOKEN_PROVIDER_APP_ID != '' }}
+          PRIVATE_KEY_PRESENT: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY != '' }}
+          CONTROL_PRESENT: ${{ secrets.GITHUB_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          if [ "${CONTROL_PRESENT}" != "true" ]; then
+            echo "::error::CONTROL FAILED: secrets.GITHUB_TOKEN is empty, so the secrets context is not being populated at all. Nothing this step says about repository configuration is trustworthy; fix the runner or the workflow before reading the messages below."
+            exit 2
+          fi
+          rc=0
+          if [ "${APP_ID_PRESENT}" != "true" ]; then
+            echo "::error::vars.CI_TOKEN_PROVIDER_APP_ID is empty. Organisation variables do not reach private repositories in this organisation (see THE CI TOKEN, DIAGNOSED at the top of this workflow); set a REPOSITORY variable: gh variable set CI_TOKEN_PROVIDER_APP_ID --repo metacraft-labs/aztec-avm-runtime --body 3115338"
+            rc=1
+          fi
+          if [ "${PRIVATE_KEY_PRESENT}" != "true" ]; then
+            echo "::error::secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY is empty. Organisation secrets do not reach private repositories in this organisation; set a REPOSITORY secret: gh secret set CI_TOKEN_PROVIDER_PRIVATE_KEY --repo metacraft-labs/aztec-avm-runtime < ci-app-private-key.pem"
+            rc=1
+          fi
+          exit "$rc"
+
       - name: Generate CI token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -858,11 +1205,49 @@ jobs:
     # `node-host/types/`.
     #
     # STATUS, STATED PLAINLY: this job has never run, and neither has any job above it. They all
-    # still abort at `Generate CI token` on "Input required and not supplied: app-id", which M11
-    # recorded as undiagnosed. So this job existing means it is wired and names the checks — not
-    # that a run has ever gated anything.
+    # still stop at the CI token, which is now DIAGNOSED — see THE CI TOKEN, DIAGNOSED at the
+    # top of this file, and the remaining blocker is a repository-level
+    # `CI_TOKEN_PROVIDER_PRIVATE_KEY` only the user can set. So this job existing means it is
+    # wired and names the checks — not that a run has ever gated anything.
     timeout-minutes: 120
     steps:
+      # PREFLIGHT, and it is here because its absence cost this campaign nine
+      # milestones of CI. `create-github-app-token` fails with a node stack
+      # trace naming only the FIRST input it finds missing, which read for
+      # months as a problem with `app-id` when both inputs were empty. This
+      # step names both, and names the remedy.
+      #
+      # THE CONTROL. `secrets.GITHUB_TOKEN` is minted by the runner for every
+      # job and cannot be empty. Without it, "the repository secret is empty"
+      # would be indistinguishable from "the secrets context is not being
+      # populated" and from "these expressions are misspelled" — three
+      # explanations with three different remedies. With it green, an empty
+      # `CI_TOKEN_PROVIDER_*` is a statement about this repository's
+      # configuration; with it red, this step says so and refuses to blame the
+      # configuration.
+      - name: Assert the CI-token inputs are present
+        shell: bash
+        env:
+          APP_ID_PRESENT: ${{ vars.CI_TOKEN_PROVIDER_APP_ID != '' }}
+          PRIVATE_KEY_PRESENT: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY != '' }}
+          CONTROL_PRESENT: ${{ secrets.GITHUB_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          if [ "${CONTROL_PRESENT}" != "true" ]; then
+            echo "::error::CONTROL FAILED: secrets.GITHUB_TOKEN is empty, so the secrets context is not being populated at all. Nothing this step says about repository configuration is trustworthy; fix the runner or the workflow before reading the messages below."
+            exit 2
+          fi
+          rc=0
+          if [ "${APP_ID_PRESENT}" != "true" ]; then
+            echo "::error::vars.CI_TOKEN_PROVIDER_APP_ID is empty. Organisation variables do not reach private repositories in this organisation (see THE CI TOKEN, DIAGNOSED at the top of this workflow); set a REPOSITORY variable: gh variable set CI_TOKEN_PROVIDER_APP_ID --repo metacraft-labs/aztec-avm-runtime --body 3115338"
+            rc=1
+          fi
+          if [ "${PRIVATE_KEY_PRESENT}" != "true" ]; then
+            echo "::error::secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY is empty. Organisation secrets do not reach private repositories in this organisation; set a REPOSITORY secret: gh secret set CI_TOKEN_PROVIDER_PRIVATE_KEY --repo metacraft-labs/aztec-avm-runtime < ci-app-private-key.pem"
+            rc=1
+          fi
+          exit "$rc"
+
       - name: Generate CI token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -991,11 +1376,49 @@ jobs:
     # enumeration reads the package from there and dies with that remedy rather than skipping.
     #
     # STATUS, STATED PLAINLY: this job has never run, and neither has any job above it. They all
-    # still abort at `Generate CI token` on "Input required and not supplied: app-id", which M11
-    # recorded as undiagnosed and which the `vars.` spelling did not fix. So this job existing
-    # means it is wired and names the checks — not that a run has ever gated anything.
+    # still stop at the CI token, which is now DIAGNOSED — see THE CI TOKEN, DIAGNOSED at the
+    # top of this file, and the remaining blocker is a repository-level
+    # `CI_TOKEN_PROVIDER_PRIVATE_KEY` only the user can set. So this job existing means it is
+    # wired and names the checks — not that a run has ever gated anything.
     timeout-minutes: 120
     steps:
+      # PREFLIGHT, and it is here because its absence cost this campaign nine
+      # milestones of CI. `create-github-app-token` fails with a node stack
+      # trace naming only the FIRST input it finds missing, which read for
+      # months as a problem with `app-id` when both inputs were empty. This
+      # step names both, and names the remedy.
+      #
+      # THE CONTROL. `secrets.GITHUB_TOKEN` is minted by the runner for every
+      # job and cannot be empty. Without it, "the repository secret is empty"
+      # would be indistinguishable from "the secrets context is not being
+      # populated" and from "these expressions are misspelled" — three
+      # explanations with three different remedies. With it green, an empty
+      # `CI_TOKEN_PROVIDER_*` is a statement about this repository's
+      # configuration; with it red, this step says so and refuses to blame the
+      # configuration.
+      - name: Assert the CI-token inputs are present
+        shell: bash
+        env:
+          APP_ID_PRESENT: ${{ vars.CI_TOKEN_PROVIDER_APP_ID != '' }}
+          PRIVATE_KEY_PRESENT: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY != '' }}
+          CONTROL_PRESENT: ${{ secrets.GITHUB_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          if [ "${CONTROL_PRESENT}" != "true" ]; then
+            echo "::error::CONTROL FAILED: secrets.GITHUB_TOKEN is empty, so the secrets context is not being populated at all. Nothing this step says about repository configuration is trustworthy; fix the runner or the workflow before reading the messages below."
+            exit 2
+          fi
+          rc=0
+          if [ "${APP_ID_PRESENT}" != "true" ]; then
+            echo "::error::vars.CI_TOKEN_PROVIDER_APP_ID is empty. Organisation variables do not reach private repositories in this organisation (see THE CI TOKEN, DIAGNOSED at the top of this workflow); set a REPOSITORY variable: gh variable set CI_TOKEN_PROVIDER_APP_ID --repo metacraft-labs/aztec-avm-runtime --body 3115338"
+            rc=1
+          fi
+          if [ "${PRIVATE_KEY_PRESENT}" != "true" ]; then
+            echo "::error::secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY is empty. Organisation secrets do not reach private repositories in this organisation; set a REPOSITORY secret: gh secret set CI_TOKEN_PROVIDER_PRIVATE_KEY --repo metacraft-labs/aztec-avm-runtime < ci-app-private-key.pem"
+            rc=1
+          fi
+          exit "$rc"
+
       - name: Generate CI token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -1129,9 +1552,48 @@ jobs:
     # output and against the shipped import graph, not against this comment.
     #
     # STATUS, STATED PLAINLY: this job has never run, and neither has any job above it. They all
-    # still abort at `Generate CI token` on "Input required and not supplied: app-id".
+    # still stop at the CI token, DIAGNOSED — see THE CI TOKEN, DIAGNOSED at the top of this
+    # file, and the remaining blocker is a repository-level `CI_TOKEN_PROVIDER_PRIVATE_KEY` only
+    # the user can set.
     timeout-minutes: 120
     steps:
+      # PREFLIGHT, and it is here because its absence cost this campaign nine
+      # milestones of CI. `create-github-app-token` fails with a node stack
+      # trace naming only the FIRST input it finds missing, which read for
+      # months as a problem with `app-id` when both inputs were empty. This
+      # step names both, and names the remedy.
+      #
+      # THE CONTROL. `secrets.GITHUB_TOKEN` is minted by the runner for every
+      # job and cannot be empty. Without it, "the repository secret is empty"
+      # would be indistinguishable from "the secrets context is not being
+      # populated" and from "these expressions are misspelled" — three
+      # explanations with three different remedies. With it green, an empty
+      # `CI_TOKEN_PROVIDER_*` is a statement about this repository's
+      # configuration; with it red, this step says so and refuses to blame the
+      # configuration.
+      - name: Assert the CI-token inputs are present
+        shell: bash
+        env:
+          APP_ID_PRESENT: ${{ vars.CI_TOKEN_PROVIDER_APP_ID != '' }}
+          PRIVATE_KEY_PRESENT: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY != '' }}
+          CONTROL_PRESENT: ${{ secrets.GITHUB_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          if [ "${CONTROL_PRESENT}" != "true" ]; then
+            echo "::error::CONTROL FAILED: secrets.GITHUB_TOKEN is empty, so the secrets context is not being populated at all. Nothing this step says about repository configuration is trustworthy; fix the runner or the workflow before reading the messages below."
+            exit 2
+          fi
+          rc=0
+          if [ "${APP_ID_PRESENT}" != "true" ]; then
+            echo "::error::vars.CI_TOKEN_PROVIDER_APP_ID is empty. Organisation variables do not reach private repositories in this organisation (see THE CI TOKEN, DIAGNOSED at the top of this workflow); set a REPOSITORY variable: gh variable set CI_TOKEN_PROVIDER_APP_ID --repo metacraft-labs/aztec-avm-runtime --body 3115338"
+            rc=1
+          fi
+          if [ "${PRIVATE_KEY_PRESENT}" != "true" ]; then
+            echo "::error::secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY is empty. Organisation secrets do not reach private repositories in this organisation; set a REPOSITORY secret: gh secret set CI_TOKEN_PROVIDER_PRIVATE_KEY --repo metacraft-labs/aztec-avm-runtime < ci-app-private-key.pem"
+            rc=1
+          fi
+          exit "$rc"
+
       - name: Generate CI token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -1220,4 +1682,158 @@ jobs:
         with:
           name: differential-oracle
           path: artifacts-m19
+          retention-days: 30
+
+  form-a-external-transactions:
+    name: Form A — a transaction whose private half ran elsewhere
+    runs-on: eph-linux-x64
+    # M20. Accept a serialized `Tx` and execute only its public half.
+    #
+    # WHAT THIS JOB IS ACTUALLY GUARDING, because most of the subject is not ours. Upstream moved
+    # public transaction execution out of TypeScript between the two anchors: `PublicTxContext` no
+    # longer exists and `PublicTxSimulator` no longer has a phase loop. The three-phase model, the
+    # gas and fee accounting and the asymmetric revert model are all inside `avm.wasm`. So what can
+    # rot here is the SEAM — the intake, the encoding, the resident-DB seeding and the
+    # classification of what the module throws — plus the model itself if upstream changes it. The
+    # checks read the C++ at the pinned anchor for the model and RUN the module for the behaviour.
+    #
+    # SEVEN ARMS, MEASURED ONCE. `lib_m20_form_a.sh` runs the arms into $M20_WORK/arms.json and all
+    # six checks read it, so two checks cannot come to disagree about a number nothing changed.
+    #
+    # THE MODULE THIS JOB NEEDS IS M13's, not M12's: M20 seeds the resident merkle DB, so
+    # `avm_merkle_db_insert_indexed_leaves_{nullifier,public_data}_tree` and the low-leaf readers
+    # must be present. `m20_require_module` asserts that before an arm starts rather than half way
+    # through one.
+    #
+    # STATUS, STATED PLAINLY: this job has never run, and neither has any job above it. They all
+    # still stop at the CI token, DIAGNOSED — see THE CI TOKEN, DIAGNOSED at the top of this file,
+    # and the remaining blocker is a repository-level `CI_TOKEN_PROVIDER_PRIVATE_KEY` only the user
+    # can set. So this job existing means it is wired and names the checks, not that a run has ever
+    # gated anything.
+    timeout-minutes: 120
+    steps:
+      - name: Assert the CI-token inputs are present
+        shell: bash
+        env:
+          APP_ID_PRESENT: ${{ vars.CI_TOKEN_PROVIDER_APP_ID != '' }}
+          PRIVATE_KEY_PRESENT: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY != '' }}
+          CONTROL_PRESENT: ${{ secrets.GITHUB_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          if [ "${CONTROL_PRESENT}" != "true" ]; then
+            echo "::error::CONTROL FAILED: secrets.GITHUB_TOKEN is empty, so the secrets context is not being populated at all. Nothing this step says about repository configuration is trustworthy; fix the runner or the workflow before reading the messages below."
+            exit 2
+          fi
+          rc=0
+          if [ "${APP_ID_PRESENT}" != "true" ]; then
+            echo "::error::vars.CI_TOKEN_PROVIDER_APP_ID is empty. Organisation variables do not reach private repositories in this organisation (see THE CI TOKEN, DIAGNOSED at the top of this workflow); set a REPOSITORY variable: gh variable set CI_TOKEN_PROVIDER_APP_ID --repo metacraft-labs/aztec-avm-runtime --body 3115338"
+            rc=1
+          fi
+          if [ "${PRIVATE_KEY_PRESENT}" != "true" ]; then
+            echo "::error::secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY is empty. Organisation secrets do not reach private repositories in this organisation; set a REPOSITORY secret: gh secret set CI_TOKEN_PROVIDER_PRIVATE_KEY --repo metacraft-labs/aztec-avm-runtime < ci-app-private-key.pem"
+            rc=1
+          fi
+          exit "$rc"
+
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+      - name: Checkout aztec-avm-runtime
+        uses: actions/checkout@v4
+        with:
+          path: aztec-avm-runtime
+
+      - name: Clone the aztec-packages fork
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/aztec-packages
+          ref: aztec-avm-runtime
+          path: aztec-packages
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Clone codetracer-specs (the prepared patch series)
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-specs
+          ref: latest
+          path: codetracer-specs
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup Dev Environment
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        with:
+          env-flavor: nix
+
+      - name: Assert the series base commit is present
+        working-directory: aztec-packages
+        run: |
+          set -euo pipefail
+          git fetch --unshallow 2>/dev/null || true
+          git rev-parse --verify 233d8e0993^{commit}
+
+      - name: Install the orchestration's published @aztec packages
+        working-directory: aztec-avm-runtime/orchestration
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tail -20
+
+      - name: Build avm.wasm with M13's resident DBs and run the M20 checks
+        working-directory: aztec-avm-runtime
+        env:
+          # Not $TMPDIR: the build is several gigabytes and a tmpfs /tmp is the wrong place.
+          M13_WORK: ${{ github.workspace }}/m13-work
+          M20_WORK: ${{ github.workspace }}/m20-work
+        # `shell: bash` rather than the default, which is `bash -e {0}` WITHOUT pipefail: piping
+        # into `tee` would otherwise hand the step `tee`'s exit status and a failing `just
+        # verify-m20` would report a green job.
+        shell: bash
+        run: |
+          set -euo pipefail
+          dev-exec just verify-m13 2>&1 | tail -5
+          export AVM_WASM_PATH="${M13_WORK}/m13/barretenberg/cpp/build-wasm-avm/bin/avm.wasm"
+          test -s "$AVM_WASM_PATH" || { echo "::error::no module at $AVM_WASM_PATH" >&2; exit 1; }
+          dev-exec just verify-m20 2>&1 | tee verify-m20.log
+
+      - name: THE ARM TABLE — what each transaction did, and to whose balance
+        if: always()
+        working-directory: aztec-avm-runtime
+        shell: bash
+        # Printed in its own step so it is the line a reader finds first. Seven arms, each with its
+        # verdict, its raw and typed revert codes and its fee-payer balance delta.
+        run: |
+          set -uo pipefail
+          f="${{ github.workspace }}/m20-work/arms.json"
+          [ -s "$f" ] || { echo "no arm run to report"; exit 0; }
+          python3 -c '
+          import json, sys
+          doc = json.load(open(sys.argv[1]))
+          print("module:", doc["module"])
+          for a in doc["arms"]:
+              e = a["external"]
+              print(a["arm"], e.get("kind"), e.get("reason", ""),
+                    "raw=" + str(e.get("rawRevertCode", "-")),
+                    "typed=" + str(e.get("revertCode", "-")),
+                    "bal", a["balanceBefore"], "->", a["balanceAfter"])
+          ' "$f"
+
+      - name: Collect the Form A artefacts
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p artifacts-m20
+          cp aztec-avm-runtime/verify-m20.log artifacts-m20/ 2>/dev/null || true
+          cp "${{ github.workspace }}"/m20-work/arms.json artifacts-m20/ 2>/dev/null || true
+          cp "${{ github.workspace }}"/m20-work/arms.stderr artifacts-m20/ 2>/dev/null || true
+          ls -la artifacts-m20
+
+      - name: Upload the Form A artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: form-a-external-transactions
+          path: artifacts-m20
           retention-days: 30

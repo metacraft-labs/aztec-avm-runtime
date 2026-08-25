@@ -49,6 +49,43 @@ jobs:
     # No build: this replays patches and reads git history. Minutes, not hours.
     timeout-minutes: 45
     steps:
+      # PREFLIGHT, and it is here because its absence cost this campaign nine
+      # milestones of CI. `create-github-app-token` fails with a node stack
+      # trace naming only the FIRST input it finds missing, which read for
+      # months as a problem with `app-id` when both inputs were empty. This
+      # step names both, and names the remedy.
+      #
+      # THE CONTROL. `secrets.GITHUB_TOKEN` is minted by the runner for every
+      # job and cannot be empty. Without it, "the repository secret is empty"
+      # would be indistinguishable from "the secrets context is not being
+      # populated" and from "these expressions are misspelled" — three
+      # explanations with three different remedies. With it green, an empty
+      # `CI_TOKEN_PROVIDER_*` is a statement about this repository's
+      # configuration; with it red, this step says so and refuses to blame the
+      # configuration.
+      - name: Assert the CI-token inputs are present
+        shell: bash
+        env:
+          APP_ID_PRESENT: ${{ vars.CI_TOKEN_PROVIDER_APP_ID != '' }}
+          PRIVATE_KEY_PRESENT: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY != '' }}
+          CONTROL_PRESENT: ${{ secrets.GITHUB_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          if [ "${CONTROL_PRESENT}" != "true" ]; then
+            echo "::error::CONTROL FAILED: secrets.GITHUB_TOKEN is empty, so the secrets context is not being populated at all. Nothing this step says about repository configuration is trustworthy; fix the runner or the workflow before reading the messages below."
+            exit 2
+          fi
+          rc=0
+          if [ "${APP_ID_PRESENT}" != "true" ]; then
+            echo "::error::vars.CI_TOKEN_PROVIDER_APP_ID is empty. Organisation variables do not reach private repositories in this organisation (see THE CI TOKEN, DIAGNOSED at the top of this workflow); set a REPOSITORY variable: gh variable set CI_TOKEN_PROVIDER_APP_ID --repo metacraft-labs/aztec-avm-runtime --body 3115338"
+            rc=1
+          fi
+          if [ "${PRIVATE_KEY_PRESENT}" != "true" ]; then
+            echo "::error::secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY is empty. Organisation secrets do not reach private repositories in this organisation; set a REPOSITORY secret: gh secret set CI_TOKEN_PROVIDER_PRIVATE_KEY --repo metacraft-labs/aztec-avm-runtime < ci-app-private-key.pem"
+            rc=1
+          fi
+          exit "$rc"
+
       - name: Generate CI token
         id: app-token
         uses: actions/create-github-app-token@v1
