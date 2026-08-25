@@ -77,6 +77,21 @@ class Checker:
         }
         if not self.consumers:
             raise Fatal("pins.json declares no npm consumers")
+        # Measured artefacts that RECORD which pin they were produced against. Allowed to carry a
+        # literal — and required to carry the right one. Exempting them instead would make "one
+        # authority" true by shrinking its subject, which is the absence-asked-of-a-tree-that-
+        # cannot-answer defect; a witness whose literal has drifted is an artefact that has stopped
+        # describing the tree it was measured on, and that is worth a red.
+        self.witnesses = {
+            k: v
+            for k, v in pins.get("npm_pin_witnesses", {}).items()
+            if not k.startswith("_")
+        }
+        for path, role in self.witnesses.items():
+            if role not in self.declared:
+                raise Fatal(
+                    "pins.json: witness %s names undeclared npm pin %r" % (path, role)
+                )
 
     def bad(self, msg: str) -> None:
         self.problems.append(msg)
@@ -163,6 +178,7 @@ class Checker:
 
         files = tracked("*.md", "*.json", "*.sh", "*.nix", "*.ts", "*.mjs", "*.js", "Justfile")
         scanned = 0
+        seen_paths: set[str] = set()
         for f in files:
             if f.startswith(("spike/node_modules", "diffsim/node_modules", "drift/node_modules")):
                 continue
@@ -174,6 +190,7 @@ class Checker:
             if not hits:
                 continue
             scanned += 1
+            seen_paths.add(f)
             self.ok()
             unknown = hits - self.declared_values - set(self.exceptions.values())
             if unknown:
@@ -181,10 +198,25 @@ class Checker:
                     "%s quotes %s, which pins.json does not declare"
                     % (f, ", ".join(sorted(unknown)))
                 )
-            if f.endswith(".json") and f not in allowed_files:
+            if f in self.witnesses:
+                want = self.declared[self.witnesses[f]]
+                self.ok()
+                if hits != {want}:
+                    self.bad(
+                        "%s is a declared pin witness for npm.%s (%s) but carries %s"
+                        % (f, self.witnesses[f], want, ", ".join(sorted(hits)))
+                    )
+            elif f.endswith(".json") and f not in allowed_files:
                 self.bad(
                     "%s is a machine-readable file carrying a pin value but is not "
-                    "pins.json or a derived package file" % f
+                    "pins.json, a derived package file or a declared pin witness" % f
+                )
+        for path in self.witnesses:
+            # A witness that no longer carries any literal has stopped witnessing, and the
+            # agreement check above would then pass by never running.
+            if path not in seen_paths:
+                self.bad(
+                    "%s is declared a pin witness but carries no nightly literal at all" % path
                 )
         if scanned == 0:
             self.bad("no tracked file mentions a nightly version — the scan is vacuous")

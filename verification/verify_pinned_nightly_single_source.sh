@@ -19,11 +19,15 @@
 #   * every lockfile entry resolves to that same version, AND its tarball URL
 #     carries that version, so a lockfile whose URL and version disagree fails;
 #   * every tracked prose file that quotes a nightly quotes a declared one, so a
-#     stale number in a README fails instead of quietly misinforming.
+#     stale number in a README fails instead of quietly misinforming;
+#   * a declared pin WITNESS — a measured artefact that records which pin it was
+#     produced against — may carry a literal, and must carry the RIGHT one, and
+#     must still carry one at all. Exempting such a file instead would make "one
+#     authority" true by shrinking its subject.
 #
-# Then five NEGATIVE CONTROLS over scratch copies, because a single-source check
+# Then seven NEGATIVE CONTROLS over scratch copies, because a single-source check
 # that has never rejected a disagreement is indistinguishable from one that
-# cannot.
+# cannot. Two of the seven are the witness rule's, in both directions.
 #
 # Run: just verify-pinned-nightly
 
@@ -47,6 +51,13 @@ print("PINS %d" % len(npm))
 print("CURRENT %s" % npm["current"]["version"])
 print("CONSUMERS %s" % " ".join(sorted(cons)))
 print("EXCEPTIONS %s" % " ".join(sorted(exc)))
+wit = {k: v for k, v in p.get("npm_pin_witnesses", {}).items() if not k.startswith("_")}
+print("WITNESSES %s" % " ".join(sorted(wit)))
+for path, role in wit.items():
+    if role not in npm:
+        print("PROBLEM witness %s names undeclared npm pin %r" % (path, role))
+    else:
+        print("WITNESSVALUE %s %s" % (path, npm[role]["version"]))
 print("HISTORY %d" % len(p.get("history", [])))
 print("ANCHORS %s" % " ".join(sorted(k for k in p["anchors"])))
 for role, spec in npm.items():
@@ -73,12 +84,14 @@ n_pins="$(printf '%s\n' "$info" | sed -n 's/^PINS //p')"
 current="$(printf '%s\n' "$info" | sed -n 's/^CURRENT //p')"
 consumers="$(printf '%s\n' "$info" | sed -n 's/^CONSUMERS //p')"
 exceptions="$(printf '%s\n' "$info" | sed -n 's/^EXCEPTIONS //p')"
+witnesses="$(printf '%s\n' "$info" | sed -n 's/^WITNESSES //p')"
 history="$(printf '%s\n' "$info" | sed -n 's/^HISTORY //p')"
 anchors="$(printf '%s\n' "$info" | sed -n 's/^ANCHORS //p')"
 
 note "pinned nightly: $current"
 note "consumers: $consumers"
 note "exceptions: $exceptions"
+note "witnesses: $witnesses"
 note "anchors: $anchors"
 
 assert_ge "pins.json declares the npm pins it needs" 2 "$n_pins"
@@ -99,6 +112,17 @@ fi
 # tool, so a bug in the tool cannot hide a stray declaration.
 allowed="pins.json"
 for t in $consumers; do allowed="$allowed $t/package.json $t/package-lock.json"; done
+# WITNESSES: measured artefacts that record which pin they were produced against. They are
+# allowed to carry a literal and REQUIRED to carry the right one — merely exempting them would
+# make "pins.json is the only authority" true by shrinking its subject, which is this campaign's
+# absence-asked-of-a-tree-that-cannot-answer defect.
+#
+# `fixtures/differential-wasm-divergences.json` is the first, and it is why this paragraph exists:
+# it was committed by M19 AFTER M19's review sweep had run, so `git grep` (which sees tracked
+# files only) could not see it during the measurement and this check went red the moment it was
+# committed. Nobody re-ran M1. A witness is now a declared, checked category rather than a
+# surprise.
+for w in $witnesses; do allowed="$allowed $w"; done
 carriers="$(git -C "$REPO_ROOT" grep -l -E '[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]{8}' -- \
   ':(exclude)*/node_modules/*' 2>/dev/null || true)"
 n_carriers="$(printf '%s\n' "$carriers" | grep -c . || true)"
@@ -119,10 +143,43 @@ done <<EOF
 $carriers
 EOF
 if [ -z "$stray_json" ]; then
-  pass "pins.json is the only machine-readable declaration; every other JSON carrying a pin is a declared consumer"
+  pass "pins.json is the only machine-readable declaration; every other JSON carrying a pin is a declared consumer or witness"
 else
-  fail "these JSON files carry a pin value but are not pins.json or a declared consumer:$stray_json"
+  fail "these JSON files carry a pin value but are not pins.json, a declared consumer or a witness:$stray_json"
 fi
+
+# Every witness EXISTS, is TRACKED, carries a literal AT ALL, and carries the RIGHT one. The
+# middle two matter: a witness that had stopped carrying a literal would make the agreement
+# assertion pass by never running, which is the shape this campaign has met twenty times.
+assert_ge "pins.json declares at least one pin witness, so the paragraph above has a subject" 1 \
+  "$(printf '%s' "$witnesses" | wc -w)"
+for w in $witnesses ; do
+  want="$(printf '%s\n' "$info" | sed -n "s|^WITNESSVALUE $w ||p")"
+  assert_true "$w is tracked" \
+    test -n "$(git -C "$REPO_ROOT" ls-files -- "$w")"
+  got="$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]{8}' "$REPO_ROOT/$w" | sort -u | tr '\n' ' ')"
+  got="${got% }"
+  assert_true "$w carries a nightly literal at all, so the comparison below is not vacuous" \
+    test -n "$got"
+  assert_eq "$w witnesses exactly the pin pins.json declares for it" "$want" "$got"
+done
+
+# THE NEGATIVE CONTROL for the witness rule, over a scratch copy: a witness whose literal has
+# drifted must be REJECTED. Without this, "the witness agrees" is indistinguishable from a rule
+# that accepts anything.
+WITSANDBOX="$(mktemp -d)"
+trap 'rm -rf "$WITSANDBOX"' EXIT
+FIRST_WITNESS="$(printf '%s' "$witnesses" | awk '{print $1}')"
+cp "$REPO_ROOT/$FIRST_WITNESS" "$WITSANDBOX/witness.json"
+WANT_FIRST="$(printf '%s\n' "$info" | sed -n "s|^WITNESSVALUE $FIRST_WITNESS ||p")"
+DRIFTED="$(printf '%s\n' "$WANT_FIRST" | sed 's/-nightly\.[0-9]\{8\}$/-nightly.19700101/')"
+assert_true "the drifted value really differs from the declared one" \
+  test "$DRIFTED" != "$WANT_FIRST"
+sed -i "s/$WANT_FIRST/$DRIFTED/g" "$WITSANDBOX/witness.json"
+DRIFTED_GOT="$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]{8}' "$WITSANDBOX/witness.json" | sort -u | tr '\n' ' ')"
+assert_eq "a witness whose literal drifted is caught by the same comparison" "not-equal" \
+  "$([ "${DRIFTED_GOT% }" = "$WANT_FIRST" ] && echo equal || echo not-equal)"
+rm -rf "$WITSANDBOX"
 
 # ---- the real check: nothing disagrees -------------------------------------
 out="$(python3 "$REPIN" --check --report 2>&1)"
@@ -162,6 +219,13 @@ files = subprocess.run(["git", "-C", src, "ls-files", "-z"],
                        capture_output=True, check=True).stdout.decode().split("\0")
 keep = [f for f in files if f and (f.endswith("package.json") or f.endswith("package-lock.json"))]
 keep += ["pins.json", "tools/repin.py", "README.md"]
+# The declared pin WITNESSES belong in the sandbox too. `repin.py` asserts that every declared
+# witness carries a literal, so a sandbox missing one fails before any mutation is applied — and
+# the failure would read as "the controls are meaningless" rather than as "the sandbox is short a
+# file". Staged from the authority itself so a new witness needs no edit here.
+import json
+with open(os.path.join(src, "pins.json"), encoding="utf-8") as fh:
+    keep += [k for k in json.load(fh).get("npm_pin_witnesses", {}) if not k.startswith("_")]
 n = 0
 for rel in keep:
     s = os.path.join(src, rel)
@@ -244,6 +308,36 @@ p='pins.json'
 d=json.load(open(p))
 d['npm_consumers']['drift']='deletion_era'
 json.dump(d, open(p,'w'), indent=2)
+EOF"
+
+# THE WITNESS RULE'S OWN CONTROLS, both directions. A witness is allowed to carry a literal
+# precisely because it is required to carry the RIGHT one; if either half could not fail, the
+# category would be an exemption wearing a check's name.
+pin_control "a pin witness whose literal drifted off the pin it names" \
+  "python3 - <<'EOF'
+import json, re
+d = json.load(open('pins.json'))
+path, role = next((k, v) for k, v in d['npm_pin_witnesses'].items() if not k.startswith('_'))
+want = d['npm'][role]['version']
+text = open(path, encoding='utf-8').read()
+assert want in text, 'the witness does not carry the pin it names; the control is staged wrong'
+# The drifted value is DERIVED from the declared one rather than typed. A literal here
+# would be a nightly version this very file quotes, which repin.py's prose rule rejects —
+# and it did, which is the rule working on its own check.
+drifted = re.sub(r'(\d+\.\d+\.\d+-nightly\.)\d{8}', lambda m: m.group(1) + '19700101', want)
+assert drifted != want
+open(path, 'w', encoding='utf-8').write(text.replace(want, drifted))
+EOF"
+
+pin_control "a pin witness that has stopped carrying a literal at all" \
+  "python3 - <<'EOF'
+import json, re
+d = json.load(open('pins.json'))
+path = next(k for k in d['npm_pin_witnesses'] if not k.startswith('_'))
+text = open(path, encoding='utf-8').read()
+stripped = re.sub(r'\d+\.\d+\.\d+-nightly\.\d{8}', '<redacted>', text)
+assert stripped != text, 'nothing to strip; the control is staged wrong'
+open(path, 'w', encoding='utf-8').write(stripped)
 EOF"
 
 finish
