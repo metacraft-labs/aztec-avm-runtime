@@ -1,0 +1,214 @@
+{
+  "note": "MEASURED by tools/measure_three_way.py, never hand-written. One entry per (pair, field) on which the three-way arm observed a disagreement, with the DRIFT.md entry that explains it. The arm fails on any divergence NOT in this file, and the checker fails on any entry in this file that no longer fires \u2014 a ledger that has stopped describing the tree is how an exemption becomes a hole.",
+  "generator": "tools/measure_three_way.py",
+  "measuredAt": "2026-08-25",
+  "modulePin": "anchor cpp 233d8e0993 (2026-08-19) + this repo's patch stack",
+  "oraclePin": "npm.deletion_era 5.0.0-nightly.20260626 = anchor ts 3a68d68ac2 (2026-06-25)",
+  "transactionsCompared": 30,
+  "transactionsAgreeingOnEveryField": 1,
+  "entries": [
+    {
+      "pair": "wasm-avm:native-cpp-avm",
+      "field": "gasUsed.billedGas",
+      "drift": "D15",
+      "note": "Downstream of metered L2 gas, which the two arms schedule differently because they are pinned two months and 276 changed vm2/ files apart. NOT a wasm defect and NOT the AND/OR/XOR change: D1 moves the wasm arm's charge DOWN and the measured deltas are all UP. A reader must not conclude that the wasm AVM is wrong, and must not conclude that the per-opcode cause is known \u2014 it is not.",
+      "transactions": 17,
+      "signatures": [
+        "22356064821d8ae7",
+        "45c7bdb2414ed548",
+        "4b8fcc9efa5df963",
+        "801d819d4400835b",
+        "9a38dfb997a8f5c8",
+        "a940d31795f6304d",
+        "af2473017633984f",
+        "c068dbf220e9eb37",
+        "cea32e462fdf4a35",
+        "e5dd8060c6154b88",
+        "ee3736d80ccd6864"
+      ]
+    },
+    {
+      "pair": "wasm-avm:native-cpp-avm",
+      "field": "gasUsed.publicGas",
+      "drift": "D15",
+      "note": "Downstream of metered L2 gas, which the two arms schedule differently because they are pinned two months and 276 changed vm2/ files apart. NOT a wasm defect and NOT the AND/OR/XOR change: D1 moves the wasm arm's charge DOWN and the measured deltas are all UP. A reader must not conclude that the wasm AVM is wrong, and must not conclude that the per-opcode cause is known \u2014 it is not.",
+      "transactions": 17,
+      "signatures": [
+        "329f713714a9f278",
+        "70fe86ba1f3fd6e9",
+        "75a1b248c55d064b",
+        "84f8903df1c28e6d",
+        "87b80cef03ce4c61",
+        "9924391d85a85775",
+        "99d9f684fb6cbe67",
+        "c4ffcb9eb64ee0e9",
+        "d0f5611ce03c0886",
+        "d8bcd411c494f045",
+        "ffe99b0ef8f3fd28"
+      ]
+    },
+    {
+      "pair": "wasm-avm:native-cpp-avm",
+      "field": "gasUsed.totalGas",
+      "drift": "D15",
+      "note": "Downstream of metered L2 gas, which the two arms schedule differently because they are pinned two months and 276 changed vm2/ files apart. NOT a wasm defect and NOT the AND/OR/XOR change: D1 moves the wasm arm's charge DOWN and the measured deltas are all UP. A reader must not conclude that the wasm AVM is wrong, and must not conclude that the per-opcode cause is known \u2014 it is not.",
+      "transactions": 17,
+      "signatures": [
+        "0d970976cfe04bb3",
+        "0ef7d2576277994e",
+        "1fed1f583b30aba7",
+        "23e2c7a28a787d46",
+        "2ef6db959c754d1b",
+        "5f9d53425811e01a",
+        "858d101f8ff2b693",
+        "d56282d6c70e2b22",
+        "dd5a127a1f6444a7",
+        "ec0efa0f263c99f4",
+        "ff5d1dc1d36c7fe5"
+      ]
+    },
+    {
+      "pair": "wasm-avm:native-cpp-avm",
+      "field": "publicTxEffect",
+      "drift": "D15",
+      "note": "Downstream of metered L2 gas, which the two arms schedule differently because they are pinned two months and 276 changed vm2/ files apart. NOT a wasm defect and NOT the AND/OR/XOR change: D1 moves the wasm arm's charge DOWN and the measured deltas are all UP. A reader must not conclude that the wasm AVM is wrong, and must not conclude that the per-opcode cause is known \u2014 it is not.",
+      "transactions": 17,
+      "signatures": [
+        "0d1bf0407dfc7c0d",
+        "2431424ee45cedf1",
+        "44d3fb5b045b9b69",
+        "5e0cbc61a73d3fe9",
+        "6455434cb2bc5a03",
+        "65652c7af6a99156",
+        "6d1cd74fbb0b6c4b",
+        "7644a49f8c030168",
+        "7a9d0283a4033bf4",
+        "a3af4576a3035103",
+        "a3b1125e87eceebc",
+        "b952ef71f34c5736",
+        "c50431a27e55d08f",
+        "d3c89d9bf29b54ff",
+        "d3fff14e26f9021b",
+        "d7260bb9cfa0101b"
+      ]
+    },
+    {
+      "pair": "wasm-avm:native-cpp-avm",
+      "field": "treeRoots",
+      "drift": "D15",
+      "note": "Downstream of metered L2 gas, which the two arms schedule differently because they are pinned two months and 276 changed vm2/ files apart. NOT a wasm defect and NOT the AND/OR/XOR change: D1 moves the wasm arm's charge DOWN and the measured deltas are all UP. A reader must not conclude that the wasm AVM is wrong, and must not conclude that the per-opcode cause is known \u2014 it is not.",
+      "transactions": 17,
+      "signatures": [
+        "00436b193319dece",
+        "035234b3b7f8e6a6",
+        "2ac79975d5eb4d10",
+        "3e649f68c2ef0a60",
+        "418e27e5a4e3fb16",
+        "4278613ae73557fc",
+        "6e399146ffaa630f",
+        "7bb7cb605aa8ba1b",
+        "a035524b9bb7c617",
+        "a0b11acf2a8dfc0c",
+        "a82f49c857107260",
+        "addd5d8df941d242",
+        "b5ef5c19c9384b53",
+        "bab8787b3e7c1084"
+      ]
+    },
+    {
+      "pair": "wasm-avm:typescript-interpreter",
+      "field": "gasUsed.billedGas",
+      "drift": "D15",
+      "note": "Downstream of metered L2 gas, which the two arms schedule differently because they are pinned two months and 276 changed vm2/ files apart. NOT a wasm defect and NOT the AND/OR/XOR change: D1 moves the wasm arm's charge DOWN and the measured deltas are all UP. A reader must not conclude that the wasm AVM is wrong, and must not conclude that the per-opcode cause is known \u2014 it is not.",
+      "transactions": 17,
+      "signatures": [
+        "22356064821d8ae7",
+        "45c7bdb2414ed548",
+        "4b8fcc9efa5df963",
+        "801d819d4400835b",
+        "9a38dfb997a8f5c8",
+        "a940d31795f6304d",
+        "af2473017633984f",
+        "c068dbf220e9eb37",
+        "cea32e462fdf4a35",
+        "e5dd8060c6154b88",
+        "ee3736d80ccd6864"
+      ]
+    },
+    {
+      "pair": "wasm-avm:typescript-interpreter",
+      "field": "gasUsed.publicGas",
+      "drift": "D15",
+      "note": "Downstream of metered L2 gas, which the two arms schedule differently because they are pinned two months and 276 changed vm2/ files apart. NOT a wasm defect and NOT the AND/OR/XOR change: D1 moves the wasm arm's charge DOWN and the measured deltas are all UP. A reader must not conclude that the wasm AVM is wrong, and must not conclude that the per-opcode cause is known \u2014 it is not.",
+      "transactions": 17,
+      "signatures": [
+        "329f713714a9f278",
+        "70fe86ba1f3fd6e9",
+        "75a1b248c55d064b",
+        "84f8903df1c28e6d",
+        "87b80cef03ce4c61",
+        "9924391d85a85775",
+        "99d9f684fb6cbe67",
+        "c4ffcb9eb64ee0e9",
+        "d0f5611ce03c0886",
+        "d8bcd411c494f045",
+        "ffe99b0ef8f3fd28"
+      ]
+    },
+    {
+      "pair": "wasm-avm:typescript-interpreter",
+      "field": "gasUsed.totalGas",
+      "drift": "D15",
+      "note": "Downstream of metered L2 gas, which the two arms schedule differently because they are pinned two months and 276 changed vm2/ files apart. NOT a wasm defect and NOT the AND/OR/XOR change: D1 moves the wasm arm's charge DOWN and the measured deltas are all UP. A reader must not conclude that the wasm AVM is wrong, and must not conclude that the per-opcode cause is known \u2014 it is not.",
+      "transactions": 17,
+      "signatures": [
+        "0d970976cfe04bb3",
+        "0ef7d2576277994e",
+        "1fed1f583b30aba7",
+        "23e2c7a28a787d46",
+        "2ef6db959c754d1b",
+        "5f9d53425811e01a",
+        "858d101f8ff2b693",
+        "d56282d6c70e2b22",
+        "dd5a127a1f6444a7",
+        "ec0efa0f263c99f4",
+        "ff5d1dc1d36c7fe5"
+      ]
+    },
+    {
+      "pair": "wasm-avm:typescript-interpreter",
+      "field": "publicInputs.presence",
+      "drift": "D16",
+      "note": "A configuration asymmetry, not a semantic divergence: the TypeScript simulator builds the AVM circuit public inputs whatever collectPublicInputs says, and both C++ arms honour the flag. A reader must not conclude that the byte-for-byte publicInputs comparison was skipped \u2014 it is a separate field that runs whenever both sides built a buffer.",
+      "transactions": 29,
+      "signatures": [
+        "4c256652b5f5eecc"
+      ]
+    },
+    {
+      "pair": "wasm-avm:typescript-interpreter",
+      "field": "publicTxEffect",
+      "drift": "D15",
+      "note": "Downstream of metered L2 gas, which the two arms schedule differently because they are pinned two months and 276 changed vm2/ files apart. NOT a wasm defect and NOT the AND/OR/XOR change: D1 moves the wasm arm's charge DOWN and the measured deltas are all UP. A reader must not conclude that the wasm AVM is wrong, and must not conclude that the per-opcode cause is known \u2014 it is not.",
+      "transactions": 17,
+      "signatures": [
+        "0d1bf0407dfc7c0d",
+        "2431424ee45cedf1",
+        "44d3fb5b045b9b69",
+        "5e0cbc61a73d3fe9",
+        "6455434cb2bc5a03",
+        "65652c7af6a99156",
+        "6d1cd74fbb0b6c4b",
+        "7644a49f8c030168",
+        "7a9d0283a4033bf4",
+        "a3af4576a3035103",
+        "a3b1125e87eceebc",
+        "b952ef71f34c5736",
+        "c50431a27e55d08f",
+        "d3c89d9bf29b54ff",
+        "d3fff14e26f9021b",
+        "d7260bb9cfa0101b"
+      ]
+    }
+  ]
+}

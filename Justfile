@@ -654,6 +654,59 @@ verify-m7:
     exit "$rc"
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# M19 — the three-way differential: wasm AVM vs native C++ AVM vs TypeScript
+# ---------------------------------------------------------------------------
+#
+# THE HEADLINE IS THE COMPARISON COUNT, NOT THE TEST COUNT, and that is the milestone's own
+# deliverable rather than a preference. 758 passing tests in this corpus contain 74 differential
+# comparisons; the difference was quoted the wrong way round once already (DRIFT.md D2, D7).
+#
+#   just report-comparisons          THE HEADLINE: transactions, then pairs, then tests
+#   just version-gap                 DD-12: how far behind the C++ oracle is, as numbers
+#   just three-way                   run the arm alone (needs AVM_WASM_PATH)
+#   just measure-three-way           re-measure the counts and the divergence ledger
+#   just verify-m19                  all of M19's checks, in order
+#
+# AVM_WASM_PATH is a build output (M6). The checks find one in a sibling milestone's work
+# directory if it is there and die with the build command if it is not; they never run two-way
+# and call it three-way.
+report-comparisons:
+    @python3 tools/report_comparisons.py
+
+version-gap:
+    @python3 tools/version_gap.py
+
+three-way:
+    @cd diffsim && RUN_THREE_WAY=1 NODE_NO_WARNINGS=1 node --experimental-vm-modules ./node_modules/.bin/jest src/differential
+
+measure-three-way:
+    @python3 tools/measure_three_way.py
+
+verify-three-way:
+    @verification/e2e_differential_wasm_vs_native_cpp.sh
+
+verify-m19:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    failed=0
+    for check in \
+      e2e_differential_wasm_vs_native_cpp \
+      e2e_differential_wasm_vs_ts_interpreter \
+      verify_differential_comparison_count_reported \
+      verify_differential_containment \
+      verify_oracle_version_gap_reported \
+      test_bitwise_dyn_gas_divergence_detected \
+      verify_differential_job_separate_failure_domain ; do
+      echo "=== $check ==="
+      verification/$check.sh || failed=1
+    done
+    if [ "$failed" -ne 0 ]; then
+      echo "verify-m19: FAILED" >&2
+      exit 1
+    fi
+    echo "verify-m19: all checks passed"
+
 # M8 — the native-versus-wasm differential, including tree roots
 # ---------------------------------------------------------------------------
 # The seven checks prepare ONE worktree of 233d8e0993 under $M8_WORK (default

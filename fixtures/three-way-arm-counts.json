@@ -1,0 +1,16 @@
+{
+  "note": "The three-way arm's own totals. `transactionsCompared` is the unit the corpus manifest quotes; `pairsCompared` is two per transaction and is reported separately so neither number can be quoted as the other.",
+  "generator": "tools/measure_three_way.py",
+  "command": "cd diffsim && AVM_WASM_PATH=\u2026 npx jest src/differential",
+  "transactionsCompared": 30,
+  "pairsCompared": 90,
+  "pairsPerTransaction": 3,
+  "twoWayRecordsFromTheParentHarness": 30,
+  "preStatesProvedIdentical": 21,
+  "transactionsAgreeingOnEveryField": 1,
+  "divergentPairFields": 10,
+  "testCounts": {
+    "totalPassed": 18,
+    "totalFailed": 0
+  }
+}

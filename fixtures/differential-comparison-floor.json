@@ -1,0 +1,17 @@
+{
+  "note": [
+    "THE FLOOR the differential surface may not fall below, in TRANSACTIONS and in",
+    "IMPLEMENTATION-PAIR COMPARISONS. Not a target and not a measurement: a ratchet. Coverage that",
+    "shrinks silently is the failure this file exists to prevent, and it has a precedent — the arm",
+    "that upstream ships commented out was worth 142 comparisons and nobody noticed it was off.",
+    "Raising it is free. Lowering it must be deliberate and must say why in the commit message,",
+    "which is the whole point of it being a checked-in number rather than a computed one.",
+    "Set from the M19 measurement: 74 (default two-way) + 142 (opcode-spam two-way) + 30 (three-way)",
+    "= 246 transactions, and 74 + 142 + 90 = 306 pair comparisons, the three-way arm contributing",
+    "three pairs per transaction."
+  ],
+  "transactions": 246,
+  "pairs": 306,
+  "setBy": "M19",
+  "setOn": "2026-08-25"
+}
