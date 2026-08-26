@@ -206,3 +206,52 @@ export {
   ResidentContractsDbCannotAnswer,
   type PendingRegistration,
 } from './resident_contracts_db.ts';
+
+// M23 — the chain loop, the timer, and the facade.
+//
+// DD-4 IS AN EXPORT-SURFACE PROPERTY TOO. There is no export here that reads a wall clock: the
+// clock is a constructor argument on `AvmChain` and `AvmRuntime`, and the three implementations
+// re-exported from `chain_clock.ts` are UPSTREAM'S — `DateProvider`, `TestDateProvider` and
+// `ManualDateProvider` from `@aztec/foundation/timer`. No `Clock` interface of ours is exported,
+// because declaring one would be the parallel-type mistake the `TreeSnapshot` deliverable names.
+//
+// WHAT IS OURS AND EXPORTED: the three-method `BlockTicker` and its three implementations, the
+// timestamp rule, the chain, the facade and §8.4's disclosure. `CHAIN-LOOP.md` records the
+// enumeration that establishes that this is all of it.
+export {
+  DateProvider,
+  DisabledTicker,
+  ManualDateProvider,
+  ManualTicker,
+  RunningPromiseTicker,
+  TestDateProvider,
+  nextBlockTimestamp,
+  type BlockTicker,
+} from './chain_clock.ts';
+
+export {
+  AvmChain,
+  ChainSealRefused,
+  DEFAULT_BLOCK_PRODUCTION,
+  type BlockProductionConfig,
+  type ChainBlock,
+  type ChainDeps,
+  type ChainSubscription,
+  type TraceEvent,
+  type TxEvent,
+} from './chain.ts';
+
+export {
+  DISCLOSURE_LINE,
+  PINNED_PROTOCOL_VERSION,
+  type Disclosure,
+} from './disclosure.ts';
+
+export {
+  AvmRuntime,
+  type AvmRuntimeDeps,
+  type AvmRuntimeOptions,
+  type ChainSnapshot,
+  type SimulationResult,
+  type TxReceipt,
+} from './avm_runtime.ts';

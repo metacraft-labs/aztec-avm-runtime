@@ -371,8 +371,20 @@ export async function runBlockArms(reactor: ReactorLike): Promise<Record<string,
   const aborted = await runBlock(reactor, 'signalAborted', four, { signal: abortedController.signal });
   const notAborted = await runBlock(reactor, 'signalOpen', four, { signal: new AbortController().signal });
 
-  const pastDeadline = await runBlock(reactor, 'deadlinePast', four, { deadline: new Date(Date.now() - 60_000) });
-  const futureDeadline = await runBlock(reactor, 'deadlineFuture', four, { deadline: new Date(Date.now() + 3_600_000) });
+  // THE DEADLINES GO THROUGH THE INJECTED CLOCK, and the reason is DD-4 rather than tidiness.
+  // These two lines called `Date.now()` directly until M23's `test_no_ambient_clock_or_timer`
+  // scanned the shipped source and reported them — the only two ambient wall-clock reads under
+  // `orchestration/src`. The values are the same, because `DateProvider.now()` IS `Date.now()`;
+  // what changes is that the read is a method on an object a caller can replace, which is the
+  // whole of DD-4. The arms are unaffected: one deadline is an hour in the past and the other an
+  // hour ahead either way.
+  const deadlineClock = new DateProvider();
+  const pastDeadline = await runBlock(reactor, 'deadlinePast', four, {
+    deadline: new Date(deadlineClock.now() - 60_000),
+  });
+  const futureDeadline = await runBlock(reactor, 'deadlineFuture', four, {
+    deadline: new Date(deadlineClock.now() + 3_600_000),
+  });
 
   // REQUEUEABLE IS A POSITIVE CLAIM AND IS MADE POSITIVELY: the two transactions the
   // maxTransactions arm did not reach are submitted again, in a fresh block, and must process.
