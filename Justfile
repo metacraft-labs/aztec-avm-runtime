@@ -1744,7 +1744,7 @@ verify-m21:
 #   just verify-block-failed-tx     test_failed_tx_leaves_no_state
 #   just verify-block-limits        test_block_limits_respected
 #   just verify-block-guard         test_guarded_merkle_tree_blocks_post_seal_access
-#   just verify-m22                 all four, in order — 252 assertions (64 / 43 / 89 / 56)
+#   just verify-m22                 all four, in order — 260 assertions (71 / 44 / 89 / 56)
 #
 # THE LOOP IS UPSTREAM'S AND THAT IS THE MILESTONE. `PublicProcessor.process` is vendored from the
 # `ts` anchor into `orchestration/src/vendor/public_processor/`, with nine other files its import

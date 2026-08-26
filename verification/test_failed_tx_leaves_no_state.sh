@@ -180,10 +180,21 @@ assert_true "…and it went down rather than up" test "$C_BAL_F2" -lt "$FUNDING"
 
 # f1 and f3 are the attribution control: they behave identically in both arms, so the only thing
 # the arms disagree about is f2.
+#
+# BOTH SIDES OF EACH OF THESE CAN READ `MISSING`, so each needs a non-emptiness partner and the
+# review found that f3 did not have one. `m22_arm` prints `MISSING` rather than empty — PART 0
+# proves that twice, deliberately — and `MISSING == MISSING` is the campaign's first catalogued
+# vacuous form, here in the check whose whole purpose is to prove a failed transaction left no
+# state. The f1 pair was anchored by the `-lt "$FUNDING"` line below; the f3 pair was not, so if the
+# driver ever stopped emitting `balancesAfter.f3` this comparison would have gone on passing. The
+# partner is a NUMERIC comparison on purpose: `test MISSING -lt <n>` is not a false predicate, it is
+# a bash syntax error, so the assertion fails rather than quietly reporting the wrong answer.
 assert_eq "f1's balance is the same in both arms" "$F_BAL_F1" "$C_BAL_F1"
 assert_eq "f3's balance is the same in both arms" "$F_BAL_F3" "$C_BAL_F3"
 assert_true "…and both of them DID pay a fee, so the equality is not two untouched balances" \
   test "$F_BAL_F1" -lt "$FUNDING"
+assert_true "…and f3's is a NUMBER in both arms, so that equality is not two MISSINGs" \
+  test "$F_BAL_F3" -lt "$FUNDING" -a "$C_BAL_F3" -lt "$FUNDING"
 
 # ---------------------------------------------------------------------------
 # PART 4 — the block's own state reference differs between the arms

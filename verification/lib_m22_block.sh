@@ -41,6 +41,14 @@ import json, sys
 print(json.load(open(sys.argv[1]))["anchors"]["ts"]["commit"])' "$REPO_ROOT/pins.json" 2>/dev/null)"
 export M22_TS_ANCHOR
 
+# The C++ anchor, read the same way. M22 vendors nothing from it; it is here as the CONTROL for the
+# `upstream/tsavm` precondition — RI-65's trap is a ts-versus-cpp difference, so the check that
+# closes that trap needs both ends of it.
+M22_CPP_ANCHOR="$(python3 -c '
+import json, sys
+print(json.load(open(sys.argv[1]))["anchors"]["cpp"]["commit"])' "$REPO_ROOT/pins.json" 2>/dev/null)"
+export M22_CPP_ANCHOR
+
 # ---------------------------------------------------------------------------
 # A SUMMARY LINE EVEN ON AN ABNORMAL EXIT.
 #

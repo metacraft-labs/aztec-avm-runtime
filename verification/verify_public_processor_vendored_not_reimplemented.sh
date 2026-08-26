@@ -128,6 +128,78 @@ assert_true "the same comparison DOES report a difference for a file that has on
   test -n "$(m22_vendor_diff side_effect_errors.ts yarn-project/simulator/src/public/side_effect_errors.ts)"
 
 # ---------------------------------------------------------------------------
+# PART 2b — THE WORKTREE TRAP, MADE IMPOSSIBLE INSTEAD OF MERELY FORBIDDEN
+# ---------------------------------------------------------------------------
+#
+# M22's documents say the ten files were taken from the fork's OBJECT STORE and never from the
+# checked-out `upstream/tsavm` worktree, citing RI-65. The review measured that claim and it does
+# not measure anything: `upstream/tsavm` is a CLEAN git worktree checked out AT the ts anchor, so
+# the two routes are the same bytes and no check can tell them apart. WHICH COMMAND SOMEBODY TYPED
+# IS NOT AN OBSERVABLE PROPERTY OF A FILE. An instruction that cannot be checked is an instruction
+# that will be believed rather than enforced.
+#
+# RI-65's trap is real, but it is not the trap the sentence describes. Its "53 entries against 68"
+# is a `ts`-anchor-versus-`cpp`-anchor difference — `acir_callback.ts` and
+# `legacy_oracle_registry.ts` exist at `233d8e0993` and do NOT exist at `3a68d68ac2` — which
+# RI-65's own last sentence says ("must be vendored from `233d8e0993` specifically"). The rule is
+# "a worktree at ANOTHER anchor is not this anchor", not "a worktree is not the anchor".
+#
+# So this block asserts the PRECONDITION under which the instruction is unnecessary: that the
+# worktree and this milestone's anchor are the same source. While that holds, vendoring from either
+# is identical and the trap cannot bite. The day somebody checks `upstream/tsavm` out somewhere
+# else — which is exactly RI-65's scenario — this goes RED and says so, instead of a sentence in a
+# document asking the next agent to remember.
+TSAVM="$REPO_ROOT/upstream/tsavm"
+assert_true "the tsavm worktree exists, so this block is asking a question of something" \
+  test -d "$TSAVM"
+assert_eq "the tsavm worktree is checked out AT this milestone's ts anchor" \
+  "$M22_TS_ANCHOR" "$(git -C "$TSAVM" rev-parse HEAD 2>/dev/null || echo NO-WORKTREE)"
+# The control for that equality: the same lookup does NOT answer the cpp anchor, so it is a
+# comparison that can come out false rather than a constant.
+assert_false "…and the same lookup does not answer the cpp anchor, so the equality discriminates" \
+  test "$(git -C "$TSAVM" rev-parse HEAD 2>/dev/null || echo NO-WORKTREE)" = "$M22_CPP_ANCHOR"
+# And the substance: for the ten paths actually taken, the worktree's bytes ARE the anchor's. The
+# scanner PRINTS ITS RESIDUE rather than counting matches, so a path that is missing from the
+# worktree reads as a named line and not as a smaller number.
+TSAVM_RESIDUE=""
+n_tsavm=0
+while IFS= read -r up; do
+  [ -n "$up" ] || continue
+  n_tsavm=$((n_tsavm + 1))
+  if [ ! -f "$TSAVM/$up" ]; then
+    TSAVM_RESIDUE="$TSAVM_RESIDUE
+absent-from-worktree $up"
+  elif ! cmp -s "$TSAVM/$up" <(m22_anchor_file "$up"); then
+    TSAVM_RESIDUE="$TSAVM_RESIDUE
+differs-from-anchor $up"
+  fi
+done <<'TSAVM_PATHS'
+yarn-project/simulator/src/public/public_processor/public_processor.ts
+yarn-project/simulator/src/public/public_processor/guarded_merkle_tree.ts
+yarn-project/simulator/src/public/public_processor/public_processor_metrics.ts
+yarn-project/simulator/src/public/public_db_sources.ts
+yarn-project/simulator/src/public/contracts_db_checkpoint.ts
+yarn-project/simulator/src/public/db_interfaces.ts
+yarn-project/simulator/src/public/side_effect_errors.ts
+yarn-project/simulator/src/public/public_errors.ts
+yarn-project/simulator/src/public/public_tx_simulator/public_tx_simulator_interface.ts
+yarn-project/txe/src/utils/block_creation.ts
+TSAVM_PATHS
+assert_eq "ten upstream paths were compared, which is the number vendored" "10" "$n_tsavm"
+if [ -z "$TSAVM_RESIDUE" ]; then
+  pass "the worktree's copy of all ten is byte-identical to the anchor, so the two vendoring routes are ONE route"
+else
+  printf '%s\n' "$TSAVM_RESIDUE" | sed 's/^/      /'
+  fail "the worktree has DIVERGED from the anchor: $(printf '%s\n' "$TSAVM_RESIDUE" | grep -c . || true) path(s) — vendor from the object store and re-read RI-65"
+fi
+# The comparison's own control: a path that exists at the CPP anchor and not at the ts anchor is
+# reported as absent by the same lookup — RI-65's actual instance, run rather than cited.
+assert_false "RI-65's own instance: a file the cpp anchor has is NOT in this ts-anchor worktree" \
+  test -f "$TSAVM/yarn-project/pxe/src/contract_function_simulator/oracle/acir_callback.ts"
+assert_true "…and it really does exist at the cpp anchor, so that absence is a difference and not a typo" \
+  git -C "$FORK_ROOT" cat-file -e "$M22_CPP_ANCHOR:yarn-project/pxe/src/contract_function_simulator/oracle/acir_callback.ts"
+
+# ---------------------------------------------------------------------------
 # PART 3 — the five that differ, diff exactly as declared
 # ---------------------------------------------------------------------------
 
