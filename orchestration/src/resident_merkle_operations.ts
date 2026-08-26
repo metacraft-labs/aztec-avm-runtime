@@ -39,7 +39,7 @@
 //     getRevision              the resident revision — there is one view and it is current
 //
 //   REFUSED BY NAME, each with the reason it cannot be answered
-//     updateArchive            THE ARCHIVE IS NOT IN THIS MODULE. See below.
+//     updateArchive            ONLY ON A MODULE WITHOUT M14'S ARCHIVE EXTENSION. See below.
 //     getTreeInfo(ARCHIVE)     the same fact, at the read end.
 //     batchInsert              the module exports no subtree insertion, and emulating one with
 //                              sequential inserts plus `pad_tree` DOES NOT PRODUCE THE SAME TREE.
@@ -61,7 +61,17 @@
 // `updateArchive` that returned without doing anything would put a block header in a chain with
 // an archive root that certifies nothing, and every consumer downstream would believe it.
 //
-// THE ARCHIVE, AND WHY IT IS A REFUSAL RATHER THAN A GAP.
+// THE ARCHIVE IS CARRIED NOW, AND WHETHER IT ANSWERS IS A PROPERTY OF THE MODULE.
+// M23 applied M14's patch as an eleventh overlay and added the two reactor exports that carry it
+// across the vm2 adapter (`verification/m23/`), so a module built from that tree exports
+// `avm_merkle_db_update_archive` and `avm_merkle_db_get_archive_snapshot` and this class answers
+// both archive calls. Every module built before it — M12's and M13's trees, which is what M18,
+// M20, M21 and M22 measure — does not, and this class goes on refusing there BY THE SAME CODE.
+// `hasArchive` is read off `module.exportNames` at construction; there is no flag and no constant.
+// The paragraph below is the record of why the refusal existed and is still exactly what happens
+// on a module without the extension.
+//
+// THE ARCHIVE, AND WHY IT WAS A REFUSAL RATHER THAN A GAP.
 // M14 asked this question and answered it: WORLD-STATE.md §3 Gap A, RI-53, DECISION: extend — one
 // more `MemoryAppendOnlyTree<aztec::AztecMerkleHashPolicy>` at `ARCHIVE_HEIGHT` inside
 // `world_state_reference`'s checkpointed `State`, with `update_archive(state_ref, header_hash)`
@@ -82,6 +92,13 @@
 // consequence and refuses, and the remaining work is three named things — apply M14's patch on
 // the AVM_WASM overlay stack, add one reactor export, add one line to the export list — rather
 // than an unknown.
+//
+// M23 DID THAT WORK AND THE PRICE WAS WRONG IN ONE PLACE. The patch applies as an eleventh overlay
+// with no `-3`, as predicted. "One reactor export" is not enough for two reasons, both measured:
+// the reactor's merkle exports run over the vm2 ADAPTER (`bb::avm2::simulation::MemoryMerkleDB`),
+// which holds the reference DB in a private member, so the adapter has to carry the archive too;
+// and appending is only half — the next header's `lastArchive` is a READ, which is why
+// `makeTXEBlockHeader` stopped at `getTreeInfo(ARCHIVE)` and not at `updateArchive`. Two exports.
 //
 // CHECKPOINT DEPTH IS TRACKED HERE, AND IT IS NOT THE MODULE'S CHECKPOINT ID.
 // `ForkCheckpoint.new` reads the value `createCheckpoint()` returns and later calls
@@ -123,6 +140,19 @@ import { residentWorldStateRevision } from './avm_inputs.ts';
  */
 export interface ResidentMerkleModule extends BlobCallable {
   callWithHandle(exportName: string, handle: number): unknown;
+  /**
+   * The module's own export names, if it can say.
+   *
+   * OPTIONAL, AND THE DEFAULT IS THE SAFE DIRECTION. M23 carried M14's archive extension into a
+   * build of `avm.wasm` (`verification/m23/`), so some modules have `avm_merkle_db_update_archive`
+   * and `avm_merkle_db_get_archive_snapshot` and some do not — the M12 and M13 trees every earlier
+   * milestone measures do not, and must go on refusing. The alternative was a constructor flag,
+   * and a flag is exactly the shape that eventually gets passed the wrong way round: the wrong
+   * answer here is a block header chained onto an archive root that certifies nothing. So the
+   * ARTEFACT is asked. A module that does not answer is treated as not having it, which makes a
+   * caller who forgets get a refusal rather than a fabricated root.
+   */
+  readonly exportNames?: readonly string[];
 }
 
 /**
@@ -185,6 +215,20 @@ export const RESIDENT_TREES: readonly MerkleTreeId[] = Object.freeze([
 export function residentModuleHasArchive(exportNames: readonly string[]): boolean {
   return exportNames.includes('avm_merkle_db_update_archive');
 }
+
+/**
+ * The two exports the archive needs, named once.
+ *
+ * BOTH, and the second is the one M22's Outstanding Tasks did not price. Appending a header is
+ * half of it: the NEXT header's `lastArchive` is a READ of the archive, so a module that can only
+ * append gives a caller no way to anchor block N+1 against block N — and the read is what
+ * `makeTXEBlockHeader` calls first, which is why `sealBlock` refused at `getTreeInfo(ARCHIVE)`
+ * rather than at `updateArchive`.
+ */
+export const ARCHIVE_EXPORTS: readonly string[] = Object.freeze([
+  'avm_merkle_db_update_archive',
+  'avm_merkle_db_get_archive_snapshot',
+]);
 
 /** The empty append-only snapshot, used only to name the shape; never returned as an answer. */
 function snapshotOf(raw: unknown): AppendOnlyTreeSnapshot {
@@ -268,10 +312,16 @@ export class ResidentMerkleWriteOperations {
   private readonly handle: number;
   private depth = 0;
   private closed = false;
+  /**
+   * Whether THIS module carries M14's archive extension. Read from the module's own export list at
+   * construction, never passed in. See `ResidentMerkleModule.exportNames`.
+   */
+  readonly hasArchive: boolean;
 
   constructor(module: ResidentMerkleModule, handle: number) {
     this.module = module;
     this.handle = handle;
+    this.hasArchive = residentModuleHasArchive(module.exportNames ?? []);
   }
 
   // -- reads ------------------------------------------------------------------------------------
@@ -313,7 +363,19 @@ export class ResidentMerkleWriteOperations {
    */
   getTreeInfo(treeId: MerkleTreeId): Promise<{ treeId: MerkleTreeId; root: Buffer; size: bigint; depth: number }> {
     if (treeId === MerkleTreeId.ARCHIVE) {
-      throw new ResidentMerkleDbCannotAnswer('getTreeInfo(ARCHIVE)', REFUSAL_REASONS.archiveTree);
+      // ANSWERED ONLY IF THIS MODULE HAS THE TREE. `hasArchive` came off the module's own export
+      // list; on an M12 or M13 build it is false and this is the refusal every earlier milestone
+      // measures, unchanged.
+      if (!this.hasArchive) {
+        throw new ResidentMerkleDbCannotAnswer('getTreeInfo(ARCHIVE)', REFUSAL_REASONS.archiveTree);
+      }
+      const archive = this.archiveSnapshot();
+      return Promise.resolve({
+        treeId,
+        root: archive.root.toBuffer(),
+        size: BigInt(archive.nextAvailableLeafIndex),
+        depth: TREE_HEIGHTS[MerkleTreeId.ARCHIVE],
+      });
     }
     if (!RESIDENT_TREES.includes(treeId)) {
       throw new ResidentMerkleDbCannotAnswer(
@@ -472,9 +534,65 @@ export class ResidentMerkleWriteOperations {
     throw new ResidentMerkleDbCannotAnswer('batchInsert', REFUSAL_REASONS.batchInsert);
   }
 
-  /** REFUSED. The block-sealing call, and the one M14's uncarried patch would answer. */
-  updateArchive(_header: unknown): Promise<never> {
-    throw new ResidentMerkleDbCannotAnswer('updateArchive', REFUSAL_REASONS.updateArchive);
+  /**
+   * The archive's current snapshot, straight off the module.
+   *
+   * Separate from `getTreeInfo(ARCHIVE)` because a caller that wants the snapshot should not have
+   * to convert a `TreeInfo` back into one, and because this is the shape `makeTXEBlock` reads.
+   */
+  archiveSnapshot(): AppendOnlyTreeSnapshot {
+    if (!this.hasArchive) {
+      throw new ResidentMerkleDbCannotAnswer('archiveSnapshot', REFUSAL_REASONS.archiveTree);
+    }
+    const raw = this.module.callWithHandle('avm_merkle_db_get_archive_snapshot', this.handle);
+    if (!raw) {
+      throw new Error('avm_merkle_db_get_archive_snapshot returned nothing');
+    }
+    return snapshotOf(raw);
+  }
+
+  /**
+   * Append a block header to the archive.
+   *
+   * REFUSED on a module without M14's extension — which is every module before M23's tree — and
+   * ANSWERED on one with it. Upstream's `MerkleTreeWriteOperations.updateArchive(header)` is the
+   * shape; the module's export takes the pair `WorldState::update_archive` takes, the block's
+   * four-tree state reference and the header's hash.
+   *
+   * THE STATE REFERENCE COMES FROM THE HEADER AND NOT FROM THE TREES. That is the whole value of
+   * the call: `world_state::MemoryMerkleDB::update_archive` compares what the header claims
+   * against what the trees currently are and throws
+   * `Can't update archive tree: Block state does not match world state` if they differ. Passing
+   * the trees' own current reference instead would make the comparison a tautology and let a
+   * header built against a stale state be certified. `test_block_seal_updates_archive` has an arm
+   * for exactly that.
+   */
+  async updateArchive(header: unknown): Promise<void> {
+    if (!this.hasArchive) {
+      throw new ResidentMerkleDbCannotAnswer('updateArchive', REFUSAL_REASONS.updateArchive);
+    }
+    const h = header as {
+      state?: { l1ToL2MessageTree?: unknown; partial?: unknown };
+      hash?: () => Promise<{ toBuffer(): Buffer }>;
+    };
+    if (typeof h.hash !== 'function' || !h.state) {
+      throw new Error('updateArchive expects a BlockHeader with a state reference and a hash()');
+    }
+    const state = h.state as { l1ToL2MessageTree: AppendOnlyTreeSnapshot; partial: PartialStateReference };
+    const hash = await h.hash();
+    this.module.callWithBlob(
+      'avm_merkle_db_update_archive',
+      this.handle,
+      serializeWithMessagePack([
+        {
+          l1ToL2MessageTree: encodeSnapshot(state.l1ToL2MessageTree),
+          noteHashTree: encodeSnapshot(state.partial.noteHashTree),
+          nullifierTree: encodeSnapshot(state.partial.nullifierTree),
+          publicDataTree: encodeSnapshot(state.partial.publicDataTree),
+        },
+        Fr.fromBuffer(hash.toBuffer()),
+      ]),
+    );
   }
 
   // -- checkpoints ------------------------------------------------------------------------------
@@ -649,4 +767,16 @@ function encodePublicDataLeaf(slot: Fr, value: Fr): Uint8Array {
 
 function encodeNullifierLeaf(nullifier: Fr): Uint8Array {
   return serializeWithMessagePack({ nullifier });
+}
+
+/**
+ * One tree snapshot in the shape the module's `TreeSnapshots` reads.
+ *
+ * `MSGPACK_CAMEL_CASE_FIELDS(root, next_available_leaf_index)` on the C++ side, so the keys are
+ * camel-cased and the root is an `Fr` (a msgpack `bin`), never a number. The index is a NUMBER and
+ * not a `bigint`: `serializeWithMessagePack` has no bigint adaptor and the C++ side reads a
+ * `uint64_t`.
+ */
+function encodeSnapshot(snapshot: AppendOnlyTreeSnapshot): { root: Fr; nextAvailableLeafIndex: number } {
+  return { root: snapshot.root, nextAvailableLeafIndex: Number(snapshot.nextAvailableLeafIndex) };
 }

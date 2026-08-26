@@ -102,6 +102,22 @@ export class Reactor {
     return this.calls;
   }
 
+  /**
+   * The names this module exports.
+   *
+   * Here so that a consumer can ask the ARTEFACT what it can do rather than being told by a
+   * constant or a constructor flag. `residentModuleHasArchive` is the first caller: M14's archive
+   * extension reaches some builds of `avm.wasm` and not others, and a database that decided which
+   * by a flag its caller passed would eventually be handed the wrong one — the direction that
+   * matters, because the wrong answer there is a merkle root that certifies nothing.
+   *
+   * It is a getter over `this.exports` rather than a list captured at construction so that it
+   * cannot drift from the object the calls actually go through.
+   */
+  get exportNames(): readonly string[] {
+    return Object.keys(this.exports);
+  }
+
   get pages(): number {
     return this.memory.buffer.byteLength / PAGE_BYTES;
   }

@@ -1,0 +1,170 @@
+From ffaeee989523b5a9e404ec3ed00c8d37b9cfc278 Mon Sep 17 00:00:00 2001
+From: Metacraft Labs <dev@metacraft-labs.com>
+Date: Wed, 26 Aug 2026 07:59:50 +0300
+Subject: [PATCH] test(vm2): expose the archive tree through the reactor, so a
+ block can be sealed
+
+M14 extended `world_state_reference::MemoryMerkleDB` with the archive tree --
+the fifth WorldState tree, the append-only tree of block-header hashes that
+every block advances. That extension is a self-contained C++ change and it does
+not reach `avm.wasm`: the AVM adapter in vm2 wraps the reference DB privately
+and exposes only `LowLevelMerkleDBInterface`, which has fourteen methods and no
+archive among them, because the AVM never reads one.
+
+This overlay carries the archive across that adapter and out through the
+reactor, and nothing else.
+
+  * `bb::avm2::simulation::MemoryMerkleDB` gains two NON-VIRTUAL methods,
+    `update_archive` and `get_archive_snapshot`. They are not added to
+    `LowLevelMerkleDBInterface`: the interface's fourteen stay fourteen, so
+    nothing the AVM sees moves and every count pinned against that interface is
+    untouched.
+
+  * `update_archive` takes the block's state reference as the AVM's own
+    `TreeSnapshots` rather than the reference DB's `world_state::TreeRoots`.
+    `TreeSnapshots` is msgpack-declared (`MSGPACK_CAMEL_CASE_FIELDS`) and
+    already crosses this boundary; `TreeRoots` has no msgpack declaration at
+    all. The `TreeRoots` the adapter builds from it leaves the archive field at
+    its default, which is never read -- `state_reference_equals` compares the
+    four StateReference trees and ignores the fifth, which is why M14 wrote it.
+
+  * TWO reactor exports, not one. Appending a header is half of it: the next
+    header's `lastArchive` is a READ of the archive, so a module that can only
+    append gives a caller no way to anchor block N+1 against block N. The read
+    is what a seal cannot do without.
+
+The reactor's export list goes from forty-nine names to fifty-one. That is a
+different artefact from M12's and M13's and is measured as one.
+---
+ .../cpp/src/barretenberg/vm2/CMakeLists.txt   |  2 ++
+ .../barretenberg/vm2/reactor/avm_reactor.cpp  | 33 +++++++++++++++++++
+ .../vm2/simulation/lib/memory_merkle_db.cpp   | 21 ++++++++++++
+ .../vm2/simulation/lib/memory_merkle_db.hpp   | 18 ++++++++++
+ 4 files changed, 74 insertions(+)
+
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt b/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt
+index 68532eee640..411b4f9e187 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt
++++ b/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt
+@@ -182,6 +182,8 @@ if(AVM_REACTOR)
+             avm_merkle_db_create_checkpoint
+             avm_merkle_db_commit_checkpoint
+             avm_merkle_db_revert_checkpoint
++            avm_merkle_db_update_archive
++            avm_merkle_db_get_archive_snapshot
+             avm_merkle_db_get_checkpoint_id
+             avm_contract_db_get_checkpoint_id
+             avm_contract_db_register_debug_function_names
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/reactor/avm_reactor.cpp b/barretenberg/cpp/src/barretenberg/vm2/reactor/avm_reactor.cpp
+index c22b749e5cd..92069f43a63 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/reactor/avm_reactor.cpp
++++ b/barretenberg/cpp/src/barretenberg/vm2/reactor/avm_reactor.cpp
+@@ -617,6 +617,39 @@ WASM_EXPORT int32_t avm_merkle_db_revert_checkpoint(uint32_t handle)
+     });
+ }
+ 
++// ---------------------------------------------------------------------------
++// THE ARCHIVE. Two exports, not one.
++//
++// M22's Outstanding Tasks priced closing the archive blocker at "one reactor export"; driving a
++// chain needs TWO, and the second is the one a seal cannot do without. `update_archive` appends a
++// block header; but the NEXT header's `lastArchive` is a READ of the archive, so a module that can
++// only append gives a caller no way to anchor block N+1 against block N. The read is the reason
++// `sealBlock` refused, not the append.
++//
++// Both are on the ADAPTER and neither is on `LowLevelMerkleDBInterface`. The AVM does not read the
++// archive, so the interface's fourteen stay fourteen and every check that pins that number is
++// untouched; what moves is the reactor's export list, from forty-nine to fifty-one.
++//
++// args: msgpack [TreeSnapshots, FF] — the block's four-tree state reference and its header hash.
++// no result. Refuses, with WorldState::update_archive's own message, if the state reference is not
++// the world state's current one.
++WASM_EXPORT int32_t avm_merkle_db_update_archive(uint32_t handle, const uint8_t* args, uint32_t len)
++{
++    AVM_MERKLE_DB(handle)
++    return guarded([&] {
++        const auto [block_state_ref, block_header_hash] = unpack_args<std::tuple<TreeSnapshots, FF>>(args, len);
++        db->update_archive(block_state_ref, block_header_hash);
++        clear_result();
++    });
++}
++
++// result: msgpack AppendOnlyTreeSnapshot — the archive's root and its next available leaf index.
++WASM_EXPORT int32_t avm_merkle_db_get_archive_snapshot(uint32_t handle)
++{
++    AVM_MERKLE_DB(handle)
++    return guarded([&] { pack_result(db->get_archive_snapshot()); });
++}
++
+ // result: msgpack uint32.
+ WASM_EXPORT int32_t avm_merkle_db_get_checkpoint_id(uint32_t handle)
+ {
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/memory_merkle_db.cpp b/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/memory_merkle_db.cpp
+index 4251aa38282..34c524d593c 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/memory_merkle_db.cpp
++++ b/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/memory_merkle_db.cpp
+@@ -10,6 +10,12 @@ AppendOnlyTreeSnapshot to_avm_snapshot(const world_state::TreeSnapshot& snapshot
+                                    .next_available_leaf_index = snapshot.next_available_leaf_index };
+ }
+ 
++world_state::TreeSnapshot to_reference_snapshot(const AppendOnlyTreeSnapshot& snapshot)
++{
++    return world_state::TreeSnapshot{ .root = snapshot.root,
++                                      .next_available_leaf_index = snapshot.next_available_leaf_index };
++}
++
+ } // namespace
+ 
+ TreeSnapshots MemoryMerkleDB::get_tree_roots() const
+@@ -23,4 +29,19 @@ TreeSnapshots MemoryMerkleDB::get_tree_roots() const
+     };
+ }
+ 
++void MemoryMerkleDB::update_archive(const TreeSnapshots& block_state_ref, const FF& block_header_hash)
++{
++    world_state::TreeRoots roots;
++    roots.l1_to_l2_message_tree = to_reference_snapshot(block_state_ref.l1_to_l2_message_tree);
++    roots.note_hash_tree = to_reference_snapshot(block_state_ref.note_hash_tree);
++    roots.nullifier_tree = to_reference_snapshot(block_state_ref.nullifier_tree);
++    roots.public_data_tree = to_reference_snapshot(block_state_ref.public_data_tree);
++    inner_.update_archive(roots, block_header_hash);
++}
++
++AppendOnlyTreeSnapshot MemoryMerkleDB::get_archive_snapshot() const
++{
++    return to_avm_snapshot(inner_.get_tree_roots().archive_tree);
++}
++
+ } // namespace bb::avm2::simulation
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/memory_merkle_db.hpp b/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/memory_merkle_db.hpp
+index 8391c70bf87..a34816bca6e 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/memory_merkle_db.hpp
++++ b/barretenberg/cpp/src/barretenberg/vm2/simulation/lib/memory_merkle_db.hpp
+@@ -79,6 +79,24 @@ class MemoryMerkleDB final : public LowLevelMerkleDBInterface {
+     }
+     void pad_tree(MerkleTreeId tree_id, size_t num_leaves) override { inner_.pad_tree(tree_id, num_leaves); }
+ 
++    // ------------------------------------------------------------------------------------------
++    // BLOCK-LEVEL, AND DELIBERATELY NOT PART OF `LowLevelMerkleDBInterface`.
++    //
++    // The AVM never reads the archive: `MerkleTreeId::ARCHIVE` appears in vm2 only in a tree-name
++    // switch, and the AVM's own column-serialised `TreeSnapshots` carries four trees. So these two
++    // are non-virtual methods on the ADAPTER rather than additions to the interface, which is what
++    // WORLD-STATE.md Gap A (RI-53) says the archive is for: block production, not execution.
++    //
++    // `update_archive` takes the block's state reference in the AVM's own `TreeSnapshots`
++    // vocabulary rather than the reference DB's `world_state::TreeRoots`, because `TreeSnapshots`
++    // is the type that already crosses the wasm boundary (`MSGPACK_CAMEL_CASE_FIELDS`) and
++    // `TreeRoots` has no msgpack declaration at all. The archive field of the constructed
++    // `TreeRoots` is left at its default and never read: `state_reference_equals` compares the four
++    // StateReference trees and ignores the fifth, which is the whole reason it exists.
++    // ------------------------------------------------------------------------------------------
++    void update_archive(const TreeSnapshots& block_state_ref, const FF& block_header_hash);
++    AppendOnlyTreeSnapshot get_archive_snapshot() const;
++
+     void create_checkpoint() override { inner_.create_checkpoint(); }
+     void commit_checkpoint() override { inner_.commit_checkpoint(); }
+     void revert_checkpoint() override { inner_.revert_checkpoint(); }
+-- 
+2.50.1
+

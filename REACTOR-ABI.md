@@ -97,6 +97,13 @@ does not.
 
 ## The export surface: thirty-nine, of which thirty-seven are written out in the link line
 
+> **THE COUNT IS A PROPERTY OF A TREE, NOT OF THIS DOCUMENT.** Thirty-nine is M12's module. M13's
+> overlay adds `avm_contract_db_register_class` and `avm_contract_db_register_instance` and eight
+> more, making **forty-nine**; M23's overlay adds two more, making **fifty-one**. Each is a
+> separate artefact measured separately, exactly as M13 did for its tenth overlay, and an export
+> appearing is as much a finding as one disappearing. See "The archive, added in M23" below.
+
+
 `--export-dynamic` is deliberately **not** passed. Each name below is given to the linker as
 `-Wl,--export=` and is therefore also a `--gc-sections` root; the two options together are what
 "exports pruned" means here — the reachable set is exactly what these names reach.
@@ -121,6 +128,51 @@ rather than by counting exports — the fifteen of its nineteen that do not shar
 for the low-level one; naming those as forbidden would have made the check contradict itself. It is internal to vm2: `simulate_fast_internal`
 builds a `PureMerkleDB` itself, exactly as it wraps whatever raw contract DB it is handed in
 `PureContractDB`. Both facts are read out of the fork at the anchor on every run.
+
+### The archive, added in M23 — and it is TWO exports, not one
+
+**`REACTOR-ABI.md` mentioned the archive zero times until M23, and that is how the decision got
+lost.** M14 decided to extend `world_state_reference` with the archive tree (RI-53), prepared the
+patch, and put "whether the reactor should export archive operations at all" in its own /Out of
+scope/ as **M15's boundary decision**. M15 never took it. M22 then needed it to seal a block,
+measured four ways that it was not carried, and refused rather than inventing a `lastArchive`. So
+the decision sat unowned across three milestones while the document that describes this boundary
+did not name the subject. It is named now.
+
+| group | exports |
+|---|---|
+| **the archive (M23's overlay)** | `avm_merkle_db_update_archive`, `avm_merkle_db_get_archive_snapshot` |
+
+* `avm_merkle_db_update_archive(handle, args, len)` — args: msgpack `[TreeSnapshots, FF]`, the
+  block's four-tree state reference and its header hash. No result. It refuses, with
+  `WorldState::update_archive`'s own message *"Can't update archive tree: Block state does not
+  match world state"*, when the state reference is not the world state's current one.
+* `avm_merkle_db_get_archive_snapshot(handle)` — result: msgpack `AppendOnlyTreeSnapshot`.
+
+**Why two and not one.** M22's Outstanding Tasks priced the remaining work at "one reactor
+export". Appending is half of it: the next header's `lastArchive` is a **read** of the archive, so
+a module that can only append gives a caller no way to anchor block N+1 against block N — and the
+read is where `makeTXEBlockHeader` actually stopped, at `getTreeInfo(ARCHIVE)`, not at
+`updateArchive`.
+
+**Neither is on `LowLevelMerkleDBInterface`, and the fourteen stay fourteen.** The AVM never reads
+the archive: `MerkleTreeId::ARCHIVE` appears in `vm2/` only in a tree-name switch, and the AVM's
+own column-serialised `TreeSnapshots` carries four trees. So both are non-virtual methods on the
+vm2 *adapter* (`bb::avm2::simulation::MemoryMerkleDB`) rather than additions to the interface, and
+every count pinned against that interface is untouched.
+
+**Why the argument is `TreeSnapshots` and not `world_state::TreeRoots`.** `TreeSnapshots` is
+declared with `MSGPACK_CAMEL_CASE_FIELDS` and already crosses this boundary — it is what
+`avm_merkle_db_get_tree_roots` returns. `world_state::TreeRoots` has no msgpack declaration at all.
+The `TreeRoots` the adapter builds from the argument leaves its archive field at the default and
+never reads it: `state_reference_equals` compares the four StateReference trees and ignores the
+fifth, which is why M14 wrote it.
+
+**One thing that does NOT move.** M14's patch adds a fifth member to `world_state::TreeRoots`, and
+M22's Outstanding Tasks expected that to ripple. It does not: `avm_merkle_db_get_tree_roots` packs
+the vm2 adapter's `TreeSnapshots`, which has four members and is a different type, so the msgpack
+keys crossing this boundary are still exactly `l1ToL2MessageTree`, `noteHashTree`, `nullifierTree`
+and `publicDataTree`.
 
 ### Why the host interfaces are exports and not imports
 
