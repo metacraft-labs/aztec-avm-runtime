@@ -52,13 +52,13 @@
 //!
 //! # DD-7
 //!
-//! `want_columns` is passed in and is **recorded, not honoured**. Path A has no column-bearing
-//! step encoder; asking for columns sets `CtfsTraceWriter::dropped_column_awareness()` and this
-//! module surfaces it as `ct_dropped_column_awareness()`. DD-7 says a consumer asserts on that
-//! signal *only* when the tracing configuration asked for columns, and the host is where that
-//! rule lives (`ct-host/src/config.ts`) — because a wasm module that refused would be refusing
-//! after the host had already committed to a writer path. `ct_writer_kind()` records which path
-//! produced the container so a reader never has to infer it.
+//! `want_columns` is **HONOURED** at the current `trace_format` anchor and was not at
+//! `9cbc127ef8`; the request reaches the writer through the TRAIT, whose defaults are empty
+//! bodies and which `CtfsTraceWriter` overrides, so `dropped_column_awareness()` answers `false`.
+//! Both signals are still surfaced, from different places on purpose: the request from this
+//! module's session, the loss from the writer. DD-7's refusal stands and its subject moved — this
+//! runtime has no source column to record (`emit()` is rung 3, `Line(pc)`) — so it fires in the
+//! host (`ct-host/src/config.ts`). `ct_writer_kind()` records which path wrote the container.
 
 use codetracer_trace_types::{Line, TypeId, TypeKind, ValueRecord};
 use codetracer_trace_writer::ctfs_writer::CtfsTraceWriter;
@@ -689,17 +689,33 @@ mod tests {
         assert_eq!(&batched[..5], &[0xC0, 0xDE, 0x72, 0xAC, 0xE2], "missing the CTFS magic");
     }
 
+    /// THIS TEST ASSERTED THE OPPOSITE UNTIL THE `trace_format` ANCHOR MOVED, AND NOTHING RAN IT.
+    ///
+    /// It was `a_column_request_is_recorded_as_dropped`, ending
+    /// `assert_eq!(ct_dropped_column_awareness(), 1, "Path A must report the loss it took")`. The
+    /// anchor moved onto a writer that HONOURS a column request, so that assertion became false
+    /// of the writer this crate links — and it stayed in the tree, green, because
+    /// `build_ct_writer_wasm.sh` only runs these tests behind `--native-tests` and nothing passed
+    /// it. Run by hand it fails `left: 0, right: 1`. The check now passes `--native-tests`, so
+    /// this file is a thing that can fail rather than a thing that is read.
     #[test]
-    fn a_column_request_is_recorded_as_dropped() {
+    fn a_column_request_is_honoured_and_reported_as_such() {
         let _g = serial();
         unsafe { assert_eq!(open(1), CT_OK) };
         let r = record(1);
         assert_eq!(unsafe { ct_ingest(r.as_ptr(), r.len()) }, 1);
         assert!(!ct_writer_close().is_null());
-        assert_eq!(ct_columns_requested(), 1);
-        assert_eq!(ct_dropped_column_awareness(), 1, "Path A must report the loss it took");
+        assert_eq!(ct_columns_requested(), 1, "the module must record that columns were asked of it");
+        assert_eq!(
+            ct_dropped_column_awareness(),
+            0,
+            "the writer at the pinned trace_format anchor carries columns, so nothing is dropped"
+        );
     }
 
+    /// The control for the test above: with no request there is nothing to honour and nothing to
+    /// drop, so `ct_dropped_column_awareness()` being 0 there is NOT evidence about the writer's
+    /// capability. Both arms exist so the 0 above is attributable.
     #[test]
     fn no_column_request_reports_no_loss() {
         let _g = serial();

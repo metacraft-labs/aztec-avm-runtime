@@ -260,6 +260,39 @@ STAMP="$M24_CRATE/build-wasm-deps/materialised-at"
 assert_file "the materialisation recorded which revision it took" "$STAMP"
 assert_eq "the materialised dependency is the revision pins.json declares" \
   "$PIN" "$(cat "$STAMP" 2>/dev/null | tr -d '[:space:]')"
+# AND THE MODULE WAS BUILT FROM THAT MATERIALISATION, NOT FROM THE ONE BEFORE IT.
+#
+# The stamp says which revision was EXTRACTED. It says nothing about which one was COMPILED, and
+# those came apart in practice: `git archive` stamps files with the commit's timestamp, cargo
+# fingerprints on mtime, and a re-materialisation at a different revision left sources older than
+# the previous revision's rlibs — so cargo reused them. `build_ct_writer_wasm.sh` extracts with
+# `tar -m` now, and this is the assertion that says the remedy held: the stamp is written before
+# the build, so a module older than it was not produced by it.
+assert_true "and the module was BUILT from that materialisation (it is newer than the stamp)" \
+  test "$MODULE" -nt "$STAMP"
+# AND THE CRATE'S OWN TESTS ARE RUN, BECAUSE UNTIL NOW THEY WERE NOT.
+#
+# `ct-writer/src/lib.rs` carries five `#[test]`s over this exact ABI, and
+# `build_ct_writer_wasm.sh` runs them only behind `--native-tests`. NOTHING IN THE REPOSITORY
+# EVER PASSED IT. Measured by the anchor move's review: when `pins.json` moved onto the
+# column-capable writer, `a_column_request_is_recorded_as_dropped` — which asserts
+# `ct_dropped_column_awareness() == 1` — became false of the writer the crate links, and it sat
+# in the tree green because no check executed it. Run by hand it fails `left: 0, right: 1`.
+#
+# A test file nobody runs is the campaign's "an assertion must be capable of failing" one level
+# up: the assertion is written, it is correct-looking, and it cannot go red. So it is executed
+# here, bounded, and its PASS COUNT is asserted too — `cargo test` exits 0 over an empty suite,
+# and "the tests passed" must not be satisfiable by there being none.
+NATIVE_LOG="$M24_WORK/ct-writer-native-tests.log"
+mkdir -p "$M24_WORK" || die "could not create $M24_WORK"
+m24_run_bounded "$M24_BUILD_TIMEOUT" "the ct-writer native tests" \
+  "$REPO_ROOT/verification/build_ct_writer_wasm.sh" --native-tests >"$NATIVE_LOG" 2>&1
+NATIVE_RC=$?
+assert_eq "the ct-writer crate's own native tests over this ABI pass" "0" "$NATIVE_RC"
+NATIVE_PASSED="$(sed -n 's/^test result: ok\. \([0-9]*\) passed;.*/\1/p' "$NATIVE_LOG" | head -1)"
+assert_ge "and it is not an empty suite — cargo exits 0 over zero tests" "5" \
+  "${NATIVE_PASSED:-0}"
+
 assert_true "the build script reads the revision from pins.json rather than declaring one" \
   str_has_sub "$(cat "$REPO_ROOT/verification/build_ct_writer_wasm.sh")" 'p["anchors"].get("trace_format")'
 assert_false "no 40-hex commit literal is typed into the build script" \
