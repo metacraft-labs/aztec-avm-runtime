@@ -239,6 +239,9 @@ ever runs the first.
 ### A PIN THAT IS NOT PUBLISHED IS NOT A PIN, IT IS A LOCAL FILE
 
 **One instance, and it made a whole milestone unreproducible while every check reported green.**
+(The rule held on its first test: the `trace_format` anchor move on 2026-08-26 pushed
+`592fa42cbf` to `origin/wasm/ctfs-writer` and confirmed it reachable from a `refs/remotes` ref
+**before** `pins.json` named it.)
 M24 added the first two non-aztec-packages anchors to `pins.json` — `trace_format` and
 `trace_format_nim` — and both pointed at commits that existed only on local branches in worktrees
 on this machine. `pins.json` recorded that ("the branch is LOCAL-ONLY"), but recorded it as *the
@@ -371,16 +374,71 @@ touch moves, look for a commit that landed between the reference sweep and yours
 repository — before writing a story. Both attributions above were re-derived independently by the
 review and both held; that is the standard, not the presumption.
 
-Current per-milestone counts. Measured **M0-M24, on 2026-08-26**, by M24's REVIEW, one milestone at
-a time with nothing else running, `setsid`-detached, **inside this repository's own dev shell**
-(`direnv exec` — the engine and the PATH the checks and CI use), `TMPDIR` and the log under
-`~/.cache`, no hole in the log:
+Current per-milestone counts. Measured **M0-M24, on 2026-08-27**, by the anchor move's REVIEW, one
+milestone at a time with nothing else running, `setsid`-detached, **inside this repository's own
+dev shell** (`direnv exec` — the engine and the PATH the checks and CI use), `TMPDIR` and the log
+under `~/.cache`, no hole in the log:
 
 ```
 m0 156  m1 169  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
 m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
-m19 180  m20 237  m21 324  m22 260  m23 509  m24 300   CAMPAIGN TOTAL 8,711
+m19 180  m20 237  m21 324  m22 260  m23 509  m24 350   CAMPAIGN TOTAL 8,761
 ```
+
+**THE ANCHOR MOVE'S REVIEW MOVED EXACTLY ONE NUMBER AND IT IS TWO ASSERTIONS.** M24 348 -> 350,
+all of it `verify_ct_writer_wasm_zero_imports` 56 -> 58, and the reason is a family this brief
+already names one level up. **`ct-writer/src/lib.rs` carries five `#[test]`s over the trace event
+ABI and NOTHING IN THE REPOSITORY EVER RAN THEM** — `build_ct_writer_wasm.sh` runs them only
+behind `--native-tests` and no check, recipe or script passed it. So when the anchor moved,
+`a_column_request_is_recorded_as_dropped` — asserting `ct_dropped_column_awareness() == 1` —
+became **false of the writer the crate links** and sat in the tree looking green; run by hand it
+fails `left: 0, right: 1`. The module doc said the same false thing in prose. *An assertion that
+cannot fail is one shape of this; a whole test file that nothing executes is another, and it is
+harder to see, because the file is full of assertions that look fine.* The test now asserts what
+the writer does, the doc is corrected, and the check EXECUTES the suite — one assertion that it
+passes and one that it is **not empty**, because `cargo test` exits 0 over zero tests.
+
+**And a property of the artefact came out of fixing that doc.** The first draft added 13 lines to
+the module header; the rebuilt module was **253,122 bytes, sha256 `df1177f1…`** — same size,
+different hash — because the release module embeds panic `Location`s from `ct-writer/src/lib.rs`.
+The fix is written in the SAME NUMBER OF LINES and reproduces `5eef4b11…` exactly. So §7's sha256
+is stable in the source *including its comments*, and "two clean builds are byte-identical" is a
+weaker statement than it sounds.
+
+Every other milestone came out at its reference value **to the assertion**, including M9 at 807 in
+1,284 s with its 140/143/113/73/126/83/129 split and no flake, and M11 at 259 with the fifth
+upstream move committed.
+
+**THE ANCHOR MOVE ITSELF MOVED EXACTLY ONE NUMBER AND EVERY UNIT OF IT IS ACCOUNTED FOR IN BOTH
+DIRECTIONS.** M24 300 -> 348: `verify_ct_writer_wasm_zero_imports` 55 -> 56 (the module must be
+newer than the materialisation stamp — `git archive` stamps files with the COMMIT's timestamp and
+cargo fingerprints on mtime, so `--force` alone did not invalidate the build);
+`test_ct_container_roundtrip_ct_print` 48 -> 86 (the split streams, through the reference reader,
+which nothing had ever read — see M24's "What the anchor move changed"); and
+`test_dropped_column_awareness_asserted` 39 -> 48 (the writer honours a column request now, so the
+gate that asserted a throw asserts the module's answer, the refusal's reason is re-pinned, and the
+bypass that rested on `dropped_column_awareness()` is closed by freezing instead). 1 + 38 + 9 = 48,
+and 8,711 + 48 = 8,759; with the review's two, **8,761**. **Every other milestone came out at its
+reference value TO THE ASSERTION**, including M9 at 807 in 1,303 s with no flake.
+
+**The 24-failure demonstration was reproduced by the review rather than accepted.** With
+`pins.json` put back to `9cbc127ef8` and the module rebuilt, the repaired check gives **86
+assertions, 24 failures, exit 1** — and the 38 assertion names the working-tree diff ADDS were
+extracted and every one of the 86 output lines classified: all 24 failures are among the 38 new
+ones and **all 48 pre-existing assertions pass over that same container**. That is what says the
+old check was green over a container whose `steps.dat`, `values.dat` and `calls.dat` the reference
+reader cannot read. The old-anchor module rebuilt to **246,527 bytes / `75626c72…`**, §7's
+pre-move figure to the byte, and the restore to **253,122 / `5eef4b11…`**, so the harness is
+calibrated in both directions.
+
+**M11 WENT RED IN THAT SWEEP FOR THE FIFTH TIME, AND FOR THE FIFTH TIME IT IS UPSTREAM MOVING.**
+`upstream/next` went `142dfcf4b2` -> `9df414ec0e` (twelve commits past the base to fourteen), by a
+fetch in the sibling `aztec-packages` checkout, while this work was running. Five failing
+assertions, **the assertion COUNT unchanged at 259** — the stale recorded tip, the stale exposure
+hash and the stale ledger. The decision half needed nothing: the three acknowledged overlaps
+outside `barretenberg/cpp` still hold at the new tip and the check's own conjunct printed
+`transfers`. Repaired mechanically (`carry/exposure.json` and `carry/rebase.json` re-measured by
+the checks themselves, `just carry-ledger` re-rendered) and re-run alone: **259, 7/7, exit 0**.
 
 **M24's review moved exactly one number and every unit of it is accounted for.** M24 292 -> 300:
 `verify_ct_writer_wasm_zero_imports` 49 -> 55 (the trace-format checkout is present; the pinned
@@ -679,21 +737,44 @@ Format spec: `~/ah/dev/agent-harbor/ah-lib/specs/Milestones-Files.md`.
   `233d8e0993` against base-plus-patches as *separate trees*. Never repoint it at
   the `codetracer` branch — that would turn base-versus-patched into
   patched-versus-patched and make every claim a tautology while staying green.
-- **Upstream moves — FOUR times now, and it is M11's work every time.** `upstream/next` has gone
-  `233d8e0993` (base) → three commits → `44a57f8c4a` (seven) → `9487ed3e9b` (nine) →
-  `142dfcf4b2` (twelve, 2026-08-26). Each move can turn `verify_carry_set_applies_to_upstream_head`
-  red without anything of ours changing. Distinguish that from a regression, and then FIX it rather
+- **Upstream moves — FIVE times now, and it is M11's work every time. THIS BULLET IS THE ONE PLACE
+  THE CHAIN IS STATED; everything else points here.** `upstream/next` has gone `233d8e0993`
+  (base) → three commits → `44a57f8c4a` (seven) → `9487ed3e9b` (nine) → `142dfcf4b2` (twelve,
+  2026-08-26) → `9df414ec0e` (**fourteen, 2026-08-26**, by a fetch in the sibling checkout during
+  the anchor move's sweep). Each move can turn `verify_carry_set_applies_to_upstream_head` red
+  without anything of ours changing. Distinguish that from a regression, and then FIX it rather
   than recording it — M21 measured the third move and left the red for the review to find.
   **The repair is half mechanical and half a decision.** Mechanical: `just carry-exposure`
   re-measures `carry/exposure.json` at the new tip, `just carry-ledger` re-renders
-  `CARRY-LEDGER.md`, and the replay rewrites `carry/rebase.json` on every run — commit all four
-  together or the ledger and the data disagree. The decision: every overlap OUTSIDE
+  `CARRY-LEDGER.md`, and the replay rewrites `carry/rebase.json` on every run — those three are
+  committed together or the ledger and the data disagree, and `carry/overlap.json` joins them as a
+  fourth **whenever the decision half is non-empty**. The decision: every overlap OUTSIDE
   `barretenberg/cpp` needs an entry in `carry/overlap.json` with a reason, a
   why-it-does-not-reach-the-build, a consequence, the declared line ranges, and the blob ids at
   both ends so it expires when upstream touches the path again. Read the check's own output first
   — it tells you whether conjunct 1 (nothing under the build tree) and conjunct 3 (disjoint
   regions) still hold, and if conjunct 1 has failed no acknowledgement can help and M6 and M10 owe
   a rebuild.
+
+  **AFTER FIVE OCCURRENCES, FOUR OF THEM NEEDED NO DECISION AT ALL, AND THAT IS THE MECHANISATION.**
+  Only move 4 added overlaps (`build-images/src/Dockerfile`, `scripts/setup-container.sh`); moves
+  1, 2, 3 and 5 needed nothing, because acknowledgements are pinned to blob ids and expire by
+  themselves. So the judgement is not "re-acknowledge", it is *"is there anything new to
+  acknowledge"* — and `verify_carry_set_applies_to_upstream_head` already computes exactly that
+  and printed `transfers` at `9df414ec0e` before anybody looked. What is missing is a **writer**
+  that runs when the check says `transfers`: a `just carry-reacknowledge` that records the new
+  tip, runs the three regenerations, runs `verification/_carry_overlap.py` against the new tip,
+  and **refuses, non-zero, naming the paths**, if an overlap is new, is under `barretenberg/cpp`,
+  or has stale blob ids — the three cases a human must decide — otherwise reporting "no decision
+  needed" and leaving three files for one commit. It adds no predicate; it runs the check's own
+  conjuncts *before* the write instead of after it.
+
+  **And the prose is the half that actually went stale.** The fifth move repaired all three data
+  files and left FOUR sites naming `142dfcf4b2` as current — this bullet, two in
+  `codetracer-specs`' M11 section, and one in a verification description that also quoted
+  "78 paths" where the new tip measures **79**. `CARRY-LEDGER.md` did not go stale, because it
+  renders the tip from `carry/rebase.json`. Same remedy as the running total above: one place
+  states it, the rest point here.
 - **The CI is published and scheduled, and every job dies at one step.** The
   workflow *is* on `origin`, *is* picked up by a `garm-*` runner, and *does* run
   on schedule — then every job aborts at `Generate CI token` with
