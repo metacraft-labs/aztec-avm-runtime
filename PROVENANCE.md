@@ -87,6 +87,16 @@ because no prefix rule would produce it.
 | F7 | fixtures/wasm-parity/vm2_spike-sources/spike_fixtures.cpp | barretenberg/cpp/src/barretenberg/vm2/testing/fixtures.cpp | cpp | Apache-2.0 | RI-16 |
 | F8 | reference/LICENSE.aztec-packages.Apache-2.0 | LICENSE | cpp | Apache-2.0 | RI-47 |
 | F9 | orchestration/src/vendor/simulator_public_utils.ts | yarn-project/simulator/src/public/utils.ts | cpp | Apache-2.0 | RI-63 |
+| F10 | orchestration/src/vendor/public_processor/public_processor.ts | yarn-project/simulator/src/public/public_processor/public_processor.ts | ts | Apache-2.0 | RI-21 |
+| F11 | orchestration/src/vendor/public_processor/guarded_merkle_tree.ts | yarn-project/simulator/src/public/public_processor/guarded_merkle_tree.ts | ts | Apache-2.0 | RI-21 |
+| F12 | orchestration/src/vendor/public_processor/public_processor_metrics.ts | yarn-project/simulator/src/public/public_processor/public_processor_metrics.ts | ts | Apache-2.0 | RI-21 |
+| F13 | orchestration/src/vendor/public_db_sources.ts | yarn-project/simulator/src/public/public_db_sources.ts | ts | Apache-2.0 | RI-23 |
+| F14 | orchestration/src/vendor/contracts_db_checkpoint.ts | yarn-project/simulator/src/public/contracts_db_checkpoint.ts | ts | Apache-2.0 | RI-23 |
+| F15 | orchestration/src/vendor/db_interfaces.ts | yarn-project/simulator/src/public/db_interfaces.ts | ts | Apache-2.0 | RI-23 |
+| F16 | orchestration/src/vendor/side_effect_errors.ts | yarn-project/simulator/src/public/side_effect_errors.ts | ts | Apache-2.0 | RI-22 |
+| F17 | orchestration/src/vendor/public_errors.ts | yarn-project/simulator/src/public/public_errors.ts | ts | Apache-2.0 | RI-22 |
+| F18 | orchestration/src/vendor/public_tx_simulator_interface.ts | yarn-project/simulator/src/public/public_tx_simulator/public_tx_simulator_interface.ts | ts | Apache-2.0 | RI-19 |
+| F19 | orchestration/src/vendor/txe_block_creation.ts | yarn-project/txe/src/utils/block_creation.ts | ts | Apache-2.0 | RI-66 |
 <!-- END:files -->
 
 <!-- BEGIN:exempt -->
@@ -135,6 +145,9 @@ defined here fails the check, and so does a class defined here that no file uses
 | avm-corpus | The seven AVM corpus programs (M2), transcribed from the C++ driver's `BytecodeBuilder` sequences and re-assembled with upstream's own TypeScript encoder, plus the test that requires the derived contract address to equal the one upstream's C++ produced. Ours: upstream has no TypeScript definition of these seven programs, because upstream does not have these seven programs. |
 | three-way-differential | M19's third arm: `avm.wasm` driven from inside the differential suite and compared, per transaction and from a proved-identical pre-transaction state, against both the native NAPI AVM and the TypeScript interpreter. Everything in `public_tx_simulator/differential/` plus `src/differential/three_way.test.ts` is ours and has no upstream counterpart; the one MODIFIED vendored file keeps the TypeScript result so a subclass can compare against it (upstream discards it, having only two arms). The arm's own corpus is upstream's own fixture drivers, unedited. Read `DRIFT.md` **D14** (our patch stack made a msgpack field required on the wire), **D15** (the two arms do not agree on metered gas, and why that is the oracle's age rather than a wasm defect) and **D16** before quoting what it proves. |
 | spike-fixtures-trim | Upstream's `vm2/testing/fixtures.cpp` with the two tracegen-dependent definitions removed (`empty_trace`, `get_minimal_trace_with_pi`), so the upstream simulation tests link against `vm2_sim` alone — i.e. without the proving stack the wasm build excludes. Everything else is byte-for-byte upstream. |
+| node-strip-types | The two edits Node's type stripper FORCES on a file this package runs from its `.ts` source, and nothing else. (1) Relative import specifiers `'./x.js'` become `'./x.ts'`, because Node resolves the literal specifier and there is no build step to emit a `.js`. (2) Constructor PARAMETER PROPERTIES are desugared into a field declaration plus an assignment — exactly what a compiler emits for them — because the stripper refuses them with `SyntaxError [ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX]` and `tsc --erasableSyntaxOnly` refuses them with TS1294. RI-26 recorded the same forced edit for `ForkCheckpoint` and `verify_orchestration_reuse_enumerated` pins it there line for line; `test_block_limits_respected` does the same for these three. |
+| telemetry-replacement | The `@aztec/telemetry-client` import repointed at `orchestration/src/telemetry.ts`, RI-29's dependency-free replacement, and nothing else. The imported NAMES are unchanged, which is what makes the substitution checkable: a name the stub does not export fails at load rather than at the first metric nobody reads. |
+| processor-block-assembly | `PublicProcessor` as M22 runs it. Six edits, each with a reason that is a deliverable or a measurement, and no others: (1) `node-strip-types`' two edits, on nine parameter properties and three specifiers; (2) `@aztec/telemetry-client` -> `../../telemetry.ts` and `@aztec/world-state/native` -> `../../fork_checkpoint.ts`, RI-29 and RI-26; (3) **`PublicProcessorFactory` removed** — DD-9: its `protected createPublicTxSimulator` hard-defaults to `TelemetryCppPublicTxSimulator`, the NAPI AVM, with no flag, and `PublicProcessor`'s own constructor takes the simulator as its fourth positional argument, so injection replaces inheritance; (4) **`generateProvingRequest` and its call site removed** — M22's own deliverable, "`AvmProvingRequest` generation removed, since we do not prove", and there is no proving stack in the wasm link closure to serve one (RI-13); (5) the three `@trackSpan` method decorators commented out — MEASURED, not assumed: a decorator is a `SyntaxError: Invalid or unexpected token` under the type stripper, reproduced standalone; (6) the `contractsDB` parameter narrowed from the CLASS `PublicContractsDB` to `PublicContractsDBInterface & { addNewContracts(tx) }`, because this runtime's contract store is resident inside `avm.wasm` and TypeScript is structural — the narrowing is what makes the substitution a declaration rather than an accident, and upstream's own class still satisfies it. |
 <!-- END:editclasses -->
 
 <!-- BEGIN:edits -->
@@ -179,6 +192,11 @@ does not exist).
 | diffsim/src/public/public_tx_simulator/differential/divergence_ledger.ts | three-way-differential | added |
 | diffsim/src/public/public_tx_simulator/differential/fault_injection.ts | three-way-differential | added |
 | diffsim/src/differential/three_way.test.ts | three-way-differential | added |
+| orchestration/src/vendor/public_processor/public_processor.ts | processor-block-assembly | modified |
+| orchestration/src/vendor/public_processor/guarded_merkle_tree.ts | node-strip-types | modified |
+| orchestration/src/vendor/public_processor/public_processor_metrics.ts | telemetry-replacement | modified |
+| orchestration/src/vendor/public_db_sources.ts | node-strip-types | modified |
+| orchestration/src/vendor/side_effect_errors.ts | node-strip-types | modified |
 <!-- END:edits -->
 
 ## Not vendored, and deliberately

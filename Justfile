@@ -50,7 +50,7 @@
 #   just verify-m3                     all five, in order
 #
 # They build barretenberg twice — once at the patch's base commit and once with
-# the patch applied — under $M3_WORK (default $TMPDIR/aztec-m3-merkle-lmdb).
+# the patch applied — under $M3_WORK (default $HOME/.cache/aztec-m3-merkle-lmdb).
 # From an empty work directory that was measured at 7m18s and 1.3 GB with a warm
 # ccache; afterwards ninja has nothing to do and the cost is the test binaries.
 # Set M3_WORK to keep the trees somewhere persistent.
@@ -65,7 +65,7 @@
 #   just verify-m4                     all five, in order
 #
 # They build barretenberg for wasm FOUR times under $M4_WORK (default
-# $TMPDIR/aztec-m4-wasi-sdk-33): the `wasm` preset with wasi-sdk 27 and with 33,
+# $HOME/.cache/aztec-m4-wasi-sdk-33): the `wasm` preset with wasi-sdk 27 and with 33,
 # and the `wasm-threads` preset with 33 both without and with the patch (the
 # first of those is a negative control and is meant to fail). Measured at 2.1 GB
 # and about 35 minutes cold on 32 cores; afterwards ninja has nothing to do and
@@ -85,7 +85,7 @@
 #   just verify-m5                     all four, in order (12m28s cold, 1.5 GB; 9m53s warm)
 #
 # They configure THREE worktrees of 233d8e0993 under $M5_WORK (default
-# $TMPDIR/aztec-m5-bytecode-shift) and build vm2_sim in each: the base commit, the
+# $HOME/.cache/aztec-m5-bytecode-shift) and build vm2_sim in each: the base commit, the
 # base plus the patch, and a DECOY carrying the patch's own added line with the
 # shift count changed to 31. The decoy is not decoration — a check that only shows
 # "the 64-bit results did not change" goes green for any patch that leaves them
@@ -112,7 +112,7 @@
 #   just verify-m6                     all seven, in order
 #
 # They prepare EIGHT worktrees of 233d8e0993 under $M6_WORK (default
-# $TMPDIR/aztec-m6-avm-wasm), each differing only by which prepared patches are
+# $HOME/.cache/aztec-m6-avm-wasm), each differing only by which prepared patches are
 # applied: `base` (none), `stack3` (patches 1,2,3), `avm` (+ the AVM_WASM one),
 # `hardcoded` (1,3,4 — patch 2 omitted, so its `wasm` preset still hardcodes
 # /opt/wasi-sdk), `spike` (the vm2-wasm spike's own change set, which carries the
@@ -590,7 +590,7 @@ verify-m6:
 # M7 — upstream's own vm2 test suite under wasm
 # ---------------------------------------------------------------------------
 # The six checks prepare ONE worktree of 233d8e0993 under $M7_WORK (default
-# $TMPDIR/aztec-m7-vm2-tests) carrying the four AVM_WASM series patches plus M7's
+# $HOME/.cache/aztec-m7-vm2-tests) carrying the four AVM_WASM series patches plus M7's
 # own AVM_SIM_TESTS overlay (verification/m7/), and build TWO trees inside it:
 # the wasm-avm one, and a native one that also builds upstream's OWN vm2_tests —
 # the binary with the proving stack and dsl in it. That native binary is the
@@ -1734,5 +1734,75 @@ verify-m21:
       echo "verify-m21: FAILED" >&2
     else
       echo "verify-m21: all checks passed"
+    fi
+    exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M22 — block assembly
+#
+#   just verify-processor-vendored  verify_public_processor_vendored_not_reimplemented
+#   just verify-block-failed-tx     test_failed_tx_leaves_no_state
+#   just verify-block-limits        test_block_limits_respected
+#   just verify-block-guard         test_guarded_merkle_tree_blocks_post_seal_access
+#   just verify-m22                 all four, in order — 252 assertions (64 / 43 / 89 / 56)
+#
+# THE LOOP IS UPSTREAM'S AND THAT IS THE MILESTONE. `PublicProcessor.process` is vendored from the
+# `ts` anchor into `orchestration/src/vendor/public_processor/`, with nine other files its import
+# closure reaches, and PROVENANCE.md F10..F19 make `just check-drift` compare all ten against that
+# commit on every run. What M22 wrote is the two adapters underneath it (RI-67, RI-68) and the seam
+# above it; `verify_public_processor_vendored_not_reimplemented` is the check that says so, by
+# diffing the copy against the anchor line for line and by requiring that nothing of ours outside
+# `vendor/` contains the loop.
+#
+# ONE BLOCK RUN, SHARED BY THREE CHECKS. `verification/lib_m22_block.sh` runs
+# `tools/run_block_arms.mjs` once into $M22_WORK/blocks.json (default ~/.cache/aztec-m22-block) and
+# the three behavioural checks read it, so they cannot come to disagree about a number nothing
+# changed. FIFTEEN arms: an unlimited block, a stopping and a non-stopping arm for each of the five
+# limits, a requeue, a failing transaction and its control, and the guard arm. It re-runs when the module, the runner, any orchestration source or any node-host source
+# is newer; M22_ARMS_REFRESH=1 forces one. It needs a built avm.wasm carrying M13's contract-DB and
+# merkle-DB exports — AVM_WASM_PATH, else this milestone's work directory, else M13's/M12's.
+#
+# WHAT THIS MILESTONE DOES NOT DELIVER, said here rather than left to be discovered: the block is
+# not SEALED. `sealBlock` is upstream's `makeTXEBlockHeader` and its `getTreeInfo(ARCHIVE)` is the
+# one call the shipped module cannot serve, because M14's archive extension (RI-53) is a prepared
+# patch that is not carried. The refusal is measured rather than described — see
+# `test_guarded_merkle_tree_blocks_post_seal_access` part 4 — and M22's status entry lists the three
+# named things that would close it.
+# ---------------------------------------------------------------------------
+
+# The loop is upstream's code at the pinned commit, with only the edits PROVENANCE.md declares.
+verify-processor-vendored:
+    @verification/verify_public_processor_vendored_not_reimplemented.sh
+
+# A thrown-out transaction contributes nothing, and the next transaction sees the pre-failure state.
+verify-block-failed-tx:
+    @verification/test_failed_tx_leaves_no_state.sh
+
+# Four limits, eight arms, a discriminator per limit, and the unprocessed set shown requeueable.
+verify-block-limits:
+    @verification/test_block_limits_respected.sh
+
+# DD-3: the guard refuses world-state access after the seal, with the unguarded database as control.
+verify-block-guard:
+    @verification/test_guarded_merkle_tree_blocks_post_seal_access.sh
+
+# Run the whole M22 verification set; every check runs even if an earlier one fails.
+verify-m22:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_public_processor_vendored_not_reimplemented \
+      test_failed_tx_leaves_no_state \
+      test_block_limits_respected \
+      test_guarded_merkle_tree_blocks_post_seal_access
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m22: FAILED" >&2
+    else
+      echo "verify-m22: all checks passed"
     fi
     exit "$rc"

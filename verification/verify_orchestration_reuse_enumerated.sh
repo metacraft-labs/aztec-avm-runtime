@@ -367,15 +367,38 @@ assert_eq "our telemetry replacement is disabled, runs a span's body, and answer
 #
 # M18's first deliverable said Aztec's orchestration — `public_tx_simulator/`, `state_manager/`,
 # `public_processor/`, `side_effect_trace*.ts`, `db_interfaces.ts`, `public_db_sources.ts` — was
-# "vendored under RI-19..RI-23 and unchanged". M18's review measured that and it is not: none of
-# those files is under `orchestration/src`, and `@aztec/simulator` is not a dependency because
-# upstream does not publish it. RI-19..RI-23 are DECISIONS to vendor, and the decisions stand;
-# the vendoring is an outstanding task.
+# "vendored under RI-19..RI-23 and unchanged". M18's review measured that and it was not: none of
+# those files was under `orchestration/src`, and `@aztec/simulator` is not a dependency because
+# importing it would pull `@aztec/native` and `@aztec/world-state`. RI-19..RI-23 were DECISIONS to
+# vendor and the vendoring was an outstanding task.
 #
-# This part exists so that state is a measurement rather than a sentence, in both directions. If
-# the vendoring is done, these assertions go RED and whoever did it has to move the deliverable
-# and this block together. That is the point: the tree and the milestone cannot drift apart
-# silently, which is how the claim got written in the first place.
+# THE BLOCK BELOW WENT RED IN M22, WHICH IS WHAT IT WAS FOR. M22 vendored the block processor and
+# the three things its own import closure reaches. The census is therefore re-pinned to what is
+# true NOW, per subject, EXACTLY — not `>=`, because a subject growing is as much a finding as one
+# disappearing, and an inequality would have let the next milestone vendor the whole simulator
+# without moving a deliverable.
+#
+#   VENDORED IN M22, and each is one file except the processor's own directory:
+#     public_processor       3 paths — the directory, public_processor.ts, public_processor_metrics.ts
+#                            (guarded_merkle_tree.ts is inside the directory and does not match the
+#                            subject's own name, which is why the count is 3 and not 4)
+#     db_interfaces          1 — db_interfaces.ts
+#     public_db_sources      1 — public_db_sources.ts
+#     public_tx_simulator    1 — public_tx_simulator_interface.ts, THE INTERFACE ONLY.
+#                            The three-phase transaction model in `public_tx_simulator/` is NOT
+#                            here and this check says so by naming the file: the processor takes
+#                            its simulator as a constructor argument, so a `PublicTxSimulator-
+#                            Interface` is all it needs, and `WasmAvmPublicTxSimulator` is what
+#                            satisfies it.
+#
+#   STILL NOT VENDORED, and still an outstanding task:
+#     state_manager          0 — RI-20. Nothing in the block path reaches it: the state manager
+#                            lives BELOW a TypeScript AVM and this runtime's AVM is the C++ one
+#                            inside avm.wasm, which has its own.
+#     side_effect_trace      0 — RI-22. Same reason, and M25 is where it is due.
+#
+# So the tree and the milestone still cannot drift apart silently; the pin has simply moved to the
+# state the milestone that moved it declared.
 
 assert_eq "the orchestration's dependencies are the four published @aztec packages" \
   "@aztec/constants @aztec/foundation @aztec/protocol-contracts @aztec/stdlib" \
@@ -388,11 +411,45 @@ import json, sys
 d = json.load(open(sys.argv[1]))
 print("yes" if "@aztec/simulator" in d.get("dependencies", {}) else "no")' "$ORCH_DIR/package.json")"
 
-for subject in public_tx_simulator state_manager public_processor side_effect_trace \
-               db_interfaces public_db_sources; do
-  assert_eq "RI-19..RI-23's $subject is NOT vendored under orchestration/src — recorded, not claimed" \
-    "0" "$(find "$ORCH_SRC" -name "$subject*" 2>/dev/null | grep -c . || true)"
+m18_subject_paths() { # <subject> -> the matching paths under orchestration/src, one per line
+  find "$ORCH_SRC" -name "$1*" 2>/dev/null | sed "s|^$ORCH_SRC/||" | sort
+}
+
+# The counts, exact and per subject. `while read` rather than a `for` over a here-string so the
+# subject and its expected count travel together and cannot get out of step.
+while IFS='|' read -r subject want; do
+  [ -n "$subject" ] || continue
+  got="$(m18_subject_paths "$subject" | grep -c . || true)"
+  if [ "$want" = "0" ]; then
+    assert_eq "RI-19..RI-23's $subject is NOT vendored under orchestration/src — recorded, not claimed" \
+      "0" "$got"
+  else
+    assert_eq "RI-19..RI-23's $subject IS vendored under orchestration/src, M22, exactly $want path(s)" \
+      "$want" "$got"
+    note "  $subject: $(m18_subject_paths "$subject" | tr '\n' ' ')"
+  fi
+done <<'SUBJECTS'
+public_tx_simulator|1
+state_manager|0
+public_processor|3
+side_effect_trace|0
+db_interfaces|1
+public_db_sources|1
+SUBJECTS
+
+# THE PROCESSOR'S DIRECTORY, BY NAME, so "3 paths" cannot be satisfied by three other files that
+# happen to start with the same word. The fourth file in it does not match the subject name at all,
+# which is exactly why it is named here rather than counted there.
+for f in public_processor.ts guarded_merkle_tree.ts public_processor_metrics.ts; do
+  assert_file "the vendored processor directory holds $f" "$ORCH_SRC/vendor/public_processor/$f"
 done
+# And the three-phase model is NOT beside them: only the interface file came across.
+assert_eq "the public_tx_simulator path under orchestration/src is the INTERFACE and nothing else" \
+  "vendor/public_tx_simulator_interface.ts" "$(m18_subject_paths public_tx_simulator)"
+# The negative control for the whole census: a subject that is not vendored anywhere reads 0 by
+# the same lookup, so the zeros above are zeros of a lookup that works.
+assert_eq "a subject name that is in no tree reads 0 by the same lookup" "0" \
+  "$(m18_subject_paths no_such_orchestration_subject | grep -c . || true)"
 
 # …and the enumeration is not looking at an empty directory, which is the shape of vacuity this
 # whole check exists to avoid.

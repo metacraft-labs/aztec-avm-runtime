@@ -923,6 +923,61 @@ were absorbed silently.
   (`m9_completeness`'s comment, which records the 39,113-of-39,115 instance);
   `aztec-avm-runtime/verification/test_revert_program_does_not_trap_module.sh`.
 
+## D20 — `timeout_race.test.ts` tests a race this runtime cannot have, and upstream has since deleted it
+
+- id: D20
+- status: closed
+- opened: 2026-08-26
+- milestone: M22 (`test_block_limits_respected`)
+- design-question: —
+- sides: upstream's `public_processor/apps_tests/timeout_race.test.ts` at anchor `ts` (391 lines)
+  versus **its absence at anchor `cpp` and at upstream HEAD**, and versus this runtime's abort
+  semantics
+- what: M22's deliverable asks for that test to be "reshaped into a test of *our* abort semantics,
+  with the reasoning recorded rather than the file quietly deleted". The reasoning has three parts
+  and only the first was anticipated.
+
+  1. **Its subject does not exist here.** Its own header says what it is for: "When a timeout fires
+     during C++ AVM simulation: 1. The C++ simulation continues running on a libuv worker thread
+     2. It directly accesses WorldState via the native handle 3. TypeScript calls checkpoint revert
+     operations 4. Both paths operate on the same WorldState concurrently", and "the key issues
+     were: `GuardedMerkleTreeOperations` does not guard C++ access; nothing stops C++ simulation on
+     `PublicProcessor` deadline". There is no libuv worker thread in this runtime and no native
+     handle: `avm.wasm` runs to completion on the caller's stack, which is exactly why
+     `WasmAvmPublicTxSimulator` declares no `cancel` — see its class comment. A test whose bug
+     cannot arise is not a test, it is a fixture that always passes.
+  2. **It is unrunnable here for a second, independent reason.** Its imports are
+     `NativeWorldStateService` and `ForkCheckpoint` from `@aztec/world-state`,
+     `CppPublicTxSimulator`, `PublicTxSimulationTester` and `SimpleContractDataSource` — the NAPI
+     AVM and the LMDB world state, both forbidden by DD-9 and asserted against in three places by
+     `verify_differential_containment`. So even the arrangement of the race is out of reach.
+  3. **UPSTREAM DELETED IT ITSELF**, and this is the part the deliverable does not mention. The
+     file exists at the `ts` anchor `3a68d68ac2` and at NEITHER the `cpp` anchor `233d8e0993` nor
+     upstream HEAD; `git log --diff-filter=D` names the commit that removed it —
+     `96082e32ec5 feat: cut simulator over to generated bb-avm-sim IPC service`. Upstream moved the
+     AVM out of process, so the shared-handle race stopped being reachable for them too. Our reason
+     and theirs are not the same reason, but they are the same shape: the worker thread and the
+     handle went away.
+- why it matters: a deleted test is invisible, and "we removed a test because it could not fail" is
+  indistinguishable in a diff from "we removed a test because it did fail". The two properties the
+  original was really about — a deadline stops block building, and an abort signal stops block
+  building — are properties of ANY block builder and are not about threads at all. Those are what
+  is kept.
+- decision: **Closed, and reshaped rather than deleted.** The file is not vendored. What replaces
+  it is `test_block_limits_respected`'s deadline and signal arms, run against the real module
+  through upstream's own `PublicProcessor.process`: a past deadline and a pre-aborted signal each
+  stop the block, each with a control (a future deadline, an open signal) in which all four
+  transactions process — because an arm that stops is satisfied by a processor that stops for any
+  reason at all. The corruption half of the original is covered from the other end by
+  `test_guarded_merkle_tree_blocks_post_seal_access`, which asserts what the guard does now that
+  its thread-related reason has gone: refuse world-state access after the block is sealed, with the
+  unguarded database beside it as the control.
+- evidence: `git show 3a68d68ac2:yarn-project/simulator/src/public/public_processor/apps_tests/timeout_race.test.ts`;
+  `aztec-avm-runtime/verification/test_block_limits_respected.sh` (the four limits and the
+  reshaping assertions); `aztec-avm-runtime/verification/test_guarded_merkle_tree_blocks_post_seal_access.sh`;
+  `aztec-avm-runtime/orchestration/src/wasm_avm_public_tx_simulator.ts` (why there is no `cancel`);
+  `aztec-avm-runtime/orchestration/src/block_assembly.ts` (DD-3, why the guard is kept).
+
 <!-- END:drift -->
 
 ---

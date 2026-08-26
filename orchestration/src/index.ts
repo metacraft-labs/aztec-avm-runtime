@@ -160,3 +160,49 @@ export {
   encodeForShippedModule,
   encodeForShippedModuleOnly,
 } from './shipped_module_config.ts';
+
+// M22 — block assembly. NOTE WHAT IS NOT HERE, AND WHY THE ONE THING THAT IS DOES NOT BREACH DD-9.
+//
+// `PublicProcessor` is NOT exported, and neither is `PublicProcessorFactory`, which does not exist
+// any more: the vendored copy drops it, because its `protected createPublicTxSimulator` hard-
+// defaults to `TelemetryCppPublicTxSimulator` with no flag to turn it off. That is the class DD-9
+// is about.
+//
+// `createBlockProcessor` IS exported and it returns one. That is not the same thing and the
+// difference is checkable rather than rhetorical: it takes the simulator as a REQUIRED positional
+// argument, so there is no arrangement of arguments under which a consumer of this package gets a
+// processor whose simulator came from a default — which is the property DD-9 names. Renaming a
+// forbidden constructor would be an evasion; exporting one that cannot default is the opposite,
+// and `test_public_processor_never_defaults_to_cpp` asserts the arity and the absence of a default
+// rather than taking this paragraph's word for it.
+export {
+  BlockPartitionViolated,
+  assembleBlock,
+  createBlockProcessor,
+  sealBlock,
+  type AssembledBlock,
+  type BlockAssemblyOptions,
+  type FailedTxRecord,
+  type SealOutcome,
+  type SealRefusal,
+} from './block_assembly.ts';
+
+export {
+  ANSWERING_METHODS,
+  REFUSAL_REASONS,
+  REFUSING_METHODS,
+  RESIDENT_TREES,
+  ResidentMerkleDbCannotAnswer,
+  ResidentMerkleWriteOperations,
+  ResidentSequentialInsertionResult,
+  TREE_HEIGHTS,
+  residentModuleHasArchive,
+  type ResidentMerkleModule,
+} from './resident_merkle_operations.ts';
+
+export {
+  REFUSING_CONTRACT_READS,
+  ResidentContractsDB,
+  ResidentContractsDbCannotAnswer,
+  type PendingRegistration,
+} from './resident_contracts_db.ts';

@@ -190,6 +190,32 @@ export class NoopTelemetryClient {
 
 export type TelemetryClient = NoopTelemetryClient;
 
+// THE INSTRUMENT AND TRACER TYPE NAMES, ADDED IN M22 WHEN THE FIRST VENDORED CONSUMER ARRIVED.
+//
+// `@aztec/telemetry-client` re-exports these five names from `@opentelemetry/api`, and
+// `PublicProcessorMetrics` and `PublicProcessor` — vendored under `vendor/` — annotate their
+// fields with them. They are TYPE aliases onto the no-op classes above and nothing more: every
+// one of them is erased at run time, so no @opentelemetry package enters this file's surface or a
+// reader's model of what this runtime depends on. That is the same reasoning as the header's
+// refusal of an `import type` — the difference is that these names are DEFINED here rather than
+// imported from a package we do not want listed.
+//
+// They are deliberately the concrete no-op classes rather than `any`. A vendored file that called
+// an instrument method this stub does not have would then fail to typecheck instead of failing at
+// run time inside a metric nobody reads.
+export type Gauge = NoopInstrument;
+export type Histogram = NoopInstrument;
+export type UpDownCounter = NoopInstrument;
+export type ObservableGauge = NoopInstrument;
+export type Meter = NoopMeter;
+export type Tracer = NoopTracer;
+export type Span = NoopSpan;
+
+/** Upstream's marker for a class that exposes a tracer. Structural there, structural here. */
+export interface Traceable {
+  readonly tracer: Tracer;
+}
+
 const singleton = new NoopTelemetryClient();
 
 export function getTelemetryClient(): TelemetryClient {

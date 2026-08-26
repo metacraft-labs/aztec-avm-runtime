@@ -109,7 +109,19 @@ EOF
 fi
 
 # ---- derived trees: regenerate and require byte equality -------------------
-scratch="$(mktemp -d)"
+#
+# THIS CHECK OWNS ITS SCRATCH DIRECTORY, and the reason is a live failure rather than a precaution.
+# `mktemp -d` lands in $TMPDIR, which on this host is a quota-limited tmpfs where `df` reports GB
+# free and a write fails at a few hundred KiB. M21's review met that in `verify_vendor_drift_clean`:
+# the check died mid-copy with `Disk quota exceeded`, printed NO summary line at all, and took M1
+# from 151 to 141 WITH NOTHING REPORTED AS FAILING — a check that dies reads as a SMALLER milestone
+# rather than as a red one. M22 met it HERE, in this very block: `render_drift` writes 153 files and
+# every one of them failed with `OSError: [Errno 122] Disk quota exceeded`, which this check reported
+# (loudly, this time) as "derived tree does not reproduce". The remedy is the one that block already
+# prescribes: an owned directory under ~/.cache, not $TMPDIR.
+DRIFT_WORK="${DRIFT_WORK:-$HOME/.cache/aztec-check-drift}"
+mkdir -p "$DRIFT_WORK" || die "cannot create $DRIFT_WORK"
+scratch="$(mktemp -d "$DRIFT_WORK/derived.XXXXXX")" || die "cannot create a scratch directory under $DRIFT_WORK"
 derived_out="$(python3 "$PROV" derived "$scratch" 2>&1)"
 derived_rc=$?
 rm -rf "$scratch"
