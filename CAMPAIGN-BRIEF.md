@@ -266,7 +266,7 @@ else running — every milestone **exit 0 and 0 failures anywhere**, including M
 ```
 m0 156  m1 166  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
 m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
-m19 180  m20 237  m21 324  m22 252                     CAMPAIGN TOTAL 7,891
+m19 180  m20 237  m21 324  m22 260                     CAMPAIGN TOTAL 7,899
 ```
 
 **M22's sweep took TWO passes and the reason is worth carrying**, because it produced two instances
@@ -310,11 +310,18 @@ of the six RI-19..RI-23 vendorings that check had PINNED AS NOT DONE, exactly as
 said would happen, and the census is re-pinned per subject and EXACTLY rather than `>=`);
 **M22 247** (new). 15 + 5 + 247 = 267, and 7,619 + 267 = **7,886**. Twenty of the twenty-three
 milestones came out at their reference value to the assertion.
-Then M22's review: **M22 247 -> 252**, `verify_public_processor_vendored_not_reimplemented`
-59 -> 64, which is the two unpinned classifier shapes pinned (2) plus a non-emptiness assertion on
-each of the three pinned sets (3). Nothing else moved: the review's other changes are `lib.sh`'s
-`$TMPDIR` repoint, five stale counter citations retired, five stale Justfile comments and prose,
-none of which is an assertion. 7,886 + 5 = **7,891**.
+Then M22's review: **M22 247 -> 260**, in two checks and nothing else.
+`verify_public_processor_vendored_not_reimplemented` **59 -> 71**: +2 for the two unpinned
+classifier shapes, +3 for a non-emptiness assertion on each of the three pinned sets, and +7 for the
+`upstream/tsavm` precondition block that turns "vendor from the object store, not the worktree" from
+an unenforceable instruction into a checked precondition (the worktree's revision, its control, the
+ten paths compared with the residue PRINTED, the count of them, and RI-65's own `acir_callback.ts`
+instance run rather than cited). `test_failed_tx_leaves_no_state` **43 -> 44**: the f3 balance
+comparison had no non-emptiness partner, and a mutation that stops the driver emitting
+`balancesAfter.f3` made it pass on `MISSING == MISSING` — one assertion, and it was the ONLY
+failure the mutation produced, so without it the corruption was invisible. Nothing else the review
+changed is an assertion: the `lib.sh` `$TMPDIR` repoint, five stale counter citations retired, the
+`gen_aztec_constants.sh` repoint, five stale Justfile comments and prose. 7,886 + 13 = **7,899**.
 
 ---
 
@@ -423,20 +430,47 @@ Format spec: `~/ah/dev/agent-harbor/ah-lib/specs/Milestones-Files.md`.
   153 files (it owns `~/.cache/aztec-check-drift` now); the sweep log lost two regions, above; and
   the agent's own shell became unusable because every command writes a cwd file to `/tmp`. On this
   host **`$TMPDIR` is not storage**.
-  **THE CENSUS IS CLOSED, AND IT WAS ALSO WRONG.** Two things, and the second is the reason the
-  first took five incidents. (1) The published figure was **29 sites across 28 files**, measured
-  with `grep -rn 'mktemp -d' verification/*.sh | grep -v '\-p \|mktemp -d "'` — and **two of the 29
-  are COMMENT LINES**, in `check_drift.sh:114` and `verify_vendor_drift_clean.sh:53`, which are the
-  two sites that were FIXED and which describe the fix. The census counted its own remedy as
-  remaining exposure. The true figure was **27 sites across 26 files**. *A census whose needle
-  cannot tell a call from a sentence is the same defect as a needle satisfied by prose, one level
-  up.* (2) Counting them one milestone at a time was never going to finish: five incidents, three
+  **THE CENSUS IS CLOSED, AND IT WAS RIGHT BY ACCIDENT — TWO ERRORS OF EQUAL SIZE IN OPPOSITE
+  DIRECTIONS.** The published figure was **29 sites across 28 files**, measured with
+  `grep -rn 'mktemp -d' verification/*.sh | grep -v '\-p \|mktemp -d "'`. Re-measured by M22's
+  review, the true figure is also **29 across 28** — and *not one step of the derivation was right*:
+
+  - **Two of the counted 29 are COMMENT LINES**, `check_drift.sh:114` and
+    `verify_vendor_drift_clean.sh:53` — the two sites that were FIXED, described in the comments
+    that record the fix. The census counted its own remedy as remaining exposure. *A needle that
+    cannot tell a call from a sentence is the campaign's "a citation counted as a call", one level
+    up, in the instrument rather than in a check.*
+  - **The needle could not see two REAL sites**, because `verification/*.sh` globs one directory
+    and does not recurse: `verification/m14/verify.sh:56` is in a subdirectory and
+    `tools/gen_aztec_constants.sh:60` is outside `verification/` entirely. Widened to
+    `grep -rI 'mktemp -d' --include='*.sh' .` they appear.
+
+  **So the number agreed with itself for two milestones while being derived wrongly twice.** That
+  is the exact hazard this brief already names for prose — a figure that is never re-derived stops
+  being a measurement — and it is worse in a census, because a census IS the derivation. Widen the
+  needle before you trust the count, and count what a scanner CANNOT place rather than only what it
+  can.
+
+  Coverage, stated per site rather than as a total: **27 of the 29 are in `verification/*.sh` and
+  every one of those 26 files either sources `lib.sh` or is a `lib_*.sh` sourced after it**, so all
+  27 are repointed. `tools/gen_aztec_constants.sh` repoints for itself on the same terms, because
+  `just gen-constants` invokes it with nothing above it. **`verification/m14/verify.sh` is
+  deliberately NOT covered**: it is a prepared upstream contribution meant to run standalone inside
+  Aztec's own repository, where `/tmp` is ordinary storage, and making it source our `lib.sh` would
+  destroy the property that makes it shippable. 28 of 29 closed, 1 out of scope with a reason.
+
+  And counting them one milestone at a time was never going to finish: five incidents, three
   one-line fixes, and the number kept being republished. **`lib.sh` now repoints `$TMPDIR` at
   `$HOME/.cache/aztec-verification-scratch` when — and only when — it points at a RAM-backed
   filesystem (`/tmp`, `/var/tmp`, `/dev/shm`) or is unset**, which covers every bare `mktemp -d` in
   every check at once, and every one added later. An explicit `$TMPDIR` elsewhere is a decision and
   is left alone, and a directory that cannot be created leaves the old behaviour rather than
-  refusing to start a hundred and fifty checks. The per-milestone `M<N>_WORK` directories already
+  refusing to start a hundred and fifty checks. **Verified to reach every mechanism a check
+  actually uses**, not just the sourcing shell: a bare `mktemp -d`, a `mktemp -d` in a subshell,
+  Python's `tempfile.mkdtemp()`, Node's `os.tmpdir()`, and `TMPDIR` in a child's environment all
+  land under `~/.cache`, while `mktemp -d -p <somewhere>` is untouched. Confirmed on the real
+  workload too — the review's own sweep ran with `TMPDIR` unset and accumulated its scratch there
+  while `/tmp` never moved. The per-milestone `M<N>_WORK` directories already
   defaulted to `$HOME/.cache/aztec-m<N>-*`; several Justfile comments still say
   `$TMPDIR/aztec-m<N>-…` and are stale.
 - Do not clean by prefix; prefixes have twice matched another agent's directories.

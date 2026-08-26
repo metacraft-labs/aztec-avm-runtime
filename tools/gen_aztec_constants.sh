@@ -57,6 +57,19 @@ if ! git -C "$fork" diff --quiet -- "${inputs[@]}"; then
   fatal "the fork has uncommitted changes to the constants-codegen inputs"
 fi
 
+# NOT A BARE `mktemp -d`. On this workstation /tmp is a 32 GB tmpfs shared with every build, and a
+# write that lands there fails silently in the middle of whatever is writing. `verification/lib.sh`
+# repoints TMPDIR for every check, and this script INHERITS that when its own check runs it — but
+# `just gen-constants` invokes it directly, where nothing has repointed anything. So it repoints for
+# itself, on the same terms: only when TMPDIR is unset or names a RAM-backed filesystem, so an
+# explicit choice (the check's included) is left exactly as it was found.
+case "${TMPDIR:-/tmp}" in
+  /tmp | /tmp/* | /var/tmp | /var/tmp/* | /dev/shm | /dev/shm/*)
+    if [ -n "${HOME:-}" ] && mkdir -p "$HOME/.cache/aztec-verification-scratch" 2>/dev/null; then
+      export TMPDIR="$HOME/.cache/aztec-verification-scratch"
+    fi
+    ;;
+esac
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
