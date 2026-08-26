@@ -35,7 +35,7 @@ load).
 Each of these is a defect that shipped, not a precaution.
 
 ### An assertion must be capable of failing
-**Twenty-three instances.** (Five places quote the running total: this line, the two M18 checks
+**Twenty-four instances.** (Five places quote the running total: this line, the two M18 checks
 `lib_m18_orchestration.sh` and `verify_no_telemetry_client_in_import_graph.sh`, and the two M19
 files `fault_injection.ts` and `e2e_differential_wasm_vs_native_cpp.sh`. M18's review added three,
 M19 added one, M19's review added one, M21 added one, and M22 added one. If you add one, move all
@@ -43,7 +43,7 @@ five numbers together — M19 wrote "eighteen" into its two new files in the sam
 the other three to "nineteen", which is the drift this parenthetical exists to prevent, and **M21
 declared its 21st instance in three documents and moved none of the five**, which is the same drift
 caught by its review instead of by its author. M22 moved all five in one edit, which is what the
-rule asks for, and M22's review moved all five again for the 23rd.
+rule asks for, and M22's review moved all five again for the 23rd, and M23's review for the 24th.
 
 **AND THE FIVE ARE NOT THE ONLY PLACES — THAT WAS MEASURED, NOT ASSUMED.** M22 reported two
 pre-existing strays outside the declared five. There are **five**, and one of them quotes a
@@ -128,6 +128,18 @@ The forms seen so far:
   non-emptiness assertion beside it. **When you fix an instance of a form, grep for the form in the
   file you are fixing before you leave it.**
 
+- **BOTH SIDES READ, BOTH SIDES ZERO — vacuity by DATA rather than by key.** M23 declares the
+  block's deviation from the wall clock (`wallClockDeviationSeconds`) and its own milestone says a
+  deviation field that lied would be worse than none. The identity
+  `timestamp - wallClockSeconds == wallClockDeviationSeconds` is asserted per block — on the
+  `emptyBlocks` arm, where a clock advanced exactly one second per block makes every term zero:
+  1/1/0, 2/2/0, 3/3/0. Measured by M23's review: replacing the field with the constant `0n` passed
+  the **whole milestone** green — 491 assertions, zero failures, fourteen of fourteen checks, exit
+  0. Nothing on the list above applies; every key is present, every value is read from the artefact,
+  and the comparison is still `0 == 0` three times. The arm where the deviation is REAL existed in
+  the same run and did not record the field. **When an identity is asserted over data, assert that
+  the data is not degenerate** — the fix is one more assertion, that at least one row is non-zero.
+
 **And `check-drift` cannot be the backstop for this, by construction.** It compares every vendored
 file against `git show <anchor>:<path>` and asserts only the DIRECTION of the result: a file
 `PROVENANCE.md` declares `none` must be byte-identical, a file it declares with an edit class must
@@ -140,7 +152,7 @@ constant by the thing under test; any comparison whose sides could both be
 absent needs a non-emptiness assertion beside it.
 
 ### Needles come from the artefact, matched on word boundaries
-Sixteen instances. `honk` ⊂ `chonk`. `world_state` ⊂ `world_state_reference`.
+Twenty instances. `honk` ⊂ `chonk`. `world_state` ⊂ `world_state_reference`.
 `"DEPENDENCIES vm2"` ⊂ `vm2_sim` — **it asserted the opposite of its intent**.
 `[A-Z_]+` never matched `L1_TO_L2_MESSAGE_TREE`. `([A-Za-z_]+::)*` found seven
 where the truth is eight, because `avm2` has a digit. LLVM spells it
@@ -163,6 +175,39 @@ through as "unclassified". It failed loudly here because the classifier reports 
 place, which is the safe shape for a scanner: **write scanners that PRINT the residue rather than
 counting the matches**, and a class that is too narrow becomes a red line instead of a silent
 undercount.
+
+**THE DIGIT ONE CAME BACK, IN THE SECTION WHOSE SUBJECT WAS THE TWO METHODS WITH A DIGIT IN THEM.**
+M23's facade-mapping check counted `AztecNodeDebug`'s method declarations with
+`^  [a-zA-Z]+\(.*\): Promise<` and found **three of five**, because `warpL2TimeAtLeastTo` and
+`warpL2TimeAtLeastBy` have a `2` in them — and those two methods are the entire point of that
+section, which exists to record that the interface has five methods at the anchor and three at the
+installed pin. `avm2` again, two years of `[A-Za-z_]+` later. Caught on the check's own first run,
+because the assertion was `assert_eq 5`.
+
+**A NEEDLE THAT SPANNED A LINE BREAK.** Three of M23's document assertions matched a SENTENCE
+against a markdown file that wraps at 100 columns, so the needle contained a newline the file spells
+as `\n  ` and matched nothing. All three went red for a reason with nothing to do with their
+subject, which is the cheap direction — but a needle that stops matching the day somebody reflows a
+paragraph is a needle that will eventually be *deleted* rather than fixed. **Match a fragment of one
+line, never a sentence.**
+
+**A TABLE'S HEADER ROW READ AS DATA.** The same check extracted a mapping table with
+`grep '^| \`'`, which matches the header row too, so the literal column titles `TXE` and
+`AztecNodeDebug` entered the set of "claimed counterparts" and were then looked up as method names.
+The header is excluded by name now. A scanner over a human-written table has to know which row is
+not a row.
+
+**`Date.now(` IS NOT THE ONLY WAY TO READ A CLOCK, AND THE SECTION THAT SAID SO WAS THE SECTION
+ABOUT READING CLOCKS.** M23 recorded, in `CHAIN-LOOP.md`, in the milestone's own deliverables table
+and as the HEADING of a block of assertions, that *"TXE never reads a wall clock for block time"* —
+resting it on three counts: `Date.now(` four times and all diagnostic, `setInterval(` once behind
+an environment variable, `setTimeout(` zero. All three counts are correct. All three are blind to
+`new Date().getTime()`, which is the spelling `txe_session.ts:349` uses to **seed every session's
+block timestamp from the host clock**. Found by M23's review. The claim was not merely unproven, it
+was false, and the evidence offered for it was three true measurements of the wrong needle. The
+count of that spelling is asserted now — it is one, and it is that line — so the fact is a
+measurement rather than an absence nobody looked for. **An absence claim is only as wide as the
+spellings you enumerated; write down which spellings those were.**
 
 **And the scanner around the needle counts too.** The import-graph walker stripped comments by
 scanning for `//` unconditionally, so a `//` inside a *string literal* began a comment and ate the
@@ -235,6 +280,16 @@ counter added it to the milestone total. **M1 came out at 316 when it is 141**, 
 reported as "consistent with the references" before anyone looked. Nothing in M1 had moved; all
 six of its checks were identical to the reference. 141 + 175 = 316 exactly.
 
+**AND THERE IS A THIRD STATE, WORSE THAN EITHER: A CHECK THAT HANGS.** M21's review established
+that a check which DIES prints no summary and reads as a smaller milestone rather than a red one,
+and M22 built the abnormal-exit trap for it. M23's review found the state the trap cannot reach.
+Mutating the chain so that every block is numbered 1 makes M23's hundred-block arm wait on a `block`
+subscription for `b.number >= 100` forever; `m23_require_arms` ran `node run_chain_arms.mjs` with
+**no timeout**, the run sat at zero bytes of output, and each of the nine arm-reading checks would
+have done the same in turn — reporting nothing at all and blocking the sweep behind it. A trap
+fires on exit; a process that never exits has no exit. **Every subprocess a check waits on needs a
+bound, and exceeding it must be a named failure rather than a hang.**
+
 **Rule:** a summary line is at column 0 and ends `assertion(s), N failure(s)`; a note is indented.
 Count only summary lines, and when a total moves, get the **per-check split** before believing any
 story about why — the split is what distinguishes "a check grew" from "the counter is wrong",
@@ -260,14 +315,25 @@ touch moves, look for a commit that landed between the reference sweep and yours
 repository — before writing a story. Both attributions above were re-derived independently by the
 review and both held; that is the standard, not the presumption.
 
-Current per-milestone counts. Measured **M0-M22, on 2026-08-26**, one milestone at a time, nothing
+Current per-milestone counts. Measured **M0-M23, on 2026-08-26**, one milestone at a time, nothing
 else running — every milestone **exit 0 and 0 failures anywhere**, including M9 and including M11:
 
 ```
-m0 156  m1 166  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m0 156  m1 169  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
 m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
-m19 180  m20 237  m21 324  m22 260                     CAMPAIGN TOTAL 7,899
+m19 180  m20 237  m21 324  m22 260  m23 491            CAMPAIGN TOTAL 8,393
 ```
+
+**M23 moved exactly two things and both are accounted for in both directions.** Its own **491**
+(fourteen checks, of which thirteen are its entries and the fourteenth is M22's
+`test_block_seal_updates_archive`, which M23 closed); and **M1 166 -> 169**, which is
+`verify_pinned_nightly_single_source` 25 -> 28 because `orchestration/src/disclosure.ts` is now a
+declared `npm_pin_witness` and the check makes exactly THREE assertions per witness — it is
+tracked, it carries a literal at all, and the literal equals the declared pin. 491 + 3 = 494, and
+7,899 + 494 = 8,393. **Every other milestone came out at its reference value to the assertion**,
+including M22 at 260 with `block_e2e_driver.ts` edited (its two `Date.now()` deadline calls
+repointed through a `DateProvider`, which changes no value because `DateProvider.now()` IS
+`Date.now()`), and M9 reproducing its 140/143/113/73/126/83/129 split exactly.
 
 **M22's sweep took TWO passes and the reason is worth carrying**, because it produced two instances
 of the campaign's most dangerous shape in one run. `/tmp` on this host FILLED twice while the sweep
