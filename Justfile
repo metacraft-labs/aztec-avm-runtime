@@ -1806,3 +1806,142 @@ verify-m22:
       echo "verify-m22: all checks passed"
     fi
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M23 — the chain loop, timer-driven empty blocks, and the AvmRuntime facade
+#
+#   just avm-wasm-build-m23         build the module that CARRIES THE ARCHIVE (twelve overlays)
+#   just verify-chain-enumeration   verify_sequencer_reuse_enumeration_recorded
+#   just verify-chain-txe-verdict   verify_txe_reuse_verdict_recorded
+#   just verify-chain-facade-map    verify_facade_surface_compared_against_txe
+#   just verify-chain-snapshot-vocabulary
+#                                   test_tree_snapshot_vocabulary_reused_not_redefined
+#   just verify-chain-kv-store      verify_kv_store_browser_exports_recorded
+#   just verify-chain-empty-blocks  test_empty_block_advances_number_and_archive
+#   just verify-chain-seal          test_block_seal_updates_archive   (M22's entry, closed here)
+#   just verify-chain-timestamps    test_timestamps_strictly_monotonic_subsecond
+#   just verify-chain-fake-clock    test_fake_clock_hundred_blocks
+#   just verify-chain-automine      e2e_automine_seals_on_submission
+#   just verify-chain-disclosure    test_receipt_declares_no_proving
+#   just verify-chain-no-ambient-clock
+#                                   test_no_ambient_clock_or_timer
+#   just verify-chain-l1-to-l2      e2e_l1_to_l2_message_injection
+#   just verify-chain-snapshot      e2e_chain_snapshot_export_import_roundtrip
+#   just verify-m23                 all fourteen, in order
+#
+# THE MODULE IS A DIFFERENT ARTEFACT FROM M12'S AND M13'S. M23 carries M14's archive extension
+# (RI-53) as an eleventh overlay and adds two reactor exports as a twelfth (RI-70), so its
+# `avm.wasm` exports FIFTY-ONE names where M13's exports forty-nine and M12's thirty-nine. It is
+# measured separately, which is what M13 did for its own tenth overlay: an export appearing is as
+# much a finding as one disappearing. Nothing repoints an earlier milestone at this tree — M18,
+# M20, M21 and M22 go on measuring the modules they were written against, where the archive is
+# absent and `sealBlock` refuses, and their checks are untouched.
+#
+# ONE ARM RUN, SHARED BY NINE CHECKS. `verification/lib_m23_chain.sh` runs
+# `tools/run_chain_arms.mjs` once into $M23_WORK/chain.json (default ~/.cache/aztec-m23-chain) and
+# the behavioural checks read it, so they cannot come to disagree about a number nothing changed.
+# NINE arms: the archive's identity against upstream's published genesis constants, three empty
+# blocks, a run with empty blocks turned OFF, fifteen blocks over a sub-second interval and a
+# throttle, a hundred blocks on a fake ticker beside a hundred on upstream's `RunningPromise`,
+# automine on and off, an L1-to-L2 message across a block boundary, the §8.4 disclosure, and an
+# export/import roundtrip into a second world state. It re-runs when the module, the runner, any
+# orchestration source or any node-host source is newer; M23_ARMS_REFRESH=1 forces one.
+#
+# WHAT THIS MILESTONE DOES NOT DELIVER, said here rather than left to be discovered: the AVM's
+# `L1TOL2MSGEXISTS` opcode is not exercised. Doing so needs a transaction that calls a REGISTERED
+# CONTRACT, and upstream's only builder of those is `PublicTxSimulationTester`, which constructs a
+# `NativeWorldStateService` — DD-9. That is M22's outstanding task, unchanged, and
+# `e2e_l1_to_l2_message_injection` asserts the blocker as a fact about the fork rather than leaving
+# it to be rediscovered.
+# ---------------------------------------------------------------------------
+
+# Build the twelve-overlay module: M13's ten, M14's archive patch, and M23's reactor exports.
+avm-wasm-build-m23:
+    @verification/build_avm_wasm_m23.sh
+
+# The enumeration, re-derived from the fork rather than read out of CHAIN-LOOP.md.
+verify-chain-enumeration:
+    @verification/verify_sequencer_reuse_enumeration_recorded.sh
+
+# TXE cannot be declined by omission: its size, surface and dependencies, measured.
+verify-chain-txe-verdict:
+    @verification/verify_txe_reuse_verdict_recorded.sh
+
+# Every AvmRuntime member mapped to its TXE and AztecNodeDebug counterpart, or to `none`.
+verify-chain-facade-map:
+    @verification/verify_facade_surface_compared_against_txe.sh
+
+# One state-reference vocabulary, and the export carrier as a distinct recorded decision.
+verify-chain-snapshot-vocabulary:
+    @verification/test_tree_snapshot_vocabulary_reused_not_redefined.sh
+
+# The kv-store browser entry points, at all four artefacts, because they disagree.
+verify-chain-kv-store:
+    @verification/verify_kv_store_browser_exports_recorded.sh
+
+# An empty block advances the number, the timestamp and the archive — the milestone's headline.
+verify-chain-empty-blocks:
+    @verification/test_empty_block_advances_number_and_archive.sh
+
+# Sealing appends the header to the archive, and a header that does not match is refused.
+verify-chain-seal:
+    @verification/test_block_seal_updates_archive.sh
+
+# Strictly monotonic timestamps under a sub-second interval and a throttled timer.
+verify-chain-timestamps:
+    @verification/test_timestamps_strictly_monotonic_subsecond.sh
+
+# A hundred blocks on a fake clock, and the same hundred on upstream's RunningPromise.
+verify-chain-fake-clock:
+    @verification/test_fake_clock_hundred_blocks.sh
+
+# Automine on and off, with the discriminator in both directions.
+verify-chain-automine:
+    @verification/e2e_automine_seals_on_submission.sh
+
+# §8.4: every receipt declares it, and a discarding sink does not suppress the record.
+verify-chain-disclosure:
+    @verification/test_receipt_declares_no_proving.sh
+
+# DD-4, structurally: no Date.now, setInterval or setTimeout in the shipped source.
+verify-chain-no-ambient-clock:
+    @verification/test_no_ambient_clock_or_timer.sh
+
+# An injected L1-to-L2 message is a leaf of the message tree at the next block boundary.
+verify-chain-l1-to-l2:
+    @verification/e2e_l1_to_l2_message_injection.sh
+
+# Export a chain, reload it into a second world state, and be the same chain.
+verify-chain-snapshot:
+    @verification/e2e_chain_snapshot_export_import_roundtrip.sh
+
+# Run the whole M23 verification set; every check runs even if an earlier one fails.
+verify-m23:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_sequencer_reuse_enumeration_recorded \
+      verify_txe_reuse_verdict_recorded \
+      verify_facade_surface_compared_against_txe \
+      test_tree_snapshot_vocabulary_reused_not_redefined \
+      verify_kv_store_browser_exports_recorded \
+      test_empty_block_advances_number_and_archive \
+      test_block_seal_updates_archive \
+      test_timestamps_strictly_monotonic_subsecond \
+      test_fake_clock_hundred_blocks \
+      e2e_automine_seals_on_submission \
+      test_receipt_declares_no_proving \
+      test_no_ambient_clock_or_timer \
+      e2e_l1_to_l2_message_injection \
+      e2e_chain_snapshot_export_import_roundtrip
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m23: FAILED" >&2
+    else
+      echo "verify-m23: all checks passed"
+    fi
+    exit "$rc"

@@ -16,7 +16,7 @@
 # THE CONTROLS ARE THE POINT. ELEVEN fault injections — one per compared field, plus the pre-state
 # proof, the input encoding and the TypeScript arm's presence — each run as its own arm invocation.
 # Every one must turn the suite RED. A differential never observed to fail is indistinguishable from
-# one that cannot fail, and this campaign has shipped twenty-three assertions that could not.
+# one that cannot fail, and this campaign has shipped twenty-four assertions that could not.
 #
 # What this loop asserts is that the arm goes red and that at least one TEST failed. It does NOT
 # assert the injection's name appears in the message; an earlier version of this comment said it
@@ -53,7 +53,7 @@ done
 # rather than to `printf`: the helper ran `printf` (which succeeds), its own output went to `grep`,
 # and its failure counter was incremented inside a SUBSHELL and lost. The check printed FAIL and
 # reported 0 failures in the same run. An assertion whose failure cannot reach the summary is the
-# twenty-three-times-over defect this campaign is named for, and it took a full-suite run to see it.
+# twenty-four-times-over defect this campaign is named for, and it took a full-suite run to see it.
 absent_hits="$(printf '%s\n' "$exports" | grep -cx 'avm_this_export_does_not_exist' || true)"
 assert_eq "a name the module does not export is not found" "0" "$absent_hits"
 present_hits="$(printf '%s\n' "$exports" | grep -cx 'avm_simulate' || true)"

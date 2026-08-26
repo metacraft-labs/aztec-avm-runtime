@@ -64,7 +64,7 @@ PACKAGES="$(m18_graph_packages "$GRAPH" | grep -c . || true)"
 note "the shipped graph is $MODULES modules across $PACKAGES packages"
 
 # THE GRAPH IS NOT EMPTY. Every assertion below is an absence, and an absence over an empty set
-# is the vacuous-assertion family this campaign has now found twenty-three times. Both sides are
+# is the vacuous-assertion family this campaign has now found twenty-four times. Both sides are
 # pinned: a real module count, and the presence of the packages the orchestration MUST reach.
 assert_ge "the graph is a real closure and not an empty one" 200 "$MODULES"
 for want in @aztec/stdlib @aztec/foundation @aztec/protocol-contracts; do
