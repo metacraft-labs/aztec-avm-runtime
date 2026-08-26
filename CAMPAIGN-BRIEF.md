@@ -236,9 +236,50 @@ byte-for-byte both ways. **A check that compiles must pin its PATH, not only its
 flags** — and the two sweeps to compare are the dev-shell one and the plain one, because CI only
 ever runs the first.
 
+### A PIN THAT IS NOT PUBLISHED IS NOT A PIN, IT IS A LOCAL FILE
+
+**One instance, and it made a whole milestone unreproducible while every check reported green.**
+M24 added the first two non-aztec-packages anchors to `pins.json` — `trace_format` and
+`trace_format_nim` — and both pointed at commits that existed only on local branches in worktrees
+on this machine. `pins.json` recorded that ("the branch is LOCAL-ONLY"), but recorded it as *the
+reason a commit is pinned rather than a branch followed*, which is not the consequence. The
+consequence is that `build_ct_writer_wasm.sh` and `build_ct_print.sh` do `git archive <rev>` out of
+an object store nobody else has: **they resolve here and fail everywhere else, including CI**, and
+the milestone is 292/0 either way. `check-drift` cannot see it — it resolves only the anchors the
+`PROVENANCE` mapping names — and neither can `verify_pinned_nightly_single_source`, which asserts
+the anchor *count*.
+
+Reproduced deliberately by M24's review with a dangling commit (`git commit-tree`, no ref
+pointing at it): `git archive` of it produced 1,873,920 bytes locally and zero remote refs
+contained it. **Publication is a checked property now** — `m24_published_refcount` in
+`lib_m24_ct_writer.sh` asks whether any `refs/remotes/*` ref contains the commit, which is exactly
+what a fresh clone or a CI checkout would have, and the counter carries its own negative control so
+it is not an assertion that can only pass.
+
+**Rule:** every commit `pins.json` names must be reachable from a published remote ref, and the
+check that says so must be able to say no. Push the branch before you pin off it.
+
 ### Conjunctions need a negative case per conjunct
 A four-tree conjunction whose only negative case exercised one tree: dropping any
 of the other three passed all twelve cases.
+
+### A MUTATION THAT CRASHES HAS NOT EXERCISED THE ASSERTION IT WAS WRITTEN FOR
+**M24 declared three "hang" mutations; exactly one hangs.** Re-run by its review, all three do
+produce `0 assertion(s), 1 failure(s)` — so the precondition family they were written to catch
+really is fixed — but only **M6** (a spin inside wasm) exceeds its bound and gets the diagnostic
+naming the command and the bound. **M5** makes the driver `await` a promise that never settles, and
+node prints `Detected unsettled top-level await` and exits **13** in seconds. **M7** is worse than
+mis-labelled: it was supposed to be the silent one — "the container is still correct; only the
+crossing identity and the buffer bound can see it" — and instead it writes past the end of the
+wasm-side buffer on the *first* arm, so the driver dies with `RangeError: offset is out of bounds`
+in two seconds and **not one assertion of the check under test runs**. The mutation was recorded as
+detected, and it was; what it did not do is exercise the thing it was written to exercise.
+
+The review wrote the mutation M7 was meant to be — events held host-side and drained in one
+crossing, container unchanged — and the check caught it properly, with five failures on the
+crossing identity, the non-degeneracy and the heap ratio. **Rule:** when a mutation reddens, read
+*which* assertions went red. "The check failed" and "the check saw what I broke" are different
+statements, and only the second is coverage.
 
 ### Exit status *and* the specific failure mode
 Counts alone miss a binary printing `132 ran / 132 PASSED` while exiting 7.
@@ -257,6 +298,21 @@ measured regression.
 It has happened to an implementation agent, a review agent, **and a reviewer
 reviewing that very defect**. A corrected `PR.md` shipped beside a stale commit
 message three times. Bind claims to data, or expect them to rot.
+
+**AND A NUMBER RE-DERIVED WITHOUT ITS ATTRIBUTION IS NOT RE-DERIVED.** M24's OQ-6 check re-computes
+every figure `TRACE-ABI.md` §2 quotes from `arms.tsv` on every run — and matched each one as
+`| <number> |`, *anywhere in the file*. Measured by M24's review: swap the median and the minimum
+between the `batched` and `perEvent` rows, so the document states that the per-event arm is the
+faster one when the data says the opposite, and the check reports **91 assertions, 0 failures**.
+Every figure was present, every figure was re-derived, and the table said the reverse of the
+measurement. Anchor the needle to the row, not to the file.
+
+**AND A FIGURE NOBODY RE-DERIVES ROTS EVEN WHEN THE MILESTONE KNOWS IT IS WRONG.** The same review
+found `245,724 bytes` in two places in M24's own section — the *mutated* artefact's size, which
+that same section's defect list explains — sitting beside the corrected 246,527 in a third place,
+with the paragraph declaring the difference's cause "not established" two screens below the
+paragraph establishing it. Setting `TRACE-ABI.md` §7 back to 245,724 passed the whole milestone.
+If a document states a measurement, something must take that measurement again and compare.
 
 **And a GENERATED document can drift too, if it derives a number from a sentence.**
 `CARRY-LEDGER.md`'s *Upstream changes* column was rendered by
@@ -315,15 +371,26 @@ touch moves, look for a commit that landed between the reference sweep and yours
 repository — before writing a story. Both attributions above were re-derived independently by the
 review and both held; that is the standard, not the presumption.
 
-Current per-milestone counts. Measured **M0-M23, on 2026-08-26**, by M23's REVIEW, after its last
-commit, one milestone at a time with nothing else running — every milestone **exit 0 and 0 failures
-anywhere**, including M9 and including M11, and no hole in the log:
+Current per-milestone counts. Measured **M0-M24, on 2026-08-26**, by M24's implementation, one
+milestone at a time with nothing else running, `setsid`-detached, `TMPDIR` and the log under
+`~/.cache` — every milestone **exit 0 and 0 failures anywhere**, including M9 and including M11,
+and no hole in the log:
 
 ```
 m0 156  m1 169  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
 m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
-m19 180  m20 237  m21 324  m22 260  m23 509            CAMPAIGN TOTAL 8,411
+m19 180  m20 237  m21 324  m22 260  m23 509  m24 292   CAMPAIGN TOTAL 8,703
 ```
+
+**M24 moved exactly one thing and it is accounted for in both directions.** Its own **292**
+(49 / 46 / 39 / 37 / 30 / 91 across six checks) and **nothing else**: every one of M0-M23 came out
+at its reference value **to the assertion**, and 8,411 + 292 = 8,703 exactly. M9 reproduced its
+140/143/113/73/126/83/129 split in 1,294 s. Three changes M24 made to shared machinery were
+checked for movement and moved nothing: two new `pins.json` anchors (`verify_pinned_nightly_single_source`
+asserts `>= 3` on the anchor count, not `==`), `ct-host/src` added to `verify_named_checks_exist`'s
+scanned roots (every assertion there is an `assert_ge` or an emptiness comparison, so it stays at
+9), and RI-42's `confidence` moving `reasoned` -> `settled` (`verify_reuse_inventory_complete`
+stays at 19).
 
 **M23 moved exactly two things and both are accounted for in both directions.** Its own **509**
 (fourteen checks, of which thirteen are its entries and the fourteenth is M22's

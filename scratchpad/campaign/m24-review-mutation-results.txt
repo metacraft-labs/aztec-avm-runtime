@@ -1,0 +1,19 @@
+# M24 REVIEW mutation matrix — 2026-08-26T17:42:59+03:00
+
+=== RM1 — UNBOUNDED host-side buffering, done correctly (the container stays right)
+  test_trace_writer_backpressure:       rc=1  test_trace_writer_backpressure: 30 assertion(s), 5 failure(s)
+         FAIL the host heap does not scale with the event count (ratio well under 10x for 10x events) (command failed: test 108 -lt 40)
+         FAIL the small arm crossed exactly ceil(N / batch) times  expected [25], got [1]
+         FAIL and so did the large arm  expected [245], got [1]
+         FAIL the large arm really did cross many times, so the identity is not 1 == 1  expected >= 100, got [1]
+         FAIL and it happened many times, not once by luck  expected >= 10, got [2]
+  test_ct_container_roundtrip_ct_print: rc=1  test_ct_container_roundtrip_ct_print: 46 assertion(s), 1 failure(s)
+         FAIL the crossing count is exactly ceil(events / batch)  expected [10], got [1]
+
+=== RM2 — TRACE-ABI.md §2: batched's and perEvent's measured numbers swapped between rows
+  verify_trace_event_abi_batched_faster: rc=0  verify_trace_event_abi_batched_faster: 91 assertion(s), 0 failure(s)
+
+=== RM3 — TRACE-ABI.md §7: the module's byte count set back to the MUTATION-era figure
+  verify_trace_event_abi_batched_faster: rc=0  verify_trace_event_abi_batched_faster: 91 assertion(s), 0 failure(s)
+  verify_ct_writer_wasm_zero_imports:    rc=0  verify_ct_writer_wasm_zero_imports: 49 assertion(s), 0 failure(s)
+REVIEW MUTATIONS DONE

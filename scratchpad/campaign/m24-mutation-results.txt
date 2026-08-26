@@ -1,0 +1,128 @@
+# M24 mutation matrix — 2026-08-26T14:41:29+03:00
+
+=== M1 — emit() writes four variables per step instead of five (silent: the container still reads)
+  test_ct_container_roundtrip_ct_print: rc=1  test_ct_container_roundtrip_ct_print: 46 assertion(s), 2 failure(s)
+         FAIL the decoded value count is five per step, which is what emit() writes  expected [25000], got [20000]
+         FAIL the five per-step variables are exactly the fields emit() records  expected [contextId,contractAddressLow,daGas,l2Gas,opcode], got [contextId,contractAddressLow,l2Gas,opcode]
+  test_trace_writer_backpressure:       rc=1  test_trace_writer_backpressure: 30 assertion(s), 1 failure(s)
+         FAIL and each carries its five variables  expected [1250000], got [1000000]
+
+=== M2 — the DD-7 identity gate becomes a TypeScript-only guarantee (erased at run time)
+  test_dropped_column_awareness_asserted: rc=1  test_dropped_column_awareness_asserted: 39 assertion(s), 6 failure(s)
+         FAIL a shape-identical config that never passed the gate is REFUSED by the writer  expected [true], got [false]
+         FAIL and the refusal is the identity check, not a type error  expected [UnresolvedTracingConfig], got [MISSING]
+         FAIL which says plainly that identity is checked rather than shape (command failed: str_has_sub MISSING Object identity is checked rather than shape)
+         FAIL a forged config handed straight to the public constructor is REFUSED (command failed: str_has_line_re REFUSED	plain	ColumnAwarenessUnavailable
+
+=== M3 — the config-time column refusal is removed; only the type forbids it
+  test_dropped_column_awareness_asserted: rc=1  test_dropped_column_awareness_asserted: 39 assertion(s), 8 failure(s)
+         FAIL columns requested of Path A THROWS at configuration time  expected [true], got [false]
+         FAIL and it is DD-7's own refusal, by class  expected [ColumnAwarenessUnavailable], got [MISSING]
+         FAIL and the refusal says WHY, in the writer's structural terms (command failed: str_has_sub MISSING no column-bearing step encoder)
+         FAIL and names the meta.dat capability bits it does not set (command failed: str_has_sub MISSING capability bits 4/6/7)
+
+=== M4 — ct_dropped_column_awareness() returns a constant 0 instead of the writer's signal
+  test_dropped_column_awareness_asserted: rc=1  test_dropped_column_awareness_asserted: 39 assertion(s), 4 failure(s)
+         FAIL columns requested and then DROPPED by the module is refused at close  expected [true], got [false]
+         FAIL by the writer's own dropped-column-awareness signal  expected [ColumnAwarenessDropped], got [MISSING]
+         FAIL and the refusal names the module kind that reported it (command failed: str_has_sub MISSING ct_writer_kind() = 1)
+         FAIL a config MUTATED after it was resolved gets past the config-time gate and is caught at CLOSE (command failed: str_has_line_re REFUSED	plain	ColumnAwarenessUnavailable
+
+=== DONE — restoring the built artefacts to the unmutated sources
+tree restored; re-run 'just verify-m24' to confirm
+# M24 mutation matrix — 2026-08-26T14:42:12+03:00
+
+=== M5 — THE HANG: the arms driver never exits (the state a trap cannot reach)
+  test_ct_container_roundtrip_ct_print: rc=1  test_ct_container_roundtrip_ct_print: 46 assertion(s), 27 failure(s)
+         FAIL the arms run produced its report  missing file []
+         FAIL the roundtrip arm wrote a container  missing file [MISSING]
+         FAIL the container is a plausible size  expected >= 10000, got [MISSING]
+         FAIL ct-print at the pinned revision reads the container (exit 0)  expected [0], got [1]
+  test_trace_writer_backpressure:       rc=1  test_trace_writer_backpressure: 20 assertion(s), 18 failure(s)
+         FAIL the arms run produced its report  missing file []
+         FAIL the small arm drove a substantial number of events  expected >= 10000, got [MISSING]
+         FAIL the large arm drove far more  expected >= 200000, got [MISSING]
+         FAIL the large arm is exactly ten times the small one  expected [10], got [MISSING]
+
+=== M6 — THE HANG, IN WASM: ct_ingest spins forever (no signal handler, no unwind)
+  test_ct_container_roundtrip_ct_print: rc=1  test_ct_container_roundtrip_ct_print: 46 assertion(s), 27 failure(s)
+         FAIL the arms run produced its report  missing file []
+         FAIL the roundtrip arm wrote a container  missing file [MISSING]
+         FAIL the container is a plausible size  expected >= 10000, got [MISSING]
+         FAIL ct-print at the pinned revision reads the container (exit 0)  expected [0], got [1]
+
+=== M7 — the host stops flushing until close (the container is still correct)
+  test_trace_writer_backpressure: rc=1  test_trace_writer_backpressure: 20 assertion(s), 18 failure(s)
+         FAIL the arms run produced its report  missing file []
+         FAIL the small arm drove a substantial number of events  expected >= 10000, got [MISSING]
+         FAIL the large arm drove far more  expected >= 200000, got [MISSING]
+         FAIL the large arm is exactly ten times the small one  expected [10], got [MISSING]
+
+=== M11 — the per-event ABI silently drops every other event
+# M24 mutation matrix — 2026-08-26T14:49:43+03:00
+
+=== M5 — THE HANG: the arms driver never exits (the state a trap cannot reach)
+  test_ct_container_roundtrip_ct_print: rc=1  <NO SUMMARY LINE AT ALL>
+  test_trace_writer_backpressure:       rc=1  <NO SUMMARY LINE AT ALL>
+
+=== M6 — THE HANG, IN WASM: ct_ingest spins forever (no signal handler, no unwind)
+  test_ct_container_roundtrip_ct_print: rc=1  <NO SUMMARY LINE AT ALL>
+
+=== M7 — the host stops flushing until close (the container is still correct)
+  test_trace_writer_backpressure: rc=1  <NO SUMMARY LINE AT ALL>
+
+=== M11 — the per-event ABI silently drops every other event
+# M24 mutation matrix — 2026-08-26T15:32:09+03:00
+
+=== M5 — THE HANG: the arms driver never exits (the state a trap cannot reach)
+  test_ct_container_roundtrip_ct_print: rc=1  test_ct_container_roundtrip_ct_print: 0 assertion(s), 1 failure(s)
+  test_trace_writer_backpressure:       rc=1  test_trace_writer_backpressure: 0 assertion(s), 1 failure(s)
+
+=== M6 — THE HANG, IN WASM: ct_ingest spins forever (no signal handler, no unwind)
+  test_ct_container_roundtrip_ct_print: rc=1  <NO SUMMARY LINE AT ALL>
+
+=== M7 — the host stops flushing until close (the container is still correct)
+  test_trace_writer_backpressure: rc=1  test_trace_writer_backpressure: 0 assertion(s), 1 failure(s)
+
+=== M11 — the per-event ABI silently drops every other event
+  test_ct_container_roundtrip_ct_print: rc=1  test_ct_container_roundtrip_ct_print: 46 assertion(s), 2 failure(s)
+         FAIL the same events through both ABIs produce byte-identical containers  expected [true], got [false]
+         FAIL the two containers are the same length  expected [282624], got [225280]
+
+=== M12 — the module declares one wasm import
+  verify_ct_writer_wasm_zero_imports: rc=1  verify_ct_writer_wasm_zero_imports: 0 assertion(s), 1 failure(s)
+
+=== M13 — the module's record size drifts from the host's (silent misalignment)
+  verify_ct_writer_wasm_zero_imports: rc=1  verify_ct_writer_wasm_zero_imports: 49 assertion(s), 1 failure(s)
+         FAIL the module declares a 64-byte event record  expected [64], got [72]
+
+=== DONE — restoring the built artefacts to the unmutated sources
+tree restored; re-run 'just verify-m24' to confirm
+# M24 mutation matrix — 2026-08-26T15:34:59+03:00
+
+=== M5 — THE HANG: the arms driver never exits (the state a trap cannot reach)
+  test_ct_container_roundtrip_ct_print: rc=1  test_ct_container_roundtrip_ct_print: 0 assertion(s), 1 failure(s)
+  test_trace_writer_backpressure:       rc=1  test_trace_writer_backpressure: 0 assertion(s), 1 failure(s)
+
+=== M6 — THE HANG, IN WASM: ct_ingest spins forever (no signal handler, no unwind)
+  test_ct_container_roundtrip_ct_print: rc=1  test_ct_container_roundtrip_ct_print: 0 assertion(s), 1 failure(s)
+
+=== M7 — the host stops flushing until close (the container is still correct)
+  test_trace_writer_backpressure: rc=1  test_trace_writer_backpressure: 0 assertion(s), 1 failure(s)
+
+=== DONE — restoring the built artefacts to the unmutated sources
+tree restored; re-run 'just verify-m24' to confirm
+# M24 mutation matrix — 2026-08-26T17:37:55+03:00
+
+=== M5 — THE HANG: the arms driver never exits (the state a trap cannot reach)
+  test_ct_container_roundtrip_ct_print: rc=1  test_ct_container_roundtrip_ct_print: 0 assertion(s), 1 failure(s)
+  test_trace_writer_backpressure:       rc=1  test_trace_writer_backpressure: 0 assertion(s), 1 failure(s)
+
+=== M6 — THE HANG, IN WASM: ct_ingest spins forever (no signal handler, no unwind)
+  test_ct_container_roundtrip_ct_print: rc=1  test_ct_container_roundtrip_ct_print: 0 assertion(s), 1 failure(s)
+
+=== M7 — the host stops flushing until close (the container is still correct)
+  test_trace_writer_backpressure: rc=1  test_trace_writer_backpressure: 0 assertion(s), 1 failure(s)
+
+=== DONE — restoring the built artefacts to the unmutated sources
+tree restored; re-run 'just verify-m24' to confirm
