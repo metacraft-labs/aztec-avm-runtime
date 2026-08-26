@@ -73,7 +73,22 @@ if [ "$FORCE" = 1 ] || [ ! -f "$STAMP" ] || [ "$(cat "$STAMP" 2>/dev/null)" != "
   say "materialising codetracer-trace-format @ ${REV:0:10} from the object store"
   rm -rf "$CTF_DIR"
   mkdir -p "$CTF_DIR"
-  git -C "$TRACE_FORMAT_REPO" archive "$REV" | tar -x -C "$CTF_DIR" \
+  # `-m` — EXTRACT WITH THE CURRENT TIME, NOT THE ARCHIVE'S.
+  #
+  # `git archive` stamps every file with the COMMIT's timestamp, and cargo's fingerprint is
+  # mtime-based. So re-materialising at a different revision can leave the new sources OLDER than
+  # the rlibs a previous revision's build left in `target/`, and cargo then reuses them. Measured:
+  # moving the pin to the column-aware anchor, building, moving it back, building, and moving it
+  # forward again produced a build in which `codetracer_ctfs` was NOT recompiled and
+  # `codetracer_trace_writer` was — four `cannot find function \`compress_pledged\` in crate
+  # \`codetracer_ctfs\`` errors from a tree that has it. That direction fails loudly; the campaign
+  # brief records the same mechanism in the direction that does NOT — "a mutated artefact outlived
+  # its restored source, because cargo'"'"'s fingerprint is mtime-based and the restore put the
+  # original timestamp back" — and that one produced a wrong number nobody could see.
+  #
+  # With `-m` every materialised file is newer than anything built before it, so a revision change
+  # always invalidates. `--force` alone did not, which is what made this look like a broken branch.
+  git -C "$TRACE_FORMAT_REPO" archive "$REV" | tar -x -m -C "$CTF_DIR" \
     || die "git archive of $REV failed"
   # The extracted tree carries its own `[workspace]` root. Our crate declares path dependencies
   # INTO it, which makes cargo treat those crates as members of that workspace and our crate as a

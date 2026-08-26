@@ -337,16 +337,29 @@ m24_require_readers() {
   want_fix="$(m24_pin trace_format_nim commit)"
   want_ctl="$(m24_pin trace_format_nim control_commit)"
   if [ ! -x "$M24_CTPRINT_WORK/ct-print" ] || [ ! -x "$M24_CTPRINT_WORK/ct-print-pre" ] \
+     || [ ! -x "$M24_CTPRINT_WORK/ct-split-probe" ] \
      || [ "$(cat "$M24_CTPRINT_WORK/ct-print.rev" 2>/dev/null | tr -d '[:space:]')" != "$want_fix" ] \
-     || [ "$(cat "$M24_CTPRINT_WORK/ct-print-pre.rev" 2>/dev/null | tr -d '[:space:]')" != "$want_ctl" ]; then
+     || [ "$(cat "$M24_CTPRINT_WORK/ct-print-pre.rev" 2>/dev/null | tr -d '[:space:]')" != "$want_ctl" ] \
+     || [ "$(cat "$M24_CTPRINT_WORK/ct-split-probe.rev" 2>/dev/null | tr -d '[:space:]')" != "$want_fix" ] \
+     || [ "$REPO_ROOT/verification/ct_split_probe.nim" -nt "$M24_CTPRINT_WORK/ct-split-probe" ]; then
     m24_require_bounded_logged "$M24_BUILD_TIMEOUT" "the ct-print build" \
       "$REPO_ROOT/verification/build_ct_print.sh" \
       || die "verification/build_ct_print.sh failed; see $M24_WORK/bounded-run.log"
   fi
-  for b in ct-print ct-print-pre; do
+  for b in ct-print ct-print-pre ct-split-probe; do
     [ -x "$M24_CTPRINT_WORK/$b" ] || die "no $b at $M24_CTPRINT_WORK after building"
   done
   M24_READERS="$M24_CTPRINT_WORK"
+}
+
+# m24_split_probe <container> — the SPLIT-STREAM reader's answers, one `KEY<TAB>VALUE` per line.
+#
+# The probe never exits non-zero: a stream it cannot read is reported as `KEY<TAB>ERR:…` so the
+# caller names the STREAM rather than reporting that the instrument died. It is still bounded,
+# because a reader given a corrupt container is exactly the shape that spins.
+m24_split_probe() { # <container>
+  m24_run_bounded "$M24_READER_TIMEOUT" "ct-split-probe" \
+    "$M24_CTPRINT_WORK/ct-split-probe" "$1" 2>&1
 }
 
 # m24_ct_print <binary> <container> — runs a reader, printing `<rc>` on the first line and its

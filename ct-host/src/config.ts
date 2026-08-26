@@ -22,7 +22,7 @@
 
 import { WRITER_KIND_PATH_A_PURE_RUST } from './abi.ts';
 
-/** DD-7's Path A: the pure-Rust `CtfsTraceWriter`. Cannot carry columns. */
+/** DD-7's Path A: the pure-Rust `CtfsTraceWriter`. */
 export const WRITER_PATH_A_PURE_RUST = 'path-a-pure-rust';
 /** DD-7's Path B: the column-aware Nim writer. Declared, and not available on wasm today. */
 export const WRITER_PATH_B_NIM = 'path-b-nim';
@@ -36,12 +36,30 @@ export const WRITER_KIND_OF: Readonly<Record<WriterPath, number>> = {
 };
 
 /**
- * Which writer paths can carry column-aware steps.
+ * Which writer paths can produce column-aware steps **as wired into this runtime**.
  *
  * A DATA TABLE RATHER THAN A CONDITIONAL, so adding Path B is a row and not an edit to the gate.
- * Path A's `false` is the structural fact §9.3 records: no column-bearing step encoder, no
- * `paths.dat` Layout A line-length table, no `sekDeltaColumn` opcode, and `meta.dat` capability
- * bits 4/6/7 deliberately unset.
+ *
+ * ---------------------------------------------------------------------------
+ * PATH A'S `false` USED TO BE A FACT ABOUT THE WRITER. IT IS NOT ANY MORE, AND THE ROW STAYS.
+ *
+ * When DD-7 was taken, Path A's limitation was structural and §9.3 enumerated it: no
+ * column-bearing step encoder, no `paths.dat` Layout A line-length table, no `sekDeltaColumn`
+ * opcode, `meta.dat` capability bits 4/6/7 unset. **All three now exist** — `pins.json`'s
+ * `trace_format` anchor moved onto the column-capable writer, and `ct_writer_open(want_columns=1)`
+ * is honoured rather than dropped.
+ *
+ * What is still missing is on THIS side, and it is not a flag either: there is no source column
+ * to record. `emit()` is on §9.2's rung 3 and writes a program counter as `Line(pc)`; there is no
+ * source mapping, so a "column" here would be a number with nothing behind it. Turning column
+ * mode on would set the `meta.dat` bits that tell a reader this recording's columns are
+ * breakpoint-sharp, over positions that are program counters — which is the silent degradation
+ * DD-7 exists to refuse, arriving from the other direction.
+ *
+ * So the row is `false` and its SUBJECT has moved from the writer to the event source. M25 is
+ * what changes it, by settling OQ-5 and giving `emit()` a real source position; when it does,
+ * this is a one-line edit and `CARRIES_COLUMNS` is still a table.
+ * ---------------------------------------------------------------------------
  */
 export const CARRIES_COLUMNS: Readonly<Record<WriterPath, boolean>> = {
   [WRITER_PATH_A_PURE_RUST]: false,
@@ -71,17 +89,20 @@ export interface ResolvedTracingConfig extends TracingConfig {
   writerPath: WriterPath;
 }
 
-/** The DD-7 refusal: columns were asked of a writer that structurally cannot carry them. */
+/** The DD-7 refusal: columns were asked of a path that has no source column to record. */
 export class ColumnAwarenessUnavailable extends Error {
   readonly writerPath: WriterPath;
   constructor(writerPath: WriterPath) {
     super(
-      `the tracing configuration asked for column-aware steps and the '${writerPath}' writer ` +
-        'cannot carry them (DD-7). This writer has no column-bearing step encoder, no paths.dat ' +
-        'Layout A line-length table and no delta-column opcode, and it does not set meta.dat ' +
-        'capability bits 4/6/7. Refusing here rather than producing a container that reads back ' +
-        'with every step present and every column silently gone. Set columns: false, or use a ' +
-        'writer path that carries them.',
+      `the tracing configuration asked for column-aware steps and the '${writerPath}' path ` +
+        'cannot record them (DD-7). The writer at the pinned trace_format anchor CAN carry ' +
+        'columns -- it has a delta-column opcode, a paths.dat Layout A line-length table and ' +
+        'meta.dat capability bits 4/6/7 -- and this runtime has no source column to put in ' +
+        'them: emit() is on rung 3 of the source-fidelity ladder and records a program counter ' +
+        'as Line(pc). Enabling column mode would advertise breakpoint-sharp columns over ' +
+        'positions that are program counters. Refusing here rather than producing a container ' +
+        'whose columns are a number with nothing behind it. Set columns: false, or wait for the ' +
+        'source mapping that gives this runtime a column to record.',
     );
     this.name = 'ColumnAwarenessUnavailable';
     this.writerPath = writerPath;
@@ -107,6 +128,16 @@ export class UnresolvedTracingConfig extends Error {
  * DD-7's second half, and it fires ONLY when columns were requested — asserting on
  * `dropped_column_awareness()` unconditionally would fail every ordinary recording, since the
  * signal is `false` precisely because nobody asked.
+ *
+ * **NOT REACHABLE THROUGH THE MODULE AT THE CURRENT `trace_format` ANCHOR, AND KEPT ANYWAY.**
+ * The writer honours a column request now, so `dropped_column_awareness()` answers `false`; the
+ * one reachable `true` left in the writer is a request arriving after `begin_writing_trace_events`
+ * and `ct_writer_open` makes the call before. This class was M24's backstop for the one bypass
+ * that got past the configuration-time gate — a resolved configuration mutated afterwards — and
+ * that bypass is closed at configuration time now, by freezing (see `resolveTracingConfig`).
+ * It is kept because the signal is still read on every recording and a future module or writer
+ * path can still report the loss; what has changed is that it is corroboration rather than
+ * enforcement, and nothing may be left resting on it.
  */
 export class ColumnAwarenessDropped extends Error {
   constructor(writerPath: WriterPath, kind: number) {
@@ -157,7 +188,19 @@ export function resolveTracingConfig(
     writerPath,
   };
   RESOLVED.add(resolved);
-  return resolved;
+  // FROZEN, AND THAT IS NOW THE ONLY THING STANDING BEHIND THE GATE.
+  //
+  // The gate cannot be re-run, so `cfg.columns = true` after the fact used to get a column
+  // request all the way into the module — and M24 caught it at CLOSE instead, on the writer's
+  // `dropped_column_awareness()`. The `trace_format` anchor moved onto a writer that HONOURS a
+  // column request, so that signal answers `false` now and the close-time catch is gone. Leaving
+  // it there would be an assertion that cannot fail guarding a bypass that works.
+  //
+  // `Object.freeze` is not a type and is not erased: these sources run under ESM, which is strict
+  // mode, so the assignment throws a `TypeError` at the point of mutation rather than silently
+  // doing nothing. That is strictly better than the close-time catch it replaces — the refusal is
+  // back at configuration time, where DD-7 says it belongs.
+  return Object.freeze(resolved);
 }
 
 /** Whether an object came out of {@link resolveTracingConfig}. Identity, not shape. */

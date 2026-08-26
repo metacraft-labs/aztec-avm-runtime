@@ -32,6 +32,32 @@
 # unconditionally would fail every ordinary recording, because the signal is false precisely
 # because nobody asked. Both directions are exercised.
 #
+# ---------------------------------------------------------------------------
+# WHAT THIS CHECK MEANS CHANGED WHEN THE `trace_format` ANCHOR MOVED, AND IT WAS CHANGED
+# DELIBERATELY RATHER THAN REPAIRED UNTIL IT WENT GREEN AGAIN.
+#
+# At `9cbc127ef8` the Path A writer could not carry columns, and DD-7 had two enforcement points:
+# a refusal at configuration time, and `dropped_column_awareness()` at close for the one bypass
+# that got past it (a resolved configuration mutated afterwards). At `592fa42cbf` the writer
+# HONOURS a column request — delta-column opcode, `paths.dat` Layout A, `meta.dat` bits 4/6/7 —
+# so:
+#
+#   * the gate that used to assert a THROW at close now asserts the module's own answer, that
+#     the request was made and NOT dropped. It is renamed `columns-requested-are-honoured`,
+#     because a gate whose name says "dropped" and whose assertion says "not dropped" is how a
+#     check comes to be believed for the wrong reason;
+#   * `dropped_column_awareness()` is no longer reachable as a `true` through this ABI, so
+#     nothing may rest on it. The bypass it used to catch is closed at CONFIGURATION time by
+#     `Object.freeze`, and this check EXECUTES that rather than reading `readonly` out of the
+#     source — `readonly` is erased and would read identically;
+#   * the DD-7 refusal itself stands, and its SUBJECT moved. It is no longer "this writer cannot
+#     carry columns"; it is "this runtime has no source column to record", because `emit()` is on
+#     rung 3 and writes a program counter as `Line(pc)`. The refusal message says that now, and
+#     the assertions below quote the new sentence.
+#
+# The three facts that make the first bullet true are asserted FROM THE MODULE, not from here.
+# ---------------------------------------------------------------------------
+#
 # Run: just verify-ct-dd7
 
 TEST_NAME="test_dropped_column_awareness_asserted"
@@ -55,17 +81,26 @@ gate_threw() { m24_arm "[g for g in d['gates'] if g['name']=='$1'][0]['threw']";
 gate_kind()  { m24_arm "[g for g in d['gates'] if g['name']=='$1'][0]['kind']"; }
 gate_error() { m24_arm "[g for g in d['gates'] if g['name']=='$1'][0]['error']"; }
 
-assert_eq "the arms run exercised five gates, four refusals and one control" "5" \
+assert_eq "the arms run exercised six gates, four refusals, one measurement and one control" "6" \
   "$(m24_arm 'len(d["gates"])')"
 
 assert_eq "columns requested of Path A THROWS at configuration time" "true" \
   "$(gate_threw columns-on-path-a)"
 assert_eq "and it is DD-7's own refusal, by class" "ColumnAwarenessUnavailable" \
   "$(gate_kind columns-on-path-a)"
-assert_true "and the refusal says WHY, in the writer's structural terms" \
-  str_has_sub "$(gate_error columns-on-path-a)" 'no column-bearing step encoder'
-assert_true "and names the meta.dat capability bits it does not set" \
-  str_has_sub "$(gate_error columns-on-path-a)" 'capability bits 4/6/7'
+# THE REFUSAL'S REASON IS THE THING THAT MOVED, SO THE REASON IS WHAT IS PINNED.
+# It used to say the writer has no column-bearing step encoder and sets no capability bits.
+# That is false of the writer at the current anchor, and a refusal that gives a false reason is
+# worse than one that gives none: it is the campaign's "prose drifts from measurement" defect
+# with a user on the other end of it.
+assert_true "the refusal says the WRITER can carry columns, which is true at this anchor" \
+  str_has_sub "$(gate_error columns-on-path-a)" 'writer at the pinned trace_format anchor CAN carry'
+assert_true "and locates the missing half in THIS runtime: rung 3, a program counter" \
+  str_has_sub "$(gate_error columns-on-path-a)" 'records a program counter'
+assert_true "and says what enabling it anyway would advertise" \
+  str_has_sub "$(gate_error columns-on-path-a)" 'breakpoint-sharp columns over'
+assert_false "and it no longer claims the writer has no column-bearing step encoder" \
+  str_has_sub "$(gate_error columns-on-path-a)" 'This writer has no column-bearing step encoder'
 
 assert_eq "a columns:true smuggled past the TYPE is refused just the same" "true" \
   "$(gate_threw columns-on-path-a-through-any)"
@@ -79,12 +114,40 @@ assert_eq "and the refusal is the identity check, not a type error" "UnresolvedT
 assert_true "which says plainly that identity is checked rather than shape" \
   str_has_sub "$(gate_error unresolved-config-object)" 'Object identity is checked rather than shape'
 
-assert_eq "columns requested and then DROPPED by the module is refused at close" "true" \
-  "$(gate_threw columns-requested-then-dropped)"
-assert_eq "by the writer's own dropped-column-awareness signal" "ColumnAwarenessDropped" \
-  "$(gate_kind columns-requested-then-dropped)"
-assert_true "and the refusal names the module kind that reported it" \
-  str_has_sub "$(gate_error columns-requested-then-dropped)" 'ct_writer_kind() = 1'
+# ---------------------------------------------------------------------------
+# THE INVERTED GATE. A column request that REACHES the module is HONOURED at this anchor.
+#
+# Read off the module (`ct_columns_requested()` and `ct_dropped_column_awareness()` at close),
+# never off the configuration: the two agreeing is a fact worth being able to fail, and the
+# writer is the only thing that knows whether it honoured the request.
+# ---------------------------------------------------------------------------
+assert_eq "a column request that reaches the module does NOT throw any more" "false" \
+  "$(gate_threw columns-requested-are-honoured)"
+assert_eq "and the module recorded that columns WERE requested of it" "true" \
+  "$(m24_arm 'd["columnRequest"]["columnsRequested"]')"
+assert_eq "and reports it did NOT drop them — the capability exists at this anchor" "false" \
+  "$(m24_arm 'd["columnRequest"]["droppedColumnAwareness"]')"
+# NON-DEGENERACY: "not dropped" over a recording that wrote nothing would be true for the wrong
+# reason. The arm pushed an event and produced a container, and both are asserted.
+assert_ge "over a recording that actually wrote an event" "1" \
+  "$(m24_arm 'd["columnRequest"]["events"]')"
+assert_ge "and produced a container rather than an empty buffer" "1000" \
+  "$(m24_arm 'd["columnRequest"]["containerBytes"]')"
+assert_eq "on the Path A module, so this is Path A's answer and not another writer's" "1" \
+  "$(m24_arm 'd["columnRequest"]["writerKind"]')"
+
+# ---------------------------------------------------------------------------
+# WHAT REPLACED THE CLOSE-TIME CATCH: THE RESOLVED CONFIGURATION IS FROZEN.
+#
+# `dropped_column_awareness()` was M24's backstop for the one bypass that got past the
+# configuration-time gate. It cannot fire at this anchor, so the bypass is closed where DD-7 says
+# it belongs — at configuration time. EXECUTED rather than read: `Object.freeze` is a call and
+# `readonly` is a type, and only one of them exists at run time.
+# ---------------------------------------------------------------------------
+assert_eq "mutating a RESOLVED configuration throws, at the mutation" "true" \
+  "$(gate_threw mutating-a-resolved-config)"
+assert_eq "and it is strict mode's own refusal rather than a check of ours" "TypeError" \
+  "$(gate_kind mutating-a-resolved-config)"
 
 # THE CONTROL. Everything above is satisfied by a host that refuses everything.
 assert_eq "AN ORDINARY RECORDING IS ALLOWED — the gates are not a blanket refusal" "false" \
@@ -146,19 +209,30 @@ try {
   ok("forged-constructor-no-columns");
 } catch (e) { no("forged-constructor-no-columns", e); }
 
-// 5. Mutating a RESOLVED config after the gate ran. The gate cannot be re-run, so this is the one
-//    bypass that WORKS at configuration time -- and it is caught at close by the module`s own
-//    signal instead. Recorded as what it is rather than claimed shut.
+// 5. Mutating a RESOLVED config after the gate ran. This USED to be the one bypass that worked
+//    at configuration time, caught at close by the writer`s dropped-column signal. The writer at
+//    the current anchor honours a column request, so that signal cannot fire -- and the bypass is
+//    closed at configuration time instead, by `Object.freeze`. THE ASSIGNMENT IS INSIDE THE TRY
+//    on purpose: it is the assignment that throws now, and leaving it outside would kill the
+//    probe rather than record the refusal.
 const inst3 = await m.instantiateCtWriter(bytes);
-const cfg = m.resolveTracingConfig({ ...base, columns: false }, m.WRITER_PATH_A_PURE_RUST);
-cfg.columns = true;
 try {
+  const cfg = m.resolveTracingConfig({ ...base, columns: false }, m.WRITER_PATH_A_PURE_RUST);
+  cfg.columns = true;
   const w = new m.CtWriter(inst3, cfg, { batchRecords: 4 });
   const addr = new Uint8Array(32);
   w.push({ contextId: 0, pc: 1, opcode: 2, l2Gas: 3n, daGas: 4n, contractAddress: addr });
   w.close();
   ok("mutated-after-resolve");
 } catch (e) { no("mutated-after-resolve", e); }
+// 5b. THE FREEZE`S OWN CONTROL. Freezing must not have made the object unreadable or the gate
+//     unusable: a resolved config still reports the fields the writer needs. Without this,
+//     "mutation throws" is satisfied by a resolveTracingConfig that returns something broken.
+try {
+  const cfg2 = m.resolveTracingConfig({ ...base, columns: false }, m.WRITER_PATH_A_PURE_RUST);
+  console.log("FROZEN\t" + Object.isFrozen(cfg2));
+  console.log("READBACK\t" + cfg2.program + "," + cfg2.writerPath + "," + String(cfg2.columns));
+} catch (e) { no("frozen-config-readback", e); }
 
 // 6. THE CONTROL: an ordinary recording, through the public export, must be ALLOWED.
 const inst4 = await m.instantiateCtWriter(bytes);
@@ -182,12 +256,17 @@ assert_true "a forged config handed straight to the public constructor is REFUSE
   str_has_line_re "$BYPASS" "^REFUSED${TAB}forged-constructor${TAB}UnresolvedTracingConfig\$"
 assert_true "and so is a forged config with columns FALSE, so gate 3 really is the identity check" \
   str_has_line_re "$BYPASS" "^REFUSED${TAB}forged-constructor-no-columns${TAB}UnresolvedTracingConfig\$"
-# THE ONE THAT GETS THROUGH THE FIRST GATE, RECORDED AS SUCH. Mutating a resolved object after
-# the fact cannot be caught at configuration time by anything short of freezing, and claiming
-# otherwise would be exactly the kind of unearned assurance this check exists to prevent. It is
-# caught at CLOSE, by the module's own signal, and that is what is asserted.
-assert_true "a config MUTATED after it was resolved gets past the config-time gate and is caught at CLOSE" \
-  str_has_line_re "$BYPASS" "^REFUSED${TAB}mutated-after-resolve${TAB}ColumnAwarenessDropped\$"
+# THE ONE THAT USED TO GET THROUGH THE FIRST GATE. M24 recorded it as uncatchable at
+# configuration time "by anything short of freezing" and caught it at close instead. The close-time
+# catch cannot fire at this anchor, so the sentence's own remedy is what is in place: it is frozen,
+# and the refusal is `TypeError` from strict mode rather than a class of ours.
+assert_true "a config MUTATED after it was resolved is refused AT THE MUTATION, at config time" \
+  str_has_line_re "$BYPASS" "^REFUSED${TAB}mutated-after-resolve${TAB}TypeError\$"
+assert_true "and the resolved object really is frozen, read back through the public export" \
+  str_has_line_re "$BYPASS" "^FROZEN${TAB}true\$"
+# THE FREEZE'S CONTROL: it must not have broken the object it protects.
+assert_true "and a frozen config still carries the fields the writer reads" \
+  str_has_line_re "$BYPASS" "^READBACK${TAB}p,path-a-pure-rust,false\$"
 assert_true "THE CONTROL: an ordinary recording through the public export is ALLOWED" \
   str_has_line_re "$BYPASS" "^ALLOWED${TAB}ordinary\$"
 assert_true "and it actually wrote its nine events rather than being allowed to do nothing" \

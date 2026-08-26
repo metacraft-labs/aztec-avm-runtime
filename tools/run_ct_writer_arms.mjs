@@ -241,15 +241,40 @@ out.gates.push(
     new CtWriter(inst, forged, { batchRecords: 8 });
   }),
 );
-// 4. A config resolved against the column-aware path, run on the Path A module. The refusal is at
-//    CLOSE, from the writer's own `dropped_column_awareness()`, and it is the only route by which
-//    that signal can be reached in production code.
+// 4. A config resolved against the column-aware path, run on the Path A module — so a column
+//    request really does reach `ct_writer_open(want_columns = 1)`.
+//
+//    THIS GATE INVERTED WHEN THE `trace_format` ANCHOR MOVED, AND THAT INVERSION IS THE RESULT.
+//    At the old anchor the writer could not honour the request, `dropped_column_awareness()`
+//    answered true and `close()` threw `ColumnAwarenessDropped`. The writer at the current anchor
+//    HONOURS it. So this arm must now NOT throw, and what it records is the module's own answer:
+//    the request was made, and it was not dropped. Recorded as the measurement it is rather than
+//    deleted, because "Path A can carry columns now" is the fact the anchor move delivers and it
+//    should be read off the module rather than off this comment.
 out.gates.push(
-  await attempt('columns-requested-then-dropped', async () => {
+  await attempt('columns-requested-are-honoured', async () => {
     const inst = await instantiateCtWriter(bytes);
     const w = new CtWriter(inst, config(true, WRITER_PATH_B_NIM), { batchRecords: 8 });
     w.push(events(3, 4)[0]);
-    w.close();
+    const r = w.close();
+    out.columnRequest = {
+      columnsRequested: r.columnsRequested,
+      droppedColumnAwareness: r.droppedColumnAwareness,
+      writerKind: r.writerKind,
+      events: r.events,
+      containerBytes: r.container.length,
+    };
+    if (!r.columnsRequested) throw new Error('the module did not record that columns were requested');
+  }),
+);
+// 4b. THE FREEZE, EXECUTED. `resolveTracingConfig` returns a frozen object, so the one bypass that
+//     used to get past the configuration-time gate — mutate the resolved config afterwards — now
+//     throws AT THE MUTATION, in strict mode, before any writer sees it. Run here rather than
+//     asserted from the source, because a `readonly` would read the same and be erased.
+out.gates.push(
+  await attempt('mutating-a-resolved-config', async () => {
+    const cfg = config(false, WRITER_PATH_A_PURE_RUST);
+    cfg.columns = true;
   }),
 );
 // 5. THE CONTROL FOR THE GATES: an ordinary recording must NOT throw. Without this every gate

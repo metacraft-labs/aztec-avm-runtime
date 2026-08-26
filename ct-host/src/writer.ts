@@ -261,6 +261,15 @@ export class CtWriter {
    * recording and reported on every recording, and it is only ever a FAILURE when the
    * configuration asked for columns. Asserting it unconditionally would fail every ordinary
    * recording, because the signal is false precisely because nobody asked.
+   *
+   * **AND IT NO LONGER CATCHES ANYTHING AT THE CURRENT `trace_format` ANCHOR.** The writer there
+   * honours a column request, so `ct_dropped_column_awareness()` answers 0 whether or not columns
+   * were asked for. The bypass this used to catch — a resolved configuration mutated after the
+   * gate ran — is refused at configuration time now, because `resolveTracingConfig` freezes what
+   * it returns. The read stays: the signal is the module's own, a future writer path can still
+   * report a loss, and reporting it on every recording is what makes it available to a consumer
+   * at all. What must not happen is anything being left to rest on it, which is why the freeze
+   * is where the guarantee is and this is where the corroboration is.
    */
   close(): CtRecording {
     this.assertOpen();

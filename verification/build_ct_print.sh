@@ -17,6 +17,21 @@
 #   ct-print       @ pins.json trace_format_nim.commit          -- has baea074, reads it
 #   ct-print-pre   @ pins.json trace_format_nim.control_commit  -- baea074^, must NOT read it
 #
+# AND A THIRD BINARY, FOR A QUESTION NEITHER OF THOSE CAN ANSWER.
+#
+# `ct-print` diverts any container carrying `events.log` to the LEGACY combined-stream reader —
+# its own source says so and gives the reason — and every Rust-written container carries one. So
+# both binaries above decode `events.log` and NEITHER of them ever touches `steps.dat`,
+# `values.dat`, `calls.dat` or `events.dat`. A container whose split streams are all unreadable
+# reads exactly the same through them, which is how `test_ct_container_roundtrip_ct_print` came to
+# report green over one.
+#
+#   ct-split-probe @ pins.json trace_format_nim.commit          -- opens the SPLIT streams
+#
+# is `verification/ct_split_probe.nim` compiled inside the SAME archived tree, so it is the
+# reference reader at the pinned revision and not a re-implementation. It calls `openNewTrace`
+# directly, which is the v4 split-stream reader `ct-print` declines to use here.
+#
 # Both from `git archive`, out of the OBJECT STORE. `../ctfnim-wt-wasm` is a worktree of the same
 # repository sitting on that branch and carries a prebuilt `ct-print`; using it would make the
 # check depend on whatever that worktree currently holds.
@@ -90,7 +105,34 @@ build_one() { # <rev> <tree-dir> <out-binary>
   say "built $(basename "$out") @ ${rev:0:10} ($(wc -c <"$out") bytes)"
 }
 
+# The split-stream probe. It is compiled INSIDE the tree `build_one` already archived for
+# `ct-print`, so it links the reference reader at the pinned revision rather than a copy of it —
+# and its `.rev` stamp is that same revision, which is what `m24_require_readers` compares.
+#
+# The source is COPIED IN rather than compiled in place from `$REPO_ROOT/verification`, because
+# `nim c -p:src` resolves `codetracer_trace_writer/new_trace_reader` relative to the archived
+# tree; a probe left outside it would find no reader to import.
+build_probe() { # <rev> <tree-dir> <out-binary>
+  local rev="$1" tree="$2" out="$3"
+  if [ "$FORCE" = 0 ] && [ -x "$out" ] && [ "$(cat "$out.rev" 2>/dev/null)" = "$rev" ] \
+     && [ ! "$REPO_ROOT/verification/ct_split_probe.nim" -nt "$out" ]; then
+    say "$(basename "$out") @ ${rev:0:10} already built"
+    return 0
+  fi
+  [ -d "$tree/src" ] || die "$tree was not archived; build_one must run first"
+  [ -f "$REPO_ROOT/verification/ct_split_probe.nim" ] || die "verification/ct_split_probe.nim is missing"
+  cp "$REPO_ROOT/verification/ct_split_probe.nim" "$tree/ct_split_probe.nim" \
+    || die "could not copy the probe into $tree"
+  ( cd "$tree" && nim c -d:release --mm:arc -p:src --passC:"-I$INC" --passL:"-L$LIB" \
+      -o:"$out" ct_split_probe.nim ) >"$WORK/ct-split-probe.build.log" 2>&1 \
+    || die "building ct-split-probe at $rev failed; see $WORK/ct-split-probe.build.log"
+  [ -x "$out" ] || die "the build reported success but $out is not there"
+  printf '%s\n' "$rev" >"$out.rev"
+  say "built $(basename "$out") @ ${rev:0:10} ($(wc -c <"$out") bytes)"
+}
+
 mkdir -p "$WORK" || die "could not create $WORK"
 build_one "$REV" "$WORK/src-tree" "$WORK/ct-print"
 build_one "$CONTROL" "$WORK/src-tree-pre" "$WORK/ct-print-pre"
+build_probe "$REV" "$WORK/src-tree" "$WORK/ct-split-probe"
 printf '%s\n' "$WORK"
