@@ -315,25 +315,36 @@ touch moves, look for a commit that landed between the reference sweep and yours
 repository — before writing a story. Both attributions above were re-derived independently by the
 review and both held; that is the standard, not the presumption.
 
-Current per-milestone counts. Measured **M0-M23, on 2026-08-26**, one milestone at a time, nothing
-else running — every milestone **exit 0 and 0 failures anywhere**, including M9 and including M11:
+Current per-milestone counts. Measured **M0-M23, on 2026-08-26**, by M23's REVIEW, after its last
+commit, one milestone at a time with nothing else running — every milestone **exit 0 and 0 failures
+anywhere**, including M9 and including M11, and no hole in the log:
 
 ```
 m0 156  m1 169  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
 m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
-m19 180  m20 237  m21 324  m22 260  m23 491            CAMPAIGN TOTAL 8,393
+m19 180  m20 237  m21 324  m22 260  m23 509            CAMPAIGN TOTAL 8,411
 ```
 
-**M23 moved exactly two things and both are accounted for in both directions.** Its own **491**
+**M23 moved exactly two things and both are accounted for in both directions.** Its own **509**
 (fourteen checks, of which thirteen are its entries and the fourteenth is M22's
 `test_block_seal_updates_archive`, which M23 closed); and **M1 166 -> 169**, which is
 `verify_pinned_nightly_single_source` 25 -> 28 because `orchestration/src/disclosure.ts` is now a
 declared `npm_pin_witness` and the check makes exactly THREE assertions per witness — it is
-tracked, it carries a literal at all, and the literal equals the declared pin. 491 + 3 = 494, and
-7,899 + 494 = 8,393. **Every other milestone came out at its reference value to the assertion**,
-including M22 at 260 with `block_e2e_driver.ts` edited (its two `Date.now()` deadline calls
-repointed through a `DateProvider`, which changes no value because `DateProvider.now()` IS
-`Date.now()`), and M9 reproducing its 140/143/113/73/126/83/129 split exactly.
+tracked, it carries a literal at all, and the literal equals the declared pin. 509 + 3 = 512, and
+7,899 + 512 = 8,411. **Every other milestone came out at its reference value to the assertion**,
+including M22 at 260 with `block_e2e_driver.ts` edited and M14's archive patch now carried into a
+module — nothing repoints M22 at that module — and M9 reproducing its 140/143/113/73/126/83/129
+split exactly in 1,279 s.
+
+**M23 was DECLARED at 491 and its review took it to 509**, in six checks: an increase is exactly as
+much a thing to account for as a decrease, and every one of the eighteen is a claim that was made
+and not pinned. `verify_txe_reuse_verdict_recorded` +4 (the `new Date().getTime()` seed three
+wall-clock needles could not see); `test_receipt_declares_no_proving` +5 (the erased-`private`
+constructor route, which was open); `test_timestamps_strictly_monotonic_subsecond` +2 (the declared
+deviation, asserted where it is non-zero); `e2e_chain_snapshot_export_import_roundtrip` +3 (a
+refusal that was read rather than run); `verify_facade_surface_compared_against_txe` +3 (a summary
+sentence wrong in both its numbers); `test_block_seal_updates_archive` +1 (four assertions that
+vanished silently when a worktree was absent).
 
 **M22's sweep took TWO passes and the reason is worth carrying**, because it produced two instances
 of the campaign's most dangerous shape in one run. `/tmp` on this host FILLED twice while the sweep

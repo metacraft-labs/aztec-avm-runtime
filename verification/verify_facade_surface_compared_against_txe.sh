@@ -41,9 +41,10 @@ echo "== every public member of AvmRuntime appears in the mapping"
 
 MEMBERS="$(cd "$ORCH_DIR" && node --input-type=module -e '
 import { AvmRuntime } from "./src/avm_runtime.ts";
-// Private members are TypeScript-private, so they exist on the prototype; the two that are
-// implementation detail are excluded BY NAME and the exclusion is asserted below, so a future
-// private method cannot be quietly dropped from the mapping by adding it to this list.
+// Private members are TypeScript-private, so they exist on the prototype. Three names are
+// excluded: `constructor`, which every prototype has, and the two that are implementation
+// detail — and BOTH of those are asserted below to be really present, so the filter is shown to
+// have removed something rather than being a hole nobody looked into.
 const skip = new Set(["constructor", "submitSubmitted", "receipt"]);
 console.log(Object.getOwnPropertyNames(AvmRuntime.prototype).filter(n => !skip.has(n)).sort().join("\n"));
 ' 2>&1 | grep -v '^$')"
@@ -55,7 +56,12 @@ assert_ge "the facade has a substantial public surface" 18 "$N_MEMBERS"
 # leaving it in put the literal strings `TXE` and `AztecNodeDebug` into the claimed-counterpart
 # set — where they were then looked up as TXE methods and reported as missing. Caught by this
 # check's own first run.
-TABLE="$(awk '/^## 4\. The facade, mapped/,/^Fourteen of the/' "$M23_DOC" \
+# THE RANGE ENDS AT THE NEXT SECTION HEADING AND NOT AT A SENTENCE. It ended at `^Fourteen of the`
+# — the document's own summary line — so editing that sentence made the range run to the end of the
+# file and swallow §6's kv-store table, whose rows were then looked up as TXE methods. Three red
+# assertions naming `./deprecated/indexeddb` as a missing `AztecNodeDebug` method, on this check's
+# first run after the correction. A scanner anchored to prose breaks when the prose is fixed.
+TABLE="$(awk '/^## 4\. The facade, mapped/,/^## 5\./' "$M23_DOC" \
   | grep '^| `' | grep -v '^| `AvmRuntime` | TXE |')"
 N_ROWS="$(printf '%s\n' "$TABLE" | grep -c .)"
 assert_ge "the mapping table has a row per member" "$N_MEMBERS" "$N_ROWS"
@@ -120,6 +126,25 @@ assert_ge "several members are marked as having no TXE counterpart" 5 "$N_NONE"
 N_CELLS="$(printf '%s\n' "$TABLE" | awk -F'|' '{print $3}' | sed -e 's/[[:space:]]//g' -e 's/`//g' \
   | grep -c . || true)"
 assert_eq "every row's TXE cell is filled in" "$N_ROWS" "$N_CELLS"
+
+# THE DOCUMENT'S OWN SUMMARY OF THIS TABLE, RE-DERIVED FROM THE TABLE.
+# It said "Fourteen of the twenty-three have a counterpart; nine do not" against a table with
+# TWELVE and ELEVEN, and listed nine names for a set of eleven — reaching the right total by the
+# wrong route, since `stop` HAS a counterpart and the "lifecycle pair" is one. Prose summarising
+# data three lines above it, never re-derived, and nothing here could catch it because both counts
+# were `>=`. NEITHER NUMBER IS TYPED HERE: both are computed off the table, and the paragraph is
+# required to equal them.
+N_WITH_ROWS="$(printf '%s\n' "$TABLE" \
+  | awk -F'|' '{gsub(/[ `]/,"",$3); if ($3 != "none" && $3 != "") n++} END {print n + 0}')"
+assert_eq "the rows with a counterpart and the rows marked none account for every row" \
+  "$N_ROWS" "$((N_WITH_ROWS + N_NONE))"
+DOC_SPLIT="$(printf '%s\n' "$DOC" \
+  | sed -n 's/^\*\*\([0-9][0-9]*\)\*\* of the \([0-9][0-9]*\) members have a TXE counterpart and \*\*\([0-9][0-9]*\)\*\* do not.*/\1 \2 \3/p' \
+  | head -1)"
+assert_true "CHAIN-LOOP.md states the split in digits, so it can be compared at all" \
+  test -n "$DOC_SPLIT"
+assert_eq "…and the stated split EQUALS the one computed from the table" \
+  "$N_WITH_ROWS $N_ROWS $N_NONE" "$DOC_SPLIT"
 
 # ---------------------------------------------------------------------------
 # PART 3 — AztecNodeDebug, at BOTH artefacts

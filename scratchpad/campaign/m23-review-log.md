@@ -222,3 +222,167 @@ This is `assert_eq "" ""` by DATA rather than by key: both sides are read, and b
 Fix: record `wallClockDeviationSeconds` on the sub-second rows, assert the identity over those
 fifteen, and require at least one of them to be NON-ZERO — the non-emptiness partner the campaign's
 own rule asks for.
+
+## Fixes applied, each with a mutation showing the new assertion can fail
+
+`scratchpad/campaign/m23-review-fixmutations.sh` — eight rows, all red:
+
+    D1 disclosure moved back out of the constructor              45 / 4 / 1
+    D2 the constructor accepts a caller-supplied disclosure      45 / 3 / 1
+    T1 CHAIN-LOOP.md drifts back to "never reads a wall clock"   72 / 2 / 1
+    T2 the lmdb-v2 count asserted against the wrong value        72 / 1 / 1
+    V1 wallClockDeviationSeconds is always 0                     20 / 2 / 1
+    V2 the declared deviation is off by one                      20 / 2 / 1
+    E1 the third block re-reads the archive before the seal      49 / 2 / 1
+    S1 produceBlock stops refusing a non-advancing timestamp     29 / 3 / 1
+
+And the silent-skip fix was exercised directly: with `M23_WORK` pointing at a directory holding
+`avm.wasm` but no overlay worktree, `test_block_seal_updates_archive` now reports
+`34 assertion(s), 2 failure(s)` and FAILS, where before the fix it would have reported 40 and
+passed.
+
+`just verify-m23` after the fixes: **506 assertions, 14/14, exit 0** —
+60 / 72 / 35 / 35 / 35 / 49 / 45 / 20 / 21 / 18 / 45 / 15 / 27 / 29. +15 over 491, in five checks.
+
+Named regression checks, re-measured: `verify_provenance_complete` **58**, `check-drift` **22**,
+`check-repo-hygiene` **28**, `verify_named_checks_exist` **9**, `verify_no_pipeline_predicates`
+**69**, `verify_reuse_inventory_complete` **19**, `verify_pinned_nightly_single_source` **28**.
+`check_status_file.py`: 198 entries, 153 passing / 45 pending, 29 milestones, every non-pending
+entry resolving to a file containing its test name.
+
+Committed in six commits (`aztec-avm-runtime`) and one (`codetracer-specs`). Sweep started after
+the last commit.
+
+### Enumeration figures spot-checked independently at the cpp anchor — all hold
+
+| claim | measured |
+|---|---|
+| `foundation/src/promise/running-promise.ts` 138 lines | 138 |
+| `foundation/src/timer/date.ts` 82 lines | 82 |
+| `automine/automine_sequencer.ts` 841 lines | 841 |
+| TXE's `state_machine/global_variable_builder.ts` 39 lines | 39 |
+| `@aztec/ethereum` imported 7 times across automine's two files | 5 + 2 = 7 |
+| no first-party `Clock` interface/class anywhere in the fork | `git grep -E '^\s*(export )?(interface\|class) Clock\b'` over `yarn-project/**/*.ts`: nothing |
+| `buildCheckpointIfEmpty` default `false`, declared at `config.ts:252-255` | `config.ts:46` default false, `:252-255` declaration |
+| twelve overlays over `233d8e0993`, the eleventh M14's archive and the twelfth M23's, `git am` with no `-3` | the am log shows twelve `Applying:` lines and no 3-way fallback; the tree has twelve commits |
+| the module exports 51 | `WebAssembly.Module.exports` over the built `avm.wasm`: 51 |
+| the build entry point refuses a module without the two archive exports | `build_avm_wasm_m23.sh:94-96`, `die` per missing name |
+| `produceEmptyBlocks` default read out of the SHIPPED default, not restated | the check imports `DEFAULT_BLOCK_PRODUCTION` and matches `"produceEmptyBlocks":true` |
+
+### Claim 9 — status honesty
+- Deliverables: 12 `[X]`, 1 `[ ]`. The unmet one is DD-5's three entry points, and the deferral is
+  REAL: M27's deliverables already carry "A browser ESM entry point with no Node builtins" and M28
+  carries the leakage gate over it. Not described as met in spirit.
+- The half-met item is `L1TOL2MSGEXISTS`, and it is not quietly counted as whole: the DELIVERABLE
+  (`injectL1ToL2Message` appending at the next block boundary) is fully delivered and is what the
+  `[X]` claims; the verification entry says "*and it delivers HALF the entry's own criterion —
+  which it says rather than implies*"; and `e2e_l1_to_l2_message_injection.sh:125-147` ASSERTS the
+  blocker as a fact about the fork (the opcode exists; `PublicTxSimulationTester` is located BY
+  NAME and required to reach `NativeWorldStateService`, with a control that a class it does not
+  name is not found).
+- 13 `- test_name:` entries under M23, all `passing`, all resolving to a file containing the name.
+
+### F13 — the facade mapping's own summary sentence is wrong in BOTH numbers
+
+`CHAIN-LOOP.md:245`: *"Fourteen of the twenty-three have a counterpart; nine do not, and the nine
+are the ones this runtime has and a node does not (`simulateTx`, `archive`, `stateReference`,
+`exportSnapshot`, `importSnapshot`, `subscribe`, `disclosure`, `provenanceKind`, `receiptFor`)
+plus the lifecycle pair."*
+
+Measured off the table the sentence summarises (23 data rows):
+
+    rows with a TXE counterpart    12   (not fourteen)
+    rows whose TXE cell is `none`  11   (not nine)
+    rows with `none` in BOTH cells 11
+
+and the parenthetical list is nine names while the set is eleven — it omits `fundFeeJuice` and
+`start`. "Plus the lifecycle pair" is wrong too: `stop` HAS a counterpart (`close`); only `start`
+does not. Nine + a pair would be eleven, which is the right total reached by the wrong route from
+the wrong list.
+
+`verify_facade_surface_compared_against_txe.sh` cannot catch it: both counts are `assert_ge`
+(`>= 8` claimed counterparts, `>= 5` marked none), and nothing compares the document's stated
+split against the measured one. Prose summarising a table in the same file, never re-derived — the
+campaign's "bind claims to data" rule, in the one place where the data is three lines above.
+
+### F14 — two rows in the enumeration table carry ts-anchor figures under a cpp-anchor header,
+### and one of them names a path that does not exist
+
+`CHAIN-LOOP.md:9` says *"Everything below is measured at the `cpp` anchor `233d8e0993` unless it
+says otherwise."* Two rows of §1 say otherwise without saying so:
+
+| row | as written | measured |
+|---|---|---|
+| a per-block transaction loop | `yarn-project/simulator/src/public/public_processor.ts`, **648 lines** | that path does not exist at either anchor. The file is `simulator/src/public/public_processor/public_processor.ts`, and it is **648 at the ts anchor** and **655 at the cpp anchor** |
+| block sealing / archive chaining | `yarn-project/txe/src/utils/block_creation.ts`, **97 lines** | **97 at the ts anchor**, **91 at the cpp anchor** |
+
+Both figures are correct *for what the rows describe* — M22 vendored both from the ts anchor — so
+this is an attribution error rather than a wrong measurement. It matters because the header makes
+the cpp anchor the default and a reader checking either number at the stated anchor gets a
+different one, and because the path in the first row is simply not there.
+
+Every other line and file count in the document was re-derived and holds: `checkpoint_builder.ts`
+449, `global_builder.ts` 68, `automine_factory.ts` 152, its `README.md` 60, its `index.ts` 6,
+`txe_oracle_top_level_context.ts` 1,024, `bin/index.ts` 49, `rpc_server.ts` 87,
+`rpc_translator.ts` 1,229, `dispatcher_pool.ts` 317, and the three C++ tree directories at
+9 / 6 / 27 files.
+
+### Does it actually run a chain? YES — measured from my own arm run, not from the checks
+
+`tools/run_chain_arms.mjs` against the 51-export module, all nine arms, **5.6 s wall clock**:
+
+    emptyBlocks    3 blocks, archive 1 -> 4 leaves, each block's lastArchive == the previous
+                   block's archive-after, three distinct header hashes
+    noEmptyBlocks  produceEmptyBlocks:false — 6 ticks, 0 blocks from the first five, 1 after a tx
+    automine on    submit() takes the chain 0 -> 1, queue empties, the block carries the tx and
+                   reports itself NOT empty
+    automine off   submit() leaves it at 0 with 1 pending; the next tick produces it
+    subSecond      15 blocks, strictly increasing, no repeats, over a clock that moved twice
+    hundredBlocks  fake ticker 100 blocks in 97 ms; RunningPromise 100 blocks / 100 ticks in
+                   202 ms; identical block count, final timestamp AND archive root
+    l1ToL2         tree resolved from MerkleTreeId as L1_TO_L2_MESSAGE_TREE; size 0 -> 0 on
+                   inject, 0 -> 1 after the block, leaf read back BY INDEX equals the injected one
+    disclosure     receipt queued -> processed in block 1, simulated/5.0.0-nightly.20260626/none
+    snapshot       export/import into a SECOND world state: identical block count, archive root
+                   and four-tree state reference
+    archive        genesis root == GENESIS_ARCHIVE_ROOT, leaf 0 == GENESIS_BLOCK_HEADER_HASH,
+                   perturbed header REFUSED with WorldState's own message and size 3 -> 3,
+                   the same header unperturbed ACCEPTED and 3 -> 4
+
+That is a chain: blocks on a timer, empty blocks by default, sealed headers chained through a real
+archive, and a hundred of them in a tenth of a second because the clock is injected.
+
+### Sweep in progress (started 11:18, after the last commit e3a60f5 / 28e2386f)
+Order: m0 m1 m22 m23 m18 m20 m21 m2 m17 m13 m16 m19 m10 m12 m11 m14 m15 m3 m4 m5 m6 m7 m8 m9.
+`TMPDIR` and the log both on `/home`. At the start: `/tmp` 12 G free, `/home` 220 G free.
+
+## THE SWEEP, M0-M23, re-run by the review after its last commit
+
+**8,408 assertions, every milestone exit 0, zero failures anywhere, NO HOLE in the log.**
+`TMPDIR` and the log both on `/home`; `/tmp` never moved (12 G free before and after).
+
+    m0 156  m1 169  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+    m10 450 m11 259 m12 691 m13 458 m14 460 m15 537 m16 223 m17 297 m18 283
+    m19 180 m20 237 m21 324 m22 260 m23 506           TOTAL 8,408
+
+Then F13/F14 were applied and the affected milestone re-measured: **m23 506 -> 509**, m0 156 and
+m1 169 unchanged. **Final total 8,411.**
+
+Accounting against the M0-M22 reference of 7,899, in both directions:
+- M23's own **509** (fourteen checks; thirteen its entries plus M22's seal check).
+- **M1 166 -> 169**, `verify_pinned_nightly_single_source` 25 -> 28, three assertions per witness.
+- 7,899 + 509 + 3 = **8,411**.
+- Every other milestone at its reference value TO THE ASSERTION, with its reference split:
+  M9 140/143/113/73/126/83/129 in 1,279 s; M12 691; M13 458; M17 297 (so the `exportNames`
+  addition to the node host moved nothing); M22 260 (so nothing repoints M22 at M23's module);
+  M19 180 (so the counter-comment edits in its two files moved nothing).
+
+The declared 8,393 was the same measurement of a tree with eighteen fewer assertions in it.
+The +18 is itemised per check and every one of the eighteen has a mutation showing it can fail.
+
+### F13's fix broke the check, which is the finding under the finding
+`verify_facade_surface_compared_against_txe`'s table extractor ended its `awk` range at
+`^Fourteen of the` — the very sentence being corrected — so the range ran to the end of the file
+and swallowed §6's kv-store table, whose rows were then looked up as `AztecNodeDebug` methods:
+three red assertions naming `./deprecated/indexeddb` as a missing method. **A scanner anchored to
+prose breaks the day the prose is fixed.** The range ends at the next section heading now.

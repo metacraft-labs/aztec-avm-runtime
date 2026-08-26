@@ -11,6 +11,12 @@ a fact differs between the anchor and the npm pin this package installs, BOTH ar
 this milestone found two places where a sentence that was true of one artefact was false of the
 other and the difference decided whether an import compiles.
 
+**Two rows of the table below say otherwise, and the first version of them did not say so.** The
+files M22 VENDORED were taken from the **`ts` anchor `3a68d68ac2`**, so their line counts are
+`ts`-anchor facts; measured at the default anchor a reader gets a different number. Both rows name
+both figures now. M23's review found it, along with a path in the first of them that exists at
+neither anchor.
+
 > The campaign has a counted family for "believed absent, actually at a parallel subdirectory" and
 > `CAMPAIGN-BRIEF.md` holds the number — deliberately not repeated here, because a total quoted in a
 > second place is a total that goes stale in silence. Every miss in it was a parallel subdirectory. RI-41 is one of those misses recorded in place: it was `build`, with
@@ -23,9 +29,9 @@ other and the difference decided whether an import compiles.
 
 | what the milestone names | what upstream has | verdict |
 |---|---|---|
-| a per-block transaction loop | `PublicProcessor.process` — `yarn-project/simulator/src/public/public_processor.ts`, 648 lines | **REUSED**, vendored in M22 (RI-21, `PROVENANCE.md` F10). Not one line of it is in `chain.ts` |
+| a per-block transaction loop | `PublicProcessor.process` — `yarn-project/simulator/src/public/public_processor/public_processor.ts`, **648 lines at the `ts` anchor** (655 at the `cpp` anchor; M22 vendored from the `ts` one, so that is the figure that describes the copy) | **REUSED**, vendored in M22 (RI-21, `PROVENANCE.md` F10). Not one line of it is in `chain.ts` |
 | block limits | `PublicProcessorLimits` — `@aztec/stdlib/interfaces/server` | **REUSED**, M22. `maxTxsPerBlock` is handed to `maxTransactions` |
-| block sealing / archive chaining | `makeTXEBlockHeader`, `makeTXEBlock` — `yarn-project/txe/src/utils/block_creation.ts`, 97 lines, zero relative imports | **REUSED**, vendored byte-identically in M22 (RI-66, F19) |
+| block sealing / archive chaining | `makeTXEBlockHeader`, `makeTXEBlock` — `yarn-project/txe/src/utils/block_creation.ts`, **97 lines at the `ts` anchor** (91 at the `cpp` anchor), zero relative imports | **REUSED**, vendored byte-identically in M22 (RI-66, F19) |
 | the per-block execution engine | `CheckpointBuilder` — `yarn-project/validator-client/src/checkpoint_builder.ts`, 449 lines | **REFERENCE.** It is the right shape — fork, `PublicProcessor`, `ForkCheckpoint` rollback, budget capping — and it constructs its simulator through `createPublicTxSimulatorForBlockBuilding`, which hard-defaults to `TelemetryCppPublicTxSimulator`. DD-9. What we take from it is the pairing it demonstrates, which M22 already has |
 | global-variable construction | `GlobalVariableBuilder` — `sequencer-client/src/global_variable_builder/global_builder.ts`, 68 lines | **REJECTED, `cannot-reach-target`.** Its constructor takes a `ViemPublicClient` and wraps a `RollupContract`; `buildCheckpointGlobalVariables` calls `rollupContract.getManaMinFeeAt(...)`, a live L1 read. There is no L1 here. *Upstream itself substitutes it*: `TXEGlobalVariablesBuilder` (39 lines) implements the same interface with zero L1 I/O. `AvmChain.globalsFor` is that substitution, over `GlobalVariables.from(GlobalVariables.empty())` so no field this runtime does not decide is invented |
 | the tick source | `RunningPromise` — `foundation/src/promise/running-promise.ts`, 138 lines, exported at `@aztec/foundation/running-promise` and `@aztec/foundation/promise` | **REUSED.** `Sequencer` ticks on it (`sequencer.ts:305-309`, `sequencerPollingIntervalMS`, default 500) and so does `AutomineSequencer` (`automine_sequencer.ts:179,185`, default 50 ms). It owns the sleeping, the coalescing of concurrent `trigger()` callers and an interruptible `stop()`. `RunningPromiseTicker` holds one and forwards |
@@ -242,10 +248,19 @@ requires every one of them to appear here.
 | `importSnapshot` | none | none |
 | `disclosure` | none | none |
 
-Fourteen of the twenty-three have a counterpart; nine do not, and the nine are the ones this
-runtime has and a node does not (`simulateTx`, `archive`, `stateReference`, `exportSnapshot`,
-`importSnapshot`, `subscribe`, `disclosure`, `provenanceKind`, `receiptFor`) plus the lifecycle
-pair.
+**12** of the 23 members have a TXE counterpart and **11** do not. The eleven are the ones this
+runtime has and a node does not — `provenanceKind`, `simulateTx`, `archive`, `stateReference`,
+`receiptFor`, `subscribe`, `exportSnapshot`, `importSnapshot` and `disclosure` — plus `start`,
+which is a process TXE does not own, and `fundFeeJuice`, which TXE reaches only through `deploy`.
+`stop` is **not** among them: TXE's `close` is its counterpart.
+
+*This sentence read "Fourteen of the twenty-three … nine do not … plus the lifecycle pair" until
+M23's review counted the rows it summarises.* It was wrong in both numbers, listed nine names for a
+set of eleven, and reached the right total by the wrong route: `stop` HAS a counterpart, so the
+pair is one. Prose summarising a table three lines above it, never re-derived — and the check could
+not catch it, because both counts were `>=`. Both are exact now and
+`verify_facade_surface_compared_against_txe` requires the numbers in this paragraph to EQUAL the
+ones it computes from the table.
 
 ---
 
