@@ -73,8 +73,9 @@
   },
 
   "npm_pin_witnesses": {
-    "_comment": "MEASURED artefacts that record which npm pin they were produced against. They are not package files, so they are not consumers — but they do carry a version literal, and the literal has to agree with the pin they name or the artefact has silently stopped describing the tree it was measured on. Each entry maps a tracked path to the npm pin its literal must equal. `tools/repin.py` and `verify_pinned_nightly_single_source` both allow these paths AND check the agreement; neither merely exempts them.",
-    "fixtures/differential-wasm-divergences.json": "deletion_era"
+    "_comment": "Tracked files that carry an npm version literal as part of what they ARE, rather than as a dependency declaration. Two kinds. A MEASURED ARTEFACT records which pin it was produced against; if the literal drifts, the artefact has silently stopped describing the tree it was measured on. SOURCE THAT PUBLISHES THE PIN states it as behaviour: orchestration/src/disclosure.ts puts it in the runtime's own section-8.4 disclosure line, so a stale literal there is a false statement made to a user rather than a stale comment. Neither kind is a package file, so neither is a consumer. Each entry maps a tracked path to the npm pin its literal must equal. `tools/repin.py` and `verify_pinned_nightly_single_source` both allow these paths AND check the agreement; neither merely exempts them.",
+    "fixtures/differential-wasm-divergences.json": "deletion_era",
+    "orchestration/src/disclosure.ts": "deletion_era"
   },
   "npm_consumers": {
     "_comment": "Which declared npm pin each package.json/package-lock.json tree must use. Every @aztec/* dependency in these trees is checked against it.",
