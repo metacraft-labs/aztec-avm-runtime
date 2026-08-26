@@ -1,0 +1,30 @@
+{
+  "name": "@aztec-avm-runtime/ct-host",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "TypeScript host for ct_writer.wasm — the CodeTracer .ct writer over a raw C ABI",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "//": [
+    "NO DEPENDENCIES, and here that is a requirement rather than a preference.",
+    "",
+    "ct_writer.wasm declares ZERO wasm imports — no WASI, no wasm-bindgen, no glue — so this",
+    "package owes the module nothing but a `WebAssembly.instantiate(bytes, {})` and a DataView",
+    "over its exported memory. That is the whole reason DD-7 chose a raw C ABI: the same host",
+    "code runs in Node and in a browser, which is what M27 needs and what a wasm-bindgen binding",
+    "would have cost.",
+    "",
+    "It is deliberately a SEPARATE package from node-host. node-host is `avm.wasm` on node:wasi",
+    "and imports `node:wasi`; a browser cannot follow it there. Folding the writer into it would",
+    "put a Node-only import into the trace path for no reason.",
+    "",
+    "tsc comes from the nix dev shell, and the Node APIs used are declared in types/, so a clean",
+    "checkout can type-check and run this package with no npm install at all — node-host's rule,",
+    "for node-host's reason."
+  ],
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

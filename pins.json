@@ -34,6 +34,24 @@
       "date": "2025-10-23",
       "identity": "0285bb092b^ — the parent of 'chore(docs): Remove protocol specs from next'",
       "what": "The only commit at which docs/docs/protocol-specs/ still exists. Vendored into reference/historical-protocol-specs/. ABANDONED upstream on purpose; see reference/PROVENANCE.md before trusting anything from it."
+    },
+    "trace_format": {
+      "repo": "metacraft-labs/codetracer-trace-format",
+      "commit": "9cbc127ef8e8c09027f5da047c333149f54c8320",
+      "short": "9cbc127ef8",
+      "date": "2026-08-20",
+      "branch_at_pin": "wasm/ctfs-writer",
+      "what": "PAIRED WITH trace_format_nim BELOW; DD-7 says both branches are jointly required and neither is useful alone. The CodeTracer trace-format anchor, and the FIRST anchor here that is not aztec-packages. DD-7's Path A pure-Rust writer (CtfsTraceWriter) at the tip of the branch that builds it for wasm32-unknown-unknown and that exposes dropped_column_awareness(). RI-42's decision is `depend`, so nothing from this revision is vendored and PROVENANCE.md has no row for it: verification/build_ct_writer_wasm.sh materialises it out of the OBJECT STORE into ct-writer/build-wasm-deps/, which is a build input and is not tracked. A commit is pinned rather than a branch name followed, so the pin does not move when the branch does. PUBLISHED: origin/wasm/ctfs-writer at metacraft-labs/codetracer-trace-format has this commit as its tip. IT WAS NOT, WHEN M24 PINNED IT. The branch was local to one worktree on one machine, this file recorded that as the reason a commit is pinned rather than as a consequence, and the consequence is that `git archive` resolved here and would have failed in CI and in every other checkout while every M24 check stayed green. M24's review pushed the branch and made publication a CHECKED property: verify_ct_writer_wasm_zero_imports asserts this commit is reachable from a refs/remotes ref, with a negative control on the counter. Anyone adding a sixth anchor off an unpushed branch fails there. check_drift.sh still never visits this anchor: it resolves only the anchors the PROVENANCE mapping names, and it resolves them against the aztec-packages fork, which does not have this commit and never will."
+    },
+    "trace_format_nim": {
+      "repo": "metacraft-labs/codetracer-trace-format-nim",
+      "commit": "baea074019138f30e5fef300954e7bcb4447f65d",
+      "short": "baea074019",
+      "date": "2026-08-20",
+      "branch_at_pin": "wasm/nim-to-wasm",
+      "branch_tip_at_pin": "0f0169830a7f84094b665c9ff61973795fbda942",
+      "control_commit": "47ba17f43d21cc7d2ea6843f00fbdb36cf4632f9",
+      "what": "THE READER, and it is a deliverable rather than a convenience. A wasm-produced Path A container cannot be read by stock ct-print: the Rust writer's zstd frames carry no pledged content size and the stock reader exits 1 with 'chunk compressed data extends beyond events.log'. The fix is one commit on this branch, baea074 'fix(reader): read an events.log written by the Rust CtfsTraceWriter', which adds decompressFrameOfUnknownSize. control_commit is baea074^ -- the SAME tree one commit earlier -- and verification/build_ct_print.sh builds BOTH out of the object store so 'this container needs that reader' is a measurement over a ONE-COMMIT difference rather than a claim. THE COMMIT PINNED IS THE FIX ITSELF AND NOT THE BRANCH TIP, deliberately: the tip is one commit further on (branch_tip_at_pin, 'accept a boolean value without the redundant text key'), pinning it would make the difference two commits, and a reader built at baea074 produces output BYTE-IDENTICAL to one built at the tip on M24's containers -- measured, which is why the smaller claim is the one made. Not vendored; PROVENANCE.md has no row. PUBLISHED: origin/wasm/nim-to-wasm at metacraft-labs/codetracer-trace-format-nim contains BOTH this commit and control_commit (its tip is branch_tip_at_pin). It was not when M24 pinned it -- see the trace_format anchor above for what that cost -- and test_ct_container_roundtrip_ct_print now asserts both commits are reachable from a refs/remotes ref."
     }
   },
 

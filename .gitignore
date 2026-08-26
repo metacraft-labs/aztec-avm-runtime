@@ -25,3 +25,9 @@ vm2wasm/*.wasm.gz
 # rendered pull-request body and the tracker-search transcript — is scratch and
 # is regenerated on every run.
 /.submit/
+
+# ct-writer: the trace-format dependency is materialised out of the object store by
+# verification/build_ct_writer_wasm.sh, and cargo puts its artefacts in target/. Neither is
+# source; both are reconstructed by that script from the revision pins.json declares.
+ct-writer/build-wasm-deps/
+ct-writer/target/

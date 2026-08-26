@@ -1,0 +1,40 @@
+[package]
+name = "aztec-ct-writer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "The CodeTracer `.ct` writer, compiled to wasm32 with a raw C ABI and zero wasm imports"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# ---------------------------------------------------------------------------
+# THREE PATH DEPENDENCIES INTO ONE CHECKOUT, AND THAT IS THE POINT.
+#
+# `build-wasm-deps/ctf` is materialised by `verification/build_ct_writer_wasm.sh` with
+# `git archive <rev>` out of `codetracer-trace-format`'s OBJECT STORE, at the revision
+# `pins.json` declares as the `trace_format` anchor. It is a build input, not a vendored copy:
+# nothing here is edited, `PROVENANCE.md` has no row for it, and RI-42's decision is `depend`.
+#
+# Two copies of `codetracer_trace_types` on different paths are TWO DISTINCT TYPES and will not
+# unify -- `ValueRecord` from one is not `ValueRecord` from the other, and the error surfaces far
+# from its cause. `noir-wt4-webpage/Cargo.toml:175` records hitting exactly this, and records that
+# `[patch.crates-io]` cannot express the constraint either. One checkout, three paths into it, is
+# what does express it, and `test_single_trace_types_instantiation` measures the result rather
+# than trusting this comment.
+#
+# `codetracer_ctfs` is NOT named here and that is deliberate rather than an omission: it is
+# `codetracer_trace_writer`'s own dependency, declared inside that checkout as `path = "../codetracer_ctfs"`,
+# so naming it again here could only introduce a second path to the same crate. The
+# single-instantiation check asserts it appears exactly once in the lock file all the same,
+# because "we did not name it twice" is not evidence about what cargo resolved.
+[dependencies]
+codetracer_trace_types = { path = "build-wasm-deps/ctf/codetracer_trace_types" }
+codetracer_trace_writer = { path = "build-wasm-deps/ctf/codetracer_trace_writer" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+panic = "abort"
+codegen-units = 1
+strip = true

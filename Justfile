@@ -1945,3 +1945,78 @@ verify-m23:
       echo "verify-m23: all checks passed"
     fi
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M24 — the `.ct` writer binding and the trace event ABI.
+#
+# The build is NOT in either dev shell: the rust wasm toolchain comes from
+# `nix shell nixpkgs#rustup nixpkgs#capnproto`, with RUSTUP_HOME and CARGO_HOME
+# under ~/.cache. `capnp` is a hard build-time dependency of the writer's
+# dependency graph and its absence fails four crates deep with `exit status: 101`.
+# ---------------------------------------------------------------------------
+
+# Materialise codetracer-trace-format at pins.json's revision and build ct_writer.wasm.
+ct-writer-build:
+    @verification/build_ct_writer_wasm.sh --native-tests
+
+# Build BOTH ct-print readers — at the fix and at its parent — out of the object store.
+ct-print-build:
+    @verification/build_ct_print.sh
+
+# Re-measure the functional arms (roundtrip, equivalence, backpressure, the DD-7 gates).
+ct-writer-arms:
+    @node --experimental-strip-types tools/run_ct_writer_arms.mjs \
+      --module ct-writer/target/wasm32-unknown-unknown/release/aztec_ct_writer.wasm \
+      --work "${M24_WORK:-$HOME/.cache/aztec-m24-ct-writer}"
+
+# Re-measure OQ-6. Twelve sessions of six ABBA blocks; about ten minutes. Run it detached.
+oq6-measure:
+    @node --experimental-strip-types tools/run_oq6_arms.mjs \
+      --module ct-writer/target/wasm32-unknown-unknown/release/aztec_ct_writer.wasm \
+      --events 100000 --batch 4096 --reps 6 --sessions 12 \
+      --out "${M24_OQ6_WORK:-$HOME/.cache/aztec-m24-oq6}/arms.tsv"
+
+# Type-check the ct-host package against the nix-pinned tsc.
+typecheck-ct-host:
+    @cd ct-host && tsc -p tsconfig.json && echo "ct-host: type-checks"
+
+verify-ct-writer-imports:
+    @verification/verify_ct_writer_wasm_zero_imports.sh
+
+verify-ct-roundtrip:
+    @verification/test_ct_container_roundtrip_ct_print.sh
+
+verify-oq6:
+    @verification/verify_trace_event_abi_batched_faster.sh
+
+verify-ct-dd7:
+    @verification/test_dropped_column_awareness_asserted.sh
+
+verify-ct-single-instantiation:
+    @verification/test_single_trace_types_instantiation.sh
+
+verify-ct-backpressure:
+    @verification/test_trace_writer_backpressure.sh
+
+# Run the whole M24 verification set; every check runs even if an earlier one fails.
+verify-m24:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_ct_writer_wasm_zero_imports \
+      test_ct_container_roundtrip_ct_print \
+      test_dropped_column_awareness_asserted \
+      test_single_trace_types_instantiation \
+      test_trace_writer_backpressure \
+      verify_trace_event_abi_batched_faster
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m24: FAILED" >&2
+    else
+      echo "verify-m24: all checks passed"
+    fi
+    exit "$rc"

@@ -108,8 +108,14 @@ for entry in sorted(os.listdir(verification)):
 # TypeScript plus M19's harness on top of it, whose vitest test names (`test_utils`,
 # `verify_three_way_differential_runs`) follow a different convention entirely and are not this
 # campaign's checks. Scanning them would make the rule about upstream's naming.
+# `ct-host/src` was added by M24 and the reason is the rule itself: `ct-host/src/config.ts` and
+# `writer.ts` each name a check to tell the reader a property is pinned, which is EXACTLY the
+# claim this file exists to hold to account. A new source directory that is not in this list is
+# the parallel-subdirectory shape the campaign has been caught by nine times, so the root is added
+# in the same commit as the sources. It moves no assertion count — every assertion below is an
+# `assert_ge` or an emptiness comparison — only the `SEEN` note.
 roots = [os.path.join(repo, r) for r in
-         ("orchestration/src", "node-host/src", "verification", "tools")]
+         ("orchestration/src", "node-host/src", "ct-host/src", "verification", "tools")]
 if extra:
     roots.append(extra)
 
