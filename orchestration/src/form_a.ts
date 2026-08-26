@@ -246,8 +246,10 @@ export async function executeExternallySettledTx(
   // THE SEAL IS CARRIED THROUGH THE EXECUTION WINDOW, NOT PARKED BESIDE IT. The first version of
   // this function read `submitted.tx` up front and never let the sealed object anywhere near the
   // simulator, which made the tripwire unable to fire for any reason other than a test injecting
-  // a read — an assertion that passes by construction, and the defect this campaign has now found
-  // twenty times. What the execution path actually holds is the SEALED submission, and it reaches
+  // a read — an assertion that passes by construction, and the defect this campaign has met more
+  // often than any other (CAMPAIGN-BRIEF.md, "An assertion must be capable of failing" — the count
+  // lives THERE and not here, because a total quoted in a sixth place goes stale in silence).
+  // What the execution path actually holds is the SEALED submission, and it reaches
   // `.tx` off it; so any frame between here and the module returning that reads `.provenance`,
   // in this file or in a future one, trips the wire at its own call site.
   const sealed: SubmittedTx<Tx> = { tx: submitted.tx, provenance: seal.sealed };

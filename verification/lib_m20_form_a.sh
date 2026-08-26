@@ -179,7 +179,8 @@ m20_require_arms() {
 
 # One field of one arm, from the shared JSON. Prints `MISSING` rather than empty, so that an
 # `assert_eq` against a typo'd arm name FAILS instead of comparing two empty strings — the exact
-# shape of vacuous assertion this campaign has found twenty times.
+# shape of vacuous assertion this campaign has found more often than any other; the running total
+# is CAMPAIGN-BRIEF.md's and is deliberately not repeated here.
 m20_arm() { # <arm-name> <jq-ish path, e.g. external.kind>
   python3 - "$M20_ARMS" "$1" "$2" <<'PY'
 import json, sys

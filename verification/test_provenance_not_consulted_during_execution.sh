@@ -28,8 +28,10 @@
 #   4. THE MUTATION CONTROL — a copy of `form_a.ts` with ONE line added to `runPublicHalf` that
 #      reads the provenance. If the tripwire is real, that copy throws
 #      `ProvenanceConsultedDuringExecution`; the unmutated copy does not. Without this arm the
-#      tripwire would "pass" by never firing, which is the defect this campaign has now found
-#      twenty times.
+#      tripwire would "pass" by never firing, which is the defect this campaign has met more often
+#      than any other. The running total lives in CAMPAIGN-BRIEF.md and not here: a counter in a
+#      place the rule does not enumerate goes stale in silence, which is how this line came to say
+#      "twenty" two families later.
 #
 # THE MUTATION IS APPLIED TO A COPY, NOT TO THE TREE. `orchestration/src/form_a.ts` is never
 # written to. The copy lands under $M20_WORK, is compared line by line against the original so

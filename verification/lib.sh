@@ -65,6 +65,53 @@ _deexport_ambient_lowercase() {
 }
 _deexport_ambient_lowercase
 
+# ---------------------------------------------------------------------------
+# $TMPDIR ON THIS HOST IS RAM, AND EVERY CHECK THAT USES IT IS EXPOSED.
+#
+# `/tmp` here is a 32 GB tmpfs — RAM-backed, shared with every build, every sweep log and every
+# agent's scratch directory. `/home` is a 953 GB disk. There is no per-user quota; what happens is
+# simply that the tmpfs FILLS, and then a write returns EDQUOT/ENOSPC in the middle of something.
+#
+# That is not a hypothetical and it is not one incident. It has now been paid for FIVE times, and
+# each time the symptom pointed away from the cause:
+#
+#   * `verify_vendor_drift_clean` died mid-`cp` staging 1,427 files, printed NO SUMMARY LINE AT ALL,
+#     and took M1 from 151 to 141 WITH NOTHING REPORTED AS FAILING. A check that dies reads as a
+#     SMALLER milestone, not as a red one, which is the most dangerous shape this campaign has.
+#   * `check_drift.sh`'s `render_drift` wrote 153 files and every one failed with
+#     `OSError: [Errno 122] Disk quota exceeded`, reported as "derived tree does not reproduce" —
+#     loud, but pointing at the subject rather than at the disk.
+#   * A sweep LOG in /tmp lost two regions, so M2 read 475 (its own plus all of M17's) and M17 read
+#     0. THE CAMPAIGN TOTAL WAS PRESERVED WHILE THE PER-MILESTONE ATTRIBUTION WAS DESTROYED.
+#   * `verify_merkle_lmdb_split_native_neutral` reported 19 failures signed `signal-BUS` and
+#     `signal-ABRT-after-heap-corruption`: LMDB writes through an mmap, and a store that cannot grow
+#     faults on the mapping. IT REPORTS THE CONDITION AS A SIGNAL AND NOT AS A MESSAGE, so grepping
+#     the log for `Disk quota exceeded` found zero and would have licensed the wrong conclusion.
+#   * An agent's own shell became unusable, because every command writes a cwd file to /tmp.
+#
+# The per-milestone work directories were moved to `$HOME/.cache/aztec-m<N>-*` long ago and two
+# checks were moved one at a time (`~/.cache/aztec-m1-vendor-drift`, `~/.cache/aztec-check-drift`).
+# What was left was a census: TWENTY-SEVEN bare `mktemp -d` call sites across TWENTY-SIX files, each
+# landing wherever $TMPDIR points, each with the same silent failure mode, each fixable in one line
+# — and a census is not a fix. This is the one line, applied once, for all of them and for every
+# site added later.
+#
+# IT RESPECTS AN EXPLICIT CHOICE. If the caller has pointed $TMPDIR somewhere that is not a known
+# RAM-backed filesystem, that is a decision and it is left alone; only the default and the
+# RAM-backed spellings are redirected. And it never fails the check: if the directory cannot be
+# made, the old behaviour stands rather than a hundred and fifty checks refusing to start.
+_repoint_tmpdir_off_ram() {
+  case "${TMPDIR:-/tmp}" in
+    /tmp | /tmp/* | /var/tmp | /var/tmp/* | /dev/shm | /dev/shm/*) ;;
+    *) return 0 ;;
+  esac
+  [ -n "${HOME:-}" ] || return 0
+  local d="$HOME/.cache/aztec-verification-scratch"
+  mkdir -p "$d" 2>/dev/null || return 0
+  export TMPDIR="$d"
+}
+_repoint_tmpdir_off_ram
+
 if [ -z "${TEST_NAME:-}" ]; then
   echo "lib.sh: sourcing script must set TEST_NAME before sourcing" >&2
   exit 1

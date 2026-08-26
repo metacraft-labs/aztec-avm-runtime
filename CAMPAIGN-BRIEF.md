@@ -35,14 +35,27 @@ load).
 Each of these is a defect that shipped, not a precaution.
 
 ### An assertion must be capable of failing
-**Twenty-one instances.** (Five places quote the running total: this line, the two M18 checks
+**Twenty-three instances.** (Five places quote the running total: this line, the two M18 checks
 `lib_m18_orchestration.sh` and `verify_no_telemetry_client_in_import_graph.sh`, and the two M19
 files `fault_injection.ts` and `e2e_differential_wasm_vs_native_cpp.sh`. M18's review added three,
-M19 added one, M19's review added one, and M21 added one. If you add one, move all five numbers
-together — M19 wrote "eighteen" into its two new files in the same session it moved the other three
-to "nineteen", which is the drift this parenthetical exists to prevent, and **M21 declared its
-21st instance in three documents and moved none of the five**, which is the same drift caught by
-its review instead of by its author.)
+M19 added one, M19's review added one, M21 added one, and M22 added one. If you add one, move all
+five numbers together — M19 wrote "eighteen" into its two new files in the same session it moved
+the other three to "nineteen", which is the drift this parenthetical exists to prevent, and **M21
+declared its 21st instance in three documents and moved none of the five**, which is the same drift
+caught by its review instead of by its author. M22 moved all five in one edit, which is what the
+rule asks for, and M22's review moved all five again for the 23rd.
+
+**AND THE FIVE ARE NOT THE ONLY PLACES — THAT WAS MEASURED, NOT ASSUMED.** M22 reported two
+pre-existing strays outside the declared five. There are **five**, and one of them quotes a
+different total from the others: `orchestration/src/form_a.ts:250`,
+`verification/test_provenance_not_consulted_during_execution.sh:32`,
+`verification/lib_m20_form_a.sh:182` and `verification/verify_pinned_nightly_single_source.sh:153`
+all said "twenty times", and `verification/verify_txe_private_flow_prior_art_consulted.sh:13` said
+"twenty-one". So the census of stale citations was itself an undercount, found by grepping only the
+spelling the author remembered. **The fix is not to bump them — bumping makes ten places to keep in
+step instead of five.** All five now name the family and point HERE for the number, which is what
+`lib_m22_block.sh` did for itself when its author caught the same thing mid-milestone. If you write
+a comment that wants this total, write the family's name and not the number.)
 The forms seen so far:
 
 - `assert_eq "" ""` — both sides read missing keys. *Renaming both keys left all
@@ -93,13 +106,41 @@ The forms seen so far:
   substrings with `re.search`, so `this.depth = depth + 1` was excused by `this.depth = depth`.
   Line counts were unchanged, so all three assertions passed on a corrupted copy — defeating the
   exact property the deliverable claimed. Compare exact lines; keep the mutation as the control.
+- **A VALUE COMPARED WITH ITSELF.** `assert_eq "the funded amount is what the driver funded" "$FUNDING" "$(printf '%s' "$FUNDING")"`
+  — one variable on both sides. It is the first form on this list in its most degenerate shape, and
+  M22 wrote it into `test_failed_tx_leaves_no_state`, the check whose own brief NAMES that test as
+  the classic vacuous-pass case, two paragraphs after quoting the rule. It reads the value out of
+  the driver's source now, and the derivation is asserted to have found something rather than
+  `UNREADABLE`. **The lesson is not "check your assertions" — it is that a constant you have just
+  typed into a check looks like a measurement to the person typing it.** If a check needs a number
+  that also exists in the thing under test, take it FROM the thing under test.
+- **A PATTERN PINNED IN ONE PLACE AND LEFT PERMISSIVE IN TWO.** M22's vendored-diff classifier
+  accepts each added line by SHAPE, and desugaring a constructor parameter property emits three
+  shapes — the parameter line, the field declaration and the assignment. The self-review pass found
+  that a shape is not a pin, because a one-for-one SWAP keeps the exact 112/72 line counts, and
+  pinned the lines matching the first shape exactly. **It left the other two, six lines below, in
+  the same file, in the same pass.** Measured by M22's review: `this.dateProvider = dateProvider;`
+  -> `this.dateProvider = log;` is a real corruption of upstream's constructor and the vendoring
+  check reported **59 assertions, 0 failures** on it; `private dateProvider: DateProvider;` ->
+  `private dateProvider: PublicProcessorMetrics;` is erased by the type stripper and passed
+  **everything** — `check-drift` 22/0, the vendoring check 59/0, `just verify-m22` 247/4-of-4/exit 0
+  — with an undeclared edit sitting in a vendored file. All three are pinned now, each with a
+  non-emptiness assertion beside it. **When you fix an instance of a form, grep for the form in the
+  file you are fixing before you leave it.**
+
+**And `check-drift` cannot be the backstop for this, by construction.** It compares every vendored
+file against `git show <anchor>:<path>` and asserts only the DIRECTION of the result: a file
+`PROVENANCE.md` declares `none` must be byte-identical, a file it declares with an edit class must
+differ. **It never pins what the difference IS.** So for every vendored file recorded as modified,
+the content pin is whatever named check happens to own it and nothing else — verified by mutation,
+both ways, on all five of M22's modified copies.
 
 **Rule:** anything asserted must be read from the artefact, never printed as a
 constant by the thing under test; any comparison whose sides could both be
 absent needs a non-emptiness assertion beside it.
 
 ### Needles come from the artefact, matched on word boundaries
-Fifteen instances. `honk` ⊂ `chonk`. `world_state` ⊂ `world_state_reference`.
+Sixteen instances. `honk` ⊂ `chonk`. `world_state` ⊂ `world_state_reference`.
 `"DEPENDENCIES vm2"` ⊂ `vm2_sim` — **it asserted the opposite of its intent**.
 `[A-Z_]+` never matched `L1_TO_L2_MESSAGE_TREE`. `([A-Za-z_]+::)*` found seven
 where the truth is eight, because `avm2` has a digit. LLVM spells it
@@ -115,6 +156,13 @@ outright IS caught, so the needle worked exactly until somebody wrote the word d
 is the opposite of a dependency**, and this campaign has now written that sentence into one check
 while the check beside it counted a citation as a call. Strip whole-line comments and require the
 name to begin a command.
+
+**A CHARACTER CLASS WITHOUT A DOT.** M22's vendored-diff classifier matched a relative `.ts`
+import specifier with `[A-Za-z0-9_/]+`, so `'../../telemetry.ts'` — a path with dots in it — fell
+through as "unclassified". It failed loudly here because the classifier reports what it cannot
+place, which is the safe shape for a scanner: **write scanners that PRINT the residue rather than
+counting the matches**, and a class that is too narrow becomes a red line instead of a silent
+undercount.
 
 **And the scanner around the needle counts too.** The import-graph walker stripped comments by
 scanning for `//` unconditionally, so a `//` inside a *string literal* began a comment and ate the
@@ -212,15 +260,32 @@ touch moves, look for a commit that landed between the reference sweep and yours
 repository — before writing a story. Both attributions above were re-derived independently by the
 review and both held; that is the standard, not the presumption.
 
-Current per-milestone counts. Measured in one sweep, **M0-M21, on 2026-08-26**, one milestone at a
-time, nothing else running — every milestone **exit 0 and 0 failures anywhere**, including M9 and
-including M11:
+Current per-milestone counts. Measured **M0-M22, on 2026-08-26**, one milestone at a time, nothing
+else running — every milestone **exit 0 and 0 failures anywhere**, including M9 and including M11:
 
 ```
-m0 156  m1 151  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
-m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 278
-m19 180  m20 237  m21 324                              CAMPAIGN TOTAL 7,619
+m0 156  m1 166  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 324  m22 252                     CAMPAIGN TOTAL 7,891
 ```
+
+**M22's sweep took TWO passes and the reason is worth carrying**, because it produced two instances
+of the campaign's most dangerous shape in one run. `/tmp` on this host FILLED twice while the sweep
+was running — a 32 GB tmpfs shared with every build and every agent, NOT a per-user quota; that is
+the review's correction and it matters because the wrong mechanism licenses the wrong remedy — and the sweep's own LOG is in `/tmp`: appends were lost, taking with
+them M2's last two check outputs and M17's `########` start line the first time, and M3's `rc=`,
+M4's, M5's and M6's markers entirely and M7's start line the second. **The campaign total was
+preserved across both holes while the per-milestone attribution was destroyed** — M2 read 475
+(its own 178 plus all of M17's 297) and M17 read 0. M21's summariser CRASHED on it, which is how it
+was found; `m22-sweep-sum.py` reports holes as findings and REFUSES TO PRINT A TOTAL while one is
+open, which is the property a summariser needs.
+
+The same exhaustion also made `verify_merkle_lmdb_split_native_neutral` report **19 failures** whose
+signatures are `signal-BUS` and `signal-ABRT-after-heap-corruption` — LMDB writes through an
+**mmap**, and a store that cannot grow faults on the mapping. **It does not report
+the quota as a message, it reports it as a signal**, so grepping the log for `Disk quota exceeded`
+found zero and would have licensed the wrong conclusion. Re-run after 6 GB was freed: **199, 0
+failures**, and M2/M4/M5/M6/M7 likewise back at their reference values to the assertion.
 
 M9's split is **140/143/113/73/126/83/129** and it reproduced on a box that was NOT idle — a foreign
 build was running when the sweep started, and the flake did not appear.
@@ -237,6 +302,19 @@ added, +3 for the declared line ranges the ledger now renders from);
 **M14 459 -> 460** (the carry count reads the manifest instead of a directory listing);
 **M17 295 -> 297** (two assertions that had never existed — see the pipe bullet above);
 **M21 324** (new). 2 + 1 + 3 + 13 + 1 + 2 + 324 = 346, and 7,273 + 346 = 7,619.
+Then M22: **M1 151 -> 166** (`verify_provenance_complete` 43 -> 58 — ten new single-file
+`PROVENANCE.md` rows F10..F19 give one `is tracked` assertion each, and five inventory ids the
+mapping had not cited before give one each: 10 + 5 = 15, exact in both parts);
+**M18 278 -> 283** (`verify_orchestration_reuse_enumerated` 61 -> 66, because M22 carried out four
+of the six RI-19..RI-23 vendorings that check had PINNED AS NOT DONE, exactly as its own header
+said would happen, and the census is re-pinned per subject and EXACTLY rather than `>=`);
+**M22 247** (new). 15 + 5 + 247 = 267, and 7,619 + 267 = **7,886**. Twenty of the twenty-three
+milestones came out at their reference value to the assertion.
+Then M22's review: **M22 247 -> 252**, `verify_public_processor_vendored_not_reimplemented`
+59 -> 64, which is the two unpinned classifier shapes pinned (2) plus a non-emptiness assertion on
+each of the three pinned sets (3). Nothing else moved: the review's other changes are `lib.sh`'s
+`$TMPDIR` repoint, five stale counter citations retired, five stale Justfile comments and prose,
+none of which is an assertion. 7,886 + 5 = **7,891**.
 
 ---
 
@@ -324,20 +402,43 @@ Format spec: `~/ah/dev/agent-harbor/ah-lib/specs/Milestones-Files.md`.
 ## Environment
 
 - `direnv exec /home/zahary/m/blocktracer nix shell nixpkgs#rustup --command bash -c 'cd <repo> && …'`
-- `~/.cache` work dirs — **never** `$TMPDIR`, a quota-limited tmpfs where `df`
-  reports GB free and `dd` fails at 356 MiB. Do a **write probe**, not `statvfs`.
+- **`/tmp` IS RAM, AND THE MECHANISM MATTERS BECAUSE IT DECIDES THE FIX.** Measured on this host by
+  M22's review: `/tmp` is a **32 GB tmpfs** (20 GB used, 12 GB free at the time), `/home` is a
+  953 GB disk with 220 GB free, and there is **no per-user quota** — `quota` is not even installed.
+  Every earlier account in this brief says "the per-user quota", which is the right observation with
+  the wrong cause, and the wrong cause licenses the wrong remedy: "free 6 GB and re-run" restores
+  headroom until the next big build, while "put build and scratch directories on `/home`" is
+  durable. One session's scratchpad here is 1.4 GB. `df` reporting free gigabytes is still not
+  evidence that a write will succeed, and the write probe is still the only evidence — the tmpfs is
+  shared with every build and every other agent, so it can fill between the probe and the write.
+- `~/.cache` work dirs — **never** `$TMPDIR`. Do a **write probe**, not `statvfs`.
   **And this rule applies to the CHECKS, not only to your probes.** A bare `mktemp -d` lands in
   `$TMPDIR`. M21's review hit it live: with another agent's build occupying `/tmp`,
   `verify_vendor_drift_clean` — which stages the whole tracked tree (1,427 files) as a template and
   again per negative control — died mid-`cp` with `Disk quota exceeded`, printed **no summary line
   at all**, and took **M1 from 151 to 141 with no failure reported**. A missing check reads as a
   smaller milestone, not as a red one. Re-run with `TMPDIR` under `~/.cache` it is 10/0; that check
-  now owns `~/.cache/aztec-m1-vendor-drift`. **TWENTY-EIGHT other sites still use a bare `mktemp -d`**
-  — measured, `grep -rn 'mktemp -d' verification/*.sh | grep -v '\-p \|mktemp -d "'` — including
-  `check_drift.sh:112`, `lib_m8_differential.sh:206`, `lib_m9_observer.sh:502`,
-  `lib_wasi33.sh:351`, `lib_vm2_tests.sh:216` and `lib_avm_wasm.sh:791`. They carry smaller payloads
-  and have not failed, but the failure mode is silent and the fix is one line each. Do not add a
-  twenty-ninth.
+  now owns `~/.cache/aztec-m1-vendor-drift`. **M22 met this THREE more times in one milestone**:
+  `check_drift.sh:112` died mid-`render_drift` with `OSError: [Errno 122] Disk quota exceeded` over
+  153 files (it owns `~/.cache/aztec-check-drift` now); the sweep log lost two regions, above; and
+  the agent's own shell became unusable because every command writes a cwd file to `/tmp`. On this
+  host **`$TMPDIR` is not storage**.
+  **THE CENSUS IS CLOSED, AND IT WAS ALSO WRONG.** Two things, and the second is the reason the
+  first took five incidents. (1) The published figure was **29 sites across 28 files**, measured
+  with `grep -rn 'mktemp -d' verification/*.sh | grep -v '\-p \|mktemp -d "'` — and **two of the 29
+  are COMMENT LINES**, in `check_drift.sh:114` and `verify_vendor_drift_clean.sh:53`, which are the
+  two sites that were FIXED and which describe the fix. The census counted its own remedy as
+  remaining exposure. The true figure was **27 sites across 26 files**. *A census whose needle
+  cannot tell a call from a sentence is the same defect as a needle satisfied by prose, one level
+  up.* (2) Counting them one milestone at a time was never going to finish: five incidents, three
+  one-line fixes, and the number kept being republished. **`lib.sh` now repoints `$TMPDIR` at
+  `$HOME/.cache/aztec-verification-scratch` when — and only when — it points at a RAM-backed
+  filesystem (`/tmp`, `/var/tmp`, `/dev/shm`) or is unset**, which covers every bare `mktemp -d` in
+  every check at once, and every one added later. An explicit `$TMPDIR` elsewhere is a decision and
+  is left alone, and a directory that cannot be created leaves the old behaviour rather than
+  refusing to start a hundred and fifty checks. The per-milestone `M<N>_WORK` directories already
+  defaulted to `$HOME/.cache/aztec-m<N>-*`; several Justfile comments still say
+  `$TMPDIR/aztec-m<N>-…` and are stale.
 - Do not clean by prefix; prefixes have twice matched another agent's directories.
 - Do not edit a shell script while a run is reading it — it kills the run.
 - `ccache` is wired via `CMAKE_{C,CXX}_COMPILER_LAUNCHER` in both dev shells.

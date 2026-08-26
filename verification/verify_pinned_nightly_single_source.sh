@@ -150,7 +150,8 @@ fi
 
 # Every witness EXISTS, is TRACKED, carries a literal AT ALL, and carries the RIGHT one. The
 # middle two matter: a witness that had stopped carrying a literal would make the agreement
-# assertion pass by never running, which is the shape this campaign has met twenty times.
+# assertion pass by never running, which is the shape this campaign has met more often than any
+# other; the running total is CAMPAIGN-BRIEF.md's and is deliberately not repeated here.
 assert_ge "pins.json declares at least one pin witness, so the paragraph above has a subject" 1 \
   "$(printf '%s' "$witnesses" | wc -w)"
 for w in $witnesses ; do

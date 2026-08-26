@@ -10,7 +10,8 @@
 # specific facts about TXE's flow, each re-derived from the anchor here, each of which either
 # changed a decision in this milestone or is a trap the next agent would otherwise fall into. A
 # deliverable that says "we read it" and asserts nothing is the shape this campaign has found
-# twenty-one times.
+# more often than any other; the running total is CAMPAIGN-BRIEF.md's and is deliberately not
+# repeated here.
 #
 # WHAT CONSULTING IT ACTUALLY CHANGED, and each is asserted below:
 #
