@@ -371,16 +371,34 @@ touch moves, look for a commit that landed between the reference sweep and yours
 repository — before writing a story. Both attributions above were re-derived independently by the
 review and both held; that is the standard, not the presumption.
 
-Current per-milestone counts. Measured **M0-M24, on 2026-08-26**, by M24's implementation, one
-milestone at a time with nothing else running, `setsid`-detached, `TMPDIR` and the log under
-`~/.cache` — every milestone **exit 0 and 0 failures anywhere**, including M9 and including M11,
-and no hole in the log:
+Current per-milestone counts. Measured **M0-M24, on 2026-08-26**, by M24's REVIEW, one milestone at
+a time with nothing else running, `setsid`-detached, **inside this repository's own dev shell**
+(`direnv exec` — the engine and the PATH the checks and CI use), `TMPDIR` and the log under
+`~/.cache`, no hole in the log:
 
 ```
 m0 156  m1 169  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
 m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
-m19 180  m20 237  m21 324  m22 260  m23 509  m24 292   CAMPAIGN TOTAL 8,703
+m19 180  m20 237  m21 324  m22 260  m23 509  m24 300   CAMPAIGN TOTAL 8,711
 ```
+
+**M24's review moved exactly one number and every unit of it is accounted for.** M24 292 -> 300:
+`verify_ct_writer_wasm_zero_imports` 49 -> 55 (the trace-format checkout is present; the pinned
+commit is on a published remote ref; the counter's own negative control; `TRACE-ABI.md` exists;
+§7's byte count and its sha256 prefix, both re-derived from the built module) and
+`test_ct_container_roundtrip_ct_print` 46 -> 48 (both pinned reader commits published). The OQ-6
+check stayed at **91** while getting strictly stricter — the §2 arm table is matched row by row
+now, whole row, so median, minimum, crossings and container bytes are each attributed to the arm
+they belong to; ten needles replaced by ten better ones, none added. **Every other milestone came
+out at its reference value TO THE ASSERTION**, including M4 at 218 measured in the dev shell (so
+M19's review's PATH pin holds) and M11 at 259 (upstream has not moved a fifth time). 8,703 + 8 =
+8,711 exactly.
+
+**M9 flaked in that sweep and passed alone, which is the settled procedure and it worked.** In the
+sweep: 524, exit 1, 12 failing assertions, the V8 step transcript truncated after 14,572 lines at
+`steps.burn.14298` with the `avmSteps.done` sentinel never arriving. Re-run alone on an idle box:
+**807, 7/7, exit 0 in 1,283 s**, split 140/143/113/73/126/83/129, the reference exactly. Not a
+regression. **But the flake exposed two things that are not the flake** — see the next section.
 
 **M24 moved exactly one thing and it is accounted for in both directions.** Its own **292**
 (49 / 46 / 39 / 37 / 30 / 91 across six checks) and **nothing else**: every one of M0-M23 came out
@@ -508,6 +526,33 @@ and none of which is.
 **Two lessons, and the second is mine.** Sweeps must not overlap other work: this brief already
 said so, and I ran M18 checks alongside the sweep earlier in the same session. And a check that
 can produce 32 red assertions from one truncated pipe will eventually be believed.
+
+### THE FLAKE CAME BACK IN M24'S REVIEW, AND WHAT IT EXPOSED IS NOT THE FLAKE
+
+**`m9_completeness` WORKS NOW — this section's "outstanding fix" is done, for two checks.**
+`verify_observation_hook_step_records_identical` and `test_observer_does_not_perturb` both refused
+to compare, and both named the truncation exactly: *"the v8 step transcript … is INCOMPLETE:
+truncated-after-14572-lines-last-key-steps.burn.14298 (expected sentinel 'avmSteps.done')"*. That
+is the right behaviour and it is what this section asked for.
+
+**Two things are still wrong, and each is a shape this brief already names.**
+
+1. **A refusal that `die`s prints NO SUMMARY LINE.** Those two checks contributed **0** where they
+   contribute 140 and 143, so `verify-m9` read **524** against 807 — a **283-assertion silent
+   shrink with no failure attributable to it**, which is "a missing check reads as a smaller
+   milestone, not as a red one" exactly. M22's abnormal-exit trap fixes this and lives in three
+   milestone libraries (`lib_m22_block.sh`, `lib_m23_chain.sh`, `lib_m24_ct_writer.sh`); M9's
+   checks do not have it. M22 said a third milestone wanting it is when it moves into `lib.sh`, and
+   M24 recorded declining to move it for M22's own reason. **M9 is a fourth caller and a
+   retrospective one: the trap would have turned this into a red milestone instead of a small one.**
+2. **The completeness precondition is wired into TWO of the FOUR checks that read that transcript.**
+   `test_observer_fires_on_exceptional_halt` produced **11 red assertions** — "[v8] oob recorded a
+   step for every one of them, expected [3], got []", "[v8] burn's last record is the instruction
+   that exhausted the gas" — and `test_existing_event_emitter_path_still_available` one more. Every
+   one reads like a discovery about the interpreter and none of them is. That is the precise
+   misattribution `m9_completeness` was written to prevent, still happening, in the checks it was
+   not wired into. **A precondition installed in some of the places that need it is a precondition
+   that will be believed in the others.**
 
 ---
 

@@ -206,10 +206,15 @@ note "nopPerEvent - nopBatched = ${NOP_PCT}%  CI $(num nopPerEvent_vs_nopBatched
 for arm in batched perEvent control nopBatched nopPerEvent; do
   med="$(python3 -c 'print(f"{int(float(__import__("sys").argv[1])):,}")' "$(num "median_us.$arm")")"
   mn="$(python3 -c 'print(f"{int(float(__import__("sys").argv[1])):,}")' "$(num "min_us.$arm")")"
+  cr="$(python3 -c 'print(f"{int(float(__import__("sys").argv[1])):,}")' "$(num "crossings.$arm")")"
+  cb="$(python3 -c 'print(f"{int(float(__import__("sys").argv[1])):,}")' "$(num "containerBytes.$arm")")"
   assert_true "TRACE-ABI.md's \`$arm\` ROW carries \`$arm\`'s measured median ($med)" \
     str_has_sub "$DOCTEXT" "| \`$arm\` | $med |"
-  assert_true "and the same row carries its measured minimum ($mn)" \
-    str_has_sub "$DOCTEXT" "| \`$arm\` | $med | $mn |"
+  # THE WHOLE ROW, so every cell of §2's arm table is re-derived and none of them can drift on its
+  # own: median, minimum, crossings and container bytes, in that order, on the row that names the
+  # arm they belong to.
+  assert_true "and the WHOLE row is the measurement — min $mn, crossings $cr, container $cb" \
+    str_has_sub "$DOCTEXT" "| \`$arm\` | $med | $mn | $cr | $cb |"
 done
 assert_true "TRACE-ABI.md quotes the measured perEvent-vs-batched median" \
   str_has_sub "$DOCTEXT" "$(num perEvent_vs_batched.median_pct) %"

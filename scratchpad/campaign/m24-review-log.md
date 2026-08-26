@@ -325,3 +325,164 @@ Tree after every mutation run: `grep -rn MUTATION` over `ct-writer/src`, `ct-hos
 back at `9cbc127ef8…`; and the module rebuilt from clean sources after `rm -rf target` is
 **246,527 bytes, sha256 75626c72…** — byte-identical to the one measured at the start, which
 independently reproduces the "two clean builds are byte-identical" claim at the corrected figure.
+
+---
+
+## R8 — status honesty (claim 8, first half)
+
+`:status: completed`, six entries `passing`, is **defensible and I am leaving it**, with one thing
+said out loud.
+
+Deliverable by deliverable, each checked rather than read: the writer is compiled to wasm with a
+raw C ABI and zero imports and is reused unmodified (measured); OQ-6 was settled by measurement
+(and the milestone says in its own first paragraph that the deliverable's *wording* — "with the ABI
+chosen on the number" — is not met, because the number has no stable sign; that is the honest
+form, and the check asserts what was established rather than the premise); DD-7 is honoured and its
+conditionality is real (executed); the single instantiation is asserted in the lock file and the
+failure reproduced twice; the reader consequence is held as a one-commit difference with both
+readers built and run; and the revisit trigger is recorded with its cost — now marked **superseded**
+rather than deleted, since the Rust CTFS writer is to reach full parity with the Nim one, so M25's
+OQ-5 outcome no longer forces a writer swap.
+
+**What is worth saying out loud: `completed` was declared on a milestone that was reproducible on
+exactly one machine.** Nothing in the six deliverables was wrong, and no check was weak in the way
+this campaign usually finds — the hole was one level down, in whether the build inputs existed
+anywhere but here. That is not a reason to move the status now that the branches are pushed and the
+property is asserted; it is a reason to note that "all six entries passing" was never going to
+detect it, and that the campaign's reproducibility posture — pinned anchors, `check-drift`,
+`PROVENANCE.md` — had no assertion anywhere that a pinned commit is fetchable. It has one now.
+
+The nine Outstanding Tasks are all genuine outstanding work rather than gaps in what M24 claims;
+one of them ("no browser engine has been measured") named the wrong engine and is corrected.
+
+---
+
+## R9 — the sweep, M0-M24
+
+Run **after** the review's last commit, `setsid`-detached, one milestone at a time with nothing
+else running, `TMPDIR` and the log under `~/.cache`, **inside this repository's own dev shell**
+(`direnv exec`) — the engine and the PATH every check and CI use, which is M19's review's finding
+and M24's own defect 11. Order is M24's: `m0 m1 m24 m22 m23 m18 m20 m21 m2 m17 m13 m16 m19 m10 m12
+m11 m14 m15 m3 m4 m5 m6 m7 m8 m9`.
+
+Summarised by `scratchpad/campaign/m24-review-sweep-sum.py`, which counts **only** summary lines at
+column 0 matching `^([A-Za-z_0-9][A-Za-z_0-9 .-]*): (\d+) assertion\(s\), (\d+) failure\(s\)$` —
+the character class admits the space in `just check-repo-hygiene:`, which an `[A-Za-z_0-9]+` needle
+silently drops — and which **refuses to print a total while a hole is open**. It found a defect in
+itself on its first run against a live log: `######## m0 rc=0 secs=40` also satisfies the START
+pattern, so a start-first reader opened a second `m0`, closed neither, and reported the whole sweep
+as one long hole. The end marker is tested first now, and the reason is written beside it.
+
+(Result appended below when the sweep finishes.)
+
+### Deferred until after the sweep, deliberately
+
+Extending the row-anchored §2 needle from `| arm | median | min |` to the **whole row**, so the
+crossings and container-bytes columns are re-derived too (the comparator emits `crossings.<arm>`
+and `containerBytes.<arm>` for every arm, so the data is already there). It changes no assertion
+COUNT — two per arm either way — but "do not edit a shell script while a run is reading it" and
+"a sweep is a measurement of the tree at the moment it ran" both say to do it afterwards and
+re-run `verify-m24`.
+
+### The sweep, first pass — 8,428, and **twenty-four of twenty-five milestones are at their
+### reference value TO THE ASSERTION**
+
+```
+m0 156   m1 169   m2 292   m3 199   m4 218   m5 236   m6 363   m7 287   m8 516   m9 524*
+m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 324  m22 260  m23 509  m24 300
+                                                      TOTAL 8,428   (* M9 flaked; see below)
+```
+
+Accounted in both directions:
+
+- **M24 292 -> 300, +8**, and every unit of it is the review's: `verify_ct_writer_wasm_zero_imports`
+  49 -> 55 (+6) and `test_ct_container_roundtrip_ct_print` 46 -> 48 (+2). Nothing else in M24
+  moved — `test_dropped_column_awareness_asserted` 39, `test_single_trace_types_instantiation` 37,
+  `test_trace_writer_backpressure` 30 and `verify_trace_event_abi_batched_faster` 91 are all
+  exactly M24's figures, which is the point: the row-anchoring in the OQ-6 check replaced ten
+  needles with ten stricter ones and added none.
+- **Every other milestone is its reference value exactly.** Including M4 at 218 measured **in the
+  dev shell**, which is where M19's review found the `wasm-opt`-on-PATH difference — so that fix
+  holds. Including M11 at 259, so upstream has not moved a fifth time. Including M22 at 260 and
+  M23 at 509.
+- Named regression checks, all at reference: `just check-repo-hygiene` **28**,
+  `verify_provenance_complete` **58**, `check-drift` **22** (a NOTE inside
+  `verify_vendor_drift_clean`, which is 10), `verify_named_checks_exist` **9**,
+  `verify_reuse_inventory_complete` **19**, `verify_pinned_nightly_single_source` **28**,
+  `verify_orchestration_reuse_enumerated` **66**. My `pins.json` prose edits moved none of them.
+- `repin: 202 assertion(s), 0 problem(s)` appears as an indented NOTE and is **not** counted —
+  that line is why M1 was once reported as 316 when it is 141.
+
+So with M9 at its reference 807 the campaign total is **8,711 = 8,703 + 8**, and the only thing
+that moved is the thing the review added.
+
+### M9 flaked, and the flake exposed a defect the standing brief had already half-named
+
+`verify-m9` came out **524, exit 1, 12 failing assertions**. 807 - 524 = **283**, and
+140 + 143 = **283** exactly: **two checks printed no summary line at all.**
+
+```
+verify_observation_hook_step_records_identical:  cannot run: the v8 step transcript … is INCOMPLETE:
+                                                 truncated-after-14572-lines-last-key-steps.burn.14298
+                                                 (expected sentinel 'avmSteps.done')
+test_observer_does_not_perturb:                  cannot run: [v8] the step transcript … is INCOMPLETE: (same)
+test_observer_fires_on_exceptional_halt:         113 assertion(s), 11 failure(s)
+verify_observation_hook_overhead_budget:          73 assertion(s), 0 failure(s)
+test_observer_disabled_is_free:                  126 assertion(s), 0 failure(s)
+test_existing_event_emitter_path_still_available: 83 assertion(s),  1 failure(s)
+verify_execution_observer_patch_applies_to_upstream: 129 assertion(s), 0 failure(s)
+```
+
+**This is the documented M9 flake in its exact shape** — the V8 step transcript stops inside
+`burn` and the `avmSteps.done` sentinel never arrives; last time it was 16,719 of 38,915, this time
+14,572 lines ending at `steps.burn.14298`. Not a regression in the subject.
+
+**Three things are worth carrying, and none of them is M24's:**
+
+1. **`m9_completeness` WORKS NOW, and the brief still lists its fix as outstanding.** Two checks
+   refused to compare and named the truncation precisely. That is exactly what the brief asks for.
+2. **But a refusal that `die`s prints no summary line**, so those two checks contributed **0**
+   instead of 140 and 143 and the milestone read as a *smaller* milestone rather than a red one —
+   `-283` with no failure attributable to them. This is the silent-death shape M22 built the
+   abnormal-exit trap for, and M9's checks do not have it: the trap lives in `lib_m22_block.sh`,
+   `lib_m23_chain.sh` and `lib_m24_ct_writer.sh` only. **M24's outstanding task says a fourth
+   milestone wanting the trap is when it moves into `lib.sh`. This is a fifth caller wanting it,
+   and it is retrospective.**
+3. **And the completeness precondition covers two of the four checks that read that transcript.**
+   `test_observer_fires_on_exceptional_halt` produced **11 red assertions** with names like
+   "[v8] oob recorded a step for every one of them — expected [3], got []" and "[v8] burn's last
+   record is the instruction that exhausted the gas", and `test_existing_event_emitter_path_still_available`
+   one more — every one of which reads like a discovery about the interpreter and none of which is.
+   That is the precise misattribution the brief says `m9_completeness` exists to prevent, still
+   happening, in the two checks it was not wired into.
+
+M9 is being re-run alone on an otherwise idle box (load 0.75) to establish flake rather than
+regression, per the brief's own settled procedure.
+
+### M9 re-run alone — **807, 7/7, exit 0, 1,283 s.** Flake, not regression.
+
+```
+verify_observation_hook_step_records_identical: 140   test_observer_disabled_is_free:                  126
+test_observer_does_not_perturb:                 143   test_existing_event_emitter_path_still_available:  83
+test_observer_fires_on_exceptional_halt:        113   verify_execution_observer_patch_applies_to_upstream: 129
+verify_observation_hook_overhead_budget:         73                                            TOTAL 807
+```
+
+Load 0.75 at the start, 1.26 at the end. The split is the reference's, check for check.
+
+### The final accounting, in both directions
+
+```
+sweep first pass                       8,428
+  M9 replaced by its alone-run     - 524 + 807
+                                       8,711
+reference (M0-M24, M24's impl)         8,703
+  + M24 292 -> 300                   +     8
+                                       8,711        exact, nothing left over
+```
+
+Nothing moved that the review did not move, and everything the review moved is enumerated
+per assertion in R7. The final `just verify-m24` after the whole-row needle change is
+**300, 6/6, exit 0** (55 / 48 / 39 / 37 / 30 / 91), and mutating a container-bytes cell of §2
+gives one named failure at 91, so the strengthened needle bites on every column of the row.
