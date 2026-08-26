@@ -7,8 +7,8 @@
   "sum_of_per_patch_hunks": 80,
   "base": "233d8e099336c1773b89e939100af047ed9c4f71",
   "base_date": "2026-08-19",
-  "upstream_tip": "142dfcf4b2b5430a0c160490d376f085f377966a",
-  "upstream_tip_date": "2026-08-25",
+  "upstream_tip": "9df414ec0e810d46d44b0357341f8dae0abe82b9",
+  "upstream_tip_date": "2026-08-26",
   "churn_window": [
     "2025-08-19",
     "2026-08-19"

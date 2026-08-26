@@ -165,7 +165,7 @@ which files. It exits non-zero if any patch we still carry stops applying. CI ru
 weekly and on every change to the series, so the cost is a dated failure rather than
 a discovery during an emergency.
 
-Last recorded replay, onto `upstream/next` (142dfcf4b2), 12 commit(s) past the base:
+Last recorded replay, onto `upstream/next` (9df414ec0e), 14 commit(s) past the base:
 
 | Patch | Result |
 | --- | --- |
