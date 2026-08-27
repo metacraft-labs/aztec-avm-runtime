@@ -638,3 +638,22 @@ summariser refused every log it was ever given.
 Everything else survived, including both headline verdicts, the closure numbers to the unit, the
 mutation matrix, the §7 offsets, the module size and sha, the container growth, the OQ-6
 re-measurement and its trigger, and both self-recorded procedure defects being harmless.
+
+### Post-push: the specs repo had moved, and the two sensitive milestones were re-measured
+
+`codetracer-specs` rejected the push — three commits had landed on `latest` while this review ran
+(`ci: route the doc-lint jobs`, `Specify managed SEC_IMAGE header identity`, `Specify suspended
+replay thread lifetimes`). None touches a path the Aztec checks read: the only two are
+`Planned-Work/Aztec-AVM-Runtime.milestones.org` and `upstream-bugs/`, enumerated from the checks
+themselves rather than assumed. Rebased cleanly and pushed.
+
+**But this campaign has been bitten exactly here** — M20 committed to `codetracer-specs` after its
+own sweep and M11 and M14 both went red — so the two were re-measured rather than reasoned about,
+after the rebase:
+
+```
+verify-m11   259   7/7   all checks passed
+verify-m14   460   8/8   all checks passed
+```
+
+Both at their reference values. The sweep stands.
