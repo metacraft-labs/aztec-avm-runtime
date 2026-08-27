@@ -1,0 +1,1 @@
+if [ "${GATE_SKIP:-0}" = "1" ]; then echo SKIP; exit 0; fi

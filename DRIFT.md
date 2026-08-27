@@ -1060,6 +1060,44 @@ were absorbed silently.
   `wasm-objdump -x -j Import` over `bin/avm-reactor-debug.wasm` from the M27 tree, which prints
   `Import[13]` — twelve WASI functions plus `env.memory`.
 
+## D22 — the shipped package declares no optional native dependency; three manifests in its declared closure do
+
+- id: D22
+- status: open
+- opened: 2026-08-27
+- milestone: M28 (measured while writing `verify_npm_pack_no_optional_native`)
+- design-question: DD-9 — no public export of this runtime may reach the native AVM or a native addon
+- sides: `orchestration/package.json`, which declares four `@aztec/*` dependencies and no
+  `optionalDependencies` at all — and which `verify_differential_containment` (M19) and
+  `verify_npm_pack_no_optional_native` (M28) both assert — versus the 268-package closure an
+  `npm install` of it would resolve, in which **three** manifests declare `optionalDependencies`
+  and all three are native-addon families.
+- what: `msgpackr` -> `msgpackr-extract`; `msgpackr-extract` -> six
+  `@msgpackr-extract/msgpackr-extract-<platform>` prebuilt `.node` packages; and
+  `@crate-crypto/node-eth-kzg` -> six more of its own. So "the published package declares no
+  optional native dependency" is **true of the package's own manifest and false of what installing
+  it pulls**, and the narrower true statement must not be allowed to stand in for the wider one.
+  Measured, not inferred: 3 of the 427 manifests installed under `orchestration/node_modules`
+  declare `optionalDependencies`, and the closure walk from the four declared dependencies reaches
+  268 packages of which those three are the only ones.
+- decision: **Recorded rather than removed, because the consequence DD-9 is about does not follow
+  and that is measurable.** An optional dependency is optional: `npm install --omit=optional`
+  resolves the whole closure without any of them, and `msgpackr` falls back to its JavaScript
+  decoder — which is exactly what the browser bundle does. Both halves are asserted rather than
+  argued: the **browser** pass of `browser/build.mjs` reaches `msgpackr` (4 files) and reaches
+  `msgpackr-extract` **zero** times, while the **node** pass of the same build, over the same
+  installed tree, reaches `msgpackr-extract` and `node-gyp-build-optional-packages`. Nothing in the
+  browser bundle's emitted bytes contains `nodejs_module`, `msgpackr-extract` or a `.node`
+  specifier, and the same greps over the node bundle's bytes find all three. Removing the
+  dependency edge is upstream's to do (`@aztec/stdlib` imports `msgpackr`), so what is owned here
+  is the gate: `verify_browser_bundle_no_native_deps` fails if the browser bundle ever reaches
+  either loader.
+- evidence: `aztec-avm-runtime/verification/verify_npm_pack_no_optional_native.sh` §6 (the closure
+  walk, the three names pinned exactly, and the browser bundle's zeroes);
+  `aztec-avm-runtime/verification/verify_browser_bundle_no_native_deps.sh` §4-§5 (the graph and the
+  emitted-byte controls, both directions); `orchestration/node_modules/msgpackr/package.json`;
+  `orchestration/node_modules/@crate-crypto/node-eth-kzg/package.json`.
+
 
 <!-- END:drift -->
 

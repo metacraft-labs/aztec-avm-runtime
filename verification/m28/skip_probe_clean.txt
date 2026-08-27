@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# A comment that mentions a skip statement and a zero exit, which the predicates in
+# verification/ci_browser_gate.sh section 5 must NOT report: a sentence is not a statement.
+# This half of the probe is the DISCRIMINATION control — without it, a predicate that reported
+# everything it was shown would satisfy the other half and look like a working instrument.
+echo hello

@@ -483,17 +483,35 @@ touch moves, look for a commit that landed between the reference sweep and yours
 repository — before writing a story. Both attributions above were re-derived independently by the
 review and both held; that is the standard, not the presumption.
 
-Current per-milestone counts. Measured **M0-M26, on 2026-08-27**, by M26, one milestone at a time
+Current per-milestone counts. Measured **M0-M28, on 2026-08-27**, by M28, one milestone at a time
 with nothing else running, `setsid`-detached, **inside this repository's own dev shell**
 (`direnv exec` — the engine and the PATH the checks and CI use), `TMPDIR` and the log under
-`~/.cache`, no hole in the log, 27 of 27 exit 0 after M9's re-run and **zero failing assertions**:
+`~/.cache`, no hole in the log, **28 of 29 exit 0**:
 
 ```
 m0 156  m1 175  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
 m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
-m19 180  m20 237  m21 324  m22 260  m23 509  m24 350  m25 272  m26 313
-                                                        CAMPAIGN TOTAL 9,352
+m19 180  m20 237  m21 324  m22 260  m23 509  m24 350  m25 272  m26 313  m27 343
+m28 348
+                                                       CAMPAIGN TOTAL 10,043
 ```
+
+**M28 MOVED EXACTLY ONE NUMBER AND IT IS ITS OWN.** 9,695 + 348 = 10,043 exactly, and 348 is the sum
+of M28's six checks and nothing else — `just ci-browser-gate` 101, `verify_browser_bundle_no_node_builtins`
+64, `verify_browser_bundle_no_native_deps` 44, `verify_npm_pack_no_optional_native` 52,
+`verify_verification_code_unreachable_from_browser` 37, `smoke_browser_headless_full_flow` 50. The
+GATE is **388** because it also runs M27's `verify_browser_entry_points_are_dd5_shaped`, which came
+out at **40** inside M27 where it is counted; `just verify-m28` deliberately excludes it, and
+`ci_browser_gate.sh` asserts the two lists differ by exactly that one name so they cannot drift.
+**Every one of M0-M27 came out at its reference value TO THE ASSERTION**, including M9 at **807 in
+1,320 s with no flake**, M4 at 218 in the dev shell, M24 at 350 and M27 at 343. Nothing outside M28
+moved: `verify_provenance_complete` stays 64 (M28 vendors nothing), `check-drift` 22,
+`verify_named_checks_exist` 9, M1 175.
+
+**THE ONE NON-ZERO EXIT IS M11's AND IT IS THE SIXTH AND SEVENTH UPSTREAM MOVES — see the bullet
+below, which is the one place the chain is stated.** m11 reads **259 with eight failing assertions
+and the count unchanged**, the recorded signature. It is NOT repaired: the seventh move breaks the
+conjunct no acknowledgement can excuse, and `carry/` is left at HEAD rather than half-repaired.
 
 **M26 MOVED THREE NUMBERS AND EVERY UNIT OF ALL THREE IS ACCOUNTED FOR IN BOTH DIRECTIONS.**
 Its own **313** (133 / 65 / 36 / 79) after its review — **declared at 293** (117 / 65 / 36 / 75), and
@@ -893,11 +911,26 @@ Format spec: `~/ah/dev/agent-harbor/ah-lib/specs/Milestones-Files.md`.
   `233d8e0993` against base-plus-patches as *separate trees*. Never repoint it at
   the `codetracer` branch — that would turn base-versus-patched into
   patched-versus-patched and make every claim a tautology while staying green.
-- **Upstream moves — FIVE times now, and it is M11's work every time. THIS BULLET IS THE ONE PLACE
+- **Upstream moves — SEVEN times now, and it is M11's work every time. THIS BULLET IS THE ONE PLACE
   THE CHAIN IS STATED; everything else points here.** `upstream/next` has gone `233d8e0993`
   (base) → three commits → `44a57f8c4a` (seven) → `9487ed3e9b` (nine) → `142dfcf4b2` (twelve,
-  2026-08-26) → `9df414ec0e` (**fourteen, 2026-08-26**, by a fetch in the sibling checkout during
-  the anchor move's sweep). Each move can turn `verify_carry_set_applies_to_upstream_head` red
+  2026-08-26) → `9df414ec0e` (fourteen, 2026-08-26) → `9d9523b973` (**2026-08-27 20:28**) →
+  `703d896149` (**2026-08-27 20:59**, seventeen commits past the base). The last two are
+  **thirty-one minutes apart** and both landed during M28's session, by fetches in the sibling
+  checkout; M28's sweep ran M11 between them. **THE SEVENTH IS A NEW CLASS AND IS OPEN.** For six
+  moves upstream changed nothing under `barretenberg/cpp`; `703d896149`
+  (*chore!: delete the in-tree labs components*) changes **five** paths there —
+  `barretenberg/cpp/bootstrap.sh`, `docs/Fuzzing.md`, `scripts/chonk_inputs.sh`,
+  `scripts/ci_benchmark_ultrahonk_circuits.sh`, `scripts/pinned_chonk_inputs.sh` — and
+  `_carry_overlap.py` rejects that class BEFORE it reads `carry/overlap.json`, which is the design.
+  What IS established, so the remedy is not guessed at: **the carry set still applies** (5 of 5,
+  p1..p5, replayed at the new tip) and **the intersection is still the same three paths**, none of
+  them under `barretenberg/cpp`. The five upstream touched are one provisioning script, one document
+  and three benchmark scripts — **no CMake file and no translation unit** — so the substance is very
+  likely unaffected and the conjunct is correctly conservative. Narrowing it is a DECISION and needs
+  M6's and M10's builds re-run; M28 did not take it and left `carry/` at HEAD rather than pinning an
+  acknowledgement to a tip that had already moved (it tried, at `9d9523b973`, and the seventh move
+  made the repair stale mid-write). Each move can turn `verify_carry_set_applies_to_upstream_head` red
   without anything of ours changing. Distinguish that from a regression, and then FIX it rather
   than recording it — M21 measured the third move and left the red for the review to find.
   **The repair is half mechanical and half a decision.** Mechanical: `just carry-exposure`
@@ -934,7 +967,11 @@ Format spec: `~/ah/dev/agent-harbor/ah-lib/specs/Milestones-Files.md`.
 - **The CI is published and scheduled, and every job dies at one step.** The
   workflow *is* on `origin`, *is* picked up by a `garm-*` runner, and *does* run
   on schedule — then every job aborts at `Generate CI token` with
-  `Input required and not supplied: app-id`. "It has never run" invites the wrong
+  `Input required and not supplied: app-id`. **There are TWELVE jobs now**: M28 added
+  `browser-gate`, which invokes `just ci-browser-gate` by recipe name and gets chromium from
+  `nix shell nixpkgs#chromium` rather than from the runner image (that line was executed locally —
+  Chromium 151.0.7922.137 from the store, both work directories cold, the whole gate green — so the
+  step is known to be runnable even though the job is not). "It has never run" invites the wrong
   first hypothesis (runner availability); the cause is scoped to this repository.
   `codetracer-ci` is private, same org, same runner group, same label, same `@v1`
   action, same `vars.` spelling, and its token step **succeeds** — so plan and

@@ -1837,3 +1837,179 @@ jobs:
           name: form-a-external-transactions
           path: artifacts-m20
           retention-days: 30
+
+  browser-gate:
+    name: the browser gate — no Node.js dependencies
+    runs-on: eph-linux-x64
+    # M28, and it is the campaign's LAST milestone. Every other job in this file gates a
+    # capability; this one gates an ABSENCE, which is a different thing to get right. It runs on
+    # every push and every pull request to `dev` and `main` (see the `on:` block at the top of this
+    # file) rather than on the weekly schedule, because the deliverable says "on EVERY PR, not
+    # nightly": a nightly absence check tells you which of the day's merges broke it only after all
+    # of them have landed.
+    #
+    # THE ENTRY POINT IS `just ci-browser-gate` AND THAT IS LOAD-BEARING. It is the same recipe a
+    # developer runs locally, so this job cannot drift into being a parallel copy of the gate that
+    # tests something slightly different. `verification/ci_browser_gate.sh` asserts that this job
+    # invokes that recipe by name, that the recipe's check list and `verify-m28`'s differ by
+    # exactly the one check they are meant to differ by, and that neither this job nor the recipe
+    # carries a `continue-on-error`, an `|| true` or any environment variable that would turn a
+    # failure into a warning.
+    #
+    # WHAT IT COSTS, AND WHY. The full-flow smoke drives a real headless Chromium against M27's
+    # THIRTEENTH-OVERLAY module — the one that exports poseidon2 and grumpkin — because the
+    # alternative is a page that downloads 7.9 MB of proving stack to compute a hash, which is what
+    # DD-11 forbids and what `verify_public_only_page_never_fetches_barretenberg` measures. So the
+    # job builds that module first. A cold barretenberg wasm build is the dominant cost here, not
+    # the browser.
+    #
+    # CHROMIUM COMES FROM NIXPKGS, NOT FROM THE RUNNER IMAGE. `lib_m27_browser.sh` takes chromium
+    # from PATH and records the version it ran against rather than assuming one, which is right for
+    # a developer's box and not enough for a runner whose image may have no browser at all. `nix
+    # shell nixpkgs#chromium` makes the provisioning explicit and reproducible. Demonstrated
+    # locally: `nix shell nixpkgs#chromium --command chromium --version` prints
+    # `Chromium 151.0.7922.137`, and the gate runs green under it.
+    #
+    # STATUS, STATED PLAINLY: THIS JOB HAS NEVER RUN, AND NEITHER HAS ANY JOB ABOVE IT. They all
+    # still stop at `Generate CI token` — see THE CI TOKEN, DIAGNOSED at the top of this file — and
+    # the remaining blocker is a repository-level `CI_TOKEN_PROVIDER_PRIVATE_KEY` that only the
+    # user can set. So this job existing means the gate is WIRED and names the checks; it does not
+    # mean a run has ever gated anything. Every check it names has been executed locally, in this
+    # repository's own dev shell, and the numbers are in M28's section of the milestone file.
+    timeout-minutes: 120
+    steps:
+      - name: Assert the CI-token inputs are present
+        shell: bash
+        env:
+          APP_ID_PRESENT: ${{ vars.CI_TOKEN_PROVIDER_APP_ID != '' }}
+          PRIVATE_KEY_PRESENT: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY != '' }}
+          CONTROL_PRESENT: ${{ secrets.GITHUB_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          if [ "${CONTROL_PRESENT}" != "true" ]; then
+            echo "::error::CONTROL FAILED: secrets.GITHUB_TOKEN is empty, so the secrets context is not being populated at all. Nothing this step says about repository configuration is trustworthy; fix the runner or the workflow before reading the messages below."
+            exit 2
+          fi
+          rc=0
+          if [ "${APP_ID_PRESENT}" != "true" ]; then
+            echo "::error::vars.CI_TOKEN_PROVIDER_APP_ID is empty. Organisation variables do not reach private repositories in this organisation (see THE CI TOKEN, DIAGNOSED at the top of this workflow); set a REPOSITORY variable: gh variable set CI_TOKEN_PROVIDER_APP_ID --repo metacraft-labs/aztec-avm-runtime --body 3115338"
+            rc=1
+          fi
+          if [ "${PRIVATE_KEY_PRESENT}" != "true" ]; then
+            echo "::error::secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY is empty. Organisation secrets do not reach private repositories in this organisation; set a REPOSITORY secret: gh secret set CI_TOKEN_PROVIDER_PRIVATE_KEY --repo metacraft-labs/aztec-avm-runtime < ci-app-private-key.pem"
+            rc=1
+          fi
+          exit "$rc"
+
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout aztec-avm-runtime
+        uses: actions/checkout@v4
+        with:
+          path: aztec-avm-runtime
+
+      - name: Clone the aztec-packages fork
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/aztec-packages
+          ref: aztec-avm-runtime
+          path: aztec-packages
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Clone codetracer-specs (the prepared patch series)
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-specs
+          ref: latest
+          path: codetracer-specs
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup Dev Environment
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        with:
+          env-flavor: nix
+
+      - name: Assert the series base commit is present
+        working-directory: aztec-packages
+        run: |
+          set -euo pipefail
+          git fetch --unshallow 2>/dev/null || true
+          git rev-parse --verify 233d8e0993^{commit}
+
+      - name: Install the orchestration's published @aztec packages
+        working-directory: aztec-avm-runtime/orchestration
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tail -20
+
+      - name: Build M27's thirteen-overlay module (poseidon2 and grumpkin out through the reactor)
+        working-directory: aztec-avm-runtime
+        env:
+          # Not $TMPDIR: the build is several gigabytes and a tmpfs /tmp is the wrong place.
+          M27_WORK: ${{ github.workspace }}/m27-work
+        shell: bash
+        run: |
+          set -euo pipefail
+          dev-exec just avm-wasm-build-m27 2>&1 | tail -20
+          test -s "${M27_WORK}/m27/barretenberg/cpp/build-wasm-avm/bin/avm.wasm" \
+            || { echo "::error::no module at ${M27_WORK}/m27/.../avm.wasm" >&2; exit 1; }
+
+      - name: THE GATE — just ci-browser-gate
+        working-directory: aztec-avm-runtime
+        env:
+          M27_WORK: ${{ github.workspace }}/m27-work
+          M28_WORK: ${{ github.workspace }}/m28-work
+        # `shell: bash` rather than the default, which is `bash -e {0}` WITHOUT pipefail: piping
+        # into `tee` would otherwise hand the step `tee`'s exit status and a failing gate would
+        # report a green job. That is a recorded defect in this campaign, not a precaution.
+        #
+        # THERE IS NO `continue-on-error` AND NO `if:` ON THIS STEP OR ON THIS JOB. The deliverable
+        # is "the gate FAILS THE BUILD. It does not warn, and it is not skippable by a flag", and
+        # `verification/ci_browser_gate.sh` reads this file and asserts exactly that.
+        shell: bash
+        run: |
+          set -euo pipefail
+          export AVM_WASM_PATH="${M27_WORK}/m27/barretenberg/cpp/build-wasm-avm/bin/avm.wasm"
+          # Chromium from nixpkgs rather than from the runner image: the gate drives a REAL
+          # browser over the DevTools protocol and there is no substitute for that which would be
+          # evidence. `M27_CHROMIUM` is what `lib_m27_browser.sh` reads.
+          nix shell nixpkgs#chromium --command bash -c '
+            export M27_CHROMIUM="$(command -v chromium)"
+            dev-exec just ci-browser-gate' 2>&1 | tee ci-browser-gate.log
+
+      - name: THE GATE'S OWN NUMBERS — per check, so a shrink is visible
+        if: always()
+        working-directory: aztec-avm-runtime
+        shell: bash
+        # Printed in its own step because a check that DIES prints no summary line and reads as a
+        # SMALLER gate rather than a red one. Seven summary lines are expected; fewer is a finding.
+        run: |
+          set -uo pipefail
+          [ -s ci-browser-gate.log ] || { echo "no gate run to report"; exit 0; }
+          grep -E '^[A-Za-z_0-9][A-Za-z_0-9 .-]*: [0-9]+ assertion\(s\), [0-9]+ failure\(s\)$' ci-browser-gate.log || true
+          echo "--- summary lines: $(grep -cE '^[A-Za-z_0-9][A-Za-z_0-9 .-]*: [0-9]+ assertion\(s\), [0-9]+ failure\(s\)$' ci-browser-gate.log || true) (expected 7)"
+
+      - name: Collect the gate's artefacts
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p artifacts-m28
+          cp aztec-avm-runtime/ci-browser-gate.log artifacts-m28/ 2>/dev/null || true
+          cp aztec-avm-runtime/browser/dist/chunks.json artifacts-m28/ 2>/dev/null || true
+          cp "${{ github.workspace }}"/m28-work/scan-*.tsv artifacts-m28/ 2>/dev/null || true
+          cp "${{ github.workspace }}"/m27-work/browser.stderr artifacts-m28/ 2>/dev/null || true
+          ls -la artifacts-m28
+
+      - name: Upload the gate's artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-gate
+          path: artifacts-m28
+          retention-days: 30

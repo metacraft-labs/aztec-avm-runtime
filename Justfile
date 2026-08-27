@@ -2284,3 +2284,104 @@ verify-m27:
       echo "verify-m27: all checks passed"
     fi
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M28 — the browser CI gate: no Node.js dependencies
+#
+#   just ci-browser-gate           THE GATE. Everything below, in order, locally, exactly as CI
+#                                  runs it. It does not warn and there is no flag that skips it.
+#   just verify-m28                M28's own six checks (the gate minus M27's DD-5 check, which is
+#                                  counted in M27 — see below)
+#
+#   just verify-browser-no-builtins           verify_browser_bundle_no_node_builtins
+#   just verify-browser-no-native             verify_browser_bundle_no_native_deps
+#   just verify-npm-pack-no-native            verify_npm_pack_no_optional_native
+#   just verify-browser-no-verification-code  verify_verification_code_unreachable_from_browser
+#   just verify-browser-full-flow             smoke_browser_headless_full_flow
+#   just verify-ci-browser-gate               the gate's own wiring, composition and CI job
+#
+# WHY THE GATE AND `verify-m28` ARE DIFFERENT LISTS, AND WHY THE DIFFERENCE IS EXACTLY ONE CHECK.
+#
+# The gate runs `verify_browser_entry_points_are_dd5_shaped` and `verify-m28` does not. That check
+# is M27's, its 40 assertions are counted in M27's total, and running it in both would double-count
+# it in a campaign sweep — the shape `CAMPAIGN-BRIEF.md` records as "M1 came out at 316 when it is
+# 141". It belongs in the GATE because DD-5 — the browser is the reference, Node is the superset —
+# is the rule the gate exists to keep true, and M23 marked it unmet precisely because nothing
+# enforced it continuously. `verification/ci_browser_gate.sh` asserts that the two lists differ by
+# exactly that one name, so they cannot drift apart.
+#
+# WHAT THE GATE NEEDS, AND WHAT IT COSTS. The full-flow smoke drives a real headless Chromium
+# against M27's thirteen-overlay module, so a cold run needs `just avm-wasm-build-m27` first
+# (~8 GB, a few minutes warm) and a chromium on PATH or in $M27_CHROMIUM. The four static gates
+# need only the built bundle and the installed @aztec packages.
+# ---------------------------------------------------------------------------
+
+verify-browser-no-builtins:
+    @verification/verify_browser_bundle_no_node_builtins.sh
+
+verify-browser-no-native:
+    @verification/verify_browser_bundle_no_native_deps.sh
+
+verify-npm-pack-no-native:
+    @verification/verify_npm_pack_no_optional_native.sh
+
+verify-browser-no-verification-code:
+    @verification/verify_verification_code_unreachable_from_browser.sh
+
+verify-browser-full-flow:
+    @verification/smoke_browser_headless_full_flow.sh
+
+verify-ci-browser-gate:
+    @verification/ci_browser_gate.sh
+
+# THE GATE. It fails the build; it does not warn, and there is no flag that skips it.
+#
+# Every check runs even if an earlier one fails, so one run reports everything that broke — and the
+# exit status is the OR of all of them. There is deliberately no `|| true`, no `continue-on-error`
+# and no environment variable that turns a failure into a warning: `ci_browser_gate.sh` asserts all
+# three of those things about this recipe's own text and about the CI job that invokes it.
+ci-browser-gate:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      ci_browser_gate \
+      verify_browser_bundle_no_node_builtins \
+      verify_browser_bundle_no_native_deps \
+      verify_npm_pack_no_optional_native \
+      verify_verification_code_unreachable_from_browser \
+      verify_browser_entry_points_are_dd5_shaped \
+      smoke_browser_headless_full_flow
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "ci-browser-gate: FAILED — the browser gate is a build failure, not a warning" >&2
+    else
+      echo "ci-browser-gate: all checks passed"
+    fi
+    exit "$rc"
+
+# M28's own six, for the campaign sweep. The gate minus M27's DD-5 check; see the note above.
+verify-m28:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      ci_browser_gate \
+      verify_browser_bundle_no_node_builtins \
+      verify_browser_bundle_no_native_deps \
+      verify_npm_pack_no_optional_native \
+      verify_verification_code_unreachable_from_browser \
+      smoke_browser_headless_full_flow
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m28: FAILED" >&2
+    else
+      echo "verify-m28: all checks passed"
+    fi
+    exit "$rc"
