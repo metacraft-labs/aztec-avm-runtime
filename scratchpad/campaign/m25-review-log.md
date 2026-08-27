@@ -442,6 +442,46 @@ that the difference is undetectable.
 **A ratio of medians is not a paired comparison, and only one of them is the measurement.** Had I
 stopped at my first pass I would have reported three figures as wrong that are right.
 
+### F13 — claim 5's fix was real but landed in ONE of the three places that state the figures
+
+M25 fixed the Rust side properly: `CT_RECORD_FIELD_BYTES` and `CT_RECORD_RESERVED_BYTES` are
+asserted against the `OFF_*` constants at compile time, so the code cannot drift. **The other two
+places that state the same two numbers were left exactly as exposed as before.**
+
+- `ct-host/src/abi.ts` carries `RECORD_FIELD_BYTES = 60` as a **typed literal**, sitting directly
+  above the `OFF_*` constants it summarises. That is the shape that caused the original defect — a
+  number typed beside a layout rather than derived from it.
+- **§7's corrected prose is compared to nothing at all.** The sentence *"a figure nobody re-derives
+  rots even when the assertion beside it is correct"* is now in §7, about §7, unchecked.
+
+Closed: the arms run recomputes both figures from the host's own offsets, and nine assertions tie
+the three statements together — the host's literals against its offsets, the values themselves (so
+the identity cannot be satisfied by two equal wrong numbers, the M23 `0 == 0` shape), their sum
+against the size the **module** reports, and §7's two figures matched in the line that states them.
+
+**And that document row cost two catalogued mistakes to anchor, both on one paragraph.** §7 wraps
+at 100 columns and the sentence spans the break: the line above ends `"…so the"` and carries the
+**retired 56**. So a needle built from the sentence matches nothing — *"a needle that spanned a line
+break"* — and a needle built from `fields need` alone selects the **wrong line** and would compare
+60 against the very figure being retired. The row is selected by two non-numeric phrases that
+co-occur on one line only.
+
+Mutation-tested: §7 set back to 56/8 gives **92 assertions, 2 failures**.
+`test_trace_metadata_declares_mapping_rung` 83 → **92**.
+
+### F14 — OQ-4's Noir half verified in the Noir checkout, not from the document
+
+| claim | verified |
+|---|---|
+| `tracer_glue.rs:152` renders `Field` as `ValueRecord::Int { i: field_value.to_i128() as i64 }` | yes, that line |
+| `:371` types it `(TypeKind::Int, "Field")` | yes |
+| `field_element.rs` `to_i128` panics `"field element too large for i128"` | yes, :253-256 |
+| gated on `fits_in_i128()` = `num_bits <= 127` | yes, :143-146 |
+
+A 254-bit address is far above 127 bits, so the Noir tracer would **abort the recorder**, and below
+that `as i64` truncates. **"Match the Noir tracer exactly" really is unavailable, and that is the
+finding rather than a caveat on it.**
+
 ## Recommendation: should M25 have vendored the 880-line builder?
 
 **No — but pricing it must be the last time it is deferred, and the reason to act is not the line
