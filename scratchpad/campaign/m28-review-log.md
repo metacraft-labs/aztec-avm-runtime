@@ -377,3 +377,42 @@ comment citation), `lib_m27_browser.sh` is sourced only by M27's and M28's check
 Each fix carries its own mutation control, run after the fix: the swapped §5 gives 2 failures, the
 swapped table row gives 1, the gutted shim now rebuilds and the build fails, the unreachable pack
 bound gives one refusal at 11/1, and the renamed `smoke_` check gives 9/1 where it gave 9/0 before.
+
+## 6. The final sweep — taken AFTER the last commit, which is the rule
+
+`~/.cache/aztec-m28rev-sweep2.log`, launched 23:40:41 with the tree clean at `36702cd`,
+`setsid`-detached, `direnv exec <this repo>`, one milestone at a time, `TMPDIR` and the log under
+`~/.cache`, **no hole in the log**.
+
+```
+m0 156  m1 175  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 324  m22 260  m23 509  m24 350  m25 272  m26 313  m27 343
+m28 353
+                                                       CAMPAIGN TOTAL 10,048
+```
+
+`TOTAL 10048   milestones 29   failing assertions 10   non-zero exits ['m11']`, and
+`reference total over the same milestones: 10048  (delta +0)`.
+
+**Both directions.** 9,695 + 353 = 10,048 exactly. M28's own 348 → 353 is itemised in §5 in two
+checks and nothing else, 3 + 2 = 5. Every one of M0–M27 came out at its reference value **to the
+assertion**, including M4 at 218 in the dev shell, M24 at 350, M26 at 313 and M27 at 343 — and the
+six cross-cutting checks reproduce at **64 / 22 / 28 / 9 / 19 / 28** (`verify_provenance_complete`,
+`check-drift`, `verify_pinned_nightly_single_source`, `verify_named_checks_exist`,
+`verify_reuse_inventory_complete`, `just check-repo-hygiene`). `check-drift`'s 22 is measured inside
+`verify_vendor_drift_clean` as `22 >= 15` and printed as a NOTE, so it is correctly absent from the
+total — that is the M1-at-316 rule working.
+
+**M9 DID NOT FLAKE, THREE TIMES IN ONE SESSION.** 807 in 1,282 s in the review's first sweep and 807
+in 1,285 s in this one, both immediately after M8's build — D19's standing hypothesis had its
+condition twice and did not fire — plus the 807 M28 measured. Split 140/143/113/73/126/83/129 every
+time. The box was not idle for any of them: a foreign `codetracer` build ran throughout.
+
+**The one non-zero exit is M11's, at 259 with TEN failing assertions**, unchanged between the two
+review sweeps, so the eighth move's signature is stable rather than a race.
+
+**And the sweep dirtied two tracked files again**, `carry/rebase.json` and `carry/exposure.json`,
+restored with `git checkout -- carry/` afterwards. Both review sweeps did it. This is now recorded
+in `CAMPAIGN-BRIEF.md` and in M11's section, because "run your sweep after your last commit" reads
+as advice about ordering and silently assumes a sweep is a reader.
