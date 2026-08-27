@@ -337,10 +337,15 @@ unchanged, verified against the discarded log, which still refuses on M4's open 
 
 | # | fix | assertions |
 |---|---|---|
-| F-FIX-1 | §2.2's stride claim re-derived; §2.3's 8-vs-9 explained | `verify_oq5…` 61 → **68** |
+| F-FIX-1 | §2.2's stride claim re-derived; §2.3's 8-vs-9 explained | `verify_oq5…` 61 → 68 |
 | F-FIX-2 | RI-72's false "already implements" retracted; the vacuous grep replaced | `verify_transaction_builder…` 42 → **53** |
 | F-FIX-3 | the milestone section's stale `1f785f24…` sha, false stride claim, false implements claim | 0 (prose) |
 | F-FIX-4 | the summariser's unreachable completion marker | 0 (instrument) |
+| F-FIX-5 | the vacuous-assertion counter, and the fifth site still quoting a number | 0 (prose) |
+| F-FIX-6 | §7's corrected 4/60 pinned in the host and in the document | `test_trace_metadata…` 83 → **92** |
+| F-FIX-7 | OQ-5 asserts which `@aztec` pin its artifact came from | `verify_oq5…` 68 → **71** |
+
+**M25 as delivered 236 → as reviewed 266** (71 / 50 / 92 / 53).
 
 **Both fixes were mutation-tested against themselves**, because replacing an assertion that cannot
 fail with more of the same would be the worst possible outcome here:
@@ -481,6 +486,46 @@ Mutation-tested: §7 set back to 56/8 gives **92 assertions, 2 failures**.
 A 254-bit address is far above 127 bits, so the Noir tracer would **abort the recorder**, and below
 that `as i64` truncates. **"Match the Noir tracer exactly" really is unavailable, and that is the
 finding rather than a caveat on it.**
+
+### F15 — OQ-5 never asserted WHICH artifact it measured, across two non-interchangeable pins
+
+`pins.json` declares two `@aztec` nightly lines and says in as many words that they are not
+interchangeable:
+
+| line | version | consumers |
+|---|---|---|
+| `deletion_era` | 5.0.0-nightly.20260626 | diffsim, spike, orchestration |
+| `current` | 5.3.0-nightly.20260819 | drift |
+
+`SOURCE-MAPPING.md` §2.2 says its measurements are *"at the `deletion_era` pin"*. But
+`M25_ARTIFACT_ROOTS` is `"diffsim spike drift probe-mt orchestration"` — the search **crosses both
+lines** and puts a `current` root **third**, ahead of `orchestration`, which is a `deletion_era`
+one. And the copies really do differ: diffsim and spike are byte-identical to each other
+(`f22f588d…`), drift is not (`b5e109b0…`).
+
+**It failed safe, so this is an attribution fix rather than a hole — and the difference is exactly
+what the three assertions buy.** Demonstrated by pointing the search at the drift root alone:
+
+```
+FAIL the shipped AvmTest public_dispatch bytecode is 50,939 bytes   got 51,532
+FAIL its debug symbols map 9,021 program counters                   got 9,108
+FAIL over an 86-file file_map                                       got 89
+FAIL the highest mapped pc is 50,526                                got 51,076
+FAIL …and the largest is 410                                        got 518
+FAIL 8,580 of the gaps fall in the 4–9 band                         got 8,661
+…twelve in all, plus every document row
+```
+
+Every one of those reads as *"the transpiler stopped preserving the mapping"* or *"the document's
+figures have rotted"*. **Neither is true**, and this campaign has believed that kind of red before —
+it is the same misattribution `m9_completeness` exists to prevent, one milestone over. The artifact's
+own `aztec_version` is now compared against what `pins.json` declares, so the **first** failure names
+the cause with both versions in it.
+
+Incidentally reassuring: the drift artifact still resolves to **rung 1**, so OQ-5's verdict is not an
+artifact of one nightly line.
+
+`verify_oq5_source_mapping_verdict_recorded` 68 → **71**.
 
 ## Recommendation: should M25 have vendored the 880-line builder?
 
