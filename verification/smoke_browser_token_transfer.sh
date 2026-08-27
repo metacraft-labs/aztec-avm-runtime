@@ -55,9 +55,18 @@ AT_OPEN_EXPORTS="$(m27_arm publicOnly transfer.atOpen.exports)"
 AT_OPEN_BYTES="$(m27_arm publicOnly transfer.atOpen.moduleBytes)"
 AT_OPEN_PAGES="$(m27_arm publicOnly transfer.atOpen.memoryPages)"
 STREAMING="$(m27_arm publicOnly transfer.atOpen.streaming)"
+# THE NON-EMPTINESS PARTNER FIRST. Both sides are helper reads and both print `MISSING` for an
+# absent key, so `MISSING == MISSING` passed — and this is the ONLY assertion joining the module the
+# page compiled to the file on disk. The `MISSING` sentinel defends a comparison with a LITERAL; it
+# defends nothing when both sides come from the same helper.
+assert_ge "the page reported the size of the module it compiled" 1000000 "$AT_OPEN_BYTES"
 assert_eq "the module the PAGE compiled is the one on disk, to the byte" \
   "$(m27_run module.bytes)" "$AT_OPEN_BYTES"
-assert_eq "…and it exports fifty-five names" "55" "$AT_OPEN_EXPORTS"
+# CROSS-CHECKED against the export count `m27_require_module` took from the file on disk, rather
+# than against a number typed in here: "does the page see what the artefact has" is the question,
+# and the fifty-five is then a measurement on both sides.
+assert_eq "…and it exports what the module on disk exports" "$M27_MODULE_EXPORT_COUNT" "$AT_OPEN_EXPORTS"
+assert_eq "…which is fifty-five — M27's thirteenth overlay, not M23's twelve" "55" "$AT_OPEN_EXPORTS"
 assert_eq "…and declares thirteen imports (twelve WASI plus env.memory)" "13" \
   "$(printf '%s' "$AT_OPEN_IMPORTS" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
 assert_true "…including env.memory" str_has_sub "$AT_OPEN_IMPORTS" 'env.memory'
@@ -119,6 +128,11 @@ TXHASH="$(m27_arm publicOnly transfer.txHash)"
 BLOCK_HASHES="$(m27_arm publicOnly transfer.blockTxHashes)"
 assert_eq "the transaction was PROCESSED" "processed" "$(m27_arm publicOnly transfer.outcome)"
 assert_eq "…in block 1" "1" "$(m27_arm publicOnly transfer.blockNumber)"
+# THE NEEDLE IS A VARIABLE, AND `str_has_sub` HAS NO EMPTY-NEEDLE GUARD — `case $h in (*""*)` matches
+# unconditionally. This is the only variable needle in M27's checks, so an arm reporting `txHash: ""`
+# would have satisfied "the block accepted THIS transaction" against any block list at all.
+assert_true "the transaction hash is a 32-byte field element, not an empty string" \
+  str_has_line_re "$TXHASH" '^0x[0-9a-f]{64}$'
 assert_true "…and the block's transaction list contains this transaction" \
   str_has_sub "$BLOCK_HASHES" "$TXHASH"
 assert_ge "…and executing it cost calls into avm.wasm" 10 "$(m27_arm publicOnly transfer.moduleCalls)"
@@ -137,9 +151,18 @@ import json, sys
 p = json.load(open(sys.argv[1]))
 print(p["npm"]["deletion_era"]["version"])' "$REPO_ROOT/pins.json")" \
   "$(m27_arm publicOnly transfer.protocolVersion)"
-# The disclosure line itself, in the page's own log.
-assert_true "…and the runtime disclosed, in the page" \
-  str_has_sub "$(m27_arm publicOnly status.log)" 'disclosure'
+# THE DISCLOSURE'S OWN TEXT, not the harness's label. `demo/main.ts` prefixes every disclosed line
+# with a hardcoded `[disclosure] `, so a needle of `disclosure` matched the PAGE'S OWN PREFIX and
+# would have passed over a runtime that disclosed an empty string. The needle is a fragment of
+# `DISCLOSURE_LINE` itself, and the fragment is taken from `orchestration/src/disclosure.ts` rather
+# than typed here, with the extraction asserted non-empty.
+PAGE_LOG="$(m27_arm publicOnly status.log)"
+DISCLOSED_WORDS="$(grep -o 'SIMULATED AVM RUNTIME' "$ORCH_SRC/disclosure.ts" | head -1)"
+assert_eq "the disclosure's opening words were read out of the runtime's own source" \
+  "SIMULATED AVM RUNTIME" "$DISCLOSED_WORDS"
+assert_true "…and the runtime disclosed THAT, in the page" str_has_sub "$PAGE_LOG" "$DISCLOSED_WORDS"
+assert_true "…naming proving: none, which is §8.4's second required content" \
+  str_has_sub "$PAGE_LOG" 'proving: none'
 
 echo "== 8. the page was healthy while doing it"
 
