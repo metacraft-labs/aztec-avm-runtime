@@ -23,7 +23,9 @@ and none of it is summarised. Moved aside rather than deleted, so the incident i
 ~/.cache/m25rev/TAINTED-pre0305-rev.log
 ```
 
-The authoritative sweep is **`~/.cache/m25rev/sweep.log`**, started `2026-08-27T03:05:43+03:00`,
+The authoritative sweep is **`~/.cache/m25rev/final-sweep.log`**, started
+`2026-08-27T03:24:44+03:00` over the COMMITTED tree — the 03:05 one was discarded too, for a second
+reason recorded in F8, and kept as `~/.cache/m25rev/DISCARDED-race-with-gashpp-residue.log`. It is
 `setsid`-detached, in this repository's own dev shell (`direnv exec <aztec-avm-runtime>` — node
 v24.19.0, the engine `TRACE-ABI.md` §2 requires), sole occupant of the tree. I poll it inside my
 own run; a monitor process does not outlive the agent that spawned it, and two stale pollers from
