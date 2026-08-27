@@ -1007,7 +1007,7 @@ were absorbed silently.
 ## D21 — `REACTOR-ABI.md` says `avm.wasm` imports eleven WASI functions and asserts `random_get`'s absence by name; M27's module imports twelve
 
 - id: D21
-- status: open
+- status: closed
 - opened: 2026-08-27
 - milestone: M27 (observed and recorded; the document is not re-rendered here)
 - design-question: —
@@ -1034,7 +1034,17 @@ were absorbed silently.
   the result — `test_browser_crypto_matches_bb_js` gets identical points from bb.js over the whole
   corpus — so this is a fact about the linker and about wasi-libc, not about determinism. It is
   recorded because the alternative was a comment asserting an absence nobody had measured.
-- decision: **Open, and deliberately not fixed by re-rendering the document.** `REACTOR-ABI.md`'s
+- closed-by: **M27's REVIEW, in the shape this entry itself prescribed, and it cost no
+  assertion.** The reasoning below is sound about the CHECKS and was wrong about the price: making
+  the import surface a property of a TREE — the way M23 made the export count one — requires no
+  check to move, because nothing pins the sentence being corrected. `REACTOR-ABI.md` now carries a
+  four-row table (M12 39/11, M13 49/11, M23 51/11, **M27 55/12**) with the vtable reason, the
+  disassembly chain and the note that `verify_avm_wasm_import_surface` is right to assert
+  `random_get`'s absence because it measures M12's artefact. Nothing is repointed and no earlier
+  milestone's number moves. **And the review found the false sentence still in the shipped source**:
+  `browser/src/wasi.ts`'s header carried the corrected four-point reading while the `randomBytes`
+  option ninety lines below still said the import is "never called".
+- decision: **Taken by M27 as "open, and deliberately not fixed by re-rendering the document"; CLOSED by its review, which took the cheaper half of the same prescription.** M27's reasoning, retained because it is right about the checks: `REACTOR-ABI.md`'s
   import table is pinned by M12's checks, which measure M12's module; changing the document without
   changing what pins it would move a number nothing re-derives, which is this campaign's
   prose-drifts-from-measurement defect in the file that exists to prevent it. The correct shape is

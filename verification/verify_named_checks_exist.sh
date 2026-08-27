@@ -97,7 +97,7 @@ EXCEPTIONS = {
     # who sees a container downloaded from a page that just executed a transaction will otherwise
     # read the step count as an instruction count. Naming a check as ABSENT is the cure for the
     # defect this file exists to catch, not an instance of it.
-    "test_trace_step_count_matches_instruction_count": "M25's pending entry, cited by ct_download.ts in the paragraph that says the step count is not an instruction count",
+    "test_trace_step_count_matches_instruction_count": "M25's pending entry, cited by ct_download.ts AND by BROWSER-PACKAGING.md section 7, each in the paragraph that says the step count is not an instruction count -- the second site was attached to this one-file exemption without widening it, found by M27's review",
 }
 
 verification = os.path.join(repo, "verification")
