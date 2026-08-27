@@ -60,7 +60,9 @@
 //! runtime has no source column to record (`emit()` is rung 3, `Line(pc)`) — so it fires in the
 //! host (`ct-host/src/config.ts`). `ct_writer_kind()` records which path wrote the container.
 
-use codetracer_trace_types::{EventLogKind, Line, TypeId, TypeKind, ValueRecord};
+use codetracer_trace_types::{
+    CallRecord, EventLogKind, Line, TraceLowLevelEvent, TypeId, TypeKind, ValueRecord,
+};
 use codetracer_trace_writer::ctfs_writer::CtfsTraceWriter;
 use codetracer_trace_writer::trace_writer::TraceWriter;
 use std::path::{Path, PathBuf};
@@ -175,6 +177,8 @@ const CT_ERR_ALREADY_OPEN: i32 = -7;
 const CT_ERR_BAD_PATH_ID: i32 = -8;
 /// A rung outside [`CT_RUNG_SOURCE`]..=[`CT_RUNG_BYTECODE`] was declared.
 const CT_ERR_BAD_RUNG: i32 = -9;
+/// M26: `ct_return` with no frame open. A host bug, refused rather than ignored.
+const CT_ERR_NO_FRAME: i32 = -10;
 
 /// Which writer produced the container. Recorded rather than inferred — DD-7's second half.
 const CT_WRITER_KIND_PATH_A_PURE_RUST: u32 = 1;
@@ -249,6 +253,14 @@ struct Session {
     rungs: Vec<RungDeclaration>,
     positioned: u64,
     unpositioned: u64,
+    /// `TraceLogEvent`s written through `ct_log_event`. M26's join record is one of these.
+    log_events: u32,
+    /// Frames currently open, maintained by `ct_call` / `ct_return`.
+    call_depth: u32,
+    /// Frames opened over the whole session. Does not go down.
+    calls_opened: u32,
+    /// The `None` type, needed for a frame's return value. Interned at open, like `type_id`.
+    none_type_id: TypeId,
 }
 
 static mut SESSION: Option<Session> = None;
@@ -407,6 +419,11 @@ pub unsafe extern "C" fn ct_writer_open(
     let workdir_path = if workdir.is_empty() { PathBuf::from("/") } else { PathBuf::from(&workdir) };
     TraceWriter::set_workdir(&mut writer, &workdir_path);
     TraceWriter::start(&mut writer, &path, Line(1));
+    // The `None` type is interned FIRST, so it is type id 0 — which is what `NONE_TYPE_ID` is and
+    // what a reader expects a `ValueRecord::None` to point at. M26 needs it for a frame's return
+    // value; interning it lazily at the first `ct_return` would give it a different id in a
+    // recording that happens to have returned before it recorded anything else.
+    let none_type_id = TraceWriter::ensure_type_id(&mut writer, TypeKind::None, "None");
     let type_id = TraceWriter::ensure_type_id(&mut writer, TypeKind::Int, "Field");
     // OQ-4: the SAME `(TypeKind::Int, "Field")` the Noir tracer registers
     // (`noir/tooling/tracer/src/tracer_glue.rs:371`), reused rather than a second type, because
@@ -432,6 +449,10 @@ pub unsafe extern "C" fn ct_writer_open(
             rungs: Vec::new(),
             positioned: 0,
             unpositioned: 0,
+            log_events: 0,
+            call_depth: 0,
+            calls_opened: 0,
+            none_type_id,
         });
     }
     set_error("");
@@ -501,6 +522,241 @@ pub unsafe extern "C" fn ct_declare_rung(
     });
     set_error("");
     CT_OK
+}
+
+/// Write one `TraceLogEvent` with an arbitrary metadata key and content. M26's export.
+///
+/// # Why the module needs a GENERIC log-event export at all
+///
+/// M25 added `ct_declare_rung`, which writes a `TraceLogEvent` under one fixed key. M26 needs a
+/// second such record — the JOIN record that says which transaction a container is half of — and
+/// the alternative to this export was to write it from somewhere other than the shipped module.
+/// That would have made M26's fallback a property of a probe rather than of the runtime, and the
+/// fallback is a deliverable: *"two recordings joined in the UI, with the join recorded explicitly
+/// rather than inferred"* is only true of a recording this module produced if this module can
+/// produce it.
+///
+/// It is deliberately GENERIC rather than a second `ct_declare_join`. `ct_declare_rung` is
+/// special-cased because it also maintains the per-contract rung table the violation counters read;
+/// a join record maintains nothing, so a key-and-content export is the whole of it, and a third
+/// consumer will not need a third export.
+///
+/// The metadata key is NOT validated against a list. A module that refused unknown keys would make
+/// every new record kind a wire-format change, and the reader's contract is already
+/// "`TraceLogEvent` carries a metadata key and a content string".
+///
+/// # Safety
+/// Each pointer must address its declared number of readable bytes in this module's linear memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ct_log_event(
+    metadata_ptr: *const u8,
+    metadata_len: usize,
+    content_ptr: *const u8,
+    content_len: usize,
+) -> i32 {
+    // An empty metadata key is refused rather than accepted: a `TraceLogEvent` whose key is the
+    // empty string is unfindable by the only mechanism a reader has for finding one.
+    if metadata_len == 0 {
+        set_error("ct_log_event: the metadata key must not be empty");
+        return CT_ERR_BAD_LENGTH;
+    }
+    let metadata = match unsafe { read_str(metadata_ptr, metadata_len) } {
+        Ok(s) => s,
+        Err(e) => {
+            set_error("ct_log_event: metadata is not valid UTF-8");
+            return e;
+        }
+    };
+    let content = match unsafe { read_str(content_ptr, content_len) } {
+        Ok(s) => s,
+        Err(e) => {
+            set_error("ct_log_event: content is not valid UTF-8");
+            return e;
+        }
+    };
+    let s = match session() {
+        Some(s) => s,
+        None => {
+            set_error("ct_log_event: no writer is open");
+            return CT_ERR_NO_SESSION;
+        }
+    };
+    TraceWriter::register_special_event(
+        &mut s.writer,
+        EventLogKind::TraceLogEvent,
+        &metadata,
+        &content,
+    );
+    s.log_events += 1;
+    set_error("");
+    CT_OK
+}
+
+/// How many `TraceLogEvent`s `ct_log_event` has written this session.
+///
+/// Read from the module rather than counted by the host, for `ct_rung_count`'s reason: a host that
+/// counted its own calls would be asserting that it called, not that the module wrote.
+#[unsafe(no_mangle)]
+pub extern "C" fn ct_log_event_count() -> u32 {
+    match session() {
+        Some(s) => s.log_events,
+        None => 0,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// M26's FRAMES.
+//
+// WHY THE MODULE NEEDS THESE AND WHY M24 DID NOT.
+//
+// M24's ABI records a flat stream of steps: `ct_ingest` in, `Step` + five `Value`s out, no frame
+// structure at all. That was right for what M24 measured, and it is not enough for M26, whose
+// deliverable is *"a private-half step and a public-half step are distinguishable by FRAME, not
+// only by content"*. Content-based distinction is the kind that works on a fixture and fails on
+// the first real transaction where a private step and a public step happen to look alike, so a
+// container that carries only steps cannot satisfy it however the steps are labelled.
+//
+// The alternative was to let the fallback's containers be written by a probe. That would have
+// delivered a demonstration that a probe can produce a joined recording, and left open whether the
+// runtime can — which is the same shape as pinning an unpublished commit: green here, absent
+// everywhere else.
+//
+// **THE SEQUENCE IS THE HOST'S AND THE STRUCTURE IS THE MODULE'S.** `ct_call` and `ct_return` do
+// not synthesize anything: `AbstractTraceWriter::register_call` emits a `Step` at the callee's
+// declaration site before the `Call`, which is right for a recorder that has not already emitted
+// the caller's step and wrong for this one — `tooling/tracer_wasm/src/ctfs_sink.rs` overrides it
+// for exactly that reason and this module writes the `Call` event directly for the same one. What
+// the module DOES own is the depth: `ct_call_depth()` is read from here rather than counted by the
+// host, because a host counting its own calls asserts that it called and not that the module
+// recorded.
+// ---------------------------------------------------------------------------
+
+/// Open a frame named `name`, at `path_id`:`line`, optionally carrying a contract address.
+///
+/// `path_id` is an id from [`ct_intern_path`], or `u32::MAX` for the session's own source path —
+/// a frame in a recording that never interned a path still has to land somewhere, and inventing a
+/// path here would put a frame in a file that does not exist.
+///
+/// `address_ptr` may be null. When it is not, the frame carries ONE argument, `contractAddress`,
+/// rendered exactly as `emit()` renders it: OQ-4's `0x` + 64 lowercase big-endian hex in
+/// `ValueRecord::String` under `(TypeKind::Int, "Field")`. That is what makes a public frame
+/// attributable to a contract WITHOUT reading its steps.
+///
+/// # Safety
+/// `name_ptr` must address `name_len` readable bytes; `address_ptr`, when non-null, 32 of them.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ct_call(
+    name_ptr: *const u8,
+    name_len: usize,
+    path_id: u32,
+    line: u32,
+    address_ptr: *const u8,
+) -> i32 {
+    if name_len == 0 {
+        set_error("ct_call: a frame name must not be empty");
+        return CT_ERR_BAD_LENGTH;
+    }
+    let name = match unsafe { read_str(name_ptr, name_len) } {
+        Ok(s) => s,
+        Err(e) => {
+            set_error("ct_call: name is not valid UTF-8");
+            return e;
+        }
+    };
+    let address: Option<[u8; ADDRESS_LEN]> = if address_ptr.is_null() {
+        None
+    } else {
+        let mut a = [0u8; ADDRESS_LEN];
+        a.copy_from_slice(unsafe { core::slice::from_raw_parts(address_ptr, ADDRESS_LEN) });
+        Some(a)
+    };
+    let s = match session() {
+        Some(s) => s,
+        None => {
+            set_error("ct_call: no writer is open");
+            return CT_ERR_NO_SESSION;
+        }
+    };
+    let path = if path_id == u32::MAX {
+        s.path.clone()
+    } else {
+        match s.paths.get(path_id as usize) {
+            Some(p) => p.clone(),
+            None => {
+                set_error("ct_call: path_id was never interned by this session");
+                return CT_ERR_BAD_PATH_ID;
+            }
+        }
+    };
+    let fid = TraceWriter::ensure_function_id(&mut s.writer, &name, &path, Line(line as i64));
+    let args = match address {
+        Some(a) => {
+            let field_type = s.field_type_id;
+            let arg = TraceWriter::arg(
+                &mut s.writer,
+                "contractAddress",
+                ValueRecord::String { text: hex32(&a), type_id: field_type },
+            );
+            // `ctfs_sink.rs`'s override: a non-toplevel call's arguments are emitted as `Value`
+            // events before the `Call`, because the writer's default would otherwise not record
+            // them at all on this path.
+            TraceWriter::add_event(&mut s.writer, TraceLowLevelEvent::Value(arg.clone()));
+            vec![arg]
+        }
+        None => vec![],
+    };
+    TraceWriter::add_event(
+        &mut s.writer,
+        TraceLowLevelEvent::Call(CallRecord { function_id: fid, args }),
+    );
+    s.call_depth += 1;
+    s.calls_opened += 1;
+    set_error("");
+    CT_OK
+}
+
+/// Close the innermost open frame.
+///
+/// A `ct_return` with no frame open is a HOST BUG and is refused rather than ignored: a writer that
+/// swallowed it would produce a container whose call tree is shallower than the execution's, and
+/// nothing downstream could tell that from a recording of a shallower execution.
+#[unsafe(no_mangle)]
+pub extern "C" fn ct_return() -> i32 {
+    let s = match session() {
+        Some(s) => s,
+        None => {
+            set_error("ct_return: no writer is open");
+            return CT_ERR_NO_SESSION;
+        }
+    };
+    if s.call_depth == 0 {
+        set_error("ct_return: no frame is open");
+        return CT_ERR_NO_FRAME;
+    }
+    let none_type = s.none_type_id;
+    TraceWriter::register_return(&mut s.writer, ValueRecord::None { type_id: none_type });
+    s.call_depth -= 1;
+    set_error("");
+    CT_OK
+}
+
+/// Frames currently open. The MODULE's count, so a host cannot assert its own arithmetic.
+#[unsafe(no_mangle)]
+pub extern "C" fn ct_call_depth() -> u32 {
+    match session() {
+        Some(s) => s.call_depth,
+        None => 0,
+    }
+}
+
+/// Frames this session has OPENED, which does not go down. `ct_call_depth` alone cannot tell a
+/// recording with no frames from one whose frames all closed.
+#[unsafe(no_mangle)]
+pub extern "C" fn ct_calls_opened() -> u32 {
+    match session() {
+        Some(s) => s.calls_opened,
+        None => 0,
+    }
 }
 
 /// How many contracts this session has declared a rung for.
@@ -1370,5 +1626,113 @@ mod tests {
             unsafe { ct_step(0, 0, 0, 0, 0, r[OFF_ADDRESS..].as_ptr()) },
             CT_ERR_NO_SESSION
         );
+    }
+
+    /// M26's FRAMES: `ct_call` / `ct_return`, their depth, and their three refusals.
+    ///
+    /// The depth is asserted at every step of the sequence rather than only at the end, because a
+    /// pair of counters that ends where it started is satisfied by a pair that never moved. And
+    /// `calls_opened` is asserted BESIDE `call_depth` for the reason it exists: a recording with no
+    /// frames and a recording whose frames all closed both end at depth 0.
+    #[test]
+    fn frames_open_and_close_and_the_module_owns_the_depth() {
+        let _g = serial();
+        let name = b"Token.transfer_in_public";
+        assert_eq!(ct_call_depth(), 0, "no session, no frames");
+        assert_eq!(
+            unsafe { ct_call(name.as_ptr(), name.len(), u32::MAX, 7, core::ptr::null()) },
+            CT_ERR_NO_SESSION
+        );
+        assert_eq!(ct_return(), CT_ERR_NO_SESSION);
+        unsafe { assert_eq!(open(0), CT_OK) };
+        assert_eq!(ct_call_depth(), 0);
+        assert_eq!(ct_calls_opened(), 0);
+        // A return with nothing open is a HOST BUG and is refused rather than swallowed.
+        assert_eq!(ct_return(), CT_ERR_NO_FRAME);
+        assert_eq!(ct_calls_opened(), 0, "the refusal opened nothing");
+        // An empty frame name is refused: a frame a reader cannot name is not a frame.
+        assert_eq!(
+            unsafe { ct_call(name.as_ptr(), 0, u32::MAX, 7, core::ptr::null()) },
+            CT_ERR_BAD_LENGTH
+        );
+        // A path id this session never interned is refused rather than silently reinterpreted.
+        assert_eq!(
+            unsafe { ct_call(name.as_ptr(), name.len(), 99, 7, core::ptr::null()) },
+            CT_ERR_BAD_PATH_ID
+        );
+        assert_eq!(ct_calls_opened(), 0, "neither refusal opened a frame");
+        // Now two nested frames, the inner one carrying a contract address.
+        let addr = [0x2fu8; ADDRESS_LEN];
+        assert_eq!(
+            unsafe { ct_call(name.as_ptr(), name.len(), u32::MAX, 7, core::ptr::null()) },
+            CT_OK
+        );
+        assert_eq!(ct_call_depth(), 1);
+        assert_eq!(
+            unsafe { ct_call(name.as_ptr(), name.len(), u32::MAX, 9, addr.as_ptr()) },
+            CT_OK
+        );
+        assert_eq!(ct_call_depth(), 2, "the second call NESTS rather than replacing");
+        assert_eq!(ct_calls_opened(), 2);
+        let r = record(1);
+        assert_eq!(unsafe { ct_ingest(r.as_ptr(), r.len()) }, 1);
+        assert_eq!(ct_return(), CT_OK);
+        assert_eq!(ct_call_depth(), 1);
+        assert_eq!(ct_return(), CT_OK);
+        assert_eq!(ct_call_depth(), 0);
+        assert_eq!(ct_calls_opened(), 2, "closing does not un-open");
+        assert_eq!(ct_return(), CT_ERR_NO_FRAME, "and the floor is still the floor");
+        assert!(!ct_writer_close().is_null());
+        assert_eq!(ct_call_depth(), 0, "the depth belongs to the session, which is gone");
+        assert_eq!(ct_calls_opened(), 0);
+    }
+
+    /// M26's `ct_log_event`, and its three refusals.
+    ///
+    /// The counter is asserted in BOTH directions — zero before, two after — because a counter that
+    /// only ever goes up is satisfied by a function that increments and writes nothing, and a
+    /// counter asserted only after the fact cannot tell "two were written" from "two were already
+    /// there". The refusals are asserted NOT to move it, which is the same property from the other
+    /// side: a refused call that still counted would make the count a count of calls rather than of
+    /// records.
+    #[test]
+    fn a_log_event_is_written_and_counted_and_its_refusals_are_not() {
+        let _g = serial();
+        assert_eq!(ct_log_event_count(), 0, "no session, no events");
+        let meta = b"ct.trace-join";
+        let content = b"join=j1 half=public halves=2 arm=split reason=recorded";
+        // Without a session it is refused rather than buffered.
+        assert_eq!(
+            unsafe { ct_log_event(meta.as_ptr(), meta.len(), content.as_ptr(), content.len()) },
+            CT_ERR_NO_SESSION
+        );
+        unsafe { assert_eq!(open(0), CT_OK) };
+        assert_eq!(ct_log_event_count(), 0, "a fresh session has written none");
+        assert_eq!(
+            unsafe { ct_log_event(meta.as_ptr(), meta.len(), content.as_ptr(), content.len()) },
+            CT_OK
+        );
+        assert_eq!(ct_log_event_count(), 1);
+        // An empty metadata key is refused: a TraceLogEvent nobody can grep for is not findable.
+        assert_eq!(
+            unsafe { ct_log_event(meta.as_ptr(), 0, content.as_ptr(), content.len()) },
+            CT_ERR_BAD_LENGTH
+        );
+        // Invalid UTF-8 in the content is refused, not written as replacement characters.
+        let bad = [0x66u8, 0xfeu8, 0xffu8];
+        assert_eq!(
+            unsafe { ct_log_event(meta.as_ptr(), meta.len(), bad.as_ptr(), bad.len()) },
+            CT_ERR_BAD_UTF8
+        );
+        assert_eq!(ct_log_event_count(), 1, "neither refusal wrote a record");
+        // An empty CONTENT is allowed — a record whose key is the whole statement is a legitimate
+        // shape, and refusing it here would be this module inventing a schema it does not own.
+        assert_eq!(
+            unsafe { ct_log_event(meta.as_ptr(), meta.len(), content.as_ptr(), 0) },
+            CT_OK
+        );
+        assert_eq!(ct_log_event_count(), 2);
+        assert!(!ct_writer_close().is_null());
+        assert_eq!(ct_log_event_count(), 0, "the count belongs to the session, which is gone");
     }
 }

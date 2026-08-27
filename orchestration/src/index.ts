@@ -255,3 +255,22 @@ export {
   type SimulationResult,
   type TxReceipt,
 } from './avm_runtime.ts';
+
+// M26 — what makes two halves of one transaction ONE recording. The grammar and the joiner only:
+// `orchestration` has no npm dependencies and cannot decode a `.ct`, so a consumer reads the
+// records out of its containers with a reader and hands them here.
+export {
+  JOIN_EVENT_METADATA,
+  JOIN_REASON,
+  TraceJoinRefused,
+  formatJoinRecord,
+  joinRecord,
+  joinRecordings,
+  parseJoinRecord,
+  privateTraceHandleFor,
+  type HalfRecording,
+  type JoinArm,
+  type JoinRecord,
+  type JoinedRecording,
+  type TraceHalf,
+} from './trace_join.ts';

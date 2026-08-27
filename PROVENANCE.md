@@ -37,8 +37,8 @@ content change.
 ```
 
 The `BEGIN`/`END` sentinels are what the stripper matches, so the header can be removed exactly and
-re-added idempotently. A file that has **no** upstream counterpart — one of the two `added` rows
-below — gets a header that says `ADDED HERE — this file has NO upstream counterpart` and
+re-added idempotently. A file that has **no** upstream counterpart — an `added` row in the recorded
+edits below — gets a header that says `ADDED HERE — this file has NO upstream counterpart` and
 `upstream-path: (none — added in this repo)`, because a header naming a path that does not exist
 would be worse than no header at all.
 
@@ -97,6 +97,11 @@ because no prefix rule would produce it.
 | F17 | orchestration/src/vendor/public_errors.ts | yarn-project/simulator/src/public/public_errors.ts | ts | Apache-2.0 | RI-22 |
 | F18 | orchestration/src/vendor/public_tx_simulator_interface.ts | yarn-project/simulator/src/public/public_tx_simulator/public_tx_simulator_interface.ts | ts | Apache-2.0 | RI-19 |
 | F19 | orchestration/src/vendor/txe_block_creation.ts | yarn-project/txe/src/utils/block_creation.ts | ts | Apache-2.0 | RI-66 |
+| F20 | orchestration/src/vendor/public_tx_simulation_tester.ts | yarn-project/simulator/src/public/fixtures/public_tx_simulation_tester.ts | ts | Apache-2.0 | RI-72 |
+| F21 | orchestration/src/vendor/public_fixtures_utils.ts | yarn-project/simulator/src/public/fixtures/utils.ts | ts | Apache-2.0 | RI-72 |
+| F22 | orchestration/src/vendor/avm_fixtures_utils.ts | yarn-project/simulator/src/public/avm/fixtures/utils.ts | ts | Apache-2.0 | RI-72 |
+| F23 | orchestration/src/vendor/simple_contract_data_source.ts | yarn-project/simulator/src/public/fixtures/simple_contract_data_source.ts | ts | Apache-2.0 | RI-72 |
+| F24 | orchestration/src/vendor/gas_compat.ts | (none — added in this repo) | ts | Apache-2.0 | RI-72 |
 <!-- END:files -->
 
 <!-- BEGIN:exempt -->
@@ -147,6 +152,7 @@ defined here fails the check, and so does a class defined here that no file uses
 | spike-fixtures-trim | Upstream's `vm2/testing/fixtures.cpp` with the two tracegen-dependent definitions removed (`empty_trace`, `get_minimal_trace_with_pi`), so the upstream simulation tests link against `vm2_sim` alone — i.e. without the proving stack the wasm build excludes. Everything else is byte-for-byte upstream. |
 | node-strip-types | The two edits Node's type stripper FORCES on a file this package runs from its `.ts` source, and nothing else. (1) Relative import specifiers `'./x.js'` become `'./x.ts'`, because Node resolves the literal specifier and there is no build step to emit a `.js`. (2) Constructor PARAMETER PROPERTIES are desugared into a field declaration plus an assignment — exactly what a compiler emits for them — because the stripper refuses them with `SyntaxError [ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX]` and `tsc --erasableSyntaxOnly` refuses them with TS1294. RI-26 recorded the same forced edit for `ForkCheckpoint` and `verify_orchestration_reuse_enumerated` pins it there line for line; `test_block_limits_respected` does the same for these three. |
 | telemetry-replacement | The `@aztec/telemetry-client` import repointed at `orchestration/src/telemetry.ts`, RI-29's dependency-free replacement, and nothing else. The imported NAMES are unchanged, which is what makes the substitution checkable: a name the stub does not export fails at load rather than at the first metric nobody reads. |
+| tx-builder-calldata-half | RI-72's reduced set as M26 vendors it: upstream's transaction builder with **the calldata-and-call-request half kept and the simulator half severed**, which is what makes 880 lines the price instead of 10,421. Five edits, each with a reason that is a deliverable or a measurement, and no others. (1) `node-strip-types`' first edit — relative specifiers `'./x.js'` become `'./x.ts'` — plus the FLATTENING the vendored layout forces, because `orchestration/src/vendor/` has no `avm/fixtures/` under it: `'../avm/fixtures/utils.js'` becomes `'./avm_fixtures_utils.ts'` and `'./utils.js'` becomes `'./public_fixtures_utils.ts'`. (2) **DD-9: the `@aztec/world-state` edge is severed** by dropping the import and the `static async create` whose only use of its `NativeWorldStateService` parameter was `worldStateService.fork()`. The constructor never took one; it takes the `MerkleTreeWriteOperations` that call yields, and `merkleTree` is stored and **never called** (`grep -c 'merkleTree\.'` is 0 against 7 mentions at the anchor), which is why the reduced set needs no merkle implementation at all. (3) **The simulator half is dropped** — `simulateTx`, `simulateTxWithLabel`, `executeTxWithLabel`, `cancel`, `getSimulator`, `setMetricsPrefix`, `prettyPrintMetrics`, `#recordBytecodeSizes`, the `MeasuredSimulatorFactory` type, `defaultConfig` and the four imports they alone reach (`cpp_public_tx_simulator`, `cpp_vs_ts_public_tx_simulator`, `public_tx_simulator_interface`, `test_executor_metrics`, `public_db_sources`). This runtime's simulator is `WasmAvmPublicTxSimulator` over `avm.wasm`; upstream's two both reach the NAPI AVM. (4) `extends BaseAvmSimulationTester` is dropped — it is the fifth file of the 5-file reduced set and its only contribution to the calldata half is two fields, so `contractDataSource` and `logger` are declared here instead of inherited. (5) In `avm/fixtures/utils.ts`, the SIX function declarations that carry the file's FOUR escaping edges are dropped (M26's review corrected "four functions" here: four is the number of edges, six the number of declarations, and the two were being reported as one number): `resolveContractAssertionMessage` (the only thing reaching `common/`, 4 files / 241 lines), `randomMemoryBytes` / `randomMemoryUint32s` / `randomMemoryUint64s` / `randomMemoryFields` (the only things reaching `avm_memory_types.js` and `errors.js`), and **`allSameExcept`, which is the only thing reaching `lodash.merge`** — a package `orchestration/package.json` does not depend on, and the one RI-72's "no new package dependency" sentence does not cover, because that sentence is scoped to `@aztec/*` specifiers. |
 | processor-block-assembly | `PublicProcessor` as M22 runs it. Six edits, each with a reason that is a deliverable or a measurement, and no others: (1) `node-strip-types`' two edits, on nine parameter properties and three specifiers; (2) `@aztec/telemetry-client` -> `../../telemetry.ts` and `@aztec/world-state/native` -> `../../fork_checkpoint.ts`, RI-29 and RI-26; (3) **`PublicProcessorFactory` removed** — DD-9: its `protected createPublicTxSimulator` hard-defaults to `TelemetryCppPublicTxSimulator`, the NAPI AVM, with no flag, and `PublicProcessor`'s own constructor takes the simulator as its fourth positional argument, so injection replaces inheritance; (4) **`generateProvingRequest` and its call site removed** — M22's own deliverable, "`AvmProvingRequest` generation removed, since we do not prove", and there is no proving stack in the wasm link closure to serve one (RI-13); (5) the three `@trackSpan` method decorators commented out — MEASURED, not assumed: a decorator is a `SyntaxError: Invalid or unexpected token` under the type stripper, reproduced standalone; (6) the `contractsDB` parameter narrowed from the CLASS `PublicContractsDB` to `PublicContractsDBInterface & { addNewContracts(tx) }`, because this runtime's contract store is resident inside `avm.wasm` and TypeScript is structural — the narrowing is what makes the substitution a declaration rather than an accident, and upstream's own class still satisfies it. |
 <!-- END:editclasses -->
 
@@ -197,6 +203,11 @@ does not exist).
 | orchestration/src/vendor/public_processor/public_processor_metrics.ts | telemetry-replacement | modified |
 | orchestration/src/vendor/public_db_sources.ts | node-strip-types | modified |
 | orchestration/src/vendor/side_effect_errors.ts | node-strip-types | modified |
+| orchestration/src/vendor/public_tx_simulation_tester.ts | tx-builder-calldata-half | modified |
+| orchestration/src/vendor/avm_fixtures_utils.ts | tx-builder-calldata-half | modified |
+| orchestration/src/vendor/simple_contract_data_source.ts | tx-builder-calldata-half | modified |
+| orchestration/src/vendor/public_fixtures_utils.ts | tx-builder-calldata-half | modified |
+| orchestration/src/vendor/gas_compat.ts | tx-builder-calldata-half | added |
 <!-- END:edits -->
 
 ## Not vendored, and deliberately

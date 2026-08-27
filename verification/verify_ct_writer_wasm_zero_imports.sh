@@ -272,7 +272,8 @@ assert_true "and the module was BUILT from that materialisation (it is newer tha
   test "$MODULE" -nt "$STAMP"
 # AND THE CRATE'S OWN TESTS ARE RUN, BECAUSE UNTIL NOW THEY WERE NOT.
 #
-# `ct-writer/src/lib.rs` carries five `#[test]`s over this exact ABI, and
+# `ct-writer/src/lib.rs` carries FOURTEEN `#[test]`s over this exact ABI — five when this block
+# was written, twelve before M26 and fourteen after it added the join surface's two — and
 # `build_ct_writer_wasm.sh` runs them only behind `--native-tests`. NOTHING IN THE REPOSITORY
 # EVER PASSED IT. Measured by the anchor move's review: when `pins.json` moved onto the
 # column-capable writer, `a_column_request_is_recorded_as_dropped` — which asserts
@@ -290,7 +291,11 @@ m24_run_bounded "$M24_BUILD_TIMEOUT" "the ct-writer native tests" \
 NATIVE_RC=$?
 assert_eq "the ct-writer crate's own native tests over this ABI pass" "0" "$NATIVE_RC"
 NATIVE_PASSED="$(sed -n 's/^test result: ok\. \([0-9]*\) passed;.*/\1/p' "$NATIVE_LOG" | head -1)"
-assert_ge "and it is not an empty suite — cargo exits 0 over zero tests" "5" \
+# THE FLOOR TRACKS THE SUITE, which it had stopped doing: it stayed at 5 while the crate grew to
+# fourteen, so nine tests could have been deleted — M26's two among them — and this assertion would
+# still have passed. M26's review raised it. It is an `assert_ge` because a milestone that ADDS a
+# test should not have to edit this line, and the count of assertions here does not move either way.
+assert_ge "and it is not an empty suite, nor a suite something has been deleted from" "14" \
   "${NATIVE_PASSED:-0}"
 
 assert_true "the build script reads the revision from pins.json rather than declaring one" \

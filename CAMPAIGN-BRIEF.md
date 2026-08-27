@@ -35,7 +35,7 @@ load).
 Each of these is a defect that shipped, not a precaution.
 
 ### An assertion must be capable of failing
-**Twenty-five instances.** (Five places quote the running total: this line, the two M18 checks
+**Twenty-seven instances.** (Five places quote the running total: this line, the two M18 checks
 `lib_m18_orchestration.sh` and `verify_no_telemetry_client_in_import_graph.sh`, and the two M19
 files `fault_injection.ts` and `e2e_differential_wasm_vs_native_cpp.sh`. M18's review added three,
 M19 added one, M19's review added one, M21 added one, and M22 added one. If you add one, move all
@@ -48,7 +48,16 @@ M25's review found the 25th and moved this line only — because four of the fiv
 and point here instead of quoting a number, which is what the remedy above asked for. **The fifth
 had not been converted**: `e2e_differential_wasm_vs_native_cpp.sh:19` still said "twenty-four
 assertions that could not", found by grepping the spelling rather than trusting the paragraph that
-claims all five were done. It points here now, so this line is the only place the number lives.)
+claims all five were done. It points here now, so this line is the only place the number lives.
+**M26 found the 26th and the 27th, both in its OWN checks and both before they landed**, which is
+what "get there first" means: `verify_oq7_shared_writer_verdict_recorded` compared a value with
+ITSELF — `assert_eq "…" "$(m26_row "$SHARED" STEPS)" "$(m26_row "$SHARED" STEPS)"`, the most
+degenerate shape on this list, in the check whose author had read this paragraph the same day — and
+the publication control beside it asked `m24_published_refcount` of a directory that is not a git
+repository, so the predicate short-circuited to 0 for the same reason it answers 0 for the subject
+and the control agreed with the thing it was controlling. The first is an identity now (the shared
+container's step count equals the sum of the two split containers'); the second is
+`refs/remotes/origin/master` IN THE SAME REPOSITORY, with the two commits asserted different.)
 
 **AND THE FIVE ARE NOT THE ONLY PLACES — THAT WAS MEASURED, NOT ASSUMED.** M22 reported two
 pre-existing strays outside the declared five. There are **five**, and one of them quotes a
@@ -306,6 +315,30 @@ it is not an assertion that can only pass.
 **Rule:** every commit `pins.json` names must be reachable from a published remote ref, and the
 check that says so must be able to say no. Push the branch before you pin off it.
 
+### "IT DOES NOT BUILD HERE" IS A CLAIM AND NEEDS THE SAME EVIDENCE AS ANY OTHER
+
+**One instance, and it was the load-bearing sentence of a milestone's most dangerous artefact.**
+M26 updated the Noir tracer's own fixture expectations for OQ-4's `Field` rendering and recorded
+that they were *"not executed: `noir_tracer` on `blocktracer` links the Nim FFI writer, whose
+static library this environment does not build"*. Measured by M26's review: it builds. The failure
+is `nimble` not being on `PATH`, and `codetracer_trace_writer_nim/build.rs`'s **own doc comment**
+names the escape (`CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL=1`); the repository's other
+route is a sibling's dev shell, because **`noir` has no `.envrc` of its own**. Either way `nargo`
+builds in 1m32s and the suite runs in under a second.
+
+**In this workspace the first hypothesis for "it does not build" is a missing `direnv exec <repo>`
+— and the repo whose shell you need may be a SIBLING**, because a path dependency's `build.rs`
+runs in the *dependent's* environment while needing the *dependency's* toolchain. This is the same
+family as "the repository's own `.envrc` is the shell; the workspace root's is not it", one level
+out: there, the wrong shell was too high; here, the right shell was next door.
+
+**And updated-but-unexecuted expectations are the artefact this rule exists to prevent.** Executed,
+they turned out to be *correct* — but the suite around them is **red at `HEAD`, six of six**, for
+reasons that predate the change and fire *earlier in each test*, so the new assertions are not
+merely unrun, they are unreachable. A reader who runs that suite gets six failures none of which is
+about the change that touched the file. **If you cannot run a test you changed, say what you tried,
+and put it in the test file rather than in a milestone document in another repository.**
+
 ### Conjunctions need a negative case per conjunct
 A four-tree conjunction whose only negative case exercised one tree: dropping any
 of the other three passed all twelve cases.
@@ -418,17 +451,39 @@ touch moves, look for a commit that landed between the reference sweep and yours
 repository — before writing a story. Both attributions above were re-derived independently by the
 review and both held; that is the standard, not the presumption.
 
-Current per-milestone counts. Measured **M0-M25, on 2026-08-27**, by M25's REVIEW, one milestone at
-a time with nothing else running, `setsid`-detached, **inside this repository's own dev shell**
+Current per-milestone counts. Measured **M0-M26, on 2026-08-27**, by M26, one milestone at a time
+with nothing else running, `setsid`-detached, **inside this repository's own dev shell**
 (`direnv exec` — the engine and the PATH the checks and CI use), `TMPDIR` and the log under
-`~/.cache`, over the COMMITTED tree, no hole in the log, 26 of 26 exit 0 and **zero failing
-assertions**:
+`~/.cache`, no hole in the log, 27 of 27 exit 0 after M9's re-run and **zero failing assertions**:
 
 ```
-m0 156  m1 169  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m0 156  m1 175  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
 m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
-m19 180  m20 237  m21 324  m22 260  m23 509  m24 350  m25 266   CAMPAIGN TOTAL 9,027
+m19 180  m20 237  m21 324  m22 260  m23 509  m24 350  m25 272  m26 313
+                                                        CAMPAIGN TOTAL 9,352
 ```
+
+**M26 MOVED THREE NUMBERS AND EVERY UNIT OF ALL THREE IS ACCOUNTED FOR IN BOTH DIRECTIONS.**
+Its own **313** (133 / 65 / 36 / 79) after its review — **declared at 293** (117 / 65 / 36 / 75), and
+the twenty its review added are itemised in M26's Verification section, in two checks and nothing
+else; **M1 169 -> 175**, which is `verify_provenance_complete`
+58 -> 64 — five new single-file `PROVENANCE.md` rows at one `is tracked` assertion each, plus one
+for `RI-72`, an inventory id no row had cited before (5 + 1, exact in both parts); and **M25
+266 -> 272**, which is `test_fr_rendering_matches_noir_tracer` 50 -> 56, because M26 landed
+`SOURCE-MAPPING.md` §4.4's option 1 and the check was repointed at the rendering that is now there
+plus the absence of the one that is not. 9,027 + 313 + 6 + 6 = **9,352** exactly.
+**Every other milestone came out at its reference value TO THE ASSERTION**, including M4 at 218 in
+the dev shell (M19's review's PATH pin still holds), M11 at 259 (upstream has not moved a sixth
+time) and M24 at 350 — unmoved even though M26 changed the module under it three times, because
+M24's checks re-derive `TRACE-ABI.md` from the artefact rather than pinning literals.
+
+**M9 FLAKED IN THAT SWEEP AND PASSED ALONE, WHICH IS THE SETTLED PROCEDURE.** In the sweep: 524,
+exit 1, twelve failing assertions, the V8 step transcript truncated after 17,866 lines at
+`steps.burn.17592` with the `avmSteps.done` sentinel never arriving — the recorded signature
+exactly. `807 - 524 = 283 = 140 + 143`, so the whole shortfall is the two checks that correctly
+REFUSED to compare and printed no summary line while doing it; the other twelve red assertions are
+in the two checks `m9_completeness` is still not wired into, which is this file's own outstanding
+item and not a finding about the interpreter.
 
 **M25'S REVIEW MOVED EXACTLY ONE MILESTONE AND IT IS M25'S OWN.** Every one of M0-M24 came out at
 its reference value **to the assertion**, including M9 at 807 in 1,313 s with its

@@ -91,6 +91,12 @@ export interface CtRecording {
   readonly rungViolations: number;
   /** Source paths interned through `ct_intern_path`. */
   readonly pathsInterned: number;
+  /** `TraceLogEvent`s written through `ct_log_event`, read off the module before it closed. */
+  readonly logEvents: number;
+  /** Frames opened through `ct_call`, read off the module before it closed. */
+  readonly callsOpened: number;
+  /** Frames still open at close. Non-zero is legitimate — an entry frame need not return. */
+  readonly callDepthAtClose: number;
 }
 
 export class CtWriterError extends Error {
@@ -366,6 +372,89 @@ export class CtWriter {
     if (status !== CT_OK) throw new CtWriterError('ct_declare_rung', status, this.lastError());
   }
 
+  /**
+   * Write one `TraceLogEvent` with an arbitrary metadata key. M26's join record goes through here.
+   *
+   * The key is not validated against a list, for the module's reason: a host that policed keys
+   * would make every new record kind a change to this file as well as to its producer. What IS
+   * refused is an empty key, by the module, because a `TraceLogEvent` nobody can grep for is not
+   * findable by the only mechanism a reader has.
+   */
+  logEvent(metadata: string, content: string): void {
+    this.assertOpen();
+    const enc = new TextEncoder();
+    const m = enc.encode(metadata);
+    const c = enc.encode(content);
+    const mPtr = this.ex.ct_alloc(m.length || 1);
+    const cPtr = this.ex.ct_alloc(c.length || 1);
+    this.refresh();
+    this.bytes.set(m, mPtr);
+    this.bytes.set(c, cPtr);
+    const status = this.ex.ct_log_event(mPtr, m.length, cPtr, c.length);
+    this.ex.ct_free(mPtr, m.length || 1);
+    this.ex.ct_free(cPtr, c.length || 1);
+    if (status !== CT_OK) throw new CtWriterError('ct_log_event', status, this.lastError());
+  }
+
+  /** `TraceLogEvent`s this session wrote through {@link logEvent}. The MODULE's count, not ours. */
+  get logEventsWritten(): number {
+    return this.ex.ct_log_event_count();
+  }
+
+  /**
+   * Open a frame. M26's frame ABI.
+   *
+   * `pathId` comes from {@link internPath}; omitting it puts the frame on the session's own source
+   * path, which is what a recording that interned nothing has. `contractAddress` is optional and
+   * becomes the frame's ONE argument, rendered as OQ-4's hex `String` — which is what makes a
+   * public frame attributable to a contract without reading the steps inside it.
+   *
+   * **THE BUFFER IS FLUSHED FIRST, AND THAT IS NOT AN OPTIMISATION.** Steps are staged host-side
+   * and cross the boundary in batches; a `ct_call` that crossed before the pending steps did would
+   * put the caller's last steps INSIDE the callee's frame. The flush makes the frame boundary land
+   * where the caller put it.
+   */
+  call(name: string, opts: { pathId?: number; line?: number; contractAddress?: Uint8Array } = {}): void {
+    this.assertOpen();
+    this.flush();
+    const enc = new TextEncoder().encode(name);
+    const namePtr = this.ex.ct_alloc(enc.length || 1);
+    const addrGiven = opts.contractAddress !== undefined;
+    if (addrGiven && opts.contractAddress!.length !== ADDRESS_LEN) {
+      throw new RangeError(`contractAddress must be exactly ${ADDRESS_LEN} bytes`);
+    }
+    this.refresh();
+    this.bytes.set(enc, namePtr);
+    if (addrGiven) this.bytes.set(opts.contractAddress!, this.addrPtr);
+    const status = this.ex.ct_call(
+      namePtr,
+      enc.length,
+      opts.pathId ?? 0xffffffff,
+      opts.line ?? 1,
+      addrGiven ? this.addrPtr : 0,
+    );
+    this.ex.ct_free(namePtr, enc.length || 1);
+    if (status !== CT_OK) throw new CtWriterError('ct_call', status, this.lastError());
+  }
+
+  /** Close the innermost open frame. Flushes first, for {@link call}'s reason. */
+  returnFrame(): void {
+    this.assertOpen();
+    this.flush();
+    const status = this.ex.ct_return();
+    if (status !== CT_OK) throw new CtWriterError('ct_return', status, this.lastError());
+  }
+
+  /** Frames currently open. The MODULE's count, so a host cannot assert its own arithmetic. */
+  get callDepth(): number {
+    return this.ex.ct_call_depth();
+  }
+
+  /** Frames opened over the session. Does not go down, so "no frames" and "all closed" differ. */
+  get callsOpened(): number {
+    return this.ex.ct_calls_opened();
+  }
+
   /** Contracts a rung has been declared for. Read from the module, not counted here. */
   get rungsDeclared(): number {
     return this.ex.ct_rung_count();
@@ -421,6 +510,9 @@ export class CtWriter {
     this.flush();
     const events = Number(this.ex.ct_events_written());
     const rungsDeclared = this.ex.ct_rung_count();
+    const logEvents = this.ex.ct_log_event_count();
+    const callsOpened = this.ex.ct_calls_opened();
+    const callDepthAtClose = this.ex.ct_call_depth();
     const positionsLeft = this.ex.ct_positions_pending();
     if (positionsLeft !== 0) {
       // More positions than steps. Not a degradation — a desynchronisation, and the steps that
@@ -474,6 +566,9 @@ export class CtWriter {
       stepsUnpositioned,
       rungViolations,
       pathsInterned: this.pathsInterned,
+      logEvents,
+      callsOpened,
+      callDepthAtClose,
     };
   }
 }

@@ -92,8 +92,8 @@ assert_true "…and whose reserved-byte figure is the measured one" \
   str_has_sub "$ABI_ROW" "**$(m25_arm 'd["surface"]["recordReservedBytesFromOffsets"]')** are reserved"
 assert_eq "M24's nineteen exports are untouched" "19" "$(m25_arm 'd["surface"]["requiredExports"]')"
 assert_eq "M25 adds eleven, in their own list" "11" "$(m25_arm 'd["surface"]["sourceMappingExports"]')"
-assert_eq "…and the union is exactly the two lists" "30" "$(m25_arm 'd["surface"]["allRequiredExports"]')"
-assert_eq "every one of the thirty is present in the built module" "0" \
+assert_eq "…and the union is exactly the three lists" "36" "$(m25_arm 'd["surface"]["allRequiredExports"]')"
+assert_eq "every one of the thirty-six is present in the built module" "0" \
   "$(m25_arm 'len(d["surface"]["missingFromModule"])')"
 # THE RESIDUE IS PRINTED, NOT COUNTED. A module export no list names is a finding — it is either a
 # surface the host does not require or a list that has gone stale.

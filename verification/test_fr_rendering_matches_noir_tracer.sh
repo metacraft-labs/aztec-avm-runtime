@@ -58,7 +58,29 @@ FIELDEL="$(cat "$NOIR/acvm-repo/acir_field/src/field_element.rs" 2>/dev/null)"
 assert_ge "the Noir tracer's value glue reads back" 300 "$(printf '%s\n' "$GLUE" | grep -c . || true)"
 assert_ge "…and acir_field's FieldElement reads back" 300 "$(printf '%s\n' "$FIELDEL" | grep -c . || true)"
 
-assert_true "the Noir tracer renders Field as ValueRecord::Int over to_i128() as i64" \
+# M26 CHANGED THIS FILE'S SUBJECT, AND THE ASSERTIONS FOLLOW THE CHANGE RATHER THAN THE OTHER WAY
+# ROUND. M25 asserted that the Noir tracer renders `Field` through `to_i128() as i64` — true then,
+# and the reason §4.1 said "match it exactly" was not available. M26 applied §4.4's option 1, so
+# the assertion now names the NEW rendering and a second assertion names the old one as ABSENT.
+#
+# **THE ABSENCE MUST BE ASKED OF THE `Field` ARM AND NOT OF THE FILE**, and that is not a detail:
+# `ValueRecord::Int { i: field_value.to_i128() as i64, type_id }` is ALSO how the
+# `UnsignedInteger` and `SignedInteger` arms render, and both are correct and must stay. A
+# whole-file `str_has_sub` for that line therefore keeps matching after the change lands — it is
+# the campaign's "a needle that stops naming what it means" in the exact place a lazy edit would
+# put it. The arm is extracted first, and the extraction's own non-emptiness is asserted.
+FIELD_ARM="$(printf '%s\n' "$GLUE" | sed -n '/        PrintableType::Field => {/,/        PrintableType::UnsignedInteger/p')"
+assert_ge "the Field arm extracts from the Noir tracer's value glue" 8 \
+  "$(printf '%s\n' "$FIELD_ARM" | grep -c . || true)"
+assert_true "the Noir tracer renders Field as ValueRecord::String over field_to_hex" \
+  str_has_sub "$FIELD_ARM" 'ValueRecord::String { text: field_to_hex(field_value), type_id }'
+assert_true "…and field_to_hex is 0x + AcirField::to_hex, which is 64 lowercase big-endian hex" \
+  str_has_sub "$GLUE" 'format!("0x{}", field_value.to_hex())'
+assert_false "…and the to_i128 rendering is GONE from the Field arm" \
+  str_has_sub "$FIELD_ARM" 'ValueRecord::Int { i: field_value.to_i128() as i64, type_id }'
+# THE CONTROL FOR THAT ABSENCE, and it is the assertion that makes the extraction meaningful: the
+# integer arms still render that way, so the needle is one that CAN match this file.
+assert_true "…while the integer arms still do render that way, so the needle still matches the file" \
   str_has_sub "$GLUE" 'ValueRecord::Int { i: field_value.to_i128() as i64, type_id }'
 assert_true "…under the type (TypeKind::Int, \"Field\"), which is the type this runtime reuses" \
   str_has_sub "$GLUE" 'PrintableType::Field => (TypeKind::Int, "Field".to_string()),'
@@ -69,11 +91,15 @@ assert_true "…gated on fits_in_i128, which is num_bits <= 127" \
 # The negative control for the four above.
 assert_false "a needle in neither Noir file does not match" \
   str_has_sub "$GLUE$FIELDEL" 'ValueRecord::BigInt { b: field_value'
-# …so the Noir half cannot render a full-width field TODAY, and the document says so.
-assert_true "the document records that 'match it exactly' is not available, with its reason" \
-  str_has_sub "$DOC_TEXT" 'cannot render a full-width 254-bit field at all today'
-assert_true "…and records the change M26 must make, by file and line" \
+# …so the Noir half could not render a full-width field before M26, and the document says so.
+assert_true "the document records that 'match it exactly' was not available, with its reason" \
+  str_has_sub "$DOC_TEXT" 'could not render a full-width 254-bit field at all'
+assert_true "…and records the change M26 made, by file and line" \
   str_has_sub "$DOC_TEXT" 'noir/tooling/tracer/src/tracer_glue.rs:148-152'
+assert_true "…and records that M26 landed it, rather than leaving §4.4 as an instruction" \
+  str_has_sub "$DOC_TEXT" 'M26 LANDED OPTION 1'
+assert_true "…and records the cost, which is that a small field now reads as 0x…04 instead of 4" \
+  str_has_sub "$DOC_TEXT" 'a small field now reads as `0x…04` instead of `4`'
 
 # ===========================================================================
 # PART 2 — WHICH RENDERINGS THE PINNED READERS CAN DECODE

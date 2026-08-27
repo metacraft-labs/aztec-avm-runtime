@@ -2098,3 +2098,65 @@ verify-m24:
       echo "verify-m24: all checks passed"
     fi
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M26 — joining the private and public halves of one transaction
+#
+#   just verify-tx-builder      verify_tx_builder_vendored_not_reimplemented
+#   just verify-oq7             verify_oq7_shared_writer_verdict_recorded
+#   just verify-frame-nesting   test_private_public_frame_nesting
+#   just verify-join-fallback   test_join_fallback_two_recordings
+#   just verify-m26             all four
+#
+# NOTHING IN M26 DEPENDS ON `avm.wasm`. The public half's containers are written by
+# `ct-writer/target/.../aztec_ct_writer.wasm` (M24's module, with M26's join and frame exports) and
+# the private half by the OQ-7 probe, so the checks build the ct-writer module and the probe and
+# nothing else.
+#
+# THE PROBE IS THE EXPENSIVE INPUT AND IT IS CACHED, NOT SKIPPED. `build_oq7_shared_writer_probe.sh`
+# links the real `noir_tracer`, which is a large part of the Noir compiler; it shares the Noir
+# worktree's own `target/` and its own toolchain so a warm tree rebuilds in seconds, and its
+# staleness stamp hashes `tracer_glue.rs` as well as the worktree HEAD, because M26's edit to that
+# file is uncommitted and a HEAD-only stamp would not move for it.
+# ---------------------------------------------------------------------------
+
+# Build the OQ-7 shared-writer probe (one CtfsTraceWriter, two producers).
+oq7-probe:
+    @verification/build_oq7_shared_writer_probe.sh
+
+# Re-measure the join arms into $M26_WORK/join.json (default ~/.cache/aztec-m26-join).
+join-arms:
+    @node --experimental-strip-types tools/run_join_arms.mjs "${M26_WORK:-$HOME/.cache/aztec-m26-join}"
+
+verify-tx-builder:
+    @verification/verify_tx_builder_vendored_not_reimplemented.sh
+
+verify-oq7:
+    @verification/verify_oq7_shared_writer_verdict_recorded.sh
+
+verify-frame-nesting:
+    @verification/test_private_public_frame_nesting.sh
+
+verify-join-fallback:
+    @verification/test_join_fallback_two_recordings.sh
+
+# Run the whole M26 verification set; every check runs even if an earlier one fails.
+verify-m26:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_tx_builder_vendored_not_reimplemented \
+      verify_oq7_shared_writer_verdict_recorded \
+      test_private_public_frame_nesting \
+      test_join_fallback_two_recordings
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m26: FAILED" >&2
+    else
+      echo "verify-m26: all checks passed"
+    fi
+    exit "$rc"

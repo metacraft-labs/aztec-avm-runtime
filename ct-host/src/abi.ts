@@ -50,6 +50,8 @@ export const CT_ERR_RESERVED_NOT_ZERO = -6;
 export const CT_ERR_ALREADY_OPEN = -7;
 export const CT_ERR_BAD_PATH_ID = -8;
 export const CT_ERR_BAD_RUNG = -9;
+/** M26: `ct_return` with no frame open. */
+export const CT_ERR_NO_FRAME = -10;
 
 /** `ct_writer_kind()` values. `1` is DD-7's Path A, the pure-Rust `CtfsTraceWriter`. */
 export const WRITER_KIND_PATH_A_PURE_RUST = 1;
@@ -155,6 +157,13 @@ export interface CtWriterExports {
   ct_rung_violation_pc(): number;
   ct_steps_positioned(): bigint;
   ct_steps_unpositioned(): bigint;
+  // -- M26's join surface. Listed separately below; see JOIN_EXPORTS. --
+  ct_log_event(metadataPtr: number, metadataLen: number, contentPtr: number, contentLen: number): number;
+  ct_log_event_count(): number;
+  ct_call(namePtr: number, nameLen: number, pathId: number, line: number, addressPtr: number): number;
+  ct_return(): number;
+  ct_call_depth(): number;
+  ct_calls_opened(): number;
 }
 
 /** Every export name the host requires, so a missing one is one named failure and not a `TypeError`. */
@@ -205,10 +214,31 @@ export const SOURCE_MAPPING_EXPORTS: readonly string[] = [
   'ct_steps_unpositioned',
 ];
 
-/** Every export the host requires. The constructor checks this, not either half alone. */
+/**
+ * M26's join exports, kept in their OWN list for {@link SOURCE_MAPPING_EXPORTS}' reason.
+ *
+ * `verify_ct_writer_wasm_zero_imports` enumerates M24's nineteen BY NAME and asserts the count is
+ * exactly nineteen; M25's own check asserts the union. Appending here would move a count for a
+ * change that is not that milestone's, which this campaign has a rule about. So M24 goes on
+ * measuring its nineteen, M25 its eleven, M26 its SIX, and the union is what the host requires.
+ * (This sentence said "two" until M26's review: the list began as `ct_log_event` and its counter
+ * and grew to six when the fallback turned out to need frames. A count in a comment beside the
+ * list it counts is the campaign's own prose-drifts-from-measurement, at arm's length of nothing.)
+ */
+export const JOIN_EXPORTS: readonly string[] = [
+  'ct_log_event',
+  'ct_log_event_count',
+  'ct_call',
+  'ct_return',
+  'ct_call_depth',
+  'ct_calls_opened',
+];
+
+/** Every export the host requires. The constructor checks this, not any one list alone. */
 export const ALL_REQUIRED_EXPORTS: readonly string[] = [
   ...REQUIRED_EXPORTS,
   ...SOURCE_MAPPING_EXPORTS,
+  ...JOIN_EXPORTS,
 ];
 
 /**
@@ -298,6 +328,8 @@ export function statusText(status: number): string {
       return 'a position record names a path id this session never interned';
     case CT_ERR_BAD_RUNG:
       return 'the declared mapping rung is not 1, 2 or 3';
+    case CT_ERR_NO_FRAME:
+      return 'no frame is open';
     default:
       return `unrecognised status ${status}`;
   }

@@ -95,16 +95,35 @@ export interface PrivateExecutionSummary {
 }
 
 /**
- * The handle M26 consumes. Opaque HERE on purpose.
+ * The handle M26 consumes. Opaque in M21 on purpose; FILLED IN BY M26, from what was built.
  *
- * M26 owns what a private trace is; this milestone owns only the fact that a locally-originated
- * transaction can carry one and an externally-settled one cannot. Declaring the shape now would be
- * this campaign's own recurring defect in a new place — a type written from a deliverable's wording
- * rather than from the thing it describes.
+ * M21 declared only `id` and said so: *"M26 owns what a private trace is; this milestone owns only
+ * the fact that a locally-originated transaction can carry one"*, and that declaring the shape
+ * before there was a thing to describe would be a type written from a deliverable's wording. There
+ * is a thing to describe now, and every field below is one a consumer needs in order to OPEN the
+ * recording rather than one that reads well:
+ *
+ * - `join` is the identity written into every half's `ct.trace-join` record. It is the SAME string
+ *   the containers carry, so a consumer never has to match a handle to a file by name.
+ * - `halves` is how many halves the join has — 1 on the shared arm, 2 on the fallback. Without it a
+ *   consumer handed one container cannot tell an incomplete join from a whole recording.
+ * - `arm` says which shape produced it, so a consumer knows whether to expect one container or two
+ *   before it goes looking for a second.
+ *
+ * WHAT IS DELIBERATELY NOT HERE IS A FILE PATH. A handle that carried one would make the join a
+ * fact about a filesystem, and `JOIN-SHAPE.md` §4's whole argument is that a join must be recorded
+ * in the containers rather than inferred from where they sit. The handle names the join; the
+ * containers say which half they are.
  */
 export interface PrivateTraceHandle {
   /** Identifies the trace to whatever produced it. */
   readonly id: string;
+  /** The join identity, equal to the `join=` field of every half's `ct.trace-join` record. */
+  readonly join?: string;
+  /** How many halves that join has. `1` on the shared arm, `2` on the fallback. */
+  readonly halves?: number;
+  /** `shared` — one container carrying both halves; `split` — one container per half. */
+  readonly arm?: 'shared' | 'split';
 }
 
 /** M20's arm: the private half ran somewhere else and we were handed the result. */

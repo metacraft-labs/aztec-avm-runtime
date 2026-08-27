@@ -185,19 +185,34 @@ are erased.
 
 ## 4. OQ-4's verdict: **`0x` + 64 lowercase big-endian hex, in `ValueRecord::String`**
 
-### 4.1 What the Noir tracer does, and why "match it exactly" is not available
+### 4.1 What the Noir tracer did, why "match it exactly" was not available, and what M26 changed
 
-| what | where |
+**M26 APPLIED THE CHANGE §4.4 ASKS FOR, so this section is now a record of what was there rather
+than of what is.** The table below is the state M25 measured; the paragraph after it is the state
+M26 left. `test_fr_rendering_matches_noir_tracer` asserts the NEW rendering and asserts the old one
+is GONE, in both Noir checkouts, so neither this section nor that check can go stale quietly.
+
+| what | where, at M25 |
 |---|---|
-| `Field` becomes an `Int` | `noir/tooling/tracer/src/tracer_glue.rs:148-152` — `ValueRecord::Int { i: field_value.to_i128() as i64, type_id }` |
+| `Field` became an `Int` | `noir/tooling/tracer/src/tracer_glue.rs:148-152` — `ValueRecord::Int { i: field_value.to_i128() as i64, type_id }` |
 | under `(TypeKind::Int, "Field")` | `tracer_glue.rs:371` |
 | and `to_i128` **panics** above 127 bits | `noir/acvm-repo/acir_field/src/field_element.rs:253-256`, gated on `fits_in_i128()` = `num_bits <= 127` |
 | then `as i64` truncates | `tracer_glue.rs:152` |
 
-**So the Noir half cannot render a full-width 254-bit field at all today**: it aborts the recorder,
-or keeps the low 64 bits with a sign fold. A 32-byte Aztec contract address is full-width.
-"Cross-check against what the Noir tracer does" therefore cannot mean "do the same thing", and
-saying so is the finding rather than a caveat on it.
+**So the Noir half could not render a full-width 254-bit field at all**: it aborted the recorder, or
+kept the low 64 bits with a sign fold. A 32-byte Aztec contract address is full-width.
+"Cross-check against what the Noir tracer does" therefore could not mean "do the same thing", and
+saying so was the finding rather than a caveat on it.
+
+**What M26 changed.** The `Field` arm now renders `ValueRecord::String { text: field_to_hex(...) }`
+under the same `(TypeKind::Int, "Field")`, where `field_to_hex` is `format!("0x{}", to_hex())` — the
+verdict of §4.3, applied to the other half. Measured on the joined container M26 produces: the Noir
+half's `x = 4` and `y = 5` read back as
+`0x0000000000000000000000000000000000000000000000000000000000000004` and `…05`, 66 characters each,
+`ValueRecord::String`, beside the public half's contract address
+`0x3051e7a94116d0ade3f33411a29365e1f0bd72d615eb9ca89705dc6d6da9076d` in the same variant. **One
+field element, one spelling, across the join.** `JOIN-SHAPE.md` §5 records it with the container
+it was read out of.
 
 ### 4.2 The measurement that decided it
 
@@ -253,6 +268,14 @@ What M24 recorded for the same address, kept so this is a delta rather than a cl
 a Metacraft repository and not Aztec, so it is **not** the sixth upstream contribution, and it is
 M26's to land — M26 is where the two halves become one container and where a disagreement between
 them is a defect rather than a divergence.
+
+***M26 LANDED OPTION 1***, in both Noir checkouts (`noir` on `blocktracer`, and the
+`noir-wt4-webpage` worktree the OQ-7 probe builds from), with the two rendering lines asserted
+byte-identical between them so the demonstration and the shipped fix cannot drift. The cost is
+recorded rather than glossed: **a small field now reads as `0x…04` instead of `4`**, which is worse
+for an ordinary Noir program and is the price of one spelling across the join. Option 2 —
+fixing `BigInt`'s CBOR encoding in the shared crate — remains the better long-run answer and
+remains a decision above this milestone.
 
 Two options exist and the reason for preferring the first is recorded:
 
