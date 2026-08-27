@@ -4,21 +4,29 @@
 
 # The trace event ABI — OQ-6, settled
 
-**THE MEASUREMENT DOES NOT HAVE A STABLE SIGN, AND THAT IS THE RESULT.** Run five times — once in
-the system engine and four times in this repository's dev shell — `perEvent - batched` came out
-**+0.20 %**, **+1.09 %**, **-0.58 %**, **-0.09 %** and **+0.96 %**. Every one is inside the
-declared **margin of 3 %**; runs 2, 3 and 4 were taken on the *same engine, the same module and
-the same binary*, and two of those have 95 % intervals that do not overlap and point opposite
-ways. So the honest statement is not "the batched ABI is about one per cent faster" — it is that
-**the difference is smaller than the run-to-run variation of the instrument that measures it**,
-and speed cannot choose the ABI.
+**THE MEASUREMENT DOES NOT HAVE A STABLE SIGN, AND THAT IS THE RESULT.** Run six times — once in
+the system engine and five times in this repository's dev shell — `perEvent - batched` came out
+**+0.20 %**, **+1.09 %**, **-0.58 %**, **-0.09 %**, **+0.96 %** and **+0.98 %**. Every one is
+inside the declared **margin of 3 %**; runs 2, 3 and 4 were taken on the *same engine, the same
+module and the same binary*, and two of those have 95 % intervals that do not overlap and point
+opposite ways. So the honest statement is not "the batched ABI is about one per cent faster" — it
+is that **the difference is smaller than the run-to-run variation of the instrument that measures
+it**, and speed cannot choose the ABI.
 
-**Run 5 is a DIFFERENT MODULE, and that is why it exists.** The `trace_format` anchor moved on
-2026-08-26 (§5, §7), `m24_require_oq6` stamps the module's content rather than its mtime, and a
-changed module is a new measurement by construction. It landed at **+0.96 %** — the same sign as
-run 2, the opposite of runs 3 and 4, and the same size as all of them. The instability is a
-property of the instrument and not of the module, which is the one thing a fifth run on new bytes
-could have refuted and did not.
+**Runs 5 and 6 are DIFFERENT MODULES, and that is why they exist.** `m24_require_oq6` stamps the
+module's content rather than its mtime, so a changed module is a new measurement by construction —
+the `trace_format` anchor moved for run 5 (§5, §7) and M25 added the source-mapping surface for
+run 6. They landed at **+0.96 %** and **+0.98 %** — the same sign, the same size, on two different
+modules, both inside the margin. **The instability is a property of the instrument and not of the
+module**, which is the one thing two runs on new bytes could have refuted and did not; run 6 is
+the stronger of the two tests, because its module also *changed what an event costs*.
+
+**RUN 6 MOVED THE CONTAINER AND NOT THE VERDICT, AND THE TWO ARE WORTH SEPARATING.** M25 settled
+OQ-4 on a 64-character hex `String` per event where M24 wrote an `i64`, so a 100,000-event
+container went **4,440,064 → 4,694,016 bytes** and every arm got slower in absolute terms. The
+`perEvent - batched` difference did not leave the noise band, and the crossing-only pair
+(`+9.04 %`) is the same size it has been in all six runs. That is the expected shape: OQ-4 changed
+the writer work per event, which is the denominator, and left the boundary alone.
 
 The ABI is therefore chosen on a stated secondary criterion, recorded in §4, and both ABIs remain
 exported.
@@ -74,34 +82,34 @@ silently.
 
 | arm | median (µs) | min (µs) | crossings | container (B) |
 |---|---|---|---|---|
-| `batched` | 535,146 | 521,075 | 25 | 4,440,064 |
-| `perEvent` | 541,080 | 529,442 | 100,000 | 4,440,064 |
-| `control` | 536,190 | 521,087 | 25 | 4,440,064 |
-| `nopBatched` | 4,546 | 4,420 | 25 | 159,744 |
-| `nopPerEvent` | 4,961 | 4,287 | 100,000 | 159,744 |
+| `batched` | 625,653 | 608,876 | 25 | 4,694,016 |
+| `perEvent` | 631,290 | 619,473 | 100,000 | 4,694,016 |
+| `control` | 621,202 | 609,074 | 25 | 4,694,016 |
+| `nopBatched` | 4,758 | 4,507 | 25 | 159,744 |
+| `nopPerEvent` | 5,070 | 4,520 | 100,000 | 159,744 |
 
 | comparison | median | 95 % interval | reads as |
 |---|---|---|---|
-| `perEvent - batched` | **+0.96 %** | **[+0.12, +1.80] %** | within noise |
-| `control - batched` | +0.41 % | [+0.08, +0.75] % | the instrument is calibrated |
-| `nopPerEvent - nopBatched` | +8.73 % | [+7.06, +10.39] % | the crossing, priced alone |
+| `perEvent - batched` | **+0.98 %** | **[+0.29, +1.67] %** | within noise |
+| `control - batched` | -0.38 % | [-0.78, +0.02] % | the instrument is calibrated |
+| `nopPerEvent - nopBatched` | +4.56 % | [+0.49, +8.63] % | the crossing, priced alone |
 
 **Verdict: `within-noise`.** The comparator resolves a verdict only when the whole interval lies
-OUTSIDE ±3 %, and none of the four runs comes close. Within a *single* run the interval is narrow
+OUTSIDE ±3 %, and none of the six runs comes close. Within a *single* run the interval is narrow
 enough to exclude zero — twice, in opposite directions — which is exactly the pathology
 `_timing_compare.py`'s header records for a different measurement: *"six runs of the same
 measurement over the same two binaries produced mutually disjoint 95 % intervals"*. The
 between-run nuisance is larger than the within-run interval, so a single run's interval must not
-be read as the precision of the quantity. §8 tabulates all four.
+be read as the precision of the quantity. §8 tabulates all six.
 
 ### Why the difference is this small
 
 The crossing-only pair is the number that explains it, and *it* is stable: `nopPerEvent -
-nopBatched` came out +16.50 %, +6.98 %, +6.07 %, +6.65 % and +8.73 % across the five runs — always
-positive, always tiny in absolute terms. In this run, 100,000 crossings cost 4,961 µs where 25
-cost 4,546 µs: **415 µs for 99,975 extra crossings, or ~4.2 ns each** — against §9.3's ~33 ns
-prior, and **0.08 % of a 535,146 µs recording**. A whole recording costs about **1,290×** what its
-extra crossings cost, at this event shape: one `register_step` and five
+nopBatched` came out +16.50 %, +6.98 %, +6.07 %, +6.65 %, +8.73 % and +4.56 % across the six runs
+— always positive, always tiny in absolute terms. In this run, 100,000 crossings cost 5,070 µs
+where 25 cost 4,758 µs: **312 µs for 99,975 extra crossings, or ~3.1 ns each** — against §9.3's
+~33 ns prior, and **0.05 % of a 625,653 µs recording**. A whole recording costs about **2,005×**
+what its extra crossings cost, at this event shape: one `register_step` and five
 `register_variable_with_full_value` calls per event.
 
 So §9.3's "obvious performance trap" is, at this writer's cost per event, **worth less than a
@@ -112,20 +120,20 @@ That is a correction to a stated expectation, and it is stated here rather than 
 
 ## 3. The choice is about cost, not semantics
 
-The same 2,000 events through both ABIs produce **byte-identical containers** — 282,624 bytes
+The same 2,000 events through both ABIs produce **byte-identical containers** — 290,816 bytes
 each, at 8 crossings versus 2,000. Asserted by comparison of the bytes, not by design intent, in
 `test_ct_container_roundtrip_ct_print`.
 
 ## 4. The decision, and the criterion that made it
 
 **`ct_ingest` — the batched binary buffer — is the shipped ABI.** Not because it is faster: over
-four runs it was faster twice and slower twice, by less than 1.1 % every time. The stated secondary
+six runs it was faster four times and slower twice, by less than 1.1 % every time. The stated secondary
 criterion is:
 
 > **The per-event ABI's cost is linear in an engine constant this project has not measured and
 > does not control; the batched ABI's is linear in one it does.**
 
-3.0 ns per crossing is *V8-in-node-24*'s number. M27 packages this runtime for a browser and M28
+3.1 ns per crossing is *V8-in-node-24*'s number. M27 packages this runtime for a browser and M28
 gates on one, and neither engine has been measured. A per-event ABI makes a 38,903-step `burn`
 recording's overhead a function of whichever engine the page happens to run in; a batched ABI
 makes it a function of `encodeStep`, which is ours and which every arm above exercises.
@@ -288,13 +296,26 @@ else can resolve is a local file wearing a pin's clothes.
 - **The event shape is upstream's `ExecutionStep`** and M24 did not invent one: `context_id`,
   `contract_address`, `pc`, `opcode`, `gas_used`, in a 64-byte little-endian record whose size the
   module publishes as `ct_record_size()`.
-- **Adding a field is a wire-format change**, not a host change. The 8 reserved bytes at offset 12
+- **Adding a field is a wire-format change**, not a host change. The reserved bytes at offset 12
   are asserted zero on ingest, so the day one of them means something, a stale host fails loudly
   rather than being reinterpreted.
-- **`emit()` is where an event becomes writer calls, and it is rung 3 today.** `Line(pc)` records
-  a program counter as a program counter. OQ-4 (how a 254-bit field renders) is unsettled, so the
-  contract address is recorded as `contractAddressLow` — its low 64 bits — and M25 replaces that
-  with the rendering it settles against the Noir tracer.
+
+  *M25 CORRECTED THIS LINE'S FIGURE AND THE MODULE DOC'S. It said **8** reserved bytes and the
+  module's own header said the fields need **56**; the offsets are `0,4,8,12,16,24,32+32`, so the
+  fields need **60** and **4** are reserved. `const _: () = assert!(OFF_ADDRESS + ADDRESS_LEN ==
+  CT_RECORD_SIZE)` had been pinning the total all along while nothing compared the other two
+  figures to the layout — a figure nobody re-derives rots even when the assertion beside it is
+  correct. Both are `CT_RECORD_FIELD_BYTES` and `CT_RECORD_RESERVED_BYTES` now, asserted against
+  the offsets at compile time and by a native test. And M25 did NOT spend them: a `(path_id, line,
+  column)` triple is twelve bytes, so the source position went on a separate channel —
+  `SOURCE-MAPPING.md` §5.*
+- **`emit()` is where an event becomes writer calls, and M25 SETTLED BOTH OPEN QUESTIONS IN IT.**
+  OQ-5 resolved in favour of **rung 1** — `avm-transpiler` re-keys `brillig_locations` by AVM pc,
+  so a step records a real `(path, line, column)` when the host resolves one and falls back to
+  `Line(pc)` when it cannot, counted per contract rather than silently. OQ-4 resolved to `0x` +
+  64 lowercase big-endian hex in `ValueRecord::String`, replacing `contractAddressLow`, because
+  the full-precision `BigInt` variant is refused by the reader this campaign pins. Both verdicts,
+  with their evidence, are in `SOURCE-MAPPING.md`.
 - **Backpressure is solved and measured**: 250,000 events at 1,024 records per batch hold 65,536
   bytes of host-side buffer, constant, at `ceil(N / 1024)` crossings exactly.
 
@@ -313,9 +334,17 @@ else can resolve is a local file wearing a pin's clothes.
 - **The module has zero wasm imports**, so it instantiates under a bare
   `WebAssembly.instantiate(bytes, {})` with no WASI shim, no `wasm-bindgen` and no glue file.
   `ct-host` has **no npm dependencies** and imports no Node module in its trace path.
-- **253,122 bytes** for the writer plus this ABI, release, `opt-level = "z"`, LTO,
+- **259,839 bytes** for the writer plus this ABI, release, `opt-level = "z"`, LTO,
   `panic = "abort"`, one codegen unit, stripped. Two clean builds (`rm -rf target`) are
-  byte-identical, sha256 `5eef4b11…`.
+  byte-identical, sha256 `1e7e0e4f…`.
+
+  *Re-derived on 2026-08-27, when M25 added the source-mapping surface: **253,122 → 259,839,
+  +6,717 (+2.65 %)**, and the import count is unchanged at **0**.
+  The growth is eleven exports — `ct_intern_path`, `ct_positions`, `ct_declare_rung` and the eight
+  counters — plus the position FIFO, the rung table and the hex renderer OQ-4 settled on. **The
+  step record did not grow**: `ct_record_size()` is still 64, so §3's byte-identical-container
+  claim and §2's twelve-session benchmark are still measurements of what they were taken on. See
+  `SOURCE-MAPPING.md` §5.*
 
   *Re-derived from the artefact on 2026-08-26, when the `trace_format` anchor moved
   `9cbc127ef8` → `592fa42cbf`: **246,527 → 253,122, +6,595 (+2.68 %)**, and the import count
@@ -340,15 +369,15 @@ reconsidered if any of these changed:
 
 | quantity | measured | where |
 |---|---|---|
-| `perEvent - batched`, median | +0.96 % | §2 |
-| its 95 % interval | [+0.12, +1.80] % | §2 |
-| cost of one boundary crossing in V8 | ~4.2 ns | §2 |
-| the crossing's share of a 100k-event recording | 0.08 % | §2 |
-| writer work versus boundary work | ~1,290× | §2 |
+| `perEvent - batched`, median | +0.98 % | §2 |
+| its 95 % interval | [+0.29, +1.67] % | §2 |
+| cost of one boundary crossing in V8 | ~3.1 ns | §2 |
+| the crossing's share of a 100k-event recording | 0.05 % | §2 |
+| writer work versus boundary work | ~2,005× | §2 |
 | containers produced by the two ABIs | byte-identical | §3 |
 | host-side buffer at 250,000 events | 65,536 B, constant | §7 |
 
-**All five runs, retained**, because the disagreement between them is the finding rather than a
+**All six runs, retained**, because the disagreement between them is the finding rather than a
 nuisance. None is wrong; they are what this measurement does.
 
 | # | engine | `perEvent - batched` | 95 % interval | `control - batched` | `nopPerEvent - nopBatched` | crossing |
@@ -357,16 +386,16 @@ nuisance. None is wrong; they are what this measurement does.
 | 2 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell) | +1.09 % | [+0.79, +1.39] % | +0.16 % | +6.98 % | ~3.2 ns |
 | 3 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell) | -0.58 % | [-1.13, -0.03] % | -0.01 % | +6.07 % | ~2.7 ns |
 | 4 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell) | -0.09 % | [-0.68, +0.51] % | +0.26 % | +6.65 % | ~2.9 ns |
-| 5 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **new module**) | **+0.96 %** | **[+0.12, +1.80] %** | +0.41 % | +8.73 % | ~4.2 ns |
+| 5 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, new module) | +0.96 % | [+0.12, +1.80] % | +0.41 % | +8.73 % | ~4.2 ns |
+| 6 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **M25's module**) | **+0.98 %** | **[+0.29, +1.67] %** | -0.38 % | +4.56 % | ~3.1 ns |
 
-Run 5 is the one §2 tabulates, because it is the one `arms.tsv` currently holds and the one the
+Run 6 is the one §2 tabulates, because it is the one `arms.tsv` currently holds and the one the
 check compares this file against. **Runs 2, 3 and 4 are the same engine, the same module and the
 same binary**, and runs 2 and 3 have disjoint intervals with opposite signs — which is why §2 says
-the sign is not stable rather than quoting any one run's interval as a precision. **Run 5 is the
-same engine and a DIFFERENT module**: the `trace_format` anchor moved (§5, §7), so it is not a
-replicate of runs 2–4 and is not offered as one. What it does is put the instability to a test it
-could have failed — a fifth run on new bytes could have come back with runs 3 and 4's sign and a
-tight interval, and instead it came back with run 2's. In all five the control reports no
-difference beyond the margin, so the instrument is calibrated in all five; what is not stable is
-the subject.
+the sign is not stable rather than quoting any one run's interval as a precision. **Runs 5 and 6
+are the same engine and DIFFERENT modules**, so neither is a replicate of runs 2–4 and neither is
+offered as one. What they do is put the instability to a test it could have failed twice — either
+could have come back with runs 3 and 4's sign and a tight interval, and both came back with run
+2's. In all six the control reports no difference beyond the margin, so the instrument is
+calibrated in all six; what is not stable is the subject.
 

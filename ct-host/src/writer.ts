@@ -21,17 +21,24 @@
 
 import {
   ADDRESS_LEN,
+  ALL_REQUIRED_EXPORTS,
   CT_OK,
+  POSITION_SIZE,
   RECORD_SIZE,
-  REQUIRED_EXPORTS,
+  RUNG_SOURCE,
+  decodePosition,
   decodeStep,
+  encodePosition,
   encodeStep,
   statusText,
   type CtWriterExports,
+  type MappingRung,
   type StepEvent,
+  type StepPosition,
 } from './abi.ts';
 import {
   ColumnAwarenessDropped,
+  MappingRungDegraded,
   UnresolvedTracingConfig,
   WRITER_KIND_OF,
   isResolvedTracingConfig,
@@ -72,6 +79,18 @@ export interface CtRecording {
   readonly crossings: number;
   /** Times `memory.grow` moved the buffer under us. */
   readonly memoryGrowths: number;
+  /** The rung this recording's configuration declared. */
+  readonly mappingRung: MappingRung;
+  /** Contracts a rung was declared for, read off the module before it closed. */
+  readonly rungsDeclared: number;
+  /** Steps recorded at a resolved source position. */
+  readonly stepsPositioned: number;
+  /** Steps recorded as `Line(pc)` because no position was available. */
+  readonly stepsUnpositioned: number;
+  /** Rung-1 contracts that produced an unpositioned step. Non-zero throws before you see this. */
+  readonly rungViolations: number;
+  /** Source paths interned through `ct_intern_path`. */
+  readonly pathsInterned: number;
 }
 
 export class CtWriterError extends Error {
@@ -97,6 +116,10 @@ export class CtWriter {
   private readonly stepName: 'ct_step' | 'ct_nop_step';
   private readonly bufPtr: number;
   private readonly addrPtr: number;
+  /** The position side channel's own staging buffer, sized to match the step batch. */
+  private readonly posPtr: number;
+  private posFilled = 0;
+  private pathsInterned = 0;
   private view: DataView;
   private bytes: Uint8Array;
   private seenBuffer: ArrayBuffer;
@@ -116,7 +139,9 @@ export class CtWriter {
       throw new UnresolvedTracingConfig();
     }
     const ex = instance.exports as unknown as CtWriterExports;
-    for (const name of REQUIRED_EXPORTS) {
+    // The UNION, not M24's nineteen alone — see `SOURCE_MAPPING_EXPORTS` in abi.ts for why the
+    // two lists are separate and why the host must still require both.
+    for (const name of ALL_REQUIRED_EXPORTS) {
       if (typeof (ex as unknown as Record<string, unknown>)[name] !== 'function') {
         throw new Error(`ct_writer.wasm does not export ${name}()`);
       }
@@ -132,6 +157,15 @@ export class CtWriter {
         `record size disagreement: the module says ${moduleRecordSize}, this host encodes ${RECORD_SIZE}`,
       );
     }
+    // The same discipline for the position side channel. A 16-versus-20 disagreement here would
+    // shift every field of every position by four bytes and produce a container whose steps point
+    // at plausible wrong lines — which is worse than a container that fails to open.
+    const modulePositionSize = ex.ct_position_size();
+    if (modulePositionSize !== POSITION_SIZE) {
+      throw new Error(
+        `position size disagreement: the module says ${modulePositionSize}, this host encodes ${POSITION_SIZE}`,
+      );
+    }
     this.ex = ex;
     this.config = config;
     this.batchRecords = opts.batchRecords ?? DEFAULT_BATCH_RECORDS;
@@ -143,6 +177,7 @@ export class CtWriter {
 
     this.bufPtr = ex.ct_alloc(this.batchRecords * RECORD_SIZE);
     this.addrPtr = ex.ct_alloc(ADDRESS_LEN);
+    this.posPtr = ex.ct_alloc(this.batchRecords * POSITION_SIZE);
     this.seenBuffer = ex.memory.buffer;
     this.view = new DataView(this.seenBuffer);
     this.bytes = new Uint8Array(this.seenBuffer);
@@ -209,10 +244,35 @@ export class CtWriter {
    * is what `test_trace_writer_backpressure` asserts. The buffer lives in the module's linear
    * memory, so the events are written once — there is no host-side array that is then copied in.
    */
-  push(e: StepEvent): void {
+  push(e: StepEvent, position?: StepPosition): void {
     this.assertOpen();
     this.refresh();
     encodeStep(this.view, this.bytes, this.bufPtr + this.filled * RECORD_SIZE, e);
+    // THE POSITION IS STAGED IN LOCKSTEP WITH THE STEP, NOT SUPPLIED SEPARATELY.
+    //
+    // The module pairs the two FIFOs by ORDER, so a host that stages a position for some steps
+    // and not others must still occupy the slot for the ones it skips — otherwise step N+1 takes
+    // step N's position and every later step in the batch is mis-attributed to a real-looking
+    // wrong line. Rather than ask callers to remember that, `push` writes a `line: 0` record for
+    // an absent position and only starts the side channel once a real one has appeared, so a
+    // caller that never passes a position pays nothing and a caller that passes some cannot
+    // desynchronise. `posFilled` and `filled` are asserted equal at every flush.
+    if (position !== undefined || this.posFilled > 0) {
+      while (this.posFilled < this.filled) {
+        encodePosition(this.view, this.posPtr + this.posFilled * POSITION_SIZE, {
+          pathId: 0,
+          line: 0,
+          column: 0,
+        });
+        this.posFilled += 1;
+      }
+      encodePosition(
+        this.view,
+        this.posPtr + this.posFilled * POSITION_SIZE,
+        position ?? { pathId: 0, line: 0, column: 0 },
+      );
+      this.posFilled += 1;
+    }
     this.filled += 1;
     if (this.filled === this.batchRecords) this.flush();
   }
@@ -221,6 +281,31 @@ export class CtWriter {
   flush(): void {
     this.assertOpen();
     if (this.filled === 0) return;
+    // POSITIONS FIRST, AND ONLY EVER AS MANY AS THERE ARE STEPS. The module consumes one per step
+    // as `ct_ingest` decodes the batch, so handing them over afterwards would leave the whole
+    // batch unpositioned and the next one shifted.
+    if (this.posFilled > 0) {
+      while (this.posFilled < this.filled) {
+        encodePosition(this.view, this.posPtr + this.posFilled * POSITION_SIZE, {
+          pathId: 0,
+          line: 0,
+          column: 0,
+        });
+        this.posFilled += 1;
+      }
+      if (this.posFilled !== this.filled) {
+        throw new Error(
+          `position/step desynchronisation: ${this.posFilled} position(s) staged for ${this.filled} step(s)`,
+        );
+      }
+      const pn = this.ex.ct_positions(this.posPtr, this.posFilled * POSITION_SIZE);
+      this.crossings += 1;
+      if (pn < 0) throw new CtWriterError('ct_positions', pn, this.lastError());
+      if (pn !== this.posFilled) {
+        throw new Error(`ct_positions accepted ${pn} of ${this.posFilled} records`);
+      }
+      this.posFilled = 0;
+    }
     const len = this.filled * RECORD_SIZE;
     const n = this.ex[this.ingestName](this.bufPtr, len);
     this.crossings += 1;
@@ -229,6 +314,66 @@ export class CtWriter {
       throw new Error(`${this.ingestName} accepted ${n} of ${this.filled} records`);
     }
     this.filled = 0;
+  }
+
+  /**
+   * Intern a source path and return the id a {@link StepPosition} must quote.
+   *
+   * `lineLengths[i]` is the number of addressable columns on line `i + 1`. The column-aware step
+   * encoder builds its `(line, column)` address space from these tables, so a column supplied for
+   * a path interned without one has nowhere to land. Passing them is therefore not optional in
+   * practice at rung 1, and it is accepted and ignored on a line-only recording — which is
+   * upstream's own contract for `register_path_with_line_lengths`.
+   */
+  internPath(path: string, lineLengths: readonly number[] = []): number {
+    this.assertOpen();
+    const enc = new TextEncoder().encode(path);
+    const pathPtr = this.ex.ct_alloc(enc.length || 1);
+    const llPtr = lineLengths.length > 0 ? this.ex.ct_alloc(lineLengths.length * 4) : 0;
+    this.refresh();
+    this.bytes.set(enc, pathPtr);
+    for (let i = 0; i < lineLengths.length; i++) {
+      this.view.setUint32(llPtr + i * 4, lineLengths[i]!, true);
+    }
+    const id = this.ex.ct_intern_path(pathPtr, enc.length, llPtr, lineLengths.length);
+    this.ex.ct_free(pathPtr, enc.length || 1);
+    if (llPtr !== 0) this.ex.ct_free(llPtr, lineLengths.length * 4);
+    if (id < 0) throw new CtWriterError('ct_intern_path', id, this.lastError());
+    if (id >= this.pathsInterned) this.pathsInterned = id + 1;
+    return id;
+  }
+
+  /**
+   * Declare the rung this recording achieved for one contract, with the reason it achieved it.
+   *
+   * Written into the trace as a `TraceLogEvent`, so the rung is a property of the container. The
+   * reason is not decoration: a rung-3 contract with the reason "no artifact was supplied" and a
+   * rung-3 contract with the reason "the artifact carries no debug symbols" are different facts
+   * about the deployment, and a reader that has only the number cannot tell them apart.
+   */
+  declareRung(contractAddress: Uint8Array, rung: MappingRung, reason: string): void {
+    this.assertOpen();
+    if (contractAddress.length !== ADDRESS_LEN) {
+      throw new RangeError(`contractAddress must be exactly ${ADDRESS_LEN} bytes`);
+    }
+    const enc = new TextEncoder().encode(reason);
+    const reasonPtr = this.ex.ct_alloc(enc.length || 1);
+    this.refresh();
+    this.bytes.set(contractAddress, this.addrPtr);
+    this.bytes.set(enc, reasonPtr);
+    const status = this.ex.ct_declare_rung(this.addrPtr, rung, reasonPtr, enc.length);
+    this.ex.ct_free(reasonPtr, enc.length || 1);
+    if (status !== CT_OK) throw new CtWriterError('ct_declare_rung', status, this.lastError());
+  }
+
+  /** Contracts a rung has been declared for. Read from the module, not counted here. */
+  get rungsDeclared(): number {
+    return this.ex.ct_rung_count();
+  }
+
+  /** Positions handed over and not yet consumed by a step. Zero except mid-batch. */
+  get positionsPending(): number {
+    return this.ex.ct_positions_pending();
   }
 
   /**
@@ -275,6 +420,19 @@ export class CtWriter {
     this.assertOpen();
     this.flush();
     const events = Number(this.ex.ct_events_written());
+    const rungsDeclared = this.ex.ct_rung_count();
+    const positionsLeft = this.ex.ct_positions_pending();
+    if (positionsLeft !== 0) {
+      // More positions than steps. Not a degradation — a desynchronisation, and the steps that
+      // DID run took the right positions, so nothing in the container is wrong yet. It is refused
+      // anyway, because the only way to get here is a host bug and the next recording would be
+      // wrong from its first step.
+      throw new Error(
+        `${positionsLeft} source position(s) were supplied that no step consumed. The host staged `
+          + 'more positions than steps, so the pairing this side channel rests on has already '
+          + 'broken; refusing rather than closing a container whose provenance is unclear.',
+      );
+    }
     const ptr = this.ex.ct_writer_close();
     if (ptr === 0) throw new CtWriterError('ct_writer_close', -2, this.lastError());
     this.refresh();
@@ -283,9 +441,23 @@ export class CtWriter {
     const writerKind = this.ex.ct_writer_kind();
     const columnsRequested = this.ex.ct_columns_requested() === 1;
     const dropped = this.ex.ct_dropped_column_awareness() === 1;
+    const rungViolations = this.ex.ct_rung_violations();
+    const violationPc = this.ex.ct_rung_violation_pc();
+    const stepsPositioned = Number(this.ex.ct_steps_positioned());
+    const stepsUnpositioned = Number(this.ex.ct_steps_unpositioned());
     this.closed = true;
     if (columnsRequested && dropped) {
       throw new ColumnAwarenessDropped(this.config.writerPath, writerKind);
+    }
+    // THE "NEVER SILENTLY DEGRADES" ENFORCEMENT, AND IT IS A DIFFERENT GATE FROM THE ONE ABOVE.
+    //
+    // `ColumnAwarenessDropped` asks the WRITER whether it lost something. This asks the MODULE
+    // whether the recording is what its own metadata says it is: a contract declared at rung 1
+    // that produced a step with no source position. The two fail on different evidence, in
+    // different places, and neither can stand in for the other — which is the shape M24's review
+    // asked for when it found the first one had stopped being able to fire.
+    if (rungViolations > 0) {
+      throw new MappingRungDegraded(rungViolations, violationPc, stepsPositioned, stepsUnpositioned);
     }
     return {
       container,
@@ -296,6 +468,12 @@ export class CtWriter {
       droppedColumnAwareness: dropped,
       crossings: this.crossings,
       memoryGrowths: this.growths,
+      mappingRung: this.config.mappingRung,
+      rungsDeclared,
+      stepsPositioned,
+      stepsUnpositioned,
+      rungViolations,
+      pathsInterned: this.pathsInterned,
     };
   }
 }
@@ -305,4 +483,4 @@ export function writerKindMatchesPath(kind: number, path: WriterPath): boolean {
   return WRITER_KIND_OF[path] === kind;
 }
 
-export { decodeStep, encodeStep };
+export { decodePosition, decodeStep, encodePosition, encodeStep, RUNG_SOURCE };

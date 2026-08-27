@@ -20,7 +20,39 @@
 // `test_dropped_column_awareness_asserted` executes both bypasses rather than reading the code.
 // ---------------------------------------------------------------------------
 
-import { WRITER_KIND_PATH_A_PURE_RUST } from './abi.ts';
+import {
+  RUNG_BYTECODE,
+  RUNG_FUNCTION,
+  RUNG_NAME,
+  RUNG_SOURCE,
+  WRITER_KIND_PATH_A_PURE_RUST,
+  type MappingRung,
+} from './abi.ts';
+
+/** A recording claimed rung 1 and then produced steps with no source position. */
+export class MappingRungDegraded extends Error {
+  readonly violations: number;
+  readonly firstViolationPc: number;
+  readonly stepsPositioned: number;
+  readonly stepsUnpositioned: number;
+  constructor(violations: number, firstViolationPc: number, positioned: number, unpositioned: number) {
+    super(
+      `${violations} contract(s) in this recording declared source-mapping rung ${RUNG_SOURCE} ` +
+        `and then produced steps with no resolved source position — the first at pc ` +
+        `${firstViolationPc}. ${positioned} step(s) were positioned and ${unpositioned} were not. ` +
+        'The container would read back complete, with every step present and some of them ' +
+        'addressing a program counter while the metadata says they address Aztec.nr source. ' +
+        'That is the SILENT DEGRADATION the ladder exists to refuse, so it is refused here ' +
+        'rather than discovered by someone stepping through the recording. Declare the rung the ' +
+        'contract actually achieved, or supply a position for every step of the ones you claim.',
+    );
+    this.name = 'MappingRungDegraded';
+    this.violations = violations;
+    this.firstViolationPc = firstViolationPc;
+    this.stepsPositioned = positioned;
+    this.stepsUnpositioned = unpositioned;
+  }
+}
 
 /** DD-7's Path A: the pure-Rust `CtfsTraceWriter`. */
 export const WRITER_PATH_A_PURE_RUST = 'path-a-pure-rust';
@@ -82,19 +114,32 @@ export interface TracingConfig {
   workdir: string;
   /** Whether this recording needs column-aware steps. DD-7's question. */
   columns: boolean;
+  /**
+   * Which rung of §9.2's source-fidelity ladder this recording claims.
+   *
+   * **Optional, and it defaults to {@link RUNG_BYTECODE} — deliberately the pessimistic end.** A
+   * caller that says nothing gets rung 3, which is what M24 shipped and what a program counter
+   * honestly is. Claiming rung 1 is an act, and it is the act the column gate below turns on.
+   */
+  mappingRung?: MappingRung;
 }
 
 export interface ResolvedTracingConfig extends TracingConfig {
   /** The writer path this configuration was resolved against. Carried into the result. */
   writerPath: WriterPath;
+  /** The rung, resolved. Never `undefined` here — that is the point of resolving. */
+  mappingRung: MappingRung;
 }
 
 /** The DD-7 refusal: columns were asked of a path that has no source column to record. */
 export class ColumnAwarenessUnavailable extends Error {
   readonly writerPath: WriterPath;
-  constructor(writerPath: WriterPath) {
+  readonly mappingRung: MappingRung;
+  constructor(writerPath: WriterPath, mappingRung: MappingRung = RUNG_BYTECODE) {
     super(
-      `the tracing configuration asked for column-aware steps and the '${writerPath}' path ` +
+      `this recording declares mapping rung ${mappingRung} — ${RUNG_NAME[mappingRung]} — and ` +
+        `columns are only recordable at rung ${RUNG_SOURCE}. ` +
+        `the tracing configuration asked for column-aware steps and the '${writerPath}' path ` +
         'cannot record them (DD-7). The writer at the pinned trace_format anchor CAN carry ' +
         'columns -- it has a delta-column opcode, a paths.dat Layout A line-length table and ' +
         'meta.dat capability bits 4/6/7 -- and this runtime has no source column to put in ' +
@@ -106,6 +151,7 @@ export class ColumnAwarenessUnavailable extends Error {
     );
     this.name = 'ColumnAwarenessUnavailable';
     this.writerPath = writerPath;
+    this.mappingRung = mappingRung;
   }
 }
 
@@ -173,11 +219,29 @@ export function resolveTracingConfig(
   if (!(writerPath in CARRIES_COLUMNS)) {
     throw new RangeError(`resolveTracingConfig: unknown writer path '${String(writerPath)}'`);
   }
+  // The rung, resolved BEFORE the column gate, because the gate now reads it. Anything that is
+  // not exactly 1 or 2 — including `undefined`, a string "1" through a JSON round trip, and a 4 —
+  // resolves to rung 3, the pessimistic end. A value comparison, not a type: types are erased.
+  const mappingRung: MappingRung =
+    config.mappingRung === RUNG_SOURCE || config.mappingRung === RUNG_FUNCTION
+      ? config.mappingRung
+      : RUNG_BYTECODE;
+
   // `=== true` rather than truthiness: a caller passing the string "false" through a JSON round
   // trip must not turn the gate off, and a caller passing 1 must not turn it on by accident.
   // The refusal is on the value, so `as any` does not route around it.
-  if (config.columns === true && CARRIES_COLUMNS[writerPath] !== true) {
-    throw new ColumnAwarenessUnavailable(writerPath);
+  //
+  // M25 ADDED THE SECOND CONJUNCT AND IT IS THE ONE THAT MOVES. `CARRIES_COLUMNS` is a fact about
+  // the WRITER and it is still `false` for Path A as a default posture; what makes columns
+  // recordable is a source position to put in them, and that arrives exactly at rung 1. So the
+  // condition a caller must satisfy is "the writer can carry them OR this recording resolves to
+  // rung 1" — and both halves need a negative case, which is why
+  // `test_trace_metadata_declares_mapping_rung` exercises rung 1 + Path A (allowed), rung 3 +
+  // Path A (refused) and a rung-1 claim with no positions supplied (refused at CLOSE, by the
+  // module's own tally, which is a different gate in a different place on purpose).
+  const recordable = CARRIES_COLUMNS[writerPath] === true || mappingRung === RUNG_SOURCE;
+  if (config.columns === true && !recordable) {
+    throw new ColumnAwarenessUnavailable(writerPath, mappingRung);
   }
   const resolved: ResolvedTracingConfig = {
     program: config.program,
@@ -186,6 +250,7 @@ export function resolveTracingConfig(
     workdir: config.workdir,
     columns: config.columns === true,
     writerPath,
+    mappingRung,
   };
   RESOLVED.add(resolved);
   // FROZEN, AND THAT IS NOW THE ONLY THING STANDING BEHIND THE GATE.

@@ -152,7 +152,7 @@ constant by the thing under test; any comparison whose sides could both be
 absent needs a non-emptiness assertion beside it.
 
 ### Needles come from the artefact, matched on word boundaries
-Twenty instances. `honk` ⊂ `chonk`. `world_state` ⊂ `world_state_reference`.
+Twenty-one instances. `honk` ⊂ `chonk`. `world_state` ⊂ `world_state_reference`.
 `"DEPENDENCIES vm2"` ⊂ `vm2_sim` — **it asserted the opposite of its intent**.
 `[A-Z_]+` never matched `L1_TO_L2_MESSAGE_TREE`. `([A-Za-z_]+::)*` found seven
 where the truth is eight, because `avm2` has a digit. LLVM spells it
@@ -168,6 +168,17 @@ outright IS caught, so the needle worked exactly until somebody wrote the word d
 is the opposite of a dependency**, and this campaign has now written that sentence into one check
 while the check beside it counted a citation as a call. Strip whole-line comments and require the
 name to begin a command.
+
+**A CHARACTER CLASS THAT EXCLUDED THE NEWLINE, IN A CENSUS WHERE THE DERIVATION *IS* THE NUMBER.**
+M25's import-closure walker matched `import … from '…'` with `[^;\n]*?` between the two keywords.
+Every MULTI-LINE import clause — the shape prettier produces past 120 columns, and the shape
+upstream writes constantly — became invisible. It returned **47 files / 8,083 lines** against the
+true **65 / 10,421**: an 18-file, 2,338-line undercount, *in the direction that reads as good
+news*, in the one measurement the whole milestone's unblocking decision rests on. Caught only
+because two independent walks of the same closure disagreed, which is the only reason it was not
+published. `verification/_import_closure.py` uses `[^;]` now, prints its residue and has the count
+asserted at zero. **The lesson is the census one, one level up from the `mktemp -d` count: when the
+derivation IS the number, run the derivation twice, differently, before believing it.**
 
 **A CHARACTER CLASS WITHOUT A DOT.** M22's vendored-diff classifier matched a relative `.ts`
 import specifier with `[A-Za-z0-9_/]+`, so `'../../telemetry.ts'` — a path with dots in it — fell
@@ -225,6 +236,16 @@ patch. A mutated **artefact** outlived its restored source.
 
 Assert artefacts present *first*. `require_work_dir` takes an `flock` whose fd is
 **inherited by children** — respect the liveness check.
+
+**AND THE ENGINE IS THE AGENT'S TO PIN TOO, NOT ONLY THE CHECK'S.** M25 ran a regression with
+`direnv exec <workspace-root>` instead of `direnv exec <aztec-avm-runtime>` — a *different* dev
+shell — and two things came out of it, both predicted by the rule below. `verify_ct_writer_wasm_zero_imports`
+read **57 with one failure**, `tsc is not on PATH`, against its reference 58; and the OQ-6
+benchmark ran on the **system node, v25.9.0 / V8 14.1**, when `TRACE-ABI.md` §2 says in as many
+words that the authoritative measurement is the one taken in the engine the checks run in.
+Rendering the document from that `arms.tsv` would have put a system-node measurement into a
+document that says it must not be one. **The repository's own `.envrc` is the shell; the workspace
+root's is not it.**
 
 **And the SHELL is state you did not produce.** M19's review ran the sweep through
 `direnv exec .` — this repository's own dev shell, the one `.envrc` exists to provide and the one

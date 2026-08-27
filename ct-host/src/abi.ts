@@ -16,6 +16,19 @@
 /** Bytes per event record. Asserted against the module's own `ct_record_size()`. */
 export const RECORD_SIZE = 64;
 
+/** Bytes the five step fields occupy. **60, not the 56 M24's prose said.** */
+export const RECORD_FIELD_BYTES = 60;
+/** Reserved bytes in a step record. **4, not the 8 M24's prose said.** */
+export const RECORD_RESERVED_BYTES = RECORD_SIZE - RECORD_FIELD_BYTES;
+
+/** Bytes per position record on M25's side channel. Asserted against `ct_position_size()`. */
+export const POSITION_SIZE = 16;
+
+export const POS_OFF_PATH_ID = 0;
+export const POS_OFF_LINE = 4;
+export const POS_OFF_COLUMN = 8;
+export const POS_OFF_RESERVED = 12;
+
 /** Field offsets within a record. Mirrors `ct-writer/src/lib.rs`'s `OFF_*` constants. */
 export const OFF_CONTEXT_ID = 0;
 export const OFF_PC = 4;
@@ -35,9 +48,43 @@ export const CT_ERR_BAD_LENGTH = -4;
 export const CT_ERR_NULL = -5;
 export const CT_ERR_RESERVED_NOT_ZERO = -6;
 export const CT_ERR_ALREADY_OPEN = -7;
+export const CT_ERR_BAD_PATH_ID = -8;
+export const CT_ERR_BAD_RUNG = -9;
 
 /** `ct_writer_kind()` values. `1` is DD-7's Path A, the pure-Rust `CtfsTraceWriter`. */
 export const WRITER_KIND_PATH_A_PURE_RUST = 1;
+
+// ---------------------------------------------------------------------------
+// §9.2's SOURCE-MAPPING LADDER. Mirrors `ct-writer/src/lib.rs`'s `CT_RUNG_*`.
+// ---------------------------------------------------------------------------
+
+/** Full source-level stepping: path, line and column, per instruction. */
+export const RUNG_SOURCE = 1;
+/** Function-level attribution: a position per frame, not per instruction. */
+export const RUNG_FUNCTION = 2;
+/** Bytecode-level stepping: `Line(pc)`. The rung M24 shipped on. */
+export const RUNG_BYTECODE = 3;
+
+export type MappingRung = typeof RUNG_SOURCE | typeof RUNG_FUNCTION | typeof RUNG_BYTECODE;
+
+/** The metadata key rung declarations are written under, so a reader greps one string. */
+export const RUNG_EVENT_METADATA = 'ct.mapping-rung';
+
+/** Human names for the ladder, for diagnostics that must not say "rung 2" and stop. */
+export const RUNG_NAME: Readonly<Record<number, string>> = {
+  [RUNG_SOURCE]: 'source-level stepping (path, line, column per instruction)',
+  [RUNG_FUNCTION]: 'function-level attribution',
+  [RUNG_BYTECODE]: 'bytecode-level stepping (Line(pc))',
+};
+
+/** One step's resolved source position. `line === 0` means "this step has no mapping". */
+export interface StepPosition {
+  readonly pathId: number;
+  /** 1-based. `0` means unmapped, and still consumes its slot in the FIFO. */
+  readonly line: number;
+  /** 1-based. `0` means line-only. */
+  readonly column: number;
+}
 
 /** One AVM execution step: upstream's `ExecutionStep`, unchanged. M15 chose this shape. */
 export interface StepEvent {
@@ -96,6 +143,18 @@ export interface CtWriterExports {
   ct_dropped_column_awareness(): number;
   ct_last_error_ptr(): number;
   ct_last_error_len(): number;
+  // -- M25's source-mapping surface. Listed separately below; see SOURCE_MAPPING_EXPORTS. --
+  ct_position_size(): number;
+  ct_intern_path(pathPtr: number, pathLen: number, lineLengthsPtr: number, lineLengthsCount: number): number;
+  ct_path_count(): number;
+  ct_positions(ptr: number, len: number): number;
+  ct_positions_pending(): number;
+  ct_declare_rung(addressPtr: number, rung: number, reasonPtr: number, reasonLen: number): number;
+  ct_rung_count(): number;
+  ct_rung_violations(): number;
+  ct_rung_violation_pc(): number;
+  ct_steps_positioned(): bigint;
+  ct_steps_unpositioned(): bigint;
 }
 
 /** Every export name the host requires, so a missing one is one named failure and not a `TypeError`. */
@@ -119,6 +178,37 @@ export const REQUIRED_EXPORTS: readonly string[] = [
   'ct_dropped_column_awareness',
   'ct_last_error_ptr',
   'ct_last_error_len',
+];
+
+/**
+ * M25's source-mapping exports, kept in their OWN list rather than appended to the one above.
+ *
+ * Not tidiness. `verify_ct_writer_wasm_zero_imports` iterates `REQUIRED_EXPORTS` and then asserts
+ * the count it enumerated is **nineteen**, by name and exactly — M24's deliberate "an export
+ * appearing is as much a finding as one disappearing". Appending here would move M24's assertion
+ * count for a change that is not M24's, which this campaign has now been bitten by often enough to
+ * have a rule about. So M24 goes on measuring the nineteen it shipped, M25 measures its eleven,
+ * and {@link ALL_REQUIRED_EXPORTS} is the union the host actually requires — asserted, in M25's
+ * own check, to be exactly the concatenation, so the split cannot become a hole.
+ */
+export const SOURCE_MAPPING_EXPORTS: readonly string[] = [
+  'ct_position_size',
+  'ct_intern_path',
+  'ct_path_count',
+  'ct_positions',
+  'ct_positions_pending',
+  'ct_declare_rung',
+  'ct_rung_count',
+  'ct_rung_violations',
+  'ct_rung_violation_pc',
+  'ct_steps_positioned',
+  'ct_steps_unpositioned',
+];
+
+/** Every export the host requires. The constructor checks this, not either half alone. */
+export const ALL_REQUIRED_EXPORTS: readonly string[] = [
+  ...REQUIRED_EXPORTS,
+  ...SOURCE_MAPPING_EXPORTS,
 ];
 
 /**
@@ -156,6 +246,35 @@ export function decodeStep(view: DataView, bytes: Uint8Array, offset: number): S
   };
 }
 
+/**
+ * Write one position record into `view` at `offset`.
+ *
+ * The reserved word is written as an explicit zero for the same reason `encodeStep` does: the
+ * buffer is reused across batches and a stale word is refused with `CT_ERR_RESERVED_NOT_ZERO`, a
+ * long way from its cause.
+ */
+export function encodePosition(view: DataView, offset: number, p: StepPosition): void {
+  if (!Number.isInteger(p.line) || p.line < 0) {
+    throw new RangeError(`position.line must be a non-negative integer, got ${String(p.line)}`);
+  }
+  if (!Number.isInteger(p.column) || p.column < 0) {
+    throw new RangeError(`position.column must be a non-negative integer, got ${String(p.column)}`);
+  }
+  view.setUint32(offset + POS_OFF_PATH_ID, p.pathId, true);
+  view.setUint32(offset + POS_OFF_LINE, p.line, true);
+  view.setUint32(offset + POS_OFF_COLUMN, p.column, true);
+  view.setUint32(offset + POS_OFF_RESERVED, 0, true);
+}
+
+/** Read a position record back. The encoder's inverse, so the checks have one to test against. */
+export function decodePosition(view: DataView, offset: number): StepPosition {
+  return {
+    pathId: view.getUint32(offset + POS_OFF_PATH_ID, true),
+    line: view.getUint32(offset + POS_OFF_LINE, true),
+    column: view.getUint32(offset + POS_OFF_COLUMN, true),
+  };
+}
+
 /** A status code turned into the sentence it stands for. Unknown codes say so rather than guess. */
 export function statusText(status: number): string {
   switch (status) {
@@ -175,6 +294,10 @@ export function statusText(status: number): string {
       return "a record's reserved word is not zero";
     case CT_ERR_ALREADY_OPEN:
       return 'a writer is already open';
+    case CT_ERR_BAD_PATH_ID:
+      return 'a position record names a path id this session never interned';
+    case CT_ERR_BAD_RUNG:
+      return 'the declared mapping rung is not 1, 2 or 3';
     default:
       return `unrecognised status ${status}`;
   }

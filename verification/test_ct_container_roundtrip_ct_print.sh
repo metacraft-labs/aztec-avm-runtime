@@ -146,8 +146,14 @@ assert_eq "the workdir is the one the host supplied (wasm has no current directo
 assert_eq "the recording opens with exactly one Call frame" "1" "$(dv COUNT_Call)"
 assert_eq "and exactly one Function" "1" "$(dv COUNT_Function)"
 # The five variable names, as a SET and by name. A count of five would pass on five wrong names.
+#
+# `contractAddressLow` BECAME `contractAddress` IN M25 AND THE CHANGE BELONGS HERE. M24 recorded
+# the low 64 bits as a deliberate placeholder because OQ-4 was unsettled; M25 settled it on the
+# full 254 bits as `0x` + 64 hex, which is a different variable with a different name and a
+# different `ValueRecord` variant. The pin is exact rather than a count, which is why it went red
+# rather than passing on a renamed field — see SOURCE-MAPPING.md 4.
 assert_eq "the five per-step variables are exactly the fields emit() records" \
-  "contextId,contractAddressLow,daGas,l2Gas,opcode" "$(dv VARNAMES)"
+  "contextId,contractAddress,daGas,l2Gas,opcode" "$(dv VARNAMES)"
 # The pc of the first and last event, carried through the ABI, the module and the container.
 assert_eq "the first step's line is the first event's pc" \
   "$(m24_arm 'd["roundtrip"]["firstPc"]')" "$(dv FIRSTLINE)"
@@ -294,7 +300,7 @@ assert_eq "and the value stream was really opened" "true" "$(sv VALUE_LOADED)"
 # compressed stream, and the names come back out of `varnames.dat` with it.
 assert_eq "step 0's record carries the five variables emit() writes" "5" "$(sv VALUES0_COUNT)"
 assert_eq "by name, decoded from the split streams rather than from events.log" \
-  "contextId,contractAddressLow,daGas,l2Gas,opcode" "$(sv VALUES0_NAMES)"
+  "contextId,contractAddress,daGas,l2Gas,opcode" "$(sv VALUES0_NAMES)"
 assert_ge "with real CBOR bytes behind them, not five empty records" "1" "$(sv VALUES0_BYTES)"
 
 # --- calls.dat -------------------------------------------------------------

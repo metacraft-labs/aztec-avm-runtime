@@ -1999,6 +1999,84 @@ verify-ct-backpressure:
     @verification/test_trace_writer_backpressure.sh
 
 # Run the whole M24 verification set; every check runs even if an earlier one fails.
+# ---------------------------------------------------------------------------
+# M25 — step-level tracing: the source-mapping ladder (OQ-5) and field rendering (OQ-4).
+#
+# IT BUILDS THE SAME `ct_writer.wasm` M24 DOES — one crate, one artefact — so `just ct-writer-build`
+# serves both and `lib_m25_trace.sh` sources `lib_m24_ct_writer.sh` rather than copying it.
+#
+# The arms are driven against a REAL SHIPPED AZTEC CONTRACT, `@aztec/noir-test-contracts.js`'s
+# `AvmTest` at the `deletion_era` pin, found under `diffsim/`, `spike/` or `drift/`. OQ-5's verdict
+# is a claim about what `avm-transpiler` leaves in an artifact somebody else built, so it is settled
+# against one and never against a fixture of ours; a missing artifact is a `die`, not a skip.
+#
+# ONE ARM RUN, SHARED BY THREE CHECKS. `verification/lib_m25_trace.sh` runs `tools/run_trace_arms.mjs`
+# once into $M25_WORK/trace.json (default ~/.cache/aztec-m25-trace) and the checks read it.
+#
+# WHAT THIS MILESTONE DOES NOT DELIVER, said here rather than left to be discovered: four of its
+# seven verification entries need a transaction that CALLS A REGISTERED CONTRACT.
+# `verify_transaction_builder_closure_measured` records the closure as a number so the decision is
+# takeable — 65 files / 10,421 lines whole, 4 files / 880 lines for the calldata-and-call-request
+# half — rather than deferred for a ninth time.
+# ---------------------------------------------------------------------------
+
+# Build the five OQ-4 rendering arms (int, low64, bigint, string, raw) out of the pinned writer.
+oq4-probe:
+    @verification/build_oq4_rendering_probe.sh
+
+# Re-measure the source-mapping arms against the shipped AvmTest artifact.
+trace-arms:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    art=""
+    for root in diffsim spike drift; do
+      if [ -f "$root/node_modules/@aztec/noir-test-contracts.js/artifacts/avm_test_contract-AvmTest.json" ]; then
+        art="$root/node_modules/@aztec/noir-test-contracts.js/artifacts/avm_test_contract-AvmTest.json"
+        break
+      fi
+    done
+    if [ -z "$art" ]; then
+      echo "trace-arms: no shipped AvmTest artifact under diffsim/, spike/ or drift/" >&2
+      exit 1
+    fi
+    node --experimental-strip-types tools/run_trace_arms.mjs \
+      --module ct-writer/target/wasm32-unknown-unknown/release/aztec_ct_writer.wasm \
+      --artifact "$art" \
+      --work "${M25_WORK:-$HOME/.cache/aztec-m25-trace}"
+
+verify-oq5:
+    @verification/verify_oq5_source_mapping_verdict_recorded.sh
+
+verify-fr-rendering:
+    @verification/test_fr_rendering_matches_noir_tracer.sh
+
+verify-mapping-rung:
+    @verification/test_trace_metadata_declares_mapping_rung.sh
+
+verify-tx-builder-closure:
+    @verification/verify_transaction_builder_closure_measured.sh
+
+# Run the whole M25 verification set; every check runs even if an earlier one fails.
+verify-m25:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_oq5_source_mapping_verdict_recorded \
+      test_fr_rendering_matches_noir_tracer \
+      test_trace_metadata_declares_mapping_rung \
+      verify_transaction_builder_closure_measured
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m25: FAILED" >&2
+    else
+      echo "verify-m25: all checks passed"
+    fi
+    exit "$rc"
+
 verify-m24:
     #!/usr/bin/env bash
     set -uo pipefail

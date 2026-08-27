@@ -60,7 +60,7 @@
 //! runtime has no source column to record (`emit()` is rung 3, `Line(pc)`) — so it fires in the
 //! host (`ct-host/src/config.ts`). `ct_writer_kind()` records which path wrote the container.
 
-use codetracer_trace_types::{Line, TypeId, TypeKind, ValueRecord};
+use codetracer_trace_types::{EventLogKind, Line, TypeId, TypeKind, ValueRecord};
 use codetracer_trace_writer::ctfs_writer::CtfsTraceWriter;
 use codetracer_trace_writer::trace_writer::TraceWriter;
 use std::path::{Path, PathBuf};
@@ -78,15 +78,38 @@ use std::path::{Path, PathBuf};
 // `barretenberg/cpp/src/barretenberg/vm2/...`. M15 chose that shape and M24 carries it; this
 // module does not invent an event.
 //
-// 64 bytes rather than the 56 the fields need. The 8 reserved bytes buy alignment — a 64-byte
+// 64 bytes rather than the 60 the fields need. The 4 reserved bytes buy alignment — a 64-byte
 // record is a power of two, so record `i` starts at `i << 6` and a host's index arithmetic cannot
 // drift from the module's — and they are asserted to be ZERO on ingest, so a host that starts
 // writing something into them is a loud failure rather than a silent reinterpretation the day
 // this layout grows a field.
+//
+// **M25 CORRECTED THE TWO FIGURES IN THE PARAGRAPH ABOVE, AND `TRACE-ABI.md` §7 WITH THEM.** Both
+// this comment and that section said "the 8 reserved bytes at offset 12" and "the 56 the fields
+// need". The offsets below are the measurement: 4 + 4 + 4 + 8 + 8 + 32 = **60** used and **4**
+// reserved, and `const _: () = assert!(OFF_ADDRESS + ADDRESS_LEN == CT_RECORD_SIZE)` has been
+// pinning 64 the whole time. The numbers mattered because §7 offered those 8 bytes as the
+// wire-format extension point M25 was expected to use, and half of them do not exist. Both are
+// constants now, asserted against the OFFSETS at compile time (below) and by the native test
+// `the_record_layout_figures_are_four_and_sixty`, which the module build runs with
+// `--native-tests` — so the pair cannot drift from the layout again the way the prose did.
+//
+// M25 DID NOT SPEND THEM. The source position a rung-1 recording needs is a `(path_id, line,
+// column)` triple — twelve bytes against four — so M25 adds a SEPARATE, ADDITIVE side channel
+// (`ct_positions`, below) rather than growing this record. The consequence is the point: with no
+// positions supplied, every byte this module writes is what M24 measured, `ct_record_size()` is
+// still 64, `CT_ERR_RESERVED_NOT_ZERO` is still reachable, and OQ-6's twelve-session benchmark is
+// still a measurement of the artefact it was taken on.
 // ---------------------------------------------------------------------------
 
 /// Bytes per event record on the batched path.
 pub const CT_RECORD_SIZE: usize = 64;
+
+/// Bytes the five step fields occupy. The rest of [`CT_RECORD_SIZE`] is reserved.
+pub const CT_RECORD_FIELD_BYTES: usize = 60;
+
+/// Reserved bytes in a step record. **Four, not eight** — see the block comment above.
+pub const CT_RECORD_RESERVED_BYTES: usize = CT_RECORD_SIZE - CT_RECORD_FIELD_BYTES;
 
 const OFF_CONTEXT_ID: usize = 0; // u32
 const OFF_PC: usize = 4; // u32
@@ -98,6 +121,45 @@ const OFF_ADDRESS: usize = 32; // [u8; 32]
 const ADDRESS_LEN: usize = 32;
 
 const _: () = assert!(OFF_ADDRESS + ADDRESS_LEN == CT_RECORD_SIZE);
+// The two figures the block comment above states, asserted against the offsets rather than typed
+// beside them. This is the whole reason the old "8 reserved / 56 used" pair survived two
+// milestones: nothing compared it to the layout.
+const _: () = assert!(OFF_RESERVED + 4 == OFF_L2_GAS);
+const _: () = assert!(CT_RECORD_FIELD_BYTES == 4 + 4 + 4 + 8 + 8 + ADDRESS_LEN);
+const _: () = assert!(CT_RECORD_RESERVED_BYTES == 4);
+
+// ---------------------------------------------------------------------------
+// THE POSITION SIDE CHANNEL — M25's rung-1 carrier.
+//
+// One 16-byte record per step, in the SAME ORDER as the step records it accompanies, handed over
+// through `ct_positions(ptr, len)` immediately before the `ct_ingest` batch it belongs to. The
+// module holds them in a FIFO and `emit()` consumes one per step.
+//
+// WHY A SIDE CHANNEL AND NOT A WIDER STEP RECORD. A `(path_id, line, column)` triple is twelve
+// bytes and the step record has four spare, so carrying it inline means `CT_RECORD_SIZE` 64 -> 80.
+// That is a wire-format change `ct_record_size()` is built to survive — and it would also move
+// every container size M24 measured, invalidate §3's byte-identical-container claim, and require
+// OQ-6's twelve-session benchmark to be re-taken over a different module. The side channel costs
+// ONE extra crossing per batch (25 -> 50 at 100,000 events and batch 4,096, against a recording
+// that costs ~1,290x its crossings) and only when a mapping exists at all.
+//
+// POSITIONAL PAIRING IS A DELIBERATE CHOICE AND ITS FAILURE MODE IS LOUD. The alternative — a
+// (contract, pc) -> position map inside the module — would silently mis-attribute a step whose pc
+// repeats across contracts. Pairing by ORDER makes a host that supplies the wrong number of
+// positions produce a countable mismatch: `ct_steps_positioned()` and `ct_steps_unpositioned()`
+// are both exported, they sum to the event count, and a rung-1 contract with a non-zero
+// unpositioned count is a RUNG VIOLATION rather than a quietly line-only recording.
+// ---------------------------------------------------------------------------
+
+/// Bytes per position record on the side channel.
+pub const CT_POSITION_SIZE: usize = 16;
+
+const POS_OFF_PATH_ID: usize = 0; // u32
+const POS_OFF_LINE: usize = 4; // u32, 1-based; 0 means "no mapping for this step"
+const POS_OFF_COLUMN: usize = 8; // u32, 1-based; 0 means "line only"
+const POS_OFF_RESERVED: usize = 12; // u32, must be zero
+
+const _: () = assert!(POS_OFF_RESERVED + 4 == CT_POSITION_SIZE);
 
 /// Status codes. Negative is failure, and each value names one cause: a host that gets `-4` knows
 /// its buffer length was not a whole number of records without reading a string out of memory.
@@ -109,9 +171,41 @@ const CT_ERR_BAD_LENGTH: i32 = -4;
 const CT_ERR_NULL: i32 = -5;
 const CT_ERR_RESERVED_NOT_ZERO: i32 = -6;
 const CT_ERR_ALREADY_OPEN: i32 = -7;
+/// A position record names a `path_id` this session never interned.
+const CT_ERR_BAD_PATH_ID: i32 = -8;
+/// A rung outside [`CT_RUNG_SOURCE`]..=[`CT_RUNG_BYTECODE`] was declared.
+const CT_ERR_BAD_RUNG: i32 = -9;
 
 /// Which writer produced the container. Recorded rather than inferred — DD-7's second half.
 const CT_WRITER_KIND_PATH_A_PURE_RUST: u32 = 1;
+
+// ---------------------------------------------------------------------------
+// §9.2's SOURCE-MAPPING LADDER, AS THREE NUMBERS THE MODULE ENFORCES.
+//
+// The milestone's words are "the runtime states which rung it is on, per contract, in the trace
+// metadata, and **never silently degrades**". Those are two separate obligations and this module
+// carries both, in two different places on purpose:
+//
+//   STATES IT  — `ct_declare_rung` writes one `TraceLogEvent` per contract into the trace itself,
+//                so a reader of the container learns the rung from the container. A rung that
+//                lived only in a host-side variable would be a claim about a recording rather
+//                than a property of one.
+//   NEVER SILENTLY DEGRADES — a contract declared at rung 1 whose steps arrive WITHOUT positions
+//                is counted as a violation, per contract, with the first offending pc kept. The
+//                module counts; `ct-host` refuses. Both, because a signal nothing enforces is
+//                decoration (M24 learnt that from `dropped_column_awareness`) and an enforcement
+//                with nothing to read is unfalsifiable.
+// ---------------------------------------------------------------------------
+
+/// Rung 1 — full source-level stepping: every step carries a path, a line and a column.
+pub const CT_RUNG_SOURCE: u32 = 1;
+/// Rung 2 — function-level attribution: a position per frame, not per instruction.
+pub const CT_RUNG_FUNCTION: u32 = 2;
+/// Rung 3 — bytecode-level stepping: `Line(pc)`, the rung M24 shipped on.
+pub const CT_RUNG_BYTECODE: u32 = 3;
+
+/// The metadata key every rung declaration is written under, so a reader greps one string.
+pub const CT_RUNG_EVENT_METADATA: &str = "ct.mapping-rung";
 
 // ---------------------------------------------------------------------------
 // Module state.
@@ -123,12 +217,38 @@ const CT_WRITER_KIND_PATH_A_PURE_RUST: u32 = 1;
 // keeps that assumption checkable rather than merely stated.
 // ---------------------------------------------------------------------------
 
+/// One contract's declared rung, and what actually happened to its steps.
+struct RungDeclaration {
+    address: [u8; ADDRESS_LEN],
+    rung: u32,
+    positioned: u64,
+    unpositioned: u64,
+    /// The pc of the FIRST step that broke the declaration. `u32::MAX` means none did.
+    first_violation_pc: u32,
+}
+
+/// One step's resolved source position, as it arrived on the side channel.
+#[derive(Clone, Copy)]
+struct Position {
+    path_id: u32,
+    line: u32,
+    column: u32,
+}
+
 struct Session {
     writer: CtfsTraceWriter,
     path: PathBuf,
     type_id: TypeId,
+    field_type_id: TypeId,
     columns_requested: bool,
     events: u64,
+    /// Paths interned through `ct_intern_path`, in id order. Index is the id a host quotes.
+    paths: Vec<PathBuf>,
+    /// The FIFO `emit()` consumes one entry of per step.
+    positions: std::collections::VecDeque<Position>,
+    rungs: Vec<RungDeclaration>,
+    positioned: u64,
+    unpositioned: u64,
 }
 
 static mut SESSION: Option<Session> = None;
@@ -138,6 +258,12 @@ static mut NOP_CALLS: u64 = 0;
 static mut NOP_RECORDS: u64 = 0;
 static mut DROPPED_COLUMNS: u32 = 0;
 static mut COLUMNS_REQUESTED: u32 = 0;
+// Survive `ct_writer_close`, which takes the session apart — a host reads them after the close
+// that produced the container, exactly as it reads `DROPPED_COLUMNS`.
+static mut RUNG_VIOLATIONS: u32 = 0;
+static mut RUNG_VIOLATION_PC: u32 = 0;
+static mut STEPS_POSITIONED: u64 = 0;
+static mut STEPS_UNPOSITIONED: u64 = 0;
 
 #[allow(static_mut_refs)]
 fn session() -> Option<&'static mut Session> {
@@ -282,14 +408,280 @@ pub unsafe extern "C" fn ct_writer_open(
     TraceWriter::set_workdir(&mut writer, &workdir_path);
     TraceWriter::start(&mut writer, &path, Line(1));
     let type_id = TraceWriter::ensure_type_id(&mut writer, TypeKind::Int, "Field");
+    // OQ-4: the SAME `(TypeKind::Int, "Field")` the Noir tracer registers
+    // (`noir/tooling/tracer/src/tracer_glue.rs:371`), reused rather than a second type, because
+    // the cross-half requirement is about the type table as much as about the value.
+    let field_type_id = type_id;
 
     unsafe {
         COLUMNS_REQUESTED = if want_columns != 0 { 1 } else { 0 };
+        RUNG_VIOLATIONS = 0;
+        RUNG_VIOLATION_PC = 0;
+        STEPS_POSITIONED = 0;
+        STEPS_UNPOSITIONED = 0;
         let slot = &raw mut SESSION;
-        *slot = Some(Session { writer, path, type_id, columns_requested: want_columns != 0, events: 0 });
+        *slot = Some(Session {
+            writer,
+            path,
+            type_id,
+            field_type_id,
+            columns_requested: want_columns != 0,
+            events: 0,
+            paths: Vec::new(),
+            positions: std::collections::VecDeque::new(),
+            rungs: Vec::new(),
+            positioned: 0,
+            unpositioned: 0,
+        });
     }
     set_error("");
     CT_OK
+}
+
+// ---------------------------------------------------------------------------
+// Rung declarations, path interning and the position side channel.
+// ---------------------------------------------------------------------------
+
+/// Declare the source-mapping rung this session achieved for one contract, with its reason.
+///
+/// Written into the trace as a `TraceLogEvent` under [`CT_RUNG_EVENT_METADATA`], so the rung is a
+/// property of the container rather than of the host that made it. Declaring the same address
+/// twice replaces the earlier declaration and does NOT emit a second event.
+///
+/// # Safety
+/// `address_ptr` must address 32 readable bytes; `reason_ptr` must address `reason_len` of them.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ct_declare_rung(
+    address_ptr: *const u8,
+    rung: u32,
+    reason_ptr: *const u8,
+    reason_len: usize,
+) -> i32 {
+    if address_ptr.is_null() {
+        set_error("ct_declare_rung: null address pointer");
+        return CT_ERR_NULL;
+    }
+    if !(CT_RUNG_SOURCE..=CT_RUNG_BYTECODE).contains(&rung) {
+        set_error("ct_declare_rung: rung must be 1, 2 or 3");
+        return CT_ERR_BAD_RUNG;
+    }
+    let reason = match unsafe { read_str(reason_ptr, reason_len) } {
+        Ok(s) => s,
+        Err(e) => {
+            set_error("ct_declare_rung: reason is not valid UTF-8");
+            return e;
+        }
+    };
+    let mut address = [0u8; ADDRESS_LEN];
+    address.copy_from_slice(unsafe { core::slice::from_raw_parts(address_ptr, ADDRESS_LEN) });
+    let s = match session() {
+        Some(s) => s,
+        None => {
+            set_error("ct_declare_rung: no writer is open");
+            return CT_ERR_NO_SESSION;
+        }
+    };
+    if let Some(existing) = s.rungs.iter_mut().find(|d| d.address == address) {
+        existing.rung = rung;
+        return CT_OK;
+    }
+    let content = format!("{} rung={} reason={}", hex32(&address), rung, reason);
+    TraceWriter::register_special_event(
+        &mut s.writer,
+        EventLogKind::TraceLogEvent,
+        CT_RUNG_EVENT_METADATA,
+        &content,
+    );
+    s.rungs.push(RungDeclaration {
+        address,
+        rung,
+        positioned: 0,
+        unpositioned: 0,
+        first_violation_pc: u32::MAX,
+    });
+    set_error("");
+    CT_OK
+}
+
+/// How many contracts this session has declared a rung for.
+#[unsafe(no_mangle)]
+pub extern "C" fn ct_rung_count() -> u32 {
+    match session() {
+        Some(s) => s.rungs.len() as u32,
+        None => 0,
+    }
+}
+
+/// Intern a source path, optionally with its per-line addressable column counts, and return the id
+/// a position record must quote. Negative on failure.
+///
+/// `line_lengths[i]` is the number of addressable columns on line `i + 1`; the writer needs that
+/// table to build the `(line, column)` address space a column-aware `steps.dat` encodes into. It
+/// is accepted and ignored on a line-only recording, which is upstream's own contract for
+/// `register_path_with_line_lengths`, so a host may pass it unconditionally.
+///
+/// # Safety
+/// `path_ptr` must address `path_len` readable bytes; `line_lengths_ptr` must address
+/// `line_lengths_count` readable `u32`s.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ct_intern_path(
+    path_ptr: *const u8,
+    path_len: usize,
+    line_lengths_ptr: *const u32,
+    line_lengths_count: usize,
+) -> i32 {
+    let path = match unsafe { read_str(path_ptr, path_len) } {
+        Ok(s) => s,
+        Err(e) => {
+            set_error("ct_intern_path: path is not valid UTF-8");
+            return e;
+        }
+    };
+    if path.is_empty() {
+        set_error("ct_intern_path: the empty path is not a path");
+        return CT_ERR_BAD_LENGTH;
+    }
+    if line_lengths_ptr.is_null() && line_lengths_count != 0 {
+        set_error("ct_intern_path: null line-lengths pointer with a non-zero count");
+        return CT_ERR_NULL;
+    }
+    let line_lengths: Vec<u32> = if line_lengths_count == 0 {
+        Vec::new()
+    } else {
+        unsafe { core::slice::from_raw_parts(line_lengths_ptr, line_lengths_count) }.to_vec()
+    };
+    let s = match session() {
+        Some(s) => s,
+        None => {
+            set_error("ct_intern_path: no writer is open");
+            return CT_ERR_NO_SESSION;
+        }
+    };
+    let buf = PathBuf::from(&path);
+    if let Some(i) = s.paths.iter().position(|p| *p == buf) {
+        return i as i32;
+    }
+    let _ = CtfsTraceWriter::register_path_with_line_lengths(&mut s.writer, &buf, &line_lengths);
+    s.paths.push(buf);
+    set_error("");
+    (s.paths.len() - 1) as i32
+}
+
+/// Paths interned this session.
+#[unsafe(no_mangle)]
+pub extern "C" fn ct_path_count() -> u32 {
+    match session() {
+        Some(s) => s.paths.len() as u32,
+        None => 0,
+    }
+}
+
+/// Bytes per position record, read from the module rather than restated by the host — the same
+/// discipline `ct_record_size()` exists for.
+#[unsafe(no_mangle)]
+pub extern "C" fn ct_position_size() -> usize {
+    CT_POSITION_SIZE
+}
+
+/// Queue `len / CT_POSITION_SIZE` resolved positions for the steps that follow. Returns the count
+/// accepted, or a negative status. Every `path_id` is validated HERE rather than at `emit()` time,
+/// because a bad id discovered mid-batch would have already written good steps beside it.
+///
+/// # Safety
+/// `ptr` must address `len` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ct_positions(ptr: *const u8, len: usize) -> i32 {
+    if ptr.is_null() && len != 0 {
+        set_error("ct_positions: null buffer");
+        return CT_ERR_NULL;
+    }
+    if len % CT_POSITION_SIZE != 0 {
+        set_error("ct_positions: buffer length is not a whole number of position records");
+        return CT_ERR_BAD_LENGTH;
+    }
+    let n = len / CT_POSITION_SIZE;
+    let buf = if len == 0 { &[][..] } else { unsafe { core::slice::from_raw_parts(ptr, len) } };
+    let s = match session() {
+        Some(s) => s,
+        None => {
+            set_error("ct_positions: no writer is open");
+            return CT_ERR_NO_SESSION;
+        }
+    };
+    let path_count = s.paths.len() as u32;
+    let mut staged = Vec::with_capacity(n);
+    for i in 0..n {
+        let r = &buf[i * CT_POSITION_SIZE..(i + 1) * CT_POSITION_SIZE];
+        let at = |o: usize| u32::from_le_bytes([r[o], r[o + 1], r[o + 2], r[o + 3]]);
+        if at(POS_OFF_RESERVED) != 0 {
+            set_error("ct_positions: the reserved word of a position record is not zero");
+            return CT_ERR_RESERVED_NOT_ZERO;
+        }
+        let path_id = at(POS_OFF_PATH_ID);
+        let line = at(POS_OFF_LINE);
+        // A line of 0 is the host saying "this step has no mapping" and is the ONE case where a
+        // path_id is not required to name anything.
+        if line != 0 && path_id >= path_count {
+            set_error("ct_positions: a position record names a path id this session never interned");
+            return CT_ERR_BAD_PATH_ID;
+        }
+        staged.push(Position { path_id, line, column: at(POS_OFF_COLUMN) });
+    }
+    for p in staged {
+        s.positions.push_back(p);
+    }
+    set_error("");
+    n as i32
+}
+
+/// Positions queued and not yet consumed by a step. A host asserts this is zero at the end of a
+/// recording; a non-zero value is a host that supplied more positions than steps.
+#[unsafe(no_mangle)]
+pub extern "C" fn ct_positions_pending() -> u32 {
+    match session() {
+        Some(s) => s.positions.len() as u32,
+        None => 0,
+    }
+}
+
+/// Steps recorded at a resolved source position. Survives close.
+#[unsafe(no_mangle)]
+pub extern "C" fn ct_steps_positioned() -> u64 {
+    unsafe { STEPS_POSITIONED }
+}
+
+/// Steps recorded as `Line(pc)` because no position was available. Survives close.
+#[unsafe(no_mangle)]
+pub extern "C" fn ct_steps_unpositioned() -> u64 {
+    unsafe { STEPS_UNPOSITIONED }
+}
+
+/// How many contracts declared rung 1 and then produced an unpositioned step. Survives close.
+///
+/// **THIS IS THE "NEVER SILENTLY DEGRADES" MEASUREMENT.** It is not the enforcement — `ct-host`
+/// throws on it — but it is what makes the enforcement a reading rather than an assumption.
+#[unsafe(no_mangle)]
+pub extern "C" fn ct_rung_violations() -> u32 {
+    unsafe { RUNG_VIOLATIONS }
+}
+
+/// The pc of the first step that broke a rung declaration, or `u32::MAX` if none did.
+#[unsafe(no_mangle)]
+pub extern "C" fn ct_rung_violation_pc() -> u32 {
+    unsafe { RUNG_VIOLATION_PC }
+}
+
+/// A 32-byte field element as `0x` + 64 lowercase big-endian hex characters. OQ-4's rendering.
+fn hex32(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut s = String::with_capacity(2 + bytes.len() * 2);
+    s.push('0');
+    s.push('x');
+    for b in bytes {
+        s.push(HEX[(b >> 4) as usize] as char);
+        s.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    s
 }
 
 /// Finish the container and return a pointer to it in linear memory. Pair with
@@ -307,6 +699,20 @@ pub extern "C" fn ct_writer_close() -> *const u8 {
     // rather than from `columns_requested`: the two agreeing is a fact worth being able to fail.
     let dropped = s.writer.dropped_column_awareness();
     let requested = s.columns_requested;
+    // The rung tallies, read off the session before it is taken apart, for the same reason
+    // `dropped` is: a host asks after the close that produced the container.
+    let mut violations = 0u32;
+    let mut violation_pc = u32::MAX;
+    for d in &s.rungs {
+        if d.rung == CT_RUNG_SOURCE && d.unpositioned > 0 {
+            violations += 1;
+            if d.first_violation_pc < violation_pc {
+                violation_pc = d.first_violation_pc;
+            }
+        }
+    }
+    let positioned = s.positioned;
+    let unpositioned = s.unpositioned;
     if s.writer.finish_writing_trace_events().is_err() {
         set_error("the writer refused to finish");
         return core::ptr::null();
@@ -321,6 +727,10 @@ pub extern "C" fn ct_writer_close() -> *const u8 {
     unsafe {
         DROPPED_COLUMNS = if dropped { 1 } else { 0 };
         COLUMNS_REQUESTED = if requested { 1 } else { 0 };
+        RUNG_VIOLATIONS = violations;
+        RUNG_VIOLATION_PC = violation_pc;
+        STEPS_POSITIONED = positioned;
+        STEPS_UNPOSITIONED = unpositioned;
         let slot = &raw mut CONTAINER;
         *slot = bytes;
         let sslot = &raw mut SESSION;
@@ -378,13 +788,56 @@ pub extern "C" fn ct_last_error_len() -> usize {
 
 #[inline(always)]
 fn emit(s: &mut Session, context_id: u32, pc: u32, opcode: u32, l2_gas: u64, da_gas: u64, address: &[u8]) {
-    // The path/line mapping is M25's, not M24's: OQ-5 has not been settled, so a program counter
-    // is recorded AS a program counter and is not dressed up as a source line. `Line(pc)` here is
-    // rung 3 of §9.2's ladder — bytecode-level stepping — and M25 replaces it once the transpiler
-    // question is answered. Saying so here is cheaper than a reader inferring source fidelity
-    // this container does not have.
-    let path = s.path.clone();
-    TraceWriter::register_step(&mut s.writer, &path, Line(pc as i64));
+    // M25 SETTLED OQ-5 AND THIS IS WHERE THE ANSWER LANDS.
+    //
+    // `avm-transpiler` re-keys a contract's `brillig_locations` by AVM pc on the way through
+    // (`avm-transpiler/src/transpile.rs:1803`, called at `transpile_contract.rs:116`), so rung 1 —
+    // full source-level stepping — is reachable with no upstream change for any contract whose
+    // artifact the host holds. The resolution itself is the HOST's, because the artifact and its
+    // 86-file `file_map` live there; what arrives here is the answer, on the position side
+    // channel, one record per step in step order.
+    //
+    // A step with a position is recorded at `(path, line, column)` — rung 1. A step without one
+    // falls back to `Line(pc)` — rung 3, exactly what M24 shipped — and **the fallback is
+    // counted, per contract, against that contract's declared rung**, so a recording cannot
+    // quietly stop being what it says it is. That is the milestone's "never silently degrades",
+    // and it is a tally rather than a promise.
+    let positioned = match s.positions.pop_front() {
+        Some(p) if p.line != 0 => {
+            let path = s.paths[p.path_id as usize].clone();
+            let column = if p.column == 0 { None } else { Some(Line(p.column as i64)) };
+            TraceWriter::register_step_with_column(&mut s.writer, &path, Line(p.line as i64), column);
+            true
+        }
+        // A queued record whose line is 0 is the host saying "no mapping for THIS step", which is
+        // a different statement from "no positions at all" and must still consume its slot — if it
+        // did not, every later step in the batch would take the wrong position.
+        Some(_) => {
+            let path = s.path.clone();
+            TraceWriter::register_step(&mut s.writer, &path, Line(pc as i64));
+            false
+        }
+        None => {
+            let path = s.path.clone();
+            TraceWriter::register_step(&mut s.writer, &path, Line(pc as i64));
+            false
+        }
+    };
+    if positioned {
+        s.positioned += 1;
+    } else {
+        s.unpositioned += 1;
+    }
+    if let Some(d) = s.rungs.iter_mut().find(|d| d.address[..] == address[..]) {
+        if positioned {
+            d.positioned += 1;
+        } else {
+            d.unpositioned += 1;
+            if d.rung == CT_RUNG_SOURCE && d.first_violation_pc == u32::MAX {
+                d.first_violation_pc = pc;
+            }
+        }
+    }
     TraceWriter::register_variable_with_full_value(
         &mut s.writer,
         "opcode",
@@ -405,18 +858,26 @@ fn emit(s: &mut Session, context_id: u32, pc: u32, opcode: u32, l2_gas: u64, da_
         "daGas",
         ValueRecord::Int { i: da_gas as i64, type_id: s.type_id },
     );
-    // The contract address is 32 bytes of field element and OQ-4 (how a 254-bit field renders)
-    // is M25's to settle against what the Noir tracer does. Until then it is recorded as its
-    // low 64 bits with the full bytes NOT silently discarded: the count is asserted by the host,
-    // and M25 replaces this with the settled rendering.
-    let mut low = 0i64;
-    for (i, b) in address.iter().rev().take(8).enumerate() {
-        low |= (*b as i64) << (8 * i);
-    }
+    // OQ-4, SETTLED BY MEASUREMENT AND NOT BY PREFERENCE — see `SOURCE-MAPPING.md` §3.
+    //
+    // M24 recorded this as `contractAddressLow`, the low 64 bits, and said so. The replacement is
+    // the full 254 bits as `0x` + 64 lowercase big-endian hex, in `ValueRecord::String`, under the
+    // SAME `(TypeKind::Int, "Field")` type the Noir tracer registers
+    // (`noir/tooling/tracer/src/tracer_glue.rs:371`).
+    //
+    // Three variants can carry 32 bytes and only two of them survive the readers this campaign
+    // pins. `ValueRecord::BigInt` — the obvious, full-precision choice — is REFUSED by `ct-print`
+    // at `trace_format_nim`'s pinned commit with `cbor: expected byte string (major 2), got major
+    // 3`, because `codetracer_trace_types`' `base64` serde module writes `b` as a CBOR text
+    // string while the reference Nim reader reads a byte string. Measured over five arms sharing
+    // one control, four green and that one red; `test_fr_rendering_matches_noir_tracer` re-runs
+    // all five on every run so the day the reader is fixed, this comment goes red rather than
+    // stale. `Raw` also survives, and is not used: `Raw` is Noir's escape hatch for values it
+    // CANNOT represent (`"()"`, `"fn"`), and an address is not one of those.
     TraceWriter::register_variable_with_full_value(
         &mut s.writer,
-        "contractAddressLow",
-        ValueRecord::Int { i: low, type_id: s.type_id },
+        "contractAddress",
+        ValueRecord::String { text: hex32(address), type_id: s.field_type_id },
     );
     s.events += 1;
 }
@@ -738,6 +1199,166 @@ mod tests {
         d[OFF_RESERVED] = 1;
         assert_eq!(unsafe { ct_ingest(d.as_ptr(), d.len()) }, CT_ERR_RESERVED_NOT_ZERO);
         assert!(!ct_writer_close().is_null());
+    }
+
+    fn position(path_id: u32, line: u32, column: u32) -> [u8; CT_POSITION_SIZE] {
+        let mut r = [0u8; CT_POSITION_SIZE];
+        r[POS_OFF_PATH_ID..POS_OFF_PATH_ID + 4].copy_from_slice(&path_id.to_le_bytes());
+        r[POS_OFF_LINE..POS_OFF_LINE + 4].copy_from_slice(&line.to_le_bytes());
+        r[POS_OFF_COLUMN..POS_OFF_COLUMN + 4].copy_from_slice(&column.to_le_bytes());
+        r
+    }
+
+    unsafe fn intern(path: &str) -> i32 {
+        unsafe { ct_intern_path(path.as_ptr(), path.len(), core::ptr::null(), 0) }
+    }
+
+    unsafe fn declare(addr: &[u8; ADDRESS_LEN], rung: u32) -> i32 {
+        let why = b"test";
+        unsafe { ct_declare_rung(addr.as_ptr(), rung, why.as_ptr(), why.len()) }
+    }
+
+    /// OQ-4. The rendering is a MEASUREMENT of the bytes, not a re-statement of the constant, so
+    /// changing the byte order or dropping a nibble fails here rather than in a reader.
+    #[test]
+    fn the_contract_address_renders_as_full_width_big_endian_hex() {
+        assert_eq!(
+            hex32(&[0xffu8; 32]),
+            format!("0x{}", "ff".repeat(32)),
+            "all-ones must be 64 f's and nothing else"
+        );
+        let mut a = [0u8; 32];
+        a[0] = 0x2f; // most significant
+        a[31] = 0x0c; // least significant
+        let h = hex32(&a);
+        assert_eq!(h.len(), 66, "0x plus 64 hex characters, always, with no leading-zero stripping");
+        assert!(h.starts_with("0x2f"), "byte 0 is the MOST significant: {h}");
+        assert!(h.ends_with("0c"), "byte 31 is the LEAST significant: {h}");
+        // The negative control for the two assertions above: a byte-order flip would satisfy
+        // neither, and this is the value it would produce.
+        let mut flipped = a;
+        flipped.reverse();
+        assert_ne!(hex32(&flipped), h, "big-endian and little-endian must not render alike");
+    }
+
+    /// The rung-1 path end to end: intern a path, queue a position, ingest a step, and read back
+    /// that it was positioned and that nothing violated its declaration.
+    #[test]
+    fn a_positioned_step_satisfies_a_rung_one_declaration() {
+        let _g = serial();
+        unsafe { assert_eq!(open(1), CT_OK) };
+        assert_eq!(unsafe { intern("/aztec/token.nr") }, 0, "the first interned path is id 0");
+        let r = record(1);
+        let mut addr = [0u8; ADDRESS_LEN];
+        addr.copy_from_slice(&r[OFF_ADDRESS..]);
+        assert_eq!(unsafe { declare(&addr, CT_RUNG_SOURCE) }, CT_OK);
+        assert_eq!(ct_rung_count(), 1);
+        let p = position(0, 41, 9);
+        assert_eq!(unsafe { ct_positions(p.as_ptr(), p.len()) }, 1);
+        assert_eq!(ct_positions_pending(), 1, "queued and not yet consumed");
+        assert_eq!(unsafe { ct_ingest(r.as_ptr(), r.len()) }, 1);
+        assert_eq!(ct_positions_pending(), 0, "the step consumed it");
+        assert!(!ct_writer_close().is_null());
+        assert_eq!(ct_steps_positioned(), 1);
+        assert_eq!(ct_steps_unpositioned(), 0);
+        assert_eq!(ct_rung_violations(), 0, "a rung-1 contract whose steps all carry positions");
+        assert_eq!(ct_rung_violation_pc(), u32::MAX);
+    }
+
+    /// THE CONTROL FOR THE TEST ABOVE, AND THE MILESTONE'S HEADLINE PROPERTY.
+    ///
+    /// The same declaration with NO position queued must not pass quietly. Without this, "never
+    /// silently degrades" would be a sentence in a document rather than a thing that can fail.
+    #[test]
+    fn a_rung_one_declaration_with_no_position_is_a_violation() {
+        let _g = serial();
+        unsafe { assert_eq!(open(1), CT_OK) };
+        assert_eq!(unsafe { intern("/aztec/token.nr") }, 0);
+        let r = record(1);
+        let mut addr = [0u8; ADDRESS_LEN];
+        addr.copy_from_slice(&r[OFF_ADDRESS..]);
+        assert_eq!(unsafe { declare(&addr, CT_RUNG_SOURCE) }, CT_OK);
+        assert_eq!(unsafe { ct_ingest(r.as_ptr(), r.len()) }, 1);
+        assert!(!ct_writer_close().is_null());
+        assert_eq!(ct_steps_positioned(), 0);
+        assert_eq!(ct_steps_unpositioned(), 1);
+        assert_eq!(ct_rung_violations(), 1, "a rung-1 contract that produced an unpositioned step");
+        assert_eq!(ct_rung_violation_pc(), 3, "record(1)'s pc is 1*3, and it is the first offender");
+    }
+
+    /// A rung-3 declaration over the SAME unpositioned step is not a violation. Without this arm
+    /// the counter above would pass for a contract that simply never declared anything.
+    #[test]
+    fn a_rung_three_declaration_over_the_same_step_is_not_a_violation() {
+        let _g = serial();
+        unsafe { assert_eq!(open(0), CT_OK) };
+        let r = record(1);
+        let mut addr = [0u8; ADDRESS_LEN];
+        addr.copy_from_slice(&r[OFF_ADDRESS..]);
+        assert_eq!(unsafe { declare(&addr, CT_RUNG_BYTECODE) }, CT_OK);
+        assert_eq!(unsafe { ct_ingest(r.as_ptr(), r.len()) }, 1);
+        assert!(!ct_writer_close().is_null());
+        assert_eq!(ct_steps_unpositioned(), 1);
+        assert_eq!(ct_rung_violations(), 0);
+    }
+
+    /// A queued position whose LINE is zero must still consume its slot. If it did not, one
+    /// unmapped step would shift every later position by one and the whole batch would be
+    /// mis-attributed — silently, because every step would still have A position.
+    #[test]
+    fn an_unmapped_position_consumes_its_slot() {
+        let _g = serial();
+        unsafe { assert_eq!(open(1), CT_OK) };
+        assert_eq!(unsafe { intern("/aztec/token.nr") }, 0);
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&position(0, 0, 0)); // step 0: no mapping
+        buf.extend_from_slice(&position(0, 77, 3)); // step 1: mapped
+        assert_eq!(unsafe { ct_positions(buf.as_ptr(), buf.len()) }, 2);
+        let mut steps = Vec::new();
+        steps.extend_from_slice(&record(1));
+        steps.extend_from_slice(&record(2));
+        assert_eq!(unsafe { ct_ingest(steps.as_ptr(), steps.len()) }, 2);
+        assert!(!ct_writer_close().is_null());
+        assert_eq!(ct_steps_positioned(), 1, "exactly the one whose line was non-zero");
+        assert_eq!(ct_steps_unpositioned(), 1);
+        assert_eq!(ct_positions_pending(), 0);
+    }
+
+    #[test]
+    fn a_bad_position_record_is_refused_before_any_step_sees_it() {
+        let _g = serial();
+        unsafe { assert_eq!(open(0), CT_OK) };
+        // An id nothing has interned.
+        let p = position(7, 1, 1);
+        assert_eq!(unsafe { ct_positions(p.as_ptr(), p.len()) }, CT_ERR_BAD_PATH_ID);
+        assert_eq!(ct_positions_pending(), 0, "a refused batch queues nothing");
+        // A short buffer.
+        let mut short = p.to_vec();
+        short.truncate(CT_POSITION_SIZE - 1);
+        assert_eq!(unsafe { ct_positions(short.as_ptr(), short.len()) }, CT_ERR_BAD_LENGTH);
+        // A dirty reserved word.
+        assert_eq!(unsafe { intern("/aztec/token.nr") }, 0);
+        let mut dirty = position(0, 1, 1);
+        dirty[POS_OFF_RESERVED] = 1;
+        assert_eq!(unsafe { ct_positions(dirty.as_ptr(), dirty.len()) }, CT_ERR_RESERVED_NOT_ZERO);
+        // …and a rung outside the ladder.
+        let addr = [3u8; ADDRESS_LEN];
+        assert_eq!(unsafe { declare(&addr, 0) }, CT_ERR_BAD_RUNG);
+        assert_eq!(unsafe { declare(&addr, 4) }, CT_ERR_BAD_RUNG);
+        assert_eq!(ct_rung_count(), 0, "neither refusal declared anything");
+        assert!(!ct_writer_close().is_null());
+    }
+
+    /// The record layout's two published figures, against the offsets. The `const _` assertions
+    /// beside them are compile-time; this one is what a reader of the test suite sees.
+    #[test]
+    fn the_record_layout_figures_are_four_and_sixty() {
+        assert_eq!(CT_RECORD_SIZE, 64);
+        assert_eq!(CT_RECORD_FIELD_BYTES, 60, "not the 56 the module doc and TRACE-ABI.md said");
+        assert_eq!(CT_RECORD_RESERVED_BYTES, 4, "not the 8 the module doc and TRACE-ABI.md said");
+        assert_eq!(CT_POSITION_SIZE, 16);
+        assert_eq!(ct_record_size(), CT_RECORD_SIZE);
+        assert_eq!(ct_position_size(), CT_POSITION_SIZE);
     }
 
     #[test]
