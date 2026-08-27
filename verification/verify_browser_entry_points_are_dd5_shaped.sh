@@ -133,15 +133,27 @@ echo "== 5. the browser and testing entries reach no Node builtin; the node entr
 
 BROWSER_BYTES="$(cat "$BROWSER_DIST"/browser.js "$BROWSER_DIST"/testing.js "$BROWSER_DIST"/chunks/*.js)"
 NODE_BYTES="$(cat "$BROWSER_DIST"/node/node.js "$BROWSER_DIST"/node/chunks/*.js 2>/dev/null)"
-FOUND=""
-for b in node:fs node:fs/promises node:path node:url node:wasi node:child_process node:worker_threads; do
-  str_has_sub "$BROWSER_BYTES" "\"$b\"" && FOUND="$FOUND $b"
-done
+BUILTINS='node:fs node:fs/promises node:path node:url node:wasi node:child_process node:worker_threads'
+# BOTH SPELLINGS. `CAMPAIGN-BRIEF.md` records a graph claim that rested on a single-quote-only grep,
+# so the same import spelled the other way passed everything.
+_builtins_found() { # <bytes> -> the subset of BUILTINS present
+  local hay="$1" b out=""
+  for b in $BUILTINS; do
+    { str_has_sub "$hay" "\"$b\"" || str_has_sub "$hay" "'$b'"; } && out="$out $b"
+  done
+  printf '%s' "$out"
+}
+FOUND="$(_builtins_found "$BROWSER_BYTES")"
 assert_eq "the browser and testing bundles reach no Node builtin" "" "$FOUND"
-# THE CONTROL: the same needles over the node bundle DO find one, so the absence above is a
-# measurement rather than a list of needles that match nothing.
-assert_true "…while the SAME needles find node:fs/promises in the node bundle" \
-  str_has_sub "$NODE_BYTES" '"node:fs/promises"'
+# THE CONTROL, AND IT RUNS THE SAME CENSUS. It used to be a hand-written literal beside the loop —
+# two needles that agree today rather than one instrument asked twice. Measured by M27's review:
+# typo the loop's list to `nodeX:fs …` and the assertion above AND its control both stayed green,
+# 34 assertions and 0 failures, which is the scanner-with-a-typo'd-needle case the comment claimed
+# to rule out.
+FOUND_NODE="$(_builtins_found "$NODE_BYTES")"
+note "the same census over the NODE bundle finds:${FOUND_NODE:- (nothing)}"
+assert_true "…while the SAME census finds node:fs/promises in the node bundle" \
+  str_has_sub "$FOUND_NODE" 'node:fs/promises'
 
 echo "== 6. DD-9 and §8.4 hold on all three surfaces"
 
@@ -149,9 +161,41 @@ for surface in "browser:$BROWSER_EXPORTS" "testing:$TESTING_EXPORTS" "node:$NODE
   label="${surface%%:*}"; names="${surface#*:}"
   assert_false "$label exports no PublicProcessor (DD-9)" str_has_line "$names" 'PublicProcessor'
   assert_false "$label exports no PublicProcessorFactory (DD-9)" str_has_line "$names" 'PublicProcessorFactory'
-  assert_false "$label exports no type named AztecNode (§8.4)" str_has_line "$names" 'AztecNode'
+  # `AztecNode` IS A TYPE, AND A TYPE CANNOT APPEAR IN `Object.keys` OF A BUILT BUNDLE. This
+  # assertion is kept because it catches a VALUE by that name, but on its own it is an absence asked
+  # of a tree that excludes its subject by construction: measured by M27's review,
+  # `export type { AztecNode } from '@aztec/stdlib/interfaces/client';` added to `entry_browser.ts`
+  # left this assertion, its two siblings and `verify_browser_bundle_builds`'s copy all green —
+  # 34/0 and 41/0. The load-bearing half is §6b.
+  assert_false "$label exports no VALUE named AztecNode (§8.4)" str_has_line "$names" 'AztecNode'
   assert_true "$label DOES export the facade, so the absences above are not an empty module" \
     str_has_line "$names" 'AvmRuntime'
 done
+
+echo "== 6b. §8.4's TYPE half, asked of the source, where a type still exists"
+
+# M21's `test_no_aztec_node_type_exported` owns this rule and measures `orchestration/src`. The
+# three browser entry points are a NEW export surface that it does not reach, so the rule is
+# re-asked here of the sources that produce them.
+#
+# ONE HAYSTACK, not three, because `entry_testing.ts` and `entry_node.ts` both
+# `export * from './entry_browser.ts'` — a per-file absence would say nothing about what the star
+# carries. COMMENTS ARE STRIPPED, because `entry_browser.ts` cites the type by name in the very
+# paragraph that says it is not exported, and "a citation is the opposite of a dependency" is a rule
+# this campaign has written down after being caught by it. The needle is the WORD, so
+# `AztecNodeDebug` — M23's facade name, legitimately mentioned in this tree — does not satisfy it.
+ENTRY_SRC=""
+for entry in entry_browser entry_testing entry_node; do
+  assert_file "the $entry source is where that surface comes from" "$BROWSER_SRC/$entry.ts"
+  ENTRY_SRC="$ENTRY_SRC
+$(grep -vE '^[[:space:]]*(//|/\*|\*)' "$BROWSER_SRC/$entry.ts")"
+done
+assert_ge "the three entry sources were read" 60 "$(printf '%s\n' "$ENTRY_SRC" | grep -c . || true)"
+assert_false "no entry source names a type called AztecNode (§8.4)" \
+  str_has_word "$ENTRY_SRC" 'AztecNode'
+# THE CONTROL FOR THAT ZERO, same predicate, same haystack: a needle that quietly stopped matching
+# would drive both to zero and this one fails.
+assert_true "…while the same predicate finds AvmRuntime in the same haystack" \
+  str_has_word "$ENTRY_SRC" 'AvmRuntime'
 
 m27_finish
