@@ -1,7 +1,18 @@
 # Browser packaging — what a page downloads, and what it does not
 
-M27's write-up. Everything here is re-derived by a check on every run; where a number appears, the
-check that recomputes it is named beside it.
+M27's write-up.
+
+**Every figure in §1 and §6 is re-derived from the artefact and compared AGAINST THIS FILE on every
+run** — `verify_browser_chunk_budget` §6, which opens this document the way
+`verify_avm_wasm_size_budget` opens `REACTOR-ABI.md`. Figures elsewhere are named with the check
+that measures the *property*, which is not the same thing and is marked where it matters.
+
+That distinction is here because the sentence this replaced — *"Everything here is re-derived by a
+check on every run"* — was **false**, and M27's review measured how false. No check opened this file
+at all: `lib_m27_browser.sh` defined and exported `M27_DOC` and nothing read it, uniquely among this
+repository's milestone write-ups (`REACTOR-ABI.md` is read by three checks, `BOUNDARY-SHAPE.md` by
+six, `CHAIN-LOOP.md` by seven). Eleven figures had already rotted, including the total in §1, four
+counts in §2, the entry-point attribution in §6 and every cell of §8's table.
 
 ---
 
@@ -32,11 +43,16 @@ and, lazily, never in any eager set:
 | `chunks/FeeJuice-*.js` | 185.88 KB | yes, when a fee payer is funded |
 | `chunks/ContractInstanceRegistry-*.js` | 103.25 KB | no |
 
-**8,166 KB gzipped across every chunk; 253.94 KB is what the reference entry point costs.** That is
+**8,149.89 KB gzipped across every chunk; 253.94 KB is what the reference entry point costs.** That is
 the whole of DD-11 in two numbers, and the difference between them is exactly the two things DD-11
 names.
 
-`verify_browser_chunk_budget` re-derives the table and proves the enforcement can fail; the
+`verify_browser_chunk_budget` re-derives every cell of both tables above OUT OF `chunks.json` and
+compares it to this file, row by row, and proves the enforcement can fail — in three directions, of
+which the third is the one this paragraph is about. (Making one contract artifact eager takes the
+reference entry from 253.94 KB to **750.09 KB** and the build refuses; that is the number that makes
+this section's claim falsifiable, and it took M27's review to find that nothing exercised the
+per-entry rule at all.) The
 per-entry EAGER totals are budgeted separately from the per-file sizes, because a per-file budget
 cannot see the regression that matters — a lazily-loaded megabyte moving into the eager set changes
 which chunks a page fetches and not how big any of them is.
@@ -72,12 +88,19 @@ point ... start from what they do and record any divergence"*. Upstream's is
    API, not the artefact.
 2. **The polyfill set is different, and upstream's would not have been enough.** The Playground
    polyfills `['buffer', 'path', 'process', 'net', 'tty']`. Measured on THIS dependency graph,
-   `esbuild --platform=browser` fails on `util` (37 files), `assert` (5), `tty` (1) and `module`
-   (1). Only `tty` overlaps. `path` and `net` never appear, because we do not import `@aztec/pxe`.
+   `esbuild --platform=browser` fails on `util` (**43** files), `assert` (**8**), `tty` (1) and `module`
+   (1) — re-derived from `meta.json`'s input graph by M27's review, which found 37 and 5. Only
+   `tty` overlaps. `path` and `net` never appear, because we do not import `@aztec/pxe`.
 3. **The shims are this repository's own**, from `browser-probe/shims/` — written for the spike's
-   browser probe, tracked, and twelve lines between them — plus one new one for `module`.
-4. **One `@aztec/foundation` module is substituted**, and two more are redirected at upstream's lazy
-   siblings. That is §3, and it is DD-11 rather than packaging.
+   browser probe, tracked, and **eleven** lines between them (4 + 5 + 2; it said twelve
+   until M27's review counted them) — plus one new one for `module`.
+4. **TWO `@aztec/foundation` modules are substituted** — poseidon2 *and* grumpkin, which is §3's
+   whole point — one `@aztec/protocol-contracts` barrel is replaced by a six-line shim over
+   upstream's lazy loader, and two more are redirected straight at upstream's lazy siblings. Five
+   redirects; `verify_browser_bundle_builds` asserts that all five fired in both passes. (This said
+   "One … and two more" until M27's review read `substitution.json`: the sentence predates grumpkin
+   and was never revisited when §3.2 was written directly below it.) That is §3, and it is DD-11
+   rather than packaging.
 
 ---
 
@@ -186,7 +209,7 @@ M27's.
 |---|---|
 | `aztec-avm-runtime/browser` | the REFERENCE. No filesystem, no persistence, no prover, no `AztecNode` type. |
 | `aztec-avm-runtime/testing` | the browser entry plus deterministic clocks and M26's vendored transaction builder. Everything it adds runs in a page. |
-| `aztec-avm-runtime/node` | the SUPERSET, by four declared conveniences and nothing else. |
+| `aztec-avm-runtime/node` | the SUPERSET, by five declared conveniences and nothing else. |
 
 "Convenience" and "capability" are easy words to argue about, so the rule is mechanical:
 `NODE_CONVENIENCES` is a **value** in `entry_node.ts`, exported and therefore readable out of the
@@ -209,16 +232,22 @@ superset over a bundle nobody could import.
 
 ## 6. What a page actually fetches
 
-`verify_public_only_page_never_fetches_barretenberg`, on the browser's own log. Thirteen requests:
+`verify_public_only_page_never_fetches_barretenberg`, on the browser's own log. Thirteen requests,
+and the enumeration below totals 13 requests, which it did not before M27's review:
 
 ```
-/index.html                       the demo page
-/demo.js + 6 shared chunks        253.94 KB gzipped of runtime
-/favicon.ico                      the browser's, not ours
-/assets/avm.wasm                  1,621,354 bytes — the AVM and its world state
-/assets/token_contract-Token.json the contract artifact, fetched when a contract is needed
-/chunks/FeeJuice-*.js             185.88 KB — a protocol-contract artifact, on demand
+1   /index.html                       the demo page
+8   /demo.js + 7 shared chunks        277.65 KB gzipped — the DEMO entry's eager set, which is
+                                      the browser entry's 253.94 KB plus the page itself
+1   /favicon.ico                      the browser's, not ours
+1   /assets/avm.wasm                  1,621,354 bytes — the AVM and its world state
+1   /assets/token_contract-Token.json the contract artifact, fetched when a contract is needed
+1   /chunks/FeeJuice-*.js             185.88 KB — a protocol-contract artifact, on demand
 ```
+
+(It said "`/demo.js` + 6 shared chunks / 253.94 KB" and enumerated to twelve under a heading that
+says thirteen. Both are M27's review's corrections: the chunk count is seven, and 253.94 KB is §1's
+**browser** row, whose entry file `browser.js` this page never requests.)
 
 and **`barretenbergRequests: []`**.
 
@@ -282,7 +311,17 @@ page** — `Page.setWebLifecycleState('frozen')`, which is what Chromium does to
 stops paying for — with `Emulation.setCPUThrottlingRate: 20` alongside, because a frozen tab and a
 merely slow tab are different failures.
 
-Nine blocks, measured:
+Nine blocks. **THIS TABLE IS ONE RUN AND CANNOT BE PINNED, which is why it is labelled rather than
+asserted.** Every cell is a function of when the arm ran and how the scheduler behaved: the
+timestamps are epoch seconds, the wall clocks are the host's, and the deviations depend on where the
+freeze landed between two ticks. It was recorded on 2026-08-27, and a re-run produces different
+numbers — M27's review re-ran it and got `1787837264..1787837272` with a three-second gap where this
+run had four. What `smoke_browser_produces_block_on_real_timer` asserts on EVERY run is the
+invariants underneath it: strictly increasing, exactly one second per block, real epoch seconds
+rather than a counter, a wall-clock gap of at least two seconds somewhere, the declared deviation
+equal to `timestamp - wallClockSeconds` per block, and at least three of those deviations non-zero.
+
+One recorded run:
 
 | # | timestamp | wall clock | declared deviation |
 |---|---|---|---|
@@ -297,11 +336,12 @@ Nine blocks, measured:
 | 9 | 1787825510 | 1787825508 | 2 |
 
 Strictly increasing throughout, one second per block. **The freeze is visible in the data**: between
-blocks 6 and 7 the host clock jumps four seconds and the declared deviation collapses from 4 to 1 —
-the rule's second branch taking over from the first, which is the whole point of DD-4's injected
-clock. The check requires that jump to be at least two seconds, because a run in which the freeze
-did not take effect produces a perfectly even chain over which every monotonicity assertion would
-pass.
+blocks 6 and 7 the host clock jumps (four seconds in this run, three in the review's) and the
+declared deviation collapses to 1 — the rule's second branch taking over from the first, which is
+the whole point of DD-4's injected clock. The check requires that jump to be at least two seconds,
+because a run in which the freeze did not take effect produces a perfectly even chain over which
+every monotonicity assertion would pass. **The jump's SIZE is a property of the run rather than of
+the runtime, and is not asserted.**
 
 ---
 

@@ -41,7 +41,8 @@
 //      `path` and `net` never appear in our graph at all, because we do not import `@aztec/pxe`.
 //   3. **The shims are this repository's own, from `browser-probe/shims/`**, rather than
 //      `vite-plugin-node-polyfills`'. They were written for the spike's browser probe, they are
-//      tracked, and they are three files totalling twelve lines. Reaching for a plugin whose
+//      tracked, and they are three files totalling ELEVEN lines (4 + 5 + 2; this said twelve
+//      until M27's review counted them). Reaching for a plugin whose
 //      transitive closure is larger than the thing being polyfilled would be the wrong trade.
 //   4. **One module is SUBSTITUTED, and it is DD-11 rather than packaging.** See below.
 //
@@ -96,7 +97,7 @@ if (!existsSync(path.join(ORCH, 'node_modules/@aztec/stdlib'))) {
 // message about npm, which reads like a dependency problem.
 //
 // THREE ARE REUSED and ONE IS M27'S. `util`, `assert` and `tty` were written for the spike's
-// browser probe and are twelve lines between them; `module` is new, because `@aztec/blob-lib`'s
+// browser probe and are eleven lines between them; `module` is new, because `@aztec/blob-lib`'s
 // KZG context reaches for `createRequire` and nothing in the spike's narrower graph did.
 const SHIMS = {
   util: path.join(REPO, 'browser-probe/shims/util.js'),

@@ -244,4 +244,33 @@ FINAL_OUT="$(cat "$M27_WORK/bounded.log")"
 assert_eq "the restored budgets build cleanly" "0" "$FINAL_RC"
 assert_true "…and the build says so" str_has_sub "$FINAL_OUT" 'all chunks within their recorded gzipped budgets'
 
+echo "== 6. BROWSER-PACKAGING.md's FIGURES, re-derived and compared AGAINST THE DOCUMENT"
+
+# ===========================================================================================
+# THE WRITE-UP WAS THE ONLY ONE IN THIS REPOSITORY THAT NO CHECK OPENED.
+# ===========================================================================================
+#
+# `lib_m27_browser.sh` defines and exports `M27_DOC` and nothing read it — uniquely: `REACTOR-ABI.md`
+# is opened by three checks, `NODE-HOST.md` by two, `BOUNDARY-SHAPE.md` by six, `CHAIN-LOOP.md` by
+# seven. Meanwhile the document's own first sentence said "Everything here is re-derived by a check
+# on every run". Measured by M27's review: ELEVEN of its figures had already rotted, including the
+# §1 total (8,166 against 8,149.89), `util`'s importer count (37 against 43), the entry-point
+# attribution in §6 (253.94 KB, which is a different entry point's number), and every cell of §8's
+# timer table. `CAMPAIGN-BRIEF.md`: "If a document states a measurement, something must take that
+# measurement again and compare."
+#
+# This is M12's shape — `verify_avm_wasm_size_budget` opens `REACTOR-ABI.md` — with M24's review's
+# correction applied: each figure is looked for on the line that NAMES ITS SUBJECT, never anywhere
+# in the file, because a check that matched `| <number> |` file-wide once passed a document whose
+# two rows had been swapped.
+assert_file "the write-up exists" "$M27_DOC"
+DOCFIG="$(python3 "$VERIFY_DIR/_m27_doc_figures.py" "$BROWSER_DIST/chunks.json" "$M27_DOC" "$M27_ARMS")"
+docfig() { printf '%s\n' "$DOCFIG" | sed -n "s/^$1\t//p"; }
+note "$(docfig CHECKED) figure(s) re-derived and compared against $M27_DOC"
+# NON-EMPTINESS FIRST: a comparer that found no rows reports no disagreements either.
+assert_ge "the comparer found the document's rows" 15 "$(docfig CHECKED)"
+assert_eq "every figure in the write-up equals what the artefact measures" "" "$(docfig BAD)"
+# THE RESIDUE, PRINTED. A row the document lost is a finding, not a smaller comparison.
+assert_eq "…and every row the comparer is about is present in the document" "" "$(docfig MISSING)"
+
 m27_finish
