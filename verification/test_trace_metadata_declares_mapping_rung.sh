@@ -43,6 +43,53 @@ assert_eq "the step record is still 64 bytes, so M24's containers are still M24'
   "64" "$(m25_arm 'd["surface"]["recordSize"]')"
 assert_eq "a position record is 16 bytes, read from the module and not restated by the host" \
   "16" "$(m25_arm 'd["surface"]["positionSize"]')"
+
+# ---------------------------------------------------------------------------
+# THE LAYOUT FIGURES, IN ALL THREE PLACES THAT STATE THEM — added by M25's review.
+#
+# M25 found `TRACE-ABI.md` §7 claiming 8 reserved bytes and `lib.rs`'s own header claiming the
+# fields need 56, when the offsets say 4 and 60, and the only compile-time assertion pinned the
+# TOTAL. It fixed the Rust side properly — `CT_RECORD_FIELD_BYTES` and `CT_RECORD_RESERVED_BYTES`
+# are asserted against `OFF_*` at compile time — but left the other two halves unpinned:
+# `ct-host/src/abi.ts` still carries `RECORD_FIELD_BYTES = 60` as a TYPED LITERAL directly above
+# the offsets it summarises, and §7's corrected prose is compared to nothing at all.
+#
+# That is the original defect's exact shape, surviving its own fix in two of the three places it
+# lived. A figure nobody re-derives rots even when the assertion beside it is correct — which is
+# the sentence §7 now contains, about itself.
+# ---------------------------------------------------------------------------
+assert_eq "the host's declared field bytes equal what its OWN offsets add up to" \
+  "$(m25_arm 'd["surface"]["recordFieldBytesFromOffsets"]')" \
+  "$(m25_arm 'd["surface"]["recordFieldBytesDeclared"]')"
+assert_eq "…and its declared reserved bytes equal the gap the offsets leave" \
+  "$(m25_arm 'd["surface"]["recordReservedBytesFromOffsets"]')" \
+  "$(m25_arm 'd["surface"]["recordReservedBytesDeclared"]')"
+# The values themselves, so the identity above cannot be satisfied by two equal WRONG numbers —
+# the `0 == 0` shape that passed a whole milestone in M23.
+assert_eq "the fields occupy 60 bytes" "60" "$(m25_arm 'd["surface"]["recordFieldBytesFromOffsets"]')"
+assert_eq "…and 4 are reserved, not the 8 M24's prose said" "4" \
+  "$(m25_arm 'd["surface"]["recordReservedBytesFromOffsets"]')"
+assert_eq "…and the two sum to the record size the MODULE reports" \
+  "$(m25_arm 'd["surface"]["recordSize"]')" \
+  "$(( $(m25_arm 'd["surface"]["recordFieldBytesFromOffsets"]') \
+     + $(m25_arm 'd["surface"]["recordReservedBytesFromOffsets"]') ))"
+# And the DOCUMENT, matched inside the sentence that attributes each figure rather than anywhere
+# in the file — M24's review measured that a file-wide match lets two figures swap and stay green.
+ABI_DOC="$(cat "$REPO_ROOT/TRACE-ABI.md" 2>/dev/null)"
+assert_ge "TRACE-ABI.md reads back" 100 "$(printf '%s\n' "$ABI_DOC" | grep -c . || true)"
+#
+# THE ROW IS IDENTIFIED BY TWO NON-NUMERIC PHRASES ON ONE LINE, and that is not incidental. §7
+# wraps at 100 columns, and the sentence stating these figures spans a line break — the line above
+# ends "…so the" and carries the RETIRED **56** in "the fields need **56**". So a needle built from
+# the sentence matches nothing (this campaign's "a needle that spanned a line break"), and a needle
+# built from "fields need" alone matches the WRONG line and would compare 60 against the retired
+# figure. Both phrases together select the one line that carries both current figures.
+ABI_ROW="$(printf '%s\n' "$ABI_DOC" | grep -F 'are reserved' | grep -F 'fields need' | head -1)"
+assert_ge "…and §7 states both layout figures on one line" 40 "$(printf '%s' "$ABI_ROW" | wc -c)"
+assert_true "…whose field-byte figure is the measured one" \
+  str_has_sub "$ABI_ROW" "fields need **$(m25_arm 'd["surface"]["recordFieldBytesFromOffsets"]')**"
+assert_true "…and whose reserved-byte figure is the measured one" \
+  str_has_sub "$ABI_ROW" "**$(m25_arm 'd["surface"]["recordReservedBytesFromOffsets"]')** are reserved"
 assert_eq "M24's nineteen exports are untouched" "19" "$(m25_arm 'd["surface"]["requiredExports"]')"
 assert_eq "M25 adds eleven, in their own list" "11" "$(m25_arm 'd["surface"]["sourceMappingExports"]')"
 assert_eq "…and the union is exactly the two lists" "30" "$(m25_arm 'd["surface"]["allRequiredExports"]')"

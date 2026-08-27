@@ -26,6 +26,12 @@ import process from 'node:process';
 
 import {
   ADDRESS_LEN,
+  OFF_ADDRESS,
+  OFF_L2_GAS,
+  OFF_RESERVED,
+  RECORD_FIELD_BYTES,
+  RECORD_RESERVED_BYTES,
+  RECORD_SIZE,
   ContractSourceMap,
   CtWriter,
   MappingRungDegraded,
@@ -148,6 +154,19 @@ const out = { module: MODULE, artifactPath: ARTIFACT };
   out.surface = {
     recordSize: ex.ct_record_size(),
     positionSize: ex.ct_position_size(),
+    // THE LAYOUT, DERIVED FROM THE OFFSETS RATHER THAN RESTATED.
+    //
+    // `RECORD_FIELD_BYTES` is a typed literal in `abi.ts`, sitting directly above the `OFF_*`
+    // constants it is supposed to summarise — which is the exact shape that produced the defect
+    // M25 fixed: `TRACE-ABI.md` §7 said 8 reserved and 56 used, `lib.rs`'s header said 56, the
+    // layout said 4 and 60, and the only compile-time assertion pinned the TOTAL. `lib.rs` now
+    // asserts its two constants against its own offsets; this recomputes the same two figures
+    // from the HOST's offsets so the host's literal is compared to something rather than trusted,
+    // and so §7's prose has a measurement to be checked against.
+    recordFieldBytesDeclared: RECORD_FIELD_BYTES,
+    recordReservedBytesDeclared: RECORD_RESERVED_BYTES,
+    recordFieldBytesFromOffsets: 4 + 4 + 4 + 8 + 8 + (RECORD_SIZE - OFF_ADDRESS),
+    recordReservedBytesFromOffsets: OFF_L2_GAS - OFF_RESERVED,
     writerKind: ex.ct_writer_kind(),
     exportedFunctions: exports.length,
     requiredExports: REQUIRED_EXPORTS.length,
