@@ -158,7 +158,25 @@ m28_value() { # <report> <KEY>
 # rather than the one on disk. Those can differ: npm rewrites the manifest on pack.
 # ---------------------------------------------------------------------------
 M28_PACK_TIMEOUT="${M28_PACK_TIMEOUT:-180}"
-m28_pack() { # <package-dir> -> prints the tarball path
+#
+# IT RETURNS NON-ZERO RATHER THAN CALLING `die`, FOR THE SAME REASON `m28_scan` DOES — AND THE FACT
+# THAT THIS HAD TO BE SAID TWICE, IN ONE FILE, IS THE POINT.
+#
+# M28 met "a `die` in `$(…)`" in `m28_scan`, fixed it there, wrote the paragraph sixty lines above
+# explaining exactly why the shape is dangerous — and left the identical shape here, in the same
+# file, with BOTH call sites spelled `t="$(m28_pack …)"`. `CAMPAIGN-BRIEF.md` says it in as many
+# words: "when you fix an instance of a form, grep for the form in the file you are fixing before
+# you leave it."
+#
+# Measured by M28's review, driving it with `M28_PACK_TIMEOUT=0.01` so the bound cannot be met:
+# `verify_npm_pack_no_optional_native` reported **52 assertions, 26 failures** — the misattributing
+# cascade — and, worse, THREE of its green lines were lies. `pack_binaries ""` runs `tar -xzf ""`,
+# which fails and leaves `$M28_WORK/extract` empty, so "the packed <p> contains no prebuilt binary,
+# by extension or by decoding" passed `ok []` for all three shipped packages over a directory
+# nothing had been extracted into. That is this entry's own deliverable, reported green, three
+# times, having packed nothing. The per-package non-emptiness assertion in
+# `verify_npm_pack_no_optional_native` §4 is the other half of this fix.
+m28_pack() { # <package-dir> -> prints the tarball path; non-zero on failure, callers write `|| die`
   local dir="$1" name dest
   name="$(basename "$dir")"
   dest="$M28_WORK/pack/$name"
@@ -167,14 +185,23 @@ m28_pack() { # <package-dir> -> prints the tarball path
   # directory by default, and a stray `.tgz` in the working tree is exactly what
   # `just check-repo-hygiene` refuses. `--ignore-scripts` because a lifecycle script is a way for a
   # pack to do something other than pack.
-  m28_bounded "$M28_PACK_TIMEOUT" "npm pack of $name" \
-    npm pack --ignore-scripts --pack-destination "$dest" --silent "$dir" \
-    || die "npm pack failed for $dir; see $M28_WORK/bounded.log"
+  #
+  # `m28_bounded` still calls `die` on an overrun, and that is correct at ITS other two call sites,
+  # which are not inside a command substitution. Reached from here it exits this function's
+  # subshell non-zero, which the caller's `|| die` then turns into a refusal in the check's own
+  # shell — so the bound is still a named failure rather than a hang either way.
+  if ! m28_bounded "$M28_PACK_TIMEOUT" "npm pack of $name" \
+       npm pack --ignore-scripts --pack-destination "$dest" --silent "$dir"; then
+    printf 'npm pack failed for %s; see %s\n' "$dir" "$M28_WORK/bounded.log" >&2
+    return 1
+  fi
   local tgz
   tgz="$(find "$dest" -maxdepth 1 -name '*.tgz' -print -quit)"
-  [ -n "$tgz" ] && [ -s "$tgz" ] \
-    || die "npm pack of $dir produced no tarball in $dest — a pack that produced nothing would make
-             every absence below vacuous."
+  if [ -z "$tgz" ] || [ ! -s "$tgz" ]; then
+    printf 'npm pack of %s produced no tarball in %s — a pack that produced nothing would make every absence below vacuous.\n' \
+      "$dir" "$dest" >&2
+    return 1
+  fi
   printf '%s\n' "$tgz"
 }
 

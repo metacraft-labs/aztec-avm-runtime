@@ -108,7 +108,10 @@ echo "== 2. each shipped package is PACKED, and the tarball is opened"
 # Reused between sections so the manifest arm and the member arm run over the same archive.
 declare -A TGZ=()
 for p in $SHIPPED; do
-  t="$(m28_pack "$REPO_ROOT/$p")"
+  t="$(m28_pack "$REPO_ROOT/$p")" \
+    || die "npm pack of $p could not be completed; see the message above and $M28_WORK/bounded.log.
+             Refusing here rather than asserting over an archive that was never produced:
+             m28_pack returns non-zero for the reason its own header gives."
   TGZ[$p]="$t"
   assert_file "npm pack produced a tarball for $p" "$t"
   members="$(m28_pack_members "$t")"
@@ -190,13 +193,19 @@ for dirpath, dirnames, filenames in os.walk(root):
 PY
 }
 
+# NON-VACUITY PER PACKAGE, NOT ONCE AFTER THE LOOP, and the difference is a measured one.
+# `pack_binaries` empties `$M28_WORK/extract` and re-fills it per tarball, so a single check after
+# the loop only ever judges the LAST package's extraction. Measured by M28's review, driving the
+# `die`-in-`$(…)` above: with nothing packed at all, `tar -xzf ""` left the directory empty and all
+# THREE of these assertions reported `ok []` — an absence over a directory that was empty by
+# construction, which is this campaign's most-repeated defect, reported green about the entry's own
+# deliverable. The non-emptiness now stands beside each absence rather than after all three.
 for p in $SHIPPED; do
   bins="$(pack_binaries "${TGZ[$p]}")"
+  assert_ge "the extraction of $p produced files, so the absence below is not over an empty directory" 5 \
+    "$(find "$M28_WORK/extract" -type f 2>/dev/null | grep -c . || true)"
   assert_eq "the packed $p contains no prebuilt binary, by extension or by decoding" "" "$bins"
 done
-# NON-VACUITY OF THE DECODE ARM: it really did read files, and they really are text.
-assert_ge "the extraction produced the files the decode arm judged" 5 \
-  "$(find "$M28_WORK/extract" -type f 2>/dev/null | grep -c . || true)"
 
 echo "== 5. THE CONTROL — a package that violates both halves, through the same two instruments"
 
@@ -217,7 +226,9 @@ printf 'export const x = 1;\n' >"$CTRL/index.js"
 printf '\177ELF\002\001\001\000\377\376\375\374' >"$CTRL/prebuilt.node"
 printf '\377\376\000\001binary-but-innocently-named\000\377' >"$CTRL/data.dat"
 
-CTRL_TGZ="$(m28_pack "$CTRL")"
+CTRL_TGZ="$(m28_pack "$CTRL")" \
+  || die "the control package could not be packed; the negative control below would otherwise be
+           asserted over nothing, which is the failure mode it exists to rule out."
 assert_file "the control package packs" "$CTRL_TGZ"
 CTRL_MANIFEST="$(m28_pack_manifest "$CTRL_TGZ")"
 assert_eq "the SAME manifest instrument reports the control's optional native dependency" "1" \
