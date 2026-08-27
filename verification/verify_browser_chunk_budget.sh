@@ -106,7 +106,15 @@ _restore_budgets() {
   cp "$WORK/budgets.orig.json" "$M27_BUDGETS"
   touch "$M27_BUDGETS"
 }
-trap '_restore_budgets' EXIT
+# AND THE RESTORE MUST NOT COST THE SUMMARY LINE. `trap '_restore_budgets' EXIT` REPLACED the
+# abnormal-exit trap `m27_summary_on_abnormal_exit` installed at the top of this file, so from here
+# down a `die` — and there are three `m27_bounded` calls below, each of which can `die` on a build
+# that overruns — printed no summary and read as a SMALLER milestone rather than a red one. That is
+# the defect M22's trap exists to prevent, disabled inside the section that most needs it. The two
+# are chained now, and the signals are covered as well as EXIT, because a Ctrl-C here leaves a
+# TRACKED file corrupted in the working tree.
+_restore_and_summarise() { _restore_budgets; _m27_abnormal_exit; }
+trap '_restore_and_summarise' EXIT INT TERM HUP
 
 python3 - "$M27_BUDGETS" <<'PY'
 import json, sys
@@ -117,14 +125,26 @@ for b in d["budgets"]:
         b["maxGzipKB"] = 1
 json.dump(d, open(p, "w"), indent=2)
 PY
-TOO_SMALL="$(m27_bounded "$M27_BUILD_TIMEOUT" "the budget-control build" node "$BROWSER_DIR/build.mjs"; printf '%s' "$?")"
+# THE EXIT STATUS IS TAKEN WITHOUT A COMMAND SUBSTITUTION, and that is not style. `m27_bounded`
+# calls `die` when a build overruns its bound, and `die` runs `exit 1` — INSIDE the substitution's
+# subshell. The `printf '%s' "$?"` after it never ran, so the variable came back EMPTY, and
+# `test "" -eq 0` exits 2 with "integer expression expected", which `assert_false` counts as a pass.
+# A control build that hung therefore read as "the enforcement works". Run in this shell, a `die`
+# is a named failure and reaches the trap above.
+m27_bounded "$M27_BUILD_TIMEOUT" "the budget-control build" node "$BROWSER_DIR/build.mjs"
+TOO_SMALL=$?
 CONTROL_OUT="$(cat "$M27_WORK/bounded.log")"
 assert_false "a shared chunk budget of 1 KB makes the build FAIL" test "$TOO_SMALL" -eq 0
 assert_true "…and the failure names the chunk-budget rule" \
   str_has_sub "$CONTROL_OUT" 'chunk budget exceeded'
 assert_true "…and says it is a build failure rather than a warning" \
   str_has_sub "$CONTROL_OUT" 'BUILD FAILURE, not a warning'
-assert_true "…and names the offending chunk by path" str_has_sub "$CONTROL_OUT" 'chunks/chunk-'
+# BOUND TO THE VIOLATION LINE, not to the log. `build.mjs` prints a per-file SIZE TABLE on every
+# build and that table names `chunks/chunk-*.js`, so a bare `str_has_sub … 'chunks/chunk-'` over the
+# whole log is satisfied by the routine output of a build that reported no violation at all —
+# dropping the path from the violation message would have passed it.
+assert_true "…and names the offending chunk by path, ON the violation line" \
+  str_has_line_re "$CONTROL_OUT" '^ +chunks/chunk-[A-Za-z0-9_]+\.js: .* gzipped exceeds 1 KB'
 
 echo "== 4. …and so does a file covered by NO budget"
 
@@ -136,11 +156,67 @@ d = json.load(open(p))
 d["budgets"] = [b for b in d["budgets"] if b["name"] != "shared-chunk"]
 json.dump(d, open(p, "w"), indent=2)
 PY
-UNCOVERED_RC="$(m27_bounded "$M27_BUILD_TIMEOUT" "the coverage-control build" node "$BROWSER_DIR/build.mjs"; printf '%s' "$?")"
+m27_bounded "$M27_BUILD_TIMEOUT" "the coverage-control build" node "$BROWSER_DIR/build.mjs"
+UNCOVERED_RC=$?
 UNCOVERED_OUT="$(cat "$M27_WORK/bounded.log")"
 assert_false "deleting a budget makes the build FAIL rather than pass silently" test "$UNCOVERED_RC" -eq 0
 assert_true "…naming coverage rather than size" \
   str_has_sub "$UNCOVERED_OUT" 'covered by no budget'
+
+echo "== 4b. AND THE PER-ENTRY EAGER BUDGET CAN REFUSE — the one the deliverable is about"
+
+# ===========================================================================================
+# THIS SECTION EXISTS BECAUSE THE TWO CONTROLS ABOVE BOTH MUTATE `budgets` AND NEITHER TOUCHES
+# `entryBudgets`, WHICH IS THE HALF THE MILESTONE SAYS IS THE POINT.
+# ===========================================================================================
+#
+# The deliverable: "Per-file AND per-entry-point EAGER totals, because a per-file budget cannot see
+# the regression that matters: a lazily-loaded megabyte moving into the eager set changes which
+# chunks a page fetches and not how big any of them is." The enforcement for that half is five lines
+# in `browser/build.mjs` (the `eagerViolations.push`), and nothing in this repository exercised them.
+# Measured by M27's review: DELETE those five lines and `verify_browser_chunk_budget` reports
+# **23 assertions, 0 failures** and `verify_browser_bundle_builds` **41, 0** — the enforcement of
+# "THE NUMBER DD-11 IS ABOUT" removed, and the whole milestone green.
+#
+# The mutation is the smallest one that can only be caught here: the browser entry's own eager
+# budget set to 1 KB, with every per-file budget left alone, so a build that still satisfies every
+# per-file rule must be refused by the eager rule or by nothing.
+_restore_budgets
+EAGER_ENTRY="$(python3 - "$M27_BUDGETS" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+row = next((r for r in d["entryBudgets"] if r["entry"] == "browser.js"), None)
+print("MISSING" if row is None else row["entry"])
+PY
+)"
+assert_eq "there is a per-entry eager budget for the reference entry point" "browser.js" "$EAGER_ENTRY"
+python3 - "$M27_BUDGETS" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+n = 0
+for r in d["entryBudgets"]:
+    if r["entry"] == "browser.js":
+        r["maxGzipKB"] = 1
+        n += 1
+assert n == 1, "the eager-budget control mutated %d rows, expected 1" % n
+json.dump(d, open(p, "w"), indent=2)
+PY
+m27_bounded "$M27_BUILD_TIMEOUT" "the eager-budget control build" node "$BROWSER_DIR/build.mjs"
+EAGER_RC=$?
+EAGER_OUT="$(cat "$M27_WORK/bounded.log")"
+assert_false "an eager budget of 1 KB for browser.js makes the build FAIL" test "$EAGER_RC" -eq 0
+# NAMED BY THE EAGER RULE, not by the per-file one, because every per-file budget is untouched here
+# and a failure attributed to one of those would mean the mutation exercised something else.
+assert_true "…and the failure is the EAGER rule, on browser.js's own line" \
+  str_has_line_re "$EAGER_OUT" '^ +browser\.js: .* gzipped eagerly exceeds 1 KB'
+# AND NO PER-FILE VIOLATION, since no per-file budget was touched. The needle is the per-file
+# wording and not the shared header: `chunk budget exceeded` is what BOTH kinds of violation print
+# under, so asking for its absence fails over a correct eager refusal — which it did, on this
+# assertion's first run. A per-file line reads `gzipped exceeds`, an eager one `gzipped eagerly
+# exceeds`, and the first is not a substring of the second.
+assert_false "…and no per-file violation, since no per-file budget was touched" \
+  str_has_sub "$EAGER_OUT" 'gzipped exceeds'
 
 echo "== 5. …and the restored file rebuilds green"
 
