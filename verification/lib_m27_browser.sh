@@ -193,12 +193,32 @@ m27_require_chromium() {
 # ---------------------------------------------------------------------------
 # The bundle.
 # ---------------------------------------------------------------------------
+# THE WATCHED SET IS THE BUNDLE'S INPUT SET, AND IT WAS THREE CLASSES SHORT.
+#
+# Measured by M28's review against `browser/dist/meta.json` itself: the shipped graph's 1,061 inputs
+# include `browser-probe/shims/{util,tty,assert}.js` and `node-host/src/{gate,memory,errors,msgpack,
+# reactor}.ts`, and NEITHER directory was watched — nor was `browser/esbuild-driver.mjs`, which is
+# where `platform`, `alias` and `external` are set, i.e. the exact three things
+# `verify_browser_bundle_no_node_builtins` measures.
+#
+# Three of the four declared polyfills live in that unwatched set, and "every builtin resolves to a
+# declared shim" is the carve-out the whole gate turns on. Driven: gut `browser-probe/shims/util.js`
+# and run the check with no refresh flag — no rebuild happens and the gate reports 64 assertions, 0
+# failures over a bundle that no longer describes the source. M28's own mutation harness had to pass
+# `M27_BUNDLE_REFRESH=1` to six of its arms, which is the workaround for this without the gap being
+# named.
+#
+# The predicate is still MTIME-based, and that remains recorded rather than changed: a restore that
+# preserves mtimes (`cp -p`, a `git checkout` of an unchanged blob, a `git stash pop`) still defeats
+# it. Being incomplete and being mtime-based are two different defects and only the first is closed
+# here.
 m27_bundle_newer_inputs() { # -> prints the first input newer than the metafile, or nothing
   local stamp="$BROWSER_DIST/meta.json"
   [ -s "$stamp" ] || { printf 'meta.json\n'; return 0; }
   find "$BROWSER_SRC" "$BROWSER_DIR/demo" -type f ! -name '.*' -newer "$stamp" -print -quit 2>/dev/null || true
   find "$ORCH_SRC" "$REPO_ROOT/ct-host/src" -type f ! -name '.*' -newer "$stamp" -print -quit 2>/dev/null || true
-  find "$BROWSER_DIR/build.mjs" "$M27_BUDGETS" -newer "$stamp" -print -quit 2>/dev/null || true
+  find "$REPO_ROOT/node-host/src" "$REPO_ROOT/browser-probe/shims" -type f ! -name '.*' -newer "$stamp" -print -quit 2>/dev/null || true
+  find "$BROWSER_DIR/build.mjs" "$BROWSER_DIR/esbuild-driver.mjs" "$M27_BUDGETS" -newer "$stamp" -print -quit 2>/dev/null || true
 }
 
 M27_BUILD_TIMEOUT="${M27_BUILD_TIMEOUT:-300}"
