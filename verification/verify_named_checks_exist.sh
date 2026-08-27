@@ -90,6 +90,14 @@ EXCEPTIONS = {
     # comment that says a check pins something when it does not, and a comment that says a check is
     # absent is the cure rather than the disease. It stops being an exception when the entry lands.
     "test_form_b_tx_matches_pxe_bytes": "M21's pending entry, cited by form_b.ts in the sentence that says it does not exist",
+    # THE SAME DISTINCTION, ONE MILESTONE LATER. M25's entry
+    # `test_trace_step_count_matches_instruction_count` is `pending` because the step stream in a
+    # recording is the artifact's own first N MAPPED program counters and not the pcs an execution
+    # visited. `browser/src/ct_download.ts` names it in the paragraph that says so, because a reader
+    # who sees a container downloaded from a page that just executed a transaction will otherwise
+    # read the step count as an instruction count. Naming a check as ABSENT is the cure for the
+    # defect this file exists to catch, not an instance of it.
+    "test_trace_step_count_matches_instruction_count": "M25's pending entry, cited by ct_download.ts in the paragraph that says the step count is not an instruction count",
 }
 
 verification = os.path.join(repo, "verification")
@@ -108,6 +116,11 @@ for entry in sorted(os.listdir(verification)):
 # TypeScript plus M19's harness on top of it, whose vitest test names (`test_utils`,
 # `verify_three_way_differential_runs`) follow a different convention entirely and are not this
 # campaign's checks. Scanning them would make the rule about upstream's naming.
+# `browser/src` and `browser/demo` were added by M27 for exactly the reason `ct-host/src` was
+# added by M24: those files name checks in order to tell a reader that a property is pinned —
+# `poseidon.ts` names the differential that says its hash agrees with bb.js, `entry_browser.ts`
+# names the check that holds DD-5 over it — and that is precisely the claim this file exists to
+# hold to account. Adding the root moves no assertion count; only the `SEEN` note.
 # `ct-host/src` was added by M24 and the reason is the rule itself: `ct-host/src/config.ts` and
 # `writer.ts` each name a check to tell the reader a property is pinned, which is EXACTLY the
 # claim this file exists to hold to account. A new source directory that is not in this list is
@@ -115,7 +128,8 @@ for entry in sorted(os.listdir(verification)):
 # in the same commit as the sources. It moves no assertion count — every assertion below is an
 # `assert_ge` or an emptiness comparison — only the `SEEN` note.
 roots = [os.path.join(repo, r) for r in
-         ("orchestration/src", "node-host/src", "ct-host/src", "verification", "tools")]
+         ("orchestration/src", "node-host/src", "ct-host/src", "browser/src", "browser/demo",
+          "verification", "tools")]
 if extra:
     roots.append(extra)
 

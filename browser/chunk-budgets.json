@@ -1,0 +1,122 @@
+{
+  "//": [
+    "CHUNK BUDGETS \u2014 recorded, enforced, and a BUILD FAILURE when exceeded.",
+    "",
+    "M27's deliverable: 'chunk budgets recorded and enforced, so a regression is a build failure",
+    "rather than a discovery'. The shape is upstream's \u2014 aztec-packages/playground/vite.config.ts",
+    "declares a list of { pattern, maxSizeKB, description } and its plugin THROWS on a violation \u2014",
+    "and so is the discipline: their limits carry a per-bump log naming what grew and why. Ours is",
+    "the `bumps` array, which is data rather than a comment so that a check can read it.",
+    "",
+    "THREE DIVERGENCES FROM UPSTREAM'S, and each comes from this milestone's own wording:",
+    "  * GZIPPED, because the deliverable says 'recorded gzipped budget' and gzip is what a page",
+    "    downloads. Raw bytes are recorded beside it in dist/chunks.json so a reader can reproduce",
+    "    a number with `ls`.",
+    "  * NO CATCH-ALL. Upstream ends with /.*/ at 5300 KB as a safety net; here a file matched by",
+    "    no budget FAILS THE BUILD. 'the budget did not catch it' and 'nothing had a budget' are",
+    "    indistinguishable from the outside.",
+    "  * PER-ENTRY EAGER TOTALS as well as per-file sizes. A per-file budget cannot see the",
+    "    regression that matters for DD-11 \u2014 a lazily-loaded megabyte moving into the eager set \u2014",
+    "    because every individual file can stay the same size while the SET grows. `entryBudgets`",
+    "    is the transitive closure of an entry point's STATIC imports, which is exactly what a page",
+    "    pays before it does anything.",
+    "",
+    "HEADROOM IS DELIBERATELY SMALL. A budget with three times the headroom is a number nobody has",
+    "to think about. These sit just above the measurement of 2026-08-27."
+  ],
+  "budgets": [
+    {
+      "name": "entry-browser",
+      "pattern": "^browser\\.js$",
+      "maxGzipKB": 4,
+      "description": "the reference entry point's own module \u2014 DD-5's browser surface",
+      "bumps": []
+    },
+    {
+      "name": "entry-testing",
+      "pattern": "^testing\\.js$",
+      "maxGzipKB": 4,
+      "description": "browser + the vendored transaction builder and the deterministic clocks",
+      "bumps": []
+    },
+    {
+      "name": "entry-demo",
+      "pattern": "^demo\\.js$",
+      "maxGzipKB": 5,
+      "description": "the demo page's own script",
+      "bumps": []
+    },
+    {
+      "name": "entry-node",
+      "pattern": "^node/node\\.js$",
+      "maxGzipKB": 230,
+      "description": "the Node entry: the browser surface plus four declared fs conveniences (DD-5). It carries the shared @aztec code itself because the Node pass does not share chunks with the browser pass; only pino's CommonJS logging stack is external.",
+      "bumps": []
+    },
+    {
+      "name": "shared-chunk",
+      "pattern": "^chunks/chunk-[A-Z0-9]+\\.js$",
+      "maxGzipKB": 200,
+      "description": "code shared between the browser entry points: @aztec/stdlib, foundation, the orchestration, the AVM host",
+      "bumps": []
+    },
+    {
+      "name": "node-shared-chunk",
+      "pattern": "^node/chunks/chunk-[A-Z0-9]+\\.js$",
+      "maxGzipKB": 20,
+      "description": "the Node pass's own shared chunks",
+      "bumps": []
+    },
+    {
+      "name": "protocol-contract-artifact",
+      "pattern": "^(node/)?chunks/(ContractClassRegistry|ContractInstanceRegistry|FeeJuice)-[A-Z0-9]+\\.js$",
+      "maxGzipKB": 550,
+      "description": "a canonical protocol-contract artifact, behind upstream's own lazy.js dynamic import. DD-11: these are the 'contract artifacts' that must load lazily. A public transaction reaches FeeJuice only; the two registries are never fetched by the demo at all.",
+      "bumps": []
+    },
+    {
+      "name": "barretenberg-proving-wasm",
+      "pattern": "^(node/)?chunks/barretenberg(-threads)?-[A-Z0-9]+\\.js$",
+      "maxGzipKB": 3200,
+      "description": "bb.js's base64-inlined proving wasm, behind its own dynamic import. DD-11: a public-only page never fetches this, which verify_public_only_page_never_fetches_barretenberg asserts on the network log. The budget exists so its SIZE is recorded rather than merely its absence from the eager set.",
+      "bumps": []
+    },
+    {
+      "name": "lazy-crypto-chunk",
+      "pattern": "^(node/)?chunks/(secp256k1|ccip|native|browser|_esm)-[A-Z0-9]+\\.js$",
+      "maxGzipKB": 24,
+      "description": "small chunks viem and @noble split out behind dynamic imports; none is on the public-execution path",
+      "bumps": []
+    }
+  ],
+  "entryBudgets": [
+    {
+      "name": "browser",
+      "entry": "browser.js",
+      "maxGzipKB": 300,
+      "description": "THE NUMBER DD-11 IS ABOUT: everything the reference entry point downloads before it can do anything. It must not contain the proving wasm or any contract artifact.",
+      "bumps": []
+    },
+    {
+      "name": "testing",
+      "entry": "testing.js",
+      "maxGzipKB": 320,
+      "description": "the test harness entry's eager set: browser plus the vendored builder",
+      "bumps": []
+    },
+    {
+      "name": "demo",
+      "entry": "demo.js",
+      "maxGzipKB": 320,
+      "description": "what the demo page costs on first paint, before avm.wasm is fetched",
+      "bumps": []
+    },
+    {
+      "name": "node",
+      "entry": "node/node.js",
+      "maxGzipKB": 245,
+      "description": "the Node entry's eager set. Larger than the browser entry's only because the Node pass does not share chunks with the browser pass, not because it carries anything the browser entry does not.",
+      "bumps": []
+    }
+  ]
+}

@@ -1,0 +1,219 @@
+From c949758a5a7e6d58467d80d11ac19bcf2f32efcc Mon Sep 17 00:00:00 2001
+From: Metacraft Labs <dev@metacraft-labs.com>
+Date: Thu, 27 Aug 2026 12:31:52 +0300
+Subject: [PATCH] test(vm2): export poseidon2 and grumpkin from the reactor, so
+ a browser page needs one wasm
+
+DD-11 says a page that only executes a public transaction must never fetch the
+barretenberg proving wasm. Measured before this patch existed, twice, and the second
+measurement is why this exports four names rather than two.
+
+FIRST: instrumenting `Barretenberg.initSingleton` around a Form A run gives 82 calls, all
+from `@aztec/foundation`'s `poseidon2Hash` -- `feeJuiceBalanceLeafSlot`, `HashedValues`
+and the private-to-public kernel public inputs. In a browser that downloads 7.9 MB of
+proving stack to compute a hash.
+
+SECOND: with poseidon2 exported, a public-only page STILL fetched it, in the browser's own
+network log. The remaining caller is address derivation --
+`computeAddress = Grumpkin.add(Grumpkin.mul(G, preaddress), ivpkM)` -- and a contract's
+address is a commitment to its class, salt and public keys, so every page that registers a
+contract computes one.
+
+`avm.wasm` is itself a barretenberg build. `vm2_sim` links `crypto_poseidon2`, which
+declares `ecc`: both the hash and the curve are in the module the page has already
+downloaded. These four exports only decide whether a host can call them.
+
+  * `avm_poseidon2_hash` / `avm_poseidon2_permutation` --
+    `bb::crypto::Poseidon2<Poseidon2Bn254ScalarFieldParams>::hash` and
+    `Poseidon2Permutation<...>::permutation`, the same functions bb.js calls.
+  * `avm_grumpkin_mul` / `avm_grumpkin_add` -- `bbapi_ecc.cpp`'s `GrumpkinMul::execute` and
+    `GrumpkinAdd::execute` line for line, including the on-curve checks.
+
+Field elements cross as 32-byte msgpack bins, which is the spelling every other export
+here already uses, rather than as `bbapi`'s own point struct.
+
+The reactor's export list goes from fifty-one names to fifty-five. That is a different
+artefact from M12's, M13's and M23's and is measured as one.
+---
+ .../cpp/src/barretenberg/vm2/CMakeLists.txt   |   4 +
+ .../barretenberg/vm2/reactor/avm_reactor.cpp  | 148 ++++++++++++++++++
+ 2 files changed, 152 insertions(+)
+
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt b/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt
+index 411b4f9e18..d2830784c1 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt
++++ b/barretenberg/cpp/src/barretenberg/vm2/CMakeLists.txt
+@@ -184,6 +184,10 @@ if(AVM_REACTOR)
+             avm_merkle_db_revert_checkpoint
+             avm_merkle_db_update_archive
+             avm_merkle_db_get_archive_snapshot
++            avm_poseidon2_hash
++            avm_poseidon2_permutation
++            avm_grumpkin_mul
++            avm_grumpkin_add
+             avm_merkle_db_get_checkpoint_id
+             avm_contract_db_get_checkpoint_id
+             avm_contract_db_register_debug_function_names
+diff --git a/barretenberg/cpp/src/barretenberg/vm2/reactor/avm_reactor.cpp b/barretenberg/cpp/src/barretenberg/vm2/reactor/avm_reactor.cpp
+index 92069f43a6..ea498099d5 100644
+--- a/barretenberg/cpp/src/barretenberg/vm2/reactor/avm_reactor.cpp
++++ b/barretenberg/cpp/src/barretenberg/vm2/reactor/avm_reactor.cpp
+@@ -75,6 +75,9 @@
+ #include <vector>
+ 
+ #include "barretenberg/common/wasm_export.hpp"
++#include "barretenberg/crypto/poseidon2/poseidon2.hpp"
++#include "barretenberg/ecc/curves/grumpkin/grumpkin.hpp"
++#include "barretenberg/crypto/poseidon2/poseidon2_permutation.hpp"
+ #include "barretenberg/serialize/msgpack.hpp"
+ #include "barretenberg/serialize/msgpack_impl.hpp"
+ 
+@@ -777,3 +780,148 @@ WASM_EXPORT int32_t avm_coordinator_simulate(uint32_t handle, const uint8_t* inp
+         pack_result(result);
+     });
+ }
++
++// ---------------------------------------------------------------------------
++// POSEIDON2 — the hash this artefact ALREADY LINKS, exported so a browser page does not have to
++// download a second barretenberg to get it.
++//
++// THIS IS DD-11, NOT A CONVENIENCE. Measured on a Form A run before this existed:
++// `@aztec/foundation`'s `poseidon2Hash` is reached 82 times by a page that only executes a PUBLIC
++// transaction — from `feeJuiceBalanceLeafSlot`, from `HashedValues`, and from the
++// private-to-public kernel public inputs. In a browser that function calls
++// `BarretenbergSync.initSingleton()`, which fetches `barretenberg.wasm` — 7.9 MB of PROVING
++// STACK for a hash. The design document's DD-11 says in as many words that a page which only
++// executes a public transaction must never fetch it.
++//
++// `vm2_sim` already links `crypto_poseidon2`: the AVM has a Poseidon2 gadget and every merkle
++// tree in `world_state_reference` hashes with it. So the function is in this module whether or
++// not it is exported; what these two exports change is only whether a host can call it. The
++// module grows by the export entries and the two wrappers and by nothing else — `--gc-sections`
++// was already keeping the implementation.
++//
++// TWO EXPORTS, BECAUSE THE SUBSTITUTED MODULE HAS TWO SHAPES.
++// `@aztec/foundation/dest/crypto/poseidon/index.js` has five exports and all five reduce to two
++// primitives: a variable-length sponge hash (`poseidon2Hash`, `poseidon2HashWithSeparator`,
++// `poseidon2HashBytes`) and a fixed-width permutation (`poseidon2Permutation`). A browser-side
++// replacement that implemented four of the five and threw on the fifth would be a landmine, so
++// both primitives are here even though the measured public-only path uses only the first.
++//
++// THE PARAMETERS ARE THE ONES BB.JS USES, NAMED RATHER THAN ASSUMED:
++// `bb::crypto::Poseidon2<bb::crypto::Poseidon2Bn254ScalarFieldParams>::hash` is what
++// `bbapi`'s `poseidon2Hash` calls, and `Poseidon2Permutation<...>::permutation` is what its
++// `poseidon2Permutation` calls. `test_browser_poseidon2_matches_bb_js` runs both against bb.js
++// itself over a corpus rather than trusting this paragraph.
++
++// args: msgpack `std::vector<FF>` — the sponge input, any length including zero.
++// result: msgpack `FF`.
++WASM_EXPORT int32_t avm_poseidon2_hash(const uint8_t* args, uint32_t len)
++{
++    return guarded([&] {
++        const auto input = unpack_args<std::vector<FF>>(args, len);
++        pack_result(bb::crypto::Poseidon2<bb::crypto::Poseidon2Bn254ScalarFieldParams>::hash(input));
++    });
++}
++
++// args: msgpack `std::vector<FF>` of EXACTLY four elements — the permutation state.
++// result: msgpack `std::vector<FF>` of four.
++//
++// The length is checked here rather than left to `std::array`'s copy, because the wrong length is
++// a host bug and the host should be told which one it made instead of reading four elements out of
++// a three-element vector.
++WASM_EXPORT int32_t avm_poseidon2_permutation(const uint8_t* args, uint32_t len)
++{
++    using Perm = bb::crypto::Poseidon2Permutation<bb::crypto::Poseidon2Bn254ScalarFieldParams>;
++    return guarded([&] {
++        const auto input = unpack_args<std::vector<FF>>(args, len);
++        if (input.size() != Perm::t) {
++            throw std::runtime_error("avm_poseidon2_permutation: the state is " + std::to_string(Perm::t) +
++                                     " field elements, got " + std::to_string(input.size()));
++        }
++        Perm::State state;
++        for (size_t i = 0; i < Perm::t; ++i) {
++            state[i] = input[i];
++        }
++        const Perm::State out = Perm::permutation(state);
++        pack_result(std::vector<FF>(out.begin(), out.end()));
++    });
++}
++
++// ---------------------------------------------------------------------------
++// GRUMPKIN — the OTHER route from a browser page to the proving wasm, and it was found the same
++// way poseidon2 was: by reading the network log of a page that was supposed to have no such route.
++//
++// With poseidon2 exported, a public-only page STILL fetched `chunks/barretenberg-*.js` and its
++// 7.9 MB data: URL. The remaining caller is `@aztec/stdlib`'s ADDRESS DERIVATION:
++//
++//     computeAddress(publicKeys, partialAddress)          keys/derivation.js:59
++//       = Grumpkin.add(derivePublicKeyFromSecretKey(preaddress), publicKeys.ivpkM)
++//       = Grumpkin.add(Grumpkin.mul(G, preaddress), ivpkM)
++//
++// A contract's address is a commitment to its class, its salt and its public keys, so ANY page that
++// registers a contract computes one — which is every page that executes a transaction against a
++// contract. Two curve operations, and without them the page downloads a proving system.
++//
++// `vm2_sim` already links `ecc`: `crypto_poseidon2` declares it as a dependency, and grumpkin is
++// bn254's cycle curve compiled in the same module. As with poseidon2, the implementation is in the
++// artefact whether or not anybody exports it.
++//
++// THE SEMANTICS ARE `bbapi_ecc.cpp`'s, LINE FOR LINE, so that the substituted host module and
++// bb.js compute the same points: `GrumpkinMul::execute` is an on-curve check then
++// `element(point).mul_const_time(scalar).to_affine_const_time()`, and `GrumpkinAdd::execute` is
++// two on-curve checks then `point_a + point_b`. `test_browser_grumpkin_matches_bb_js` runs both
++// against bb.js over a corpus rather than trusting this paragraph.
++//
++// THE ENCODING IS THIS REACTOR'S AND NOT `bbapi`'s. `bbapi` packs an `affine_element` as its own
++// msgpack struct; this boundary already has a proven spelling for a field element — a 32-byte bin,
++// which is what every `FF` on every other export here uses — so a point is TWO of those and a
++// grumpkin scalar (which lives in bn254's BASE field, not its scalar field) is a third, passed as
++// raw bytes and read with `from_buffer`. That keeps the host side using the same encoder it
++// already uses for poseidon2 instead of growing a second one.
++
++using GrumpkinG1 = bb::grumpkin::g1;
++
++namespace {
++
++std::vector<FF> pack_point(const GrumpkinG1::affine_element& p)
++{
++    return { p.x, p.y };
++}
++
++GrumpkinG1::affine_element point_from(const FF& x, const FF& y, const char* what)
++{
++    GrumpkinG1::affine_element p{ x, y };
++    if (!p.on_curve()) {
++        throw std::runtime_error(std::string(what) + " is not on the grumpkin curve");
++    }
++    return p;
++}
++
++} // namespace
++
++// args: msgpack [FF x, FF y, bin32 scalar] — the point and a grumpkin scalar, big-endian.
++// result: msgpack [FF x, FF y].
++WASM_EXPORT int32_t avm_grumpkin_mul(const uint8_t* args, uint32_t len)
++{
++    return guarded([&] {
++        const auto [x, y, scalar_bytes] =
++            unpack_args<std::tuple<FF, FF, std::vector<uint8_t>>>(args, len);
++        if (scalar_bytes.size() != 32) {
++            throw std::runtime_error("avm_grumpkin_mul: the scalar is 32 bytes, got " +
++                                     std::to_string(scalar_bytes.size()));
++        }
++        const auto scalar = ::from_buffer<bb::grumpkin::fr>(scalar_bytes);
++        const auto point = point_from(x, y, "avm_grumpkin_mul: the input point");
++        pack_result(pack_point(GrumpkinG1::element(point).mul_const_time(scalar).to_affine_const_time()));
++    });
++}
++
++// args: msgpack [FF ax, FF ay, FF bx, FF by]. result: msgpack [FF x, FF y].
++WASM_EXPORT int32_t avm_grumpkin_add(const uint8_t* args, uint32_t len)
++{
++    return guarded([&] {
++        const auto [ax, ay, bx, by] = unpack_args<std::tuple<FF, FF, FF, FF>>(args, len);
++        const auto a = point_from(ax, ay, "avm_grumpkin_add: point a");
++        const auto b = point_from(bx, by, "avm_grumpkin_add: point b");
++        pack_result(pack_point(GrumpkinG1::affine_element(GrumpkinG1::element(a) + GrumpkinG1::element(b))));
++    });
++}

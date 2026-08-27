@@ -31,3 +31,11 @@ vm2wasm/*.wasm.gz
 # source; both are reconstructed by that script from the revision pins.json declares.
 ct-writer/build-wasm-deps/
 ct-writer/target/
+browser/dist/
+
+# browser/node_modules is a SYMLINK to ../orchestration/node_modules, not a directory, so the
+# `node_modules/` rule above does not match it. The browser package declares no dependencies of its
+# own — it packages the orchestration's — and sharing the installed tree by symlink is what keeps
+# exactly one pinned @aztec nightly in this repository and exactly one install of nine hundred
+# packages. `verification/lib_m27_browser.sh` recreates it if it is missing.
+/browser/node_modules

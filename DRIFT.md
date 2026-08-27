@@ -1004,6 +1004,53 @@ were absorbed silently.
   `aztec-avm-runtime/orchestration/src/wasm_avm_public_tx_simulator.ts` (why there is no `cancel`);
   `aztec-avm-runtime/orchestration/src/block_assembly.ts` (DD-3, why the guard is kept).
 
+## D21 — `REACTOR-ABI.md` says `avm.wasm` imports eleven WASI functions and asserts `random_get`'s absence by name; M27's module imports twelve
+
+- id: D21
+- status: open
+- opened: 2026-08-27
+- milestone: M27 (observed and recorded; the document is not re-rendered here)
+- design-question: —
+- sides: `REACTOR-ABI.md`'s import table, which says ELEVEN `wasi_snapshot_preview1` functions and
+  records the ABSENCE of `random_get` among four names it enumerates, versus the module
+  `verification/build_avm_wasm_m27.sh` produces, which declares TWELVE. Both exist; both are pinned;
+  they disagree.
+- what: The document is **right about M12's, M13's and M23's artefacts and wrong about M27's**, and
+  the difference is M27's own thirteenth overlay. Exporting `avm_grumpkin_mul` / `avm_grumpkin_add`
+  makes `bb::numeric::RandomEngine` reachable, and its `get_random_uint{64,128,256}()` are VIRTUAL —
+  so the call sites are `call_indirect` through a vtable and `--gc-sections` cannot prove them dead
+  however unreachable they are in practice. Traced through the unstripped module's disassembly
+  rather than inferred:
+
+  ```
+  wasi_snapshot_preview1.random_get  <-  __wasi_random_get  <-  __getentropy
+                                     <-  RandomEngine::get_random_uint{64,128,256}()
+  ```
+
+  **AND IT IS CALLED, ONCE, WHICH IS NOT WHAT THE FIRST DRAFT OF THE SHIM SAID.** The counter in
+  `browser/src/wasi.ts`, read at four points in one process: 0 after `_initialize`, 0 after a
+  poseidon2 hash, **1 after the first `avm_grumpkin_mul`**, 1 after an add. `mul_const_time` blinds
+  and barretenberg's engine seeds itself once, lazily. The blinding is internal and does not move
+  the result — `test_browser_crypto_matches_bb_js` gets identical points from bb.js over the whole
+  corpus — so this is a fact about the linker and about wasi-libc, not about determinism. It is
+  recorded because the alternative was a comment asserting an absence nobody had measured.
+- decision: **Open, and deliberately not fixed by re-rendering the document.** `REACTOR-ABI.md`'s
+  import table is pinned by M12's checks, which measure M12's module; changing the document without
+  changing what pins it would move a number nothing re-derives, which is this campaign's
+  prose-drifts-from-measurement defect in the file that exists to prevent it. The correct shape is
+  the one M23 used for the EXPORT count — a property of a TREE (39 / 49 / 51 / 55) rather than of
+  "the module" — and it belongs in the milestone that repoints those checks. Until then the
+  per-artefact statement lives in `BROWSER-PACKAGING.md` §4 and in `browser/src/wasi.ts`'s header,
+  both with the disassembly behind them, and M27's own `WASI_IMPORT_NAMES` carries all twelve so the
+  loader cannot fail to supply one.
+- evidence: `REACTOR-ABI.md` (the eleven-name table and the `random_get` absence claim);
+  `aztec-avm-runtime/verification/m27/0001-test-vm2-export-poseidon2-and-grumpkin-from-the-reac.patch`;
+  `aztec-avm-runtime/browser/src/wasi.ts` (the twelve names, the counter, and the four-point
+  reading); `aztec-avm-runtime/BROWSER-PACKAGING.md` §4;
+  `wasm-objdump -x -j Import` over `bin/avm-reactor-debug.wasm` from the M27 tree, which prints
+  `Import[13]` — twelve WASI functions plus `env.memory`.
+
+
 <!-- END:drift -->
 
 ---

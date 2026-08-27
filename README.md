@@ -51,6 +51,7 @@ tested with `npm install`, with no barretenberg C++ build, no Rust/wasm-bindgen 
 | `WORLD-STATE.md` | what the in-memory reference world state covers of block production and what it does not: five implementations enumerated, thirteen operations classified, four dispositions worked in order — M14's write-up |
 | `BOUNDARY-SHAPE.md` | how much of the transaction and block loop lives inside wasm, decided on measurement, with the rejected shape's numbers retained — M15's write-up |
 | `FALLBACK.md` | the TypeScript-trees fallback: its three triggers evaluated conjunct by conjunct, the switch priced out of the deleted package, and the wrong-root hazard with its target values — M16's write-up, and the milestone closes **not-required** |
+| `BROWSER-PACKAGING.md` | what a page downloads and what it does not: the eager set against the design document's §8.5 figure, the two routes from a public-only page to the proving wasm and how each was found, DD-5's three entry points and the mechanical rule that holds them, and the product claim — M27's write-up |
 | `NODE-HOST.md` | the Node host: the WASI-shim reuse question answered by enumeration, the toolchain gate and the engine premise that did not survive it, and the trap-versus-revert distinction the type system enforces — M17's write-up |
 | `PROVENANCE.md` | the machine-checked mapping of every vendored file to its upstream path and commit; the input `just check-drift` reads |
 | `pins.json` / `PINS.md` | the single authority for every upstream pin, and the policy for moving it |

@@ -2160,3 +2160,127 @@ verify-m26:
       echo "verify-m26: all checks passed"
     fi
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M27 — browser packaging and code splitting
+#
+#   just avm-wasm-build-m27        build the module that EXPORTS POSEIDON2 AND GRUMPKIN
+#                                  (thirteen overlays, fifty-five exports)
+#   just browser-build             build the three entry points + the demo, and ENFORCE the budgets
+#   just browser-arms              re-measure the browser arms in a real headless Chromium
+#   just browser-serve             serve the built demo on a local port, for a person
+#
+#   just verify-browser-build              verify_browser_bundle_builds
+#   just verify-browser-no-barretenberg    verify_public_only_page_never_fetches_barretenberg
+#   just verify-browser-chunk-budget       verify_browser_chunk_budget
+#   just verify-browser-bbjs-condition     verify_bb_js_browser_condition_honoured
+#   just verify-browser-token-transfer     smoke_browser_token_transfer
+#   just verify-browser-real-timer         smoke_browser_produces_block_on_real_timer
+#   just verify-browser-ct-container       e2e_browser_downloads_ct_container_and_ct_print_parses
+#   just verify-browser-crypto             test_browser_crypto_matches_bb_js
+#   just verify-browser-entry-points       verify_browser_entry_points_are_dd5_shaped
+#   just verify-browser-artifacts-lazy     verify_browser_artifacts_lazy
+#   just verify-m27                        all ten, in order
+#
+# WHAT M27 NEEDS THAT NO EARLIER MILESTONE DID:
+#
+#   * A MODULE FROM ITS OWN OVERLAY STACK. M23's twelve-patch module has fifty-one exports and no
+#     poseidon2; a browser page that used bb.js's instead would download 7.9 MB of proving stack for
+#     a hash, which is what DD-11 forbids. `just avm-wasm-build-m27` builds the thirteen-patch tree
+#     under $M27_WORK (default ~/.cache/aztec-m27-browser). Budget about 8 GB and a few minutes with
+#     a warm ccache.
+#   * A REAL BROWSER. The checks drive `/usr/bin/chromium` over the DevTools protocol, because
+#     `verify_public_only_page_never_fetches_barretenberg` must be asserted on OBSERVED NETWORK
+#     REQUESTS and there is no substitute for that which would be evidence. There is no puppeteer
+#     and no playwright: Node 24's global `WebSocket` speaks CDP directly (tools/browser_cdp.mjs).
+#     Set M27_CHROMIUM to point at a different binary.
+#   * `ct_writer.wasm` AND `ct-print`, M24's, for the product claim. Both are built by their own
+#     scripts if absent.
+#
+# The browser arms are measured ONCE into $M27_WORK/browser.json and shared by every behavioural
+# check, which is M20's convention: seven checks each launching a browser is seven browsers and
+# seven chances to disagree about a number nothing changed.
+# ---------------------------------------------------------------------------
+
+# Build the thirteen-overlay module: poseidon2 and grumpkin out through the reactor.
+avm-wasm-build-m27:
+    @verification/build_avm_wasm_m27.sh
+
+# Build the browser bundles. FAILS if a chunk exceeds its recorded gzipped budget.
+browser-build:
+    @node browser/build.mjs
+
+# Re-measure the browser arms into $M27_WORK/browser.json.
+browser-arms:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    work="${M27_WORK:-$HOME/.cache/aztec-m27-browser}"
+    : "${AVM_WASM_PATH:=$work/m27/barretenberg/cpp/build-wasm-avm/bin/avm.wasm}"
+    export AVM_WASM_PATH
+    node tools/run_browser_arms.mjs "$work" > "$work/browser.json"
+    echo "browser-arms: wrote $work/browser.json"
+
+# Serve the built demo for a person to click. Ctrl-C to stop.
+#
+# It serves $M27_WORK/site, which `just browser-arms` assembles: the built bundle plus the three
+# assets a page fetches at run time. A `file://` page cannot work — ES module imports, dynamic
+# imports and `WebAssembly.compileStreaming` are all same-origin, and a `file://` origin is `null`.
+browser-serve:
+    @node tools/serve_browser_demo.mjs "${M27_WORK:-$HOME/.cache/aztec-m27-browser}/site"
+
+verify-browser-build:
+    @verification/verify_browser_bundle_builds.sh
+
+verify-browser-no-barretenberg:
+    @verification/verify_public_only_page_never_fetches_barretenberg.sh
+
+verify-browser-chunk-budget:
+    @verification/verify_browser_chunk_budget.sh
+
+verify-browser-bbjs-condition:
+    @verification/verify_bb_js_browser_condition_honoured.sh
+
+verify-browser-token-transfer:
+    @verification/smoke_browser_token_transfer.sh
+
+verify-browser-real-timer:
+    @verification/smoke_browser_produces_block_on_real_timer.sh
+
+verify-browser-ct-container:
+    @verification/e2e_browser_downloads_ct_container_and_ct_print_parses.sh
+
+verify-browser-crypto:
+    @verification/test_browser_crypto_matches_bb_js.sh
+
+verify-browser-entry-points:
+    @verification/verify_browser_entry_points_are_dd5_shaped.sh
+
+verify-browser-artifacts-lazy:
+    @verification/verify_browser_artifacts_lazy.sh
+
+# Run the whole M27 verification set; every check runs even if an earlier one fails.
+verify-m27:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_browser_bundle_builds \
+      verify_browser_entry_points_are_dd5_shaped \
+      verify_browser_chunk_budget \
+      verify_browser_artifacts_lazy \
+      verify_bb_js_browser_condition_honoured \
+      test_browser_crypto_matches_bb_js \
+      verify_public_only_page_never_fetches_barretenberg \
+      smoke_browser_token_transfer \
+      smoke_browser_produces_block_on_real_timer \
+      e2e_browser_downloads_ct_container_and_ct_print_parses
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m27: FAILED" >&2
+    else
+      echo "verify-m27: all checks passed"
+    fi
+    exit "$rc"
