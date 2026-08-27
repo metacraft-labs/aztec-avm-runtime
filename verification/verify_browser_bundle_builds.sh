@@ -59,21 +59,60 @@ assert_eq "…and no output file is covered by no budget" "0" "$UNCOVERED"
 echo "== 2. the format is esm / es2022 / browser, read off the artefacts"
 
 BROWSER_JS="$(cat "$BROWSER_DIST/browser.js")"
+# `str_has_line_re`, NOT `str_has_re`. Bash's `=~` has no `REG_NEWLINE` and no `\n` escape, so the
+# `\n` alternative in the old needle `(^|;|\n)export ?\{` was the LETTER n — a dead newline branch
+# and a spurious `n` branch, confirmed directly: `nexport{a}` matched and a real newline did not.
+# `lib.sh` names this trap for exactly this predicate pair.
 assert_true "browser.js is an ES module: it has a top-level export statement" \
-  str_has_re "$BROWSER_JS" '(^|;|\n)export ?\{'
+  str_has_line_re "$BROWSER_JS" '(^|;)export ?\{'
 assert_false "…and no CommonJS module.exports" str_has_sub "$BROWSER_JS" 'module.exports'
 # es2022 rather than a downlevel target: `??=`, `?.` and class fields survive rather than being
 # transpiled to helper functions. `__publicField` is esbuild's class-field helper and appears only
 # when the target is BELOW es2022.
+#
+# ALL THE CHUNKS, not `chunk-*.js`. The old glob missed ten of the seventeen emitted chunks —
+# `barretenberg-*`, `ContractClassRegistry-*`, `FeeJuice-*`, `secp256k1-*` and the rest — which is a
+# scanner narrowed in the direction that reads as good news.
+ALL_BROWSER_JS="$BROWSER_JS$(cat "$BROWSER_DIST"/chunks/*.js)"
+assert_ge "…and the scanner had something to scan" 1000000 "${#ALL_BROWSER_JS}"
 assert_false "…and no es2022 downlevel helper (__publicField) was emitted" \
-  str_has_sub "$BROWSER_JS$(cat "$BROWSER_DIST"/chunks/chunk-*.js)" '__publicField'
+  str_has_sub "$ALL_BROWSER_JS" '__publicField'
 
-FORMAT="$(python3 -c '
+# ===========================================================================================
+# THE FORMAT AND THE TARGET, READ OFF SOMETHING THAT COULD SAY OTHERWISE.
+# ===========================================================================================
+#
+# What stood here was `outs = [k for k in m["outputs"] if k.endswith("browser.js")]` followed by
+# `str_has_sub "$FORMAT" 'browser.js'` — a needle whose haystack is a set FILTERED BY THAT NEEDLE.
+# Its only failure mode was the output going missing entirely, and neither `esm`, nor `es2022`, nor
+# `browser` was read from the metafile anywhere in this check, while the section's heading said all
+# three. Setting `target: 'esnext'` in the driver passed it.
+OUT_FACTS="$(python3 - "$BROWSER_DIST/meta.json" <<'PY'
 import json, sys
 m = json.load(open(sys.argv[1]))
-outs = [k for k in m["outputs"] if k.endswith("browser.js")]
-print(outs[0] if outs else "MISSING")' "$BROWSER_DIST/meta.json")"
-assert_true "the metafile names the browser entry output" str_has_sub "$FORMAT" 'browser.js'
+out = next((v for k, v in m["outputs"].items() if k.endswith("/browser.js")), None)
+if out is None:
+    print("ENTRYPOINT\tMISSING"); print("NEXPORTS\t0"); raise SystemExit(0)
+print("ENTRYPOINT\t%s" % out.get("entryPoint", "MISSING"))
+# esbuild records an `exports` list for an ESM output and omits it for a CJS one, so this is the
+# format read off the artefact rather than off the flag that produced it.
+print("NEXPORTS\t%d" % len(out.get("exports", [])))
+PY
+)"
+outfact() { printf '%s\n' "$OUT_FACTS" | sed -n "s/^$1\t//p"; }
+assert_eq "the metafile joins browser.js to the DD-5 reference entry source" \
+  "browser/src/entry_browser.ts" "$(outfact ENTRYPOINT)"
+assert_ge "…and records an ESM export list for it, which a CJS output would not have" 40 \
+  "$(outfact NEXPORTS)"
+# The two flags themselves are pinned at their declaration site, because nothing in an artefact
+# distinguishes es2022 from esnext for this input — the `__publicField` absence above is consistent
+# with both. Stating where the claim comes from is the point; `CAMPAIGN-BRIEF.md`'s rule is that a
+# figure nobody re-derives rots, not that every figure must be derivable from bytes.
+DRIVER="$(cat "$BROWSER_DIR/esbuild-driver.mjs")"
+assert_ge "the esbuild driver was read" 100 "$(printf '%s\n' "$DRIVER" | grep -c .)"
+assert_true "…and it declares format: 'esm'" str_has_line_re "$DRIVER" "^ *format: 'esm',$"
+assert_true "…and target: 'es2022'" str_has_line_re "$DRIVER" "^ *target: 'es2022',$"
+assert_true "…and platform: 'browser' for the browser pass" str_has_line_re "$DRIVER" "^ *platform: 'browser',$"
 
 echo "== 3. the EXECUTION SURFACE, read out of the built module rather than out of a source"
 
@@ -100,7 +139,9 @@ done
 # subject and `index.ts` says so; if it appeared here the list above would be measuring nothing
 # about what is excluded.
 assert_false "…and does NOT export PublicProcessor (DD-9)" str_has_line "$SURFACE" 'PublicProcessor'
-assert_false "…and exports no type named AztecNode (§8.4)" str_has_line "$SURFACE" 'AztecNode'
+# The TYPE half of §8.4 is verify_browser_entry_points_are_dd5_shaped §6b: a TypeScript type is not
+# in `Object.keys` of a built bundle, so this assertion can only catch a VALUE by that name.
+assert_false "…and exports no VALUE named AztecNode (§8.4)" str_has_line "$SURFACE" 'AztecNode'
 
 echo "== 4. no Node builtin in the browser bundles — with the Node bundle as the control"
 
@@ -151,5 +192,49 @@ print(len(d["passes"][0]))' "$BROWSER_DIST/substitution.json")"
 assert_eq "there are five declared redirects" "5" "$N_TARGETS"
 assert_true "…and the poseidon module is one of them" str_has_sub "$SUBST" 'crypto/poseidon/index.js'
 assert_true "…and the grumpkin module is another" str_has_sub "$SUBST" 'crypto/grumpkin/index.js'
+
+echo "== 6. NO BROWSER-AUTOMATION PACKAGE ENTERED THE DEPENDENCY TREE"
+
+# ===========================================================================================
+# THE MILESTONE CLAIMS THIS IN THREE COMMENTS AND NOTHING MEASURED IT.
+# ===========================================================================================
+#
+# "There is no puppeteer and no playwright: Node 24's global `WebSocket` speaks CDP directly." It is
+# TRUE — measured by M27's review — and it was stated in `Justfile`, in `tools/browser_cdp.mjs` and
+# in the milestone, and asserted nowhere, which is `CAMPAIGN-BRIEF.md`'s "bind claims to data, or
+# expect them to rot". It matters beyond tidiness: M28 is the browser CI gate and its subject is
+# what a checkout has to install, and a browser-automation package brings a browser DOWNLOAD with it.
+#
+# TWO TREES, because either alone is an absence asked of something that cannot answer: every tracked
+# `package.json`'s four dependency fields — what a fresh checkout would install — AND the installed
+# tree `browser/node_modules` symlinks to, which is what this run actually resolved against.
+DEPSCAN="$(cd "$REPO_ROOT" && git ls-files '*package.json' | grep -v node_modules \
+  | xargs python3 "$VERIFY_DIR/_m27_depscan.py")"
+depscan() { printf '%s\n' "$DEPSCAN" | sed -n "s/^$1\t//p"; }
+note "package.json files scanned: $(depscan FILES); automation hits: $(depscan AUTOMATION)"
+assert_ge "the dependency scan read every tracked package.json" 5 "$(depscan FILES)"
+assert_eq "no tracked package.json declares a browser-automation package" "" "$(depscan AUTOMATION)"
+# THE CONTROL FOR THAT ZERO, same instrument, same files: a package that IS declared must be found,
+# so a scan that silently stopped reading fails here instead of reporting a clean tree.
+assert_true "…while the same scan DOES find esbuild, which is declared" \
+  str_has_sub "$(depscan CONTROL)" 'esbuild'
+
+# AND THE INSTALLED TREE. `browser/node_modules` is a symlink to the orchestration's, so this is the
+# tree the demo page, the arm runner and every check here resolved against.
+INSTALLED_AUTOMATION="$(ls "$ORCH_DIR/node_modules" 2>/dev/null \
+  | grep -iE '^(puppeteer|playwright|selenium|webdriverio|chromedriver|chrome-launcher|chrome-remote-interface)' || true)"
+INSTALLED_TOTAL="$(ls "$ORCH_DIR/node_modules" 2>/dev/null | grep -c . || true)"
+note "installed packages: $INSTALLED_TOTAL; automation: ${INSTALLED_AUTOMATION:- (none)}"
+assert_ge "the installed tree is populated, so the zero below is not an empty directory" 100 \
+  "$INSTALLED_TOTAL"
+assert_eq "…and no browser-automation package is installed in it" "" "$INSTALLED_AUTOMATION"
+
+# The driver that stands in for them is one tracked file with no dependency: every `import` in it
+# resolves to a Node builtin or to a relative path.
+assert_file "the CDP driver that replaces them is tracked" "$REPO_ROOT/tools/browser_cdp.mjs"
+BARE_IMPORTS="$(grep -oE "^import [^;]*from '[^.'][^']*'" "$REPO_ROOT/tools/browser_cdp.mjs" \
+  | grep -oE "'[^']*'$" | tr -d "'" | grep -v '^node:' || true)"
+note "non-builtin bare imports in browser_cdp.mjs: ${BARE_IMPORTS:- (none)}"
+assert_eq "…and it imports no npm package, only node: builtins and relative paths" "" "$BARE_IMPORTS"
 
 m27_finish
