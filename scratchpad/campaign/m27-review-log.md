@@ -261,3 +261,89 @@ distinct code rather than returning a wrong number on a loaded box"** — i.e. t
 when its own control arm's spread exceeds the budget, rather than reporting a red assertion that
 reads as a regression in the subject. That is M9's to change and not M27's; recorded here with the
 reasoning so the next sweep that sees it does not re-derive it.
+# F17 — BROWSER-PACKAGING.md: the only milestone write-up no check opens
+
+Verified independently (not taken from the audit):
+
+- `lib_m27_browser.sh:32,35` defines and exports `M27_DOC`. `grep -rn M27_DOC verification/` outside
+  those two lines: **nothing**. Every other write-up is opened by 2-7 checks
+  (`M12_WRITEUP` 3, `M15_WRITEUP` 6, `M23_DOC` 7).
+- The document's own line 3-4: *"Everything here is re-derived by a check on every run; where a
+  number appears, the check that recomputes it is named beside it."* **Zero of its figures are.**
+
+Eleven figures are ALREADY WRONG, each re-derived by me from the artefact:
+
+| doc | says | artefact says | derived from |
+|---|---|---|---|
+| `:35` | 8,166 KB total gzipped | **8,149.89** | `chunks.json.totalGzipBytes` 8,345,484 / 1024 |
+| `:75` | `util` (37 files) | **43** | `meta.json` importers of `browser-probe/shims/util.js` |
+| `:75` | `assert` (5) | **8** | same |
+| `:78` | shims "twelve lines between them" | **11** | `wc -l` 4 + 5 + 2 |
+| `:79` | "**One** `@aztec/foundation` module is substituted" | **two** (poseidon AND grumpkin) | `.build-config.json` `redirects` |
+| `:189` | node "adds **four** declared conveniences" | **five** `NODE_CONVENIENCES` keys | `entry_node.ts:43-50`, and the check's own set equality is over all five |
+| `:216` | "`/demo.js` + **6** shared chunks" | **7** | `arms.publicOnly.requests`, and `chunks.json` `eager[demo]` = 8 files |
+| `:216` | "**253.94 KB** gzipped of runtime" for the demo page | **277.65** (253.94 is the *browser* entry, whose entry file the demo never fetches) | `chunks.json` `eager` |
+| `:212` vs `:214-221` | "Thirteen requests" over an enumeration totalling **12** | — | its own list |
+| `:287-297` | the nine-row timer table, absolute epochs | a DIFFERENT run entirely | `browser.json` |
+| `:299` | "jumps **four** seconds", "deviation collapses **from 4** to 1" | **three**, from 3 | `browser.json` |
+
+`util` (37) / `assert` (5), "twelve lines", "four conveniences" and the timer table are each repeated
+in 2-4 more places (`browser/build.mjs`, `REUSE-INVENTORY.md`, the milestone file), which is the
+brief's "move all five numbers together" shape.
+
+**The timer table cannot be pinned at all** and that is the interesting half: the timestamps, the
+wall clocks and the deviations are all functions of when the arm ran and how the scheduler behaved.
+Any table of them is stale the moment the arms re-run. The check already asserts the INVARIANTS
+(strictly increasing, one second per block, a >= 2 s wall-clock gap, >= 3 non-zero deviations); the
+document presents one run's numbers as if they were the measurement.
+
+**Three numbers the harness already computes and throws away**, each in the section whose figure the
+document leads with:
+- `verify_browser_chunk_budget.sh:55` computes `TOTALGZIP` into `$SUMMARY` and never asserts on it —
+  that is `:35`'s 8,166.
+- `e2e_...sh:108` computes `$LINES` and spends it on a `note` — that is `:244`'s 3,355.
+- `lib_m27_browser.sh:137` exports `M27_MODULE_EXPORT_COUNT` and no check reads it — that is
+  `:139`'s 55.
+
+## 13. The M0–M27 sweep — 9,695, 28/28, zero failures
+
+`setsid`-detached, `direnv exec <this repo>`, one milestone at a time, nothing else running,
+`TMPDIR` and the log under `~/.cache`, no hole in the log, 103 minutes.
+
+```
+m0 156  m1 175  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 324  m22 260  m23 509  m24 350  m25 272  m26 313  m27 343
+                                                        CAMPAIGN TOTAL 9,695
+```
+
+**Every one of M0–M26 came out at its reference value TO THE ASSERTION**, including M9 at **807 in
+1,433 s with no flake and no truncation** (immediately after M8's build, which is D19's standing
+hypothesis, and it did not fire), M11 at 259 (upstream has not moved a sixth time), M4 at 218 in the
+dev shell, M24 at 350 and M25 at 272.
+
+**Both directions.** Declared 9,653 = 9,352 + 301. Measured 9,695 = 9,352 + 343. The +42 is M27's
+alone, in six checks and nothing else:
+
+| check | declared | after review | Δ |
+|---|---|---|---|
+| `verify_browser_bundle_builds` | 41 | 54 | +13 |
+| `verify_browser_chunk_budget` | 23 | 33 | +10 |
+| `verify_browser_entry_points_are_dd5_shaped` | 34 | 40 | +6 |
+| `verify_browser_artifacts_lazy` | 61 | 67 | +6 |
+| `smoke_browser_token_transfer` | 32 | 37 | +5 |
+| `verify_bb_js_browser_condition_honoured` | 21 | 23 | +2 |
+| `test_browser_crypto_matches_bb_js` | 21 | 21 | — |
+| `verify_public_only_page_never_fetches_barretenberg` | 20 | 20 | — |
+| `smoke_browser_produces_block_on_real_timer` | 14 | 14 | — |
+| `e2e_browser_downloads_ct_container_and_ct_print_parses` | 34 | 34 | — |
+
+13 + 10 + 6 + 6 + 5 + 2 = 42, and 301 + 42 = 343.
+
+**Nothing outside M27 moved**, and the two things that could have were measured rather than assumed:
+`verify_named_checks_exist` stays at **9** with `browser/` as a scan root instead of two of its
+subdirectories, and `verify_provenance_complete` stays at **64** — M27 vendors nothing and
+`PROVENANCE.md` is byte-unchanged. After the `codetracer-specs` edits, M11 and M14 were re-run alone
+and came back **259** and **460**, the reference exactly.
+
+The final M27 run: **343, 10/10, exit 0**, the arms run **once** and zero `mv: cannot stat`.
