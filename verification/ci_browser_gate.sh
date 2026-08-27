@@ -352,6 +352,32 @@ NODE="$(m28_scan node "$BROWSER_DIST/node" "$BROWSER_DIST/node/meta.json")" \
 
 doc_figure "The gate recipe runs" "$N_GATE" "the doc's gate-size figure is the recipe's own"
 doc_figure "The verify-m28 recipe runs" "$N_M28" "…and its verify-m28 figure is that recipe's own"
+# THE SIZE IS NOT THE COMPOSITION. §2 lists the seven checks by name in a table, and until M28's
+# review only the SIZE (7) and the EXISTENCE of every name the document contains were re-derived —
+# so replacing one row with a DIFFERENT check that exists satisfied both, and this check reported
+# 101 assertions, 0 failures over a table naming the wrong gate. Measured. The table's set of check
+# names is compared with the recipe's, as a set.
+DOC_TABLE_CHECKS="$(printf '%s\n' "$DOC" | python3 -c '
+import re, sys
+# A table ROW, not the header and not the separator: the FIRST cell only, so a check named in a
+# row description cannot stand in for one named as the row subject.
+NAME = re.compile(r"\b(?:verify|test|e2e|smoke)_[a-z0-9_]{4,}\b")
+out = set()
+for line in sys.stdin:
+    if not line.startswith("| `"):
+        continue
+    cell = line.split("|")[1]
+    out.update(NAME.findall(cell))
+    # The gate row names the check by the command a person types (`just ci-browser-gate`) with the
+    # script beside it, because that is its TEST_NAME; the four-family regex above cannot see it.
+    if "ci_browser_gate" in cell:
+        out.add("ci_browser_gate")
+print(" ".join(sorted(out)))')"
+assert_ge "§2s table was read at all, so the comparison below has two sides" 5 \
+  "$(printf '%s\n' "$DOC_TABLE_CHECKS" | tr " " "\n" | grep -c . || true)"
+assert_eq "§2s table names exactly the checks the gate recipe runs, as a set" \
+  "$(printf '%s\n' "$GATE_CHECKS" | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ $//')" \
+  "$DOC_TABLE_CHECKS"
 doc_figure "The browser bundle's module graph has" "$(m28_value "$BROWSER" INPUTS)" \
   "the doc's browser input count is the metafile's"
 doc_figure "The node bundle's module graph has" "$(m28_value "$NODE" INPUTS)" \
@@ -382,11 +408,18 @@ doc_figure "The graph carries" "$(m28_rows "$BROWSER" BUILTIN-SHIMMED | awk -F'\
   "the doc's util import-edge count is the metafile's"
 doc_figure "shipped packages" "$(cd "$REPO_ROOT" && git ls-files '*/package.json' | grep -cE '^(orchestration|node-host|ct-host)/' || true)" \
   "the doc's shipped-package count is the tree's"
-doc_figure "dependency closure of the shipped package is" "$(python3 - "$REPO_ROOT/orchestration" <<'PY'
+# THE CLOSURE WALK, PRINTING BOTH OF ITS FIGURES. §5 used to carry them on ONE line — "is **268**
+# packages, of which **3** declare" — with only the 268 re-derived, so swapping the two left the
+# document stating that the closure is three packages of which 268 declare an optional native
+# dependency, and this check reported 101 assertions, 0 failures. Measured by M28's review. It is
+# M24's review's OQ-6 defect exactly, in the section AFTER the one M28 converted to one figure per
+# line for that very reason: fixing an instance of a form is not the same as grepping the file for
+# it. Both figures are re-derived now, from the same walk, each on its own line.
+CLOSURE_WALK="$(python3 - "$REPO_ROOT/orchestration" <<'PY'
 import json, os, sys
 root = sys.argv[1]
 nm = os.path.join(root, "node_modules")
-seen = set()
+seen, optional = set(), []
 stack = list(json.load(open(os.path.join(root, "package.json"))).get("dependencies", {}))
 while stack:
     n = stack.pop()
@@ -397,11 +430,20 @@ while stack:
     if not os.path.exists(p):
         continue
     d = json.load(open(p))
+    od = d.get("optionalDependencies") or {}
+    if od:
+        optional.append(n)
     stack.extend(d.get("dependencies") or {})
-    stack.extend(d.get("optionalDependencies") or {})
-print(len(seen))
+    stack.extend(od)
+print("SIZE %d" % len(seen))
+print("OPTIONAL %d" % len(optional))
 PY
-)" "the doc's closure size is the walk's"
+)"
+doc_figure "dependency closure of the shipped package is" \
+  "$(printf '%s\n' "$CLOSURE_WALK" | sed -n 's/^SIZE //p')" "the doc's closure size is the walk's"
+doc_figure "Manifests in that closure declaring" \
+  "$(printf '%s\n' "$CLOSURE_WALK" | sed -n 's/^OPTIONAL //p')" \
+  "…and its optional-manifest count is the walk's, on its OWN line so the two cannot be swapped"
 
 # THE CONTROL FOR THE INSTRUMENT ITSELF, run over a scratch document through the same function.
 # Three cases: a right figure on the right line, a WRONG figure on a line that exists, and a

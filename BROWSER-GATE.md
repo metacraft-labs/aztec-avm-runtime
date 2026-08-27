@@ -108,11 +108,17 @@ because npm rewrites it on pack. No member is a prebuilt binary, checked by exte
 requiring every member to decode as UTF-8, which is the arm that does not depend on having
 enumerated the right suffixes.
 
-**And the transitive closure is a different question with a different answer.** The declared
-dependency closure of the shipped package is **268** packages, of which **3** declare
-`optionalDependencies` — `msgpackr`, `msgpackr-extract` and `@crate-crypto/node-eth-kzg`, all
-native-addon families. That is `DRIFT.md` D22. The narrower true statement ("the published package
-declares none") is not allowed to stand in for the wider one; what the gate owns is the
+**And the transitive closure is a different question with a different answer.** Two figures, and
+they are on separate lines for the reason §3 gives — a line carrying two of them can have them
+swapped and still contain both, which is precisely how this section passed a review mutation that
+made it state the reverse of the data:
+
+- The declared dependency closure of the shipped package is 268 packages.
+- Manifests in that closure declaring `optionalDependencies`: 3.
+
+All three are native-addon families — `msgpackr`, `msgpackr-extract` and
+`@crate-crypto/node-eth-kzg`. That is `DRIFT.md` D22. The narrower true statement ("the published
+package declares none") is not allowed to stand in for the wider one; what the gate owns is the
 consequence, which is that the browser bundle reaches none of them.
 
 ## 6. What re-derives this document
