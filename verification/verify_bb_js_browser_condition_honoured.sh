@@ -54,10 +54,21 @@ for k, v in d["exports"].items():
 PY
 )"
 note "$(printf '%s' "$EXPORTS" | tr '\n' ' ')"
+# THE PREMISE FIRST. This check's header states as fact that bb.js "has THREE subpaths at this pin
+# and only ONE of them has a browser condition", and nothing measured the three. If a future pin
+# drops `./platform`, the two absences below both pass over a subpath that no longer exists and the
+# header's sentence becomes silently false — an absence asked of a tree that no longer contains its
+# subject.
+assert_eq "bb.js declares exactly three export subpaths at this pin" "3" \
+  "$(printf '%s\n' "$EXPORTS" | grep -c .)"
 assert_true "its '.' subpath declares a browser condition" \
   str_has_line_re "$EXPORTS" '^\. -> .*"browser":'
-assert_true "…pointing at dest/browser/index.js" str_has_sub "$EXPORTS" 'dest/browser/index.js'
-assert_true "…while its 'default' is the NODE build" str_has_sub "$EXPORTS" 'dest/node/index.js'
+# BOUND TO THE `.` ROW, not to the whole map: the haystack is all three lines, so a hit on another
+# subpath satisfied a claim about `.`.
+assert_true "…pointing at dest/browser/index.js" \
+  str_has_line_re "$EXPORTS" '^\. -> .*dest/browser/index\.js'
+assert_true "…while its 'default' is the NODE build" \
+  str_has_line_re "$EXPORTS" '^\. -> .*dest/node/index\.js'
 # The two subpaths that have NO browser condition. If either ever grows one, this assertion goes red
 # and the paragraph above needs rewriting — which is the point of pinning it.
 assert_false "…and './aztec-wsdb' has no browser condition" \
@@ -141,9 +152,16 @@ assert_true "the BROWSER platform locator's own refusal string IS emitted" \
   str_has_sub "$BYTES" 'Not implemented in browser environment.'
 assert_false "…and it is absent from the node bundle, so it discriminates" \
   str_has_sub "$NODE_BUNDLE" 'Not implemented in browser environment.'
-# A second browser-only marker, so the discrimination does not rest on one string.
+# A second browser-only marker, so the discrimination does not rest on one string — AND IT NEEDS
+# ITS OWN NEGATIVE CONTROL, which it did not have. `hardwareConcurrency` is a plain Web API name and
+# it occurs in `dest/node/barretenberg_wasm/helpers/browser/index.js` as well as in the browser
+# build's copy, so "the bundle mentions it" is not by itself a statement about which build was
+# resolved. Measured: 1 in the browser bundles, 0 in the node one — so the pairing is what makes it
+# a discriminator, exactly as for the string above.
 assert_true "…as is the browser helper's navigator.hardwareConcurrency probe" \
   str_has_sub "$BYTES" 'hardwareConcurrency'
+assert_false "…and it too is absent from the node bundle, so it discriminates as well" \
+  str_has_sub "$NODE_BUNDLE" 'hardwareConcurrency'
 
 echo "== 5. and the proving chunk is present, lazy, and never in an eager set"
 
