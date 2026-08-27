@@ -114,6 +114,34 @@ while IFS=$'\t' read -r root found; do note "  $root: $found"; done < <(m25_arti
 assert_ge "at least one node_modules root ships the AvmTest artifact" 1 \
   "$(m25_artifact_roots_found | grep -c 'yes$' || true)"
 
+# WHICH ARTIFACT, NOT JUST THAT THERE IS ONE — added by M25's review.
+#
+# TWO @aztec NIGHTLY LINES ARE INSTALLED IN THIS TREE AT ONCE and `pins.json` says in as many words
+# that they are not interchangeable: `deletion_era` (5.0.0-nightly.20260626 — diffsim, spike,
+# orchestration) is the frozen evidence §2.2 names, and `current` (5.3.0-nightly.20260819 — drift)
+# is a DIFFERENT build of the same contract. Measured: the diffsim and spike copies are
+# byte-identical to each other and the drift copy is not.
+#
+# `M25_ARTIFACT_ROOTS` is "diffsim spike drift probe-mt orchestration", so the search crosses both
+# lines and puts a `current` root THIRD — ahead of `orchestration`, which is a `deletion_era` one.
+# With `diffsim/node_modules` and `spike/node_modules` absent, every figure below would be measured
+# against the wrong contract. Those assertions would go red, so it fails safe — but they would read
+# as "the transpiler stopped preserving the mapping", which is a discovery about the subject rather
+# than about the tree, and this campaign has believed that kind of red before.
+#
+# So the pin is asserted from the artifact's OWN `aztec_version` against what `pins.json` declares,
+# and a mismatch is one named failure instead of six anonymous ones.
+DECLARED_PIN="$(python3 -c '
+import json, sys
+print((json.load(open(sys.argv[1], encoding="utf-8")).get("npm", {}).get("deletion_era", {})
+       or {}).get("version", "MISSING"))' "$REPO_ROOT/pins.json" 2>/dev/null || printf 'MISSING\n')"
+assert_true "pins.json declares a deletion_era npm pin, so the comparison below has two sides" \
+  test "$DECLARED_PIN" != "MISSING"
+assert_eq "the artifact measured is the deletion_era pin's, not the current line's" \
+  "$DECLARED_PIN" "$(m25_arm 'd["artifact"]["aztecVersion"]')"
+assert_true "…and §2.2 names that same pin as the one it measured" \
+  str_has_sub "$DOC_TEXT" '`deletion_era` pin'
+
 BYTECODE="$(m25_arm 'd["artifact"]["bytecodeLength"]')"
 MAPPED="$(m25_arm 'd["artifact"]["mappedPcs"]')"
 FILES="$(m25_arm 'd["artifact"]["fileCount"]')"

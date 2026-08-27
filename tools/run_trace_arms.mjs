@@ -116,7 +116,18 @@ function loadArtifact(path) {
   for (const [id, entry] of Object.entries(artifact.file_map ?? {})) {
     files.set(Number(id), { path: entry.path, source: entry.source });
   }
-  return { name: artifact.name, bytecodeLength: bytecode.length, debugInfo, files };
+  return {
+    name: artifact.name,
+    // THE ARTIFACT SAYS WHICH @aztec LINE IT CAME FROM, AND THE CHECK COMPARES IT TO pins.json.
+    // Two nightly lines are installed in this tree at once and they are not interchangeable:
+    // `deletion_era` (diffsim, spike, orchestration) is the frozen evidence SOURCE-MAPPING.md 2.2
+    // names, and `current` (drift) is a different contract with different pcs. The artifact search
+    // falls back across roots from BOTH lines, so without this the wrong one is measurable.
+    aztecVersion: artifact.aztec_version ?? null,
+    bytecodeLength: bytecode.length,
+    debugInfo,
+    files,
+  };
 }
 
 // strideCensus — the gaps between consecutive mapped pcs, as a distribution rather than a range.
@@ -188,6 +199,7 @@ if (ARTIFACT) {
   const real = loadArtifact(ARTIFACT);
   out.artifact = {
     name: real.name,
+    aztecVersion: real.aztecVersion,
     bytecodeLength: real.bytecodeLength,
     fileCount: real.files.size,
     brilligFunctionIds: Object.keys(real.debugInfo.brillig_locations),
