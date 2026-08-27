@@ -51,6 +51,36 @@ Measured on this artefact, that list is **exactly right**: eleven functions, tho
 deliverable did not say is that there is a twelfth import — `env.memory`, the only non-WASI one.
 Twelve in total.
 
+### …AND IT IS A PROPERTY OF AN ARTEFACT, NOT OF "THE REACTOR" — M27's IMPORTS TWELVE WASI
+
+The table above, and every "eleven" on this page, is measured on **M12's module** and holds for
+M13's and M23's. It is **false of M27's**, and the export count already had this shape before the
+import count did: M23 made that a property of a tree (39 / 49 / 51 / 55) rather than of "the
+module", and this is the same correction one column over.
+
+| overlay stack | exports | WASI imports | `random_get` |
+|---|---|---|---|
+| M12 (one overlay) | 39 | 11 | absent |
+| M13 | 49 | 11 | absent |
+| M23 (twelve overlays) | 51 | 11 | absent |
+| **M27 (thirteen overlays)** | **55** | **12** | **present, and called once** |
+
+The cause is M27's own patch. Exporting `avm_grumpkin_mul` / `avm_grumpkin_add` makes
+`bb::numeric::RandomEngine` reachable, and its `get_random_uint{64,128,256}()` are **virtual**, so
+the call sites are `call_indirect` through a vtable and `--gc-sections` cannot prove them dead
+however unreachable they are in practice:
+
+```
+wasi_snapshot_preview1.random_get  <-  __wasi_random_get  <-  __getentropy
+                                   <-  RandomEngine::get_random_uint{64,128,256}()
+```
+
+`verify_avm_wasm_import_surface` asserts `random_get`'s absence **by name** and is right to: it
+measures M12's artefact, which does not import it. Nothing here repoints that check — doing so
+would move a number the check does not re-derive — so the two statements are scoped instead. The
+full account, with the four-point counter reading that also killed a comment claiming the import was
+never *called*, is `DRIFT.md` **D21**, `BROWSER-PACKAGING.md` §4 and `browser/src/wasi.ts`'s header.
+
 ### The eleven are a consequence of the link options, not only of the code
 
 This is the check's most useful result, and it took **two** corrections to get right.

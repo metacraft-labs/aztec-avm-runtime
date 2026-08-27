@@ -111,9 +111,15 @@ export interface BrowserWasiOptions {
   /**
    * DD-3. Fills `out` with random bytes. Defaults to `crypto.getRandomValues`.
    *
-   * M27's module IMPORTS `random_get` and (measured) never calls it — see the header. The option
-   * exists so that a host which wants a module it can prove deterministic can supply its own, and
-   * so that the default is a decision rather than an accident.
+   * M27's module IMPORTS `random_get` and DOES call it — once, on the first `avm_grumpkin_mul`,
+   * because `mul_const_time` blinds and barretenberg's `RandomEngine` seeds itself lazily. The
+   * header carries the four-point reading. (This sentence said "never calls it" until M27's review:
+   * the header was corrected when the counter contradicted it and this copy, ninety lines below in
+   * the same file, was not. `CAMPAIGN-BRIEF.md`: when you fix an instance of a form, grep for the
+   * form in the file you are fixing before you leave it.)
+   *
+   * The option exists so that a host which wants a module it can prove deterministic can supply its
+   * own, and so that the default is a decision rather than an accident.
    */
   readonly randomBytes?: (out: Uint8Array) => void;
 }

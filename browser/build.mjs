@@ -115,7 +115,7 @@ const GLOBALS = path.join(HERE, 'src/globals.js');
 if (!existsSync(GLOBALS)) fail(`the globals injection is missing: ${GLOBALS}`);
 
 // ---------------------------------------------------------------------------------------------
-// THE REDIRECT TABLE. Four modules, by ABSOLUTE PATH, and every one of them is DD-11.
+// THE REDIRECT TABLE. Five modules, by ABSOLUTE PATH, and every one of them is DD-11.
 //
 // Absolute paths rather than a regex over the specifier, because the specifier is relative in
 // every one of these modules' importers. Every entry's hit count is asserted NON-ZERO at the end

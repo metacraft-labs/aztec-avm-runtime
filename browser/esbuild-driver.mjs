@@ -28,7 +28,7 @@ const esbuild = await import(config.esbuildModule);
 // ---------------------------------------------------------------------------------------------
 // THE DD-11 REDIRECT PLUGIN.
 //
-// Four modules are redirected, by absolute resolved path, and every one is a lazily-loaded or
+// Five modules are redirected, by absolute resolved path, and every one is a lazily-loaded or
 // never-loaded megabyte. `build.mjs`'s header explains each. What this plugin adds is the property
 // that makes the table trustworthy: EVERY ENTRY MUST FIRE. A redirect that quietly stops matching
 // — because a package layout moved, or an importer changed its specifier — puts the eager,
