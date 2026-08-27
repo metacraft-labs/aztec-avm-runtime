@@ -418,16 +418,32 @@ touch moves, look for a commit that landed between the reference sweep and yours
 repository — before writing a story. Both attributions above were re-derived independently by the
 review and both held; that is the standard, not the presumption.
 
-Current per-milestone counts. Measured **M0-M24, on 2026-08-27**, by the anchor move's REVIEW, one
-milestone at a time with nothing else running, `setsid`-detached, **inside this repository's own
-dev shell** (`direnv exec` — the engine and the PATH the checks and CI use), `TMPDIR` and the log
-under `~/.cache`, no hole in the log:
+Current per-milestone counts. Measured **M0-M25, on 2026-08-27**, by M25's REVIEW, one milestone at
+a time with nothing else running, `setsid`-detached, **inside this repository's own dev shell**
+(`direnv exec` — the engine and the PATH the checks and CI use), `TMPDIR` and the log under
+`~/.cache`, over the COMMITTED tree, no hole in the log, 26 of 26 exit 0 and **zero failing
+assertions**:
 
 ```
 m0 156  m1 169  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
 m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
-m19 180  m20 237  m21 324  m22 260  m23 509  m24 350   CAMPAIGN TOTAL 8,761
+m19 180  m20 237  m21 324  m22 260  m23 509  m24 350  m25 266   CAMPAIGN TOTAL 9,027
 ```
+
+**M25'S REVIEW MOVED EXACTLY ONE MILESTONE AND IT IS M25'S OWN.** Every one of M0-M24 came out at
+its reference value **to the assertion**, including M9 at 807 in 1,313 s with its
+140/143/113/73/126/83/129 split and no flake, M11 at 259 (upstream has not moved a sixth time), M4
+at 218 in the dev shell (M19's review's PATH pin still holds) and M24 at 350 with
+`verify_trace_event_abi_batched_faster` at 91 — the OQ-6 content stamp matched, so no benchmark
+re-ran. 8,761 + 266 = 9,027 exactly.
+
+M25 was DECLARED at 236 (61 / 50 / 83 / 42) and its review took it to **266** (71 / 50 / 92 / 53),
+in three checks and nothing else: `verify_oq5_source_mapping_verdict_recorded` +10 (a stride census
+the document stated wrongly and nothing re-derived, and the `@aztec` nightly line the artifact
+actually came from), `test_trace_metadata_declares_mapping_rung` +9 (§7's corrected 4/60, pinned in
+the host and in the document rather than only in Rust), and
+`verify_transaction_builder_closure_measured` +11 (one assertion that could not fail, replaced by
+ten that can, plus two on the retraction it was propping up).
 
 **THE ANCHOR MOVE'S REVIEW MOVED EXACTLY ONE NUMBER AND IT IS TWO ASSERTIONS.** M24 348 -> 350,
 all of it `verify_ct_writer_wasm_zero_imports` 56 -> 58, and the reason is a family this brief

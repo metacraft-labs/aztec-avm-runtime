@@ -576,3 +576,65 @@ paths"*. Both are true — the container interns the session's own program path 
 8 source paths, which my probe run confirms (`PATH_COUNT 9` for rung 1, `1` for the rung-3
 control). The 8 is re-derived by the check; the 9 is not, and nothing explains the difference.
 Fixed as prose: see F-FIX-1.
+
+---
+
+## The sweep — M0–M25, 26 of 26, zero failing assertions
+
+`~/.cache/m25rev/final-sweep.log`, started `2026-08-27T03:24:44+03:00` over the **committed** tree,
+`setsid`-detached, one milestone at a time, nothing else running, in this repository's own dev
+shell (node v24.19.0). No hole in the log.
+
+```
+m0  156  m1  169  m2  292  m3  199  m4  218  m5  236  m6  363  m7  287  m8  516  m9  807
+m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283  m19 180
+m20 237  m21 324  m22 260  m23 509  m24 350  m25 266        CAMPAIGN TOTAL 9,027
+```
+
+**Every unit is accounted for in both directions. M25's review moved exactly one milestone and it
+is M25's own.** Every one of M0–M24 came out at its reference value **to the assertion**, so
+8,761 + 266 = 9,027 exactly. Specifically:
+
+- **M9 = 807 in 1,313 s, split 140/143/113/73/126/83/129, no flake.** The recorded flake did not
+  appear and no re-run alone was needed.
+- **M11 = 259** — upstream has not moved a sixth time.
+- **M4 = 218** measured in the dev shell, so M19's review's PATH pin still holds.
+- **M18 = 283** — `verify_named_checks_exist` stayed at 9, confirming that neither M25's four new
+  checks nor this review's prose introduced a dangling check name. I pre-verified that with the
+  check's own regex over all sixteen files I changed inside its scanned roots: zero unresolved.
+- **M24 = 350**, split 58/86/48/37/30/91. Two things worth naming: `verify_trace_event_abi_batched_faster`
+  is at **91**, so the OQ-6 content stamp matched and **no benchmark re-ran** — my edits touched
+  `run_trace_arms.mjs`, not `run_oq6_arms.mjs` or the three hosts the stamp hashes; and
+  `test_ct_container_roundtrip_ct_print` is at **86**, so the `contractAddressLow` →
+  `contractAddress` repoint really did move no assertion count, exactly as claimed.
+- **M19 = 180** — my comment-only edit to `e2e_differential_wasm_vs_native_cpp.sh` moved nothing.
+- **M1 = 169**, the F1 collateral fully repaired, and unaffected by this review's edits to
+  `CAMPAIGN-BRIEF.md` and `REUSE-INVENTORY.md`.
+
+M25 itself: **71 / 50 / 92 / 53 = 266**, declared at 236.
+
+**And the total printed at all, which is the F9 fix working end to end.** Before it, this
+summariser refused every log it was ever given.
+
+## What did not survive
+
+1. **"The split probe is fixed and now refuses what the reference reader refuses."** It is
+   unchanged. The defect is pinned as an asserted fact instead — defensible, and nothing rests on
+   the probe alone, but "verified fixed" would have been false. (F4)
+2. **`ResidentMerkleWriteOperations` "already implements" `MerkleTreeWriteOperations`.** It is
+   deliberately declared not to, and the check propping the claim up could not fail. The conclusion
+   survives on a stronger fact nobody had measured. (F6)
+3. **§2.2's "strides of 4–9".** Contradicted by the fifteen keys printed two lines above it. (F3)
+4. **The milestone section's module sha `1f785f24…`.** Stale by one comment edit; the module is
+   `1e7e0e4f…`. §7 was right because a check re-derives it; the milestone file is re-derived by
+   nothing. (F-FIX-3)
+5. **"235 assertions."** It is 236 — the closure check is 42, not 41. (F11)
+6. **§7's layout fix being complete.** It landed in Rust only; the host kept a typed literal and
+   the document kept unchecked prose. (F13)
+7. **The counter remedy being complete.** Four of five sites point at the brief; the fifth still
+   quoted a number, one behind. (F-FIX-5)
+8. **The sweep summariser.** Could never print a total for any run. (F9)
+
+Everything else survived, including both headline verdicts, the closure numbers to the unit, the
+mutation matrix, the §7 offsets, the module size and sha, the container growth, the OQ-6
+re-measurement and its trigger, and both self-recorded procedure defects being harmless.
