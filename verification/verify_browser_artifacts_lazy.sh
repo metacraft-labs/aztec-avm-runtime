@@ -108,15 +108,100 @@ assert_true "upstream computes the leaf slot from ProtocolContractAddress.FeeJui
   str_has_sub "$BARREL" 'computePublicDataTreeLeafSlot(ProtocolContractAddress.FeeJuice, balanceSlot)'
 assert_true "…and the shim's line is upstream's, unchanged" \
   str_has_sub "$SHIM_TEXT" 'computePublicDataTreeLeafSlot(ProtocolContractAddress.FeeJuice, balanceSlot)'
+# ===========================================================================================
+# AND THE FOUR ASSERTIONS ABOVE ARE CONTAINMENT, NOT A PIN — WHICH IS THE DEFECT THIS BLOCK CLOSES.
+# ===========================================================================================
+#
+# `str_has_sub` says a line is PRESENT. It says nothing about what else is present, how many times
+# it is present, or in what order. Measured by M27's review, three mutations of this shim, each
+# reported by this check as **61 assertions, 0 failures, exit 0**:
+#
+#   * the storage-slot line REPEATED TWENTY TIMES  (M26's review's exact shape);
+#   * the leaf-slot body's TWO ADJACENT LINES SWAPPED;
+#   * one inserted line, `feePayer = ProtocolContractAddress.FeeJuice;`, immediately above the
+#     pinned derivation — which is a REAL corruption: under it the fee payer is funded at a leaf
+#     slot nobody reads and `smoke_browser_token_transfer` goes from `processed` to **failed**,
+#     exactly the four-layers-away failure this file's own header predicts.
+#
+# The milestone says this check pins the shim "line by line" and that it stands in for `check-drift`,
+# which cannot own the file because the file DELIBERATELY differs from what it replaces. A pin that
+# a real corruption walks through is not a pin, and "it deliberately differs so we pinned it
+# differently" is the shape of an exclusion that hides a defect. So the bodies are compared as
+# ORDERED LISTS OF LINES against an expectation DERIVED FROM UPSTREAM'S BARREL — not typed in here —
+# by applying the two declared substitutions and nothing else. Upstream drifting therefore moves the
+# expectation, which a typed literal would not.
+BODIES="$(python3 - "$SHIM" "$PC/fee-juice/index.js" <<'PY'
+import json, re, sys
+
+def body(text, fn):
+    """The lines between `function <fn>(` and the closing brace at column 0, indentation stripped."""
+    lines = text.split("\n")
+    start = next((i for i, l in enumerate(lines) if re.search(r"function %s\(" % re.escape(fn), l)), None)
+    if start is None:
+        return None
+    out = []
+    for l in lines[start + 1:]:
+        if l.startswith("}"):
+            return out
+        out.append(l.strip())
+    return None
+
+shim = open(sys.argv[1]).read()
+barrel = open(sys.argv[2]).read()
+
+A = "computeFeePayerBalanceStorageSlot"
+B = "computeFeePayerBalanceLeafSlot"
+
+up_a, up_b = body(barrel, A), body(barrel, B)
+me_a, me_b = body(shim, A), body(shim, B)
+
+# THE TWO DECLARED SUBSTITUTIONS, and there are exactly two. The artifact is fetched rather than
+# imported eagerly, so the shim adds one line and rewrites the eager constant's name to the local.
+want_a = None if up_a is None else ["const artifact = await getFeeJuiceArtifact();"] + [
+    l.replace("FeeJuiceArtifact.", "artifact.") for l in up_a
+]
+want_b = up_b
+
+for key, value in (("UP-A", up_a), ("UP-B", up_b),
+                   ("WANT-A", want_a), ("WANT-B", want_b),
+                   ("GOT-A", me_a), ("GOT-B", me_b)):
+    print("%s\t%s" % (key, json.dumps(value)))
+PY
+)"
+bodyline() { printf '%s\n' "$BODIES" | sed -n "s/^$1\t//p"; }
+
+# NON-EMPTINESS FIRST, both sides, because two `null`s compare equal and an extractor that found
+# nothing would otherwise report agreement. `CAMPAIGN-BRIEF.md`: "any comparison whose sides could
+# both be absent needs a non-emptiness assertion beside it."
+assert_ge "upstream's storage-slot body was extracted" 1 \
+  "$(python3 -c 'import json,sys; v=json.loads(sys.argv[1]); print(0 if v is None else len(v))' "$(bodyline UP-A)")"
+assert_ge "…and its leaf-slot body" 2 \
+  "$(python3 -c 'import json,sys; v=json.loads(sys.argv[1]); print(0 if v is None else len(v))' "$(bodyline UP-B)")"
+assert_ge "…and the shim's storage-slot body" 2 \
+  "$(python3 -c 'import json,sys; v=json.loads(sys.argv[1]); print(0 if v is None else len(v))' "$(bodyline GOT-A)")"
+assert_ge "…and the shim's leaf-slot body" 2 \
+  "$(python3 -c 'import json,sys; v=json.loads(sys.argv[1]); print(0 if v is None else len(v))' "$(bodyline GOT-B)")"
+
+assert_eq "the shim's storage-slot body is upstream's, line for line, with the artifact awaited" \
+  "$(bodyline WANT-A)" "$(bodyline GOT-A)"
+assert_eq "…and its leaf-slot body is upstream's, line for line, UNCHANGED" \
+  "$(bodyline WANT-B)" "$(bodyline GOT-B)"
+
 # THE ONE DELIBERATE OMISSION, asserted so it is a decision rather than an oversight.
 assert_true "upstream's barrel exports the EAGER FeeJuiceArtifact constant" \
   str_has_sub "$BARREL" 'export const FeeJuiceArtifact'
 assert_false "…and the shim does not, because it cannot exist without the eager import" \
   str_has_sub "$SHIM_TEXT" 'export const FeeJuiceArtifact'
-# …AND NOTHING IN THIS RUNTIME NAMES IT, which is what makes the omission safe. Measured over the
-# three source roots that ship, with the residue implied by the count.
-assert_eq "no shipped source names FeeJuiceArtifact" "0" \
-  "$(cd "$REPO_ROOT" && grep -rl 'FeeJuiceArtifact' orchestration/src node-host/src ct-host/src 2>/dev/null | grep -c . || true)"
+# …AND NOTHING IN THIS RUNTIME NAMES IT, which is what makes the omission safe.
+#
+# `browser/src` IS IN THE MEASURED SET, minus the shim itself. It was not, and the shim's own header
+# says it was — so the absence was asked of a tree from which the shipped BROWSER sources were
+# missing entirely, which is `CAMPAIGN-BRIEF.md`'s "an absence asked of a tree that excludes the
+# subject by construction" in its mildest form. The residue is PRINTED rather than counted.
+NAMERS="$(cd "$REPO_ROOT" && grep -rl 'FeeJuiceArtifact' browser/src orchestration/src node-host/src ct-host/src 2>/dev/null \
+  | grep -v '^browser/src/shims/protocol_fee_juice.ts$' || true)"
+note "shipped sources naming FeeJuiceArtifact, other than the shim: ${NAMERS:-(none)}"
+assert_eq "no shipped source names FeeJuiceArtifact" "0" "$(printf '%s\n' "$NAMERS" | grep -c . || true)"
 # THE CONTROL for that zero: the same grep over a file that DOES name it.
 assert_ge "…while the same grep finds it where it IS named" 1 \
   "$(grep -c 'FeeJuiceArtifact' "$SHIM" || true)"
