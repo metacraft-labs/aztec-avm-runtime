@@ -270,7 +270,14 @@ m27_require_arms() {
     # discarding `$M27_ARMS.tmp` on a non-zero exit throws away the ONLY diagnostic. Measured: the
     # deliberate HANG mutation produced an empty `browser.stderr` and a `die` that named it, which
     # is a check reporting a failure while pointing at nothing.
-    if [ -s "$M27_ARMS.tmp" ]; then
+    #
+    # AND THE `rc` GUARD IS THE WHOLE POINT OF THIS BLOCK, which the first version of it did not
+    # have. Without it a SUCCESSFUL run was filed as `browser-failed.json` too, the `mv` on the
+    # success path below then had nothing to move, `$M27_ARMS` was never written, and every
+    # behavioural check read whatever `browser.json` happened to be lying in the work directory
+    # — or, on a cold one, died with "the browser arm run produced no output" straight after a
+    # browser run that had just succeeded. Measured by M27's review, both ways.
+    if [ "$rc" -ne 0 ] && [ -s "$M27_ARMS.tmp" ]; then
       mv "$M27_ARMS.tmp" "$M27_WORK/browser-failed.json"
     fi
     if [ "$rc" -eq 137 ] || [ "$rc" -eq 124 ]; then
@@ -293,9 +300,22 @@ print(err.get("message", "(no message)") if err else "(the run failed with no re
       die "the browser arm run failed (exit $rc): ${why:-(no report)}
              Full report: $M27_WORK/browser-failed.json; stderr: $M27_WORK/browser.stderr"
     fi
-    mv "$M27_ARMS.tmp" "$M27_ARMS"
+    # A `mv` whose failure is silent is what produced the defect above, so this one is a NAMED
+    # failure rather than a diagnostic on stderr that a green summary line sits underneath.
+    mv "$M27_ARMS.tmp" "$M27_ARMS" \
+      || die "the browser arm run succeeded but its report could not be installed at $M27_ARMS"
   fi
   [ -s "$M27_ARMS" ] || die "the browser arm run produced no output"
+  # THE SHARED ARM RUN MUST BE THE ONE THIS TREE WOULD PRODUCE, not one left behind by an earlier
+  # one. `m27_arms_newer_inputs` decided it was stale a few lines above; if it is STILL stale after
+  # the refresh, the refresh did not take and every assertion below is about the wrong artefact.
+  if [ "$stale" = "1" ]; then
+    local still
+    still="$(m27_arms_newer_inputs)"
+    [ -z "$still" ] || die "the browser arm run did not refresh $M27_ARMS: '$still' is still newer
+             than it. An arm report that outlives the tree it was measured on is the defect
+             CAMPAIGN-BRIEF.md calls 'a mutated artefact outlived its restored source'."
+  fi
 }
 
 # One field of one arm, from the shared JSON. Prints `MISSING` rather than empty, so an assertion
