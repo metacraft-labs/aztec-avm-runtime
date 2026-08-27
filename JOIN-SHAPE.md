@@ -197,6 +197,19 @@ this milestone.
   pinnable. Nothing else in §2 has to change.
 - **A second consumer of `ct_log_event`.** The export is generic on purpose; a third record kind
   needs no third export, so the module does not move again.
+
+> **WHY `noir-wt4-webpage` IS LEFT WITH AN UNCOMMITTED EDIT, DELIBERATELY.** That worktree carries
+> one uncommitted change — OQ-4's `Field` rendering in `tooling/tracer/src/tracer_glue.rs` — and
+> M26's review left it that way on purpose rather than tidying it. Committing it locally would make
+> an unpushed commit, which this campaign's own rule calls a local file. **Pushing it would publish
+> `wasm/webpage`, which is fact 7 above** — the fact the entire "not shippable" verdict rests on —
+> and §6's first bullet names publishing that branch as one of the two things that would REOPEN
+> OQ-7. `verify_oq7_shared_writer_verdict_recorded` asserts the branch's HEAD is contained in ZERO
+> published remote refs and would go red the moment it were pushed. Reopening a settled question is
+> not something a tidy-up should be able to do by accident. Nothing about the demonstration depends
+> on the commit: `build_oq7_shared_writer_probe.sh` tolerates exactly this one edit by name
+> (`ALLOWED_EDIT`), refuses any other, stamps the probe on the file's SHA rather than on `HEAD`, and
+> asserts the rendering is identical in both checkouts.
 - **A private half that actually executes here.** M21 measured why it does not: `@aztec/pxe`
   hard-depends on `@aztec/simulator`, which hard-depends on `@aztec/native` and
   `@aztec/world-state`, and beneath that sit 68 oracles of which none exists in this workspace. The
