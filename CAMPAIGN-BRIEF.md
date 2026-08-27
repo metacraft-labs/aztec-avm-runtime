@@ -483,7 +483,7 @@ touch moves, look for a commit that landed between the reference sweep and yours
 repository — before writing a story. Both attributions above were re-derived independently by the
 review and both held; that is the standard, not the presumption.
 
-Current per-milestone counts. Measured **M0-M28, on 2026-08-27**, by M28, one milestone at a time
+Current per-milestone counts. Measured **M0-M28, on 2026-08-27**, by M28's REVIEW, one milestone at a time
 with nothing else running, `setsid`-detached, **inside this repository's own dev shell**
 (`direnv exec` — the engine and the PATH the checks and CI use), `TMPDIR` and the log under
 `~/.cache`, no hole in the log, **28 of 29 exit 0**:
@@ -492,26 +492,43 @@ with nothing else running, `setsid`-detached, **inside this repository's own dev
 m0 156  m1 175  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
 m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
 m19 180  m20 237  m21 324  m22 260  m23 509  m24 350  m25 272  m26 313  m27 343
-m28 348
-                                                       CAMPAIGN TOTAL 10,043
+m28 353
+                                                       CAMPAIGN TOTAL 10,048
 ```
 
-**M28 MOVED EXACTLY ONE NUMBER AND IT IS ITS OWN.** 9,695 + 348 = 10,043 exactly, and 348 is the sum
-of M28's six checks and nothing else — `just ci-browser-gate` 101, `verify_browser_bundle_no_node_builtins`
-64, `verify_browser_bundle_no_native_deps` 44, `verify_npm_pack_no_optional_native` 52,
+**M28 MOVED EXACTLY ONE NUMBER AND IT IS ITS OWN.** 9,695 + 353 = 10,048 exactly, and 353 is the sum
+of M28's six checks and nothing else — `just ci-browser-gate` 104, `verify_browser_bundle_no_node_builtins`
+64, `verify_browser_bundle_no_native_deps` 44, `verify_npm_pack_no_optional_native` 54,
 `verify_verification_code_unreachable_from_browser` 37, `smoke_browser_headless_full_flow` 50. The
-GATE is **388** because it also runs M27's `verify_browser_entry_points_are_dd5_shaped`, which came
+GATE is **393** because it also runs M27's `verify_browser_entry_points_are_dd5_shaped`, which came
 out at **40** inside M27 where it is counted; `just verify-m28` deliberately excludes it, and
 `ci_browser_gate.sh` asserts the two lists differ by exactly that one name so they cannot drift.
-**Every one of M0-M27 came out at its reference value TO THE ASSERTION**, including M9 at **807 in
-1,320 s with no flake**, M4 at 218 in the dev shell, M24 at 350 and M27 at 343. Nothing outside M28
-moved: `verify_provenance_complete` stays 64 (M28 vendors nothing), `check-drift` 22,
-`verify_named_checks_exist` 9, M1 175.
+
+**M28 WAS DECLARED AT 348 AND ITS REVIEW TOOK IT TO 353, IN TWO CHECKS AND NOTHING ELSE.**
+`just ci-browser-gate` **101 -> 104**: the closure's optional-manifest count re-derived on a line of
+its own (§5 carried 268 and 3 on ONE line with only the 268 re-derived, and swapping them left the
+document stating the reverse of D22 with 101 assertions and 0 failures), plus the §2 composition
+table compared as a SET against the recipe's — a size is not a composition, and replacing one row
+with a different check that exists also passed 101/0 — with a non-emptiness assertion beside the
+read. `verify_npm_pack_no_optional_native` **52 -> 54**: the extraction non-emptiness moves INSIDE
+the per-package loop, because `pack_binaries` re-fills one directory per tarball so a single check
+after the loop only ever judged the last package. 3 + 2 = 5, exact in both parts.
+
+**Every one of M0-M27 came out at its reference value TO THE ASSERTION** in the review's own sweep,
+including M9 at **807 in 1,282 s with no flake** — immediately after M8's build, which is D19's
+standing hypothesis, on a box carrying a foreign build, and it did not fire — M4 at 218 in the dev
+shell, M24 at 350 and M27 at 343. Nothing outside M28 moved: `verify_provenance_complete` stays 64
+(M28 vendors nothing), `check-drift` 22, `verify_named_checks_exist` 9, `verify_pinned_nightly_single_source`
+28, `verify_reuse_inventory_complete` 19, `just check-repo-hygiene` 28, M0 156, M1 175, M20 237.
 
 **THE ONE NON-ZERO EXIT IS M11's AND IT IS THE SIXTH AND SEVENTH UPSTREAM MOVES — see the bullet
-below, which is the one place the chain is stated.** m11 reads **259 with eight failing assertions
-and the count unchanged**, the recorded signature. It is NOT repaired: the seventh move breaks the
-conjunct no acknowledgement can excuse, and `carry/` is left at HEAD rather than half-repaired.
+below, which is the one place the chain is stated.** m11 reads **259 with TEN failing assertions and
+the count unchanged** — the count is the recorded signature; the failure count is not, and M28's own
+sweep read eight because it ran m11 BETWEEN the sixth and seventh moves. It is NOT repaired: the
+seventh move breaks the conjunct no acknowledgement can excuse, and `carry/` is left at HEAD rather
+than half-repaired. **And a sweep is a WRITER here**: `verify-m11` rewrites `carry/rebase.json` and
+`carry/exposure.json` to the current tip on every run, so a sweep leaves two tracked files modified
+and they must be restored afterwards.
 
 **M26 MOVED THREE NUMBERS AND EVERY UNIT OF ALL THREE IS ACCOUNTED FOR IN BOTH DIRECTIONS.**
 Its own **313** (133 / 65 / 36 / 79) after its review — **declared at 293** (117 / 65 / 36 / 75), and
@@ -911,13 +928,18 @@ Format spec: `~/ah/dev/agent-harbor/ah-lib/specs/Milestones-Files.md`.
   `233d8e0993` against base-plus-patches as *separate trees*. Never repoint it at
   the `codetracer` branch — that would turn base-versus-patched into
   patched-versus-patched and make every claim a tautology while staying green.
-- **Upstream moves — SEVEN times now, and it is M11's work every time. THIS BULLET IS THE ONE PLACE
+- **Upstream moves — EIGHT times now, and it is M11's work every time. THIS BULLET IS THE ONE PLACE
   THE CHAIN IS STATED; everything else points here.** `upstream/next` has gone `233d8e0993`
   (base) → three commits → `44a57f8c4a` (seven) → `9487ed3e9b` (nine) → `142dfcf4b2` (twelve,
   2026-08-26) → `9df414ec0e` (fourteen, 2026-08-26) → `9d9523b973` (**2026-08-27 20:28**) →
-  `703d896149` (**2026-08-27 20:59**, seventeen commits past the base). The last two are
-  **thirty-one minutes apart** and both landed during M28's session, by fetches in the sibling
-  checkout; M28's sweep ran M11 between them. **THE SEVENTH IS A NEW CLASS AND IS OPEN.** For six
+  `703d896149` (**2026-08-27 20:59**, seventeen) → `7df97dce1b` (**2026-08-27 22:29**, eighteen
+  commits past the base, 10,933 changed paths). **FOUR MOVES IN TWENTY-SIX HOURS, THREE OF THEM
+  INSIDE TWO HOURS**, all by fetches in the sibling checkout; M28's sweep ran M11 between the sixth
+  and the seventh, and its review's sweep started M11 in the minute the eighth landed. **This chain
+  has now gone stale four times, and it will keep going stale**: the "one place states it" remedy
+  fixes duplication, not the fact that the number is a property of a moving target rather than of
+  this repository. Anything that must be TRUE rather than merely current has to be re-measured, and
+  the checks do that; the prose cannot. **THE SEVENTH IS A NEW CLASS AND IS OPEN.** For six
   moves upstream changed nothing under `barretenberg/cpp`; `703d896149`
   (*chore!: delete the in-tree labs components*) changes **five** paths there —
   `barretenberg/cpp/bootstrap.sh`, `docs/Fuzzing.md`, `scripts/chonk_inputs.sh`,
@@ -978,8 +1000,11 @@ Format spec: `~/ah/dev/agent-harbor/ah-lib/specs/Milestones-Files.md`.
   variable visibility are ruled out. Never imply a gate exists: no job has ever
   reached a check.
 - **Nothing is filed upstream.** Five patches prepared and **six** branches published — five
-  `pr/*` plus the downstream `aztec-avm-runtime` — which is what
-  `verify_pr_branches_match_patches` asserts by name from `series.json`. Submission is the user's
+  `pr/*` plus the downstream **`codetracer`**, which is `fork.downstream_branch` in `series.json`
+  and is the sixth identity `verify_pr_branches_match_patches` compares. (This bullet said
+  `aztec-avm-runtime` for several milestones. That is `fork.downstream_base_branch`; it is also
+  published, and it is NOT one of the six the check reads. Corrected by M28's review, measured
+  against `series.json` and `git ls-remote`.) Submission is the user's
   manual step via `submit/pr<N>-*.sh`; there are five such scripts.
 - **PR #22815** (Emscripten migration) is open and would delete what patch 2
   changes. Patches 1, 3, 4 are unaffected but for one shared file.

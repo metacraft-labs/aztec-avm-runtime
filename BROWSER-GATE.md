@@ -129,11 +129,18 @@ make to an OQ-6 check that once passed a document with two table rows swapped, e
 and every figure re-derived. A subject line this document does not contain is a `ROW-MISSING`
 failure rather than a silent pass.
 
-Re-derived: §2's two recipe sizes, from the Justfile recipes themselves; §3's six bundle figures
-and the root count, from the two metafiles; §5's package count and its closure size, from the
-packed packages and the closure walk; §4's `util` edge count, from the browser metafile. The
-instrument that judges this document is itself controlled — a wrong figure on a line that exists
-and a subject line that does not exist are both required to be reported.
+Re-derived, thirteen figures: §2's two recipe sizes, from the Justfile recipes themselves; §3's six
+bundle figures and the root count, from the two metafiles; §5's package count, its closure size and
+the number of manifests in that closure declaring `optionalDependencies`, from the packed packages
+and one closure walk; §4's `util` edge count, from the browser metafile. The instrument that judges
+this document is itself controlled — a wrong figure on a line that exists and a subject line that
+does not exist are both required to be reported.
+
+**And a size is not a composition.** §2's table names the seven checks, and until M28's review only
+the size (7) and the existence of each name were re-derived — so replacing one row with a
+*different* check that exists passed everything. The table's set of check names is compared against
+the recipe's set now, with a non-emptiness assertion beside it, and the first cell only, so a name
+appearing in a row's description cannot stand in for the row's subject.
 
 ## 7. Why it cannot be skipped
 
