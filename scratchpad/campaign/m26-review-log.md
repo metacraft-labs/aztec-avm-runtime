@@ -490,3 +490,53 @@ the Noir fixture-parity milestone and the test header names each one.
 because one of the two causes is M26's own undeclared consequence — leaving it unfixed would have
 shipped a behavioural change nobody had written down, behind a suite that could not reach the
 assertions meant to catch it.
+
+### R16 addendum — the M24 red is NOT the six exports, and the attribution matters
+
+The obvious reading is that M26's six new module exports changed the module, moved the stamp and
+left §2 stale. **That is not what happened, and it is refuted by three measurements:**
+
+1. **The module has not been rebuilt since M26 finished.**
+   `ct-writer/target/wasm32-unknown-unknown/release/aztec_ct_writer.wasm` is
+   **262,693 bytes, sha256 `5edf9671…`, mtime 06:17** — hours before this review's first edit and
+   before the sweep. `TRACE-ABI.md` §7 states exactly those two figures and
+   `verify_ct_writer_wasm_zero_imports` re-derives both from the artefact: it was **58/0** in the
+   same sweep run in which the OQ-6 check failed. A changed module would have reddened §7 too.
+2. **M24 was GREEN at 350 at the end of M26's own sweep**, with all six exports already in the
+   module (they landed in M26's step 7, before its sweep). So §2 and `arms.tsv` agreed then.
+3. **M26 did re-render §2 — three times**, for runs 7, 8 and 9, and §8's ninth row reads
+   *"the SAME module as run 8"*. The document was current for the module it describes.
+
+The desync therefore arose during the review, and the only stamp input the review touched is
+`ct-host/src/abi.ts` — **a comment**. `_m24_oq6_stamp` hashes the module PLUS
+`tools/run_oq6_arms.mjs`, `ct-host/src/{writer,abi,config}.ts` by file content, so R11's
+one-sentence docstring correction was sufficient on its own.
+
+**Why the distinction is worth the paragraph:** "M26 forgot to re-render after changing the module"
+licenses the remedy "re-render after changing the module", which M26 already did and which would not
+have prevented this. The true remedy is knowing that editing a COMMENT in those four files buys a
+twelve-session benchmark, which is now in the brief.
+
+### The corrected §2, checked against the coordinator's arithmetic
+
+| row | median | min | crossings | container |
+|---|---|---|---|---|
+| `batched` | 627,120 | 616,408 | 25 | 4,694,016 |
+| `perEvent` | 632,951 | 621,529 | 100,000 | 4,694,016 |
+| `control` | 623,664 | 608,135 | 25 | 4,694,016 |
+| `nopBatched` | 4,711 | 4,488 | 25 | 159,744 |
+| `nopPerEvent` | 5,584 | 4,945 | 100,000 | 159,744 |
+
+Whole rows, rewritten by `m24-render-trace-abi.py` from the sweep's own `arms.tsv` and matched
+row-at-a-time by the check — M24's review's fix, so a swapped median cannot pass.
+
+**The verdict holds, and the two ways of computing it differ slightly.** `perEvent - batched` is
+**+1.21 %, [+0.58, +1.85] %, `within-noise`**; the control is **−0.35 %**, inside the margin, so the
+instrument is calibrated. `(632,951 − 627,120) / 627,120 = +0.93 %` is the ratio of the two medians;
+the document and the comparator use the **median of the per-session paired ratios**, which is the
+paired statistic and is +1.21 %. Same sign, same order, and the sign is run 2's — the sixth of the
+ten runs to land there. **The ABI decision does not move.**
+
+**The container sizes are unchanged to the byte**: 4,694,016 for the three real arms, matching
+`TRACE-ABI.md` §5's *"4,694,016 bytes, unchanged to the byte"* recorded when M26 added the exports,
+and 159,744 for the two nop arms whose writer work is removed. Nothing about the artefact moved.
