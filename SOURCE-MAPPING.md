@@ -194,7 +194,7 @@ is GONE, in both Noir checkouts, so neither this section nor that check can go s
 
 | what | where, at M25 |
 |---|---|
-| `Field` became an `Int` | `noir/tooling/tracer/src/tracer_glue.rs:148-152` — `ValueRecord::Int { i: field_value.to_i128() as i64, type_id }` |
+| `Field` became an `Int` | `noir/tooling/tracer/src/tracer_glue.rs:160-189` — `ValueRecord::Int { i: field_value.to_i128() as i64, type_id }` |
 | under `(TypeKind::Int, "Field")` | `tracer_glue.rs:371` |
 | and `to_i128` **panics** above 127 bits | `noir/acvm-repo/acir_field/src/field_element.rs:253-256`, gated on `fits_in_i128()` = `num_bits <= 127` |
 | then `as i64` truncates | `tracer_glue.rs:152` |
@@ -264,7 +264,7 @@ What M24 recorded for the same address, kept so this is a delta rather than a cl
 
 ### 4.4 The cross-half work this leaves, named rather than implied
 
-**The Noir half must change to match**, at `noir/tooling/tracer/src/tracer_glue.rs:148-152`. That is
+**The Noir half must change to match**, at `noir/tooling/tracer/src/tracer_glue.rs:160-189`. That is
 a Metacraft repository and not Aztec, so it is **not** the sixth upstream contribution, and it is
 M26's to land — M26 is where the two halves become one container and where a disagreement between
 them is a defect rather than a divergence.
@@ -276,6 +276,18 @@ recorded rather than glossed: **a small field now reads as `0x…04` instead of 
 for an ordinary Noir program and is the price of one spelling across the join. Option 2 —
 fixing `BigInt`'s CBOR encoding in the shared crate — remains the better long-run answer and
 remains a decision above this milestone.
+
+**AND THERE IS A SECOND COST, WHICH M26 DID NOT DECLARE AND M26'S REVIEW MEASURED.** The change is
+neutral in the TYPE RECORD and not in the TYPE TABLE. The writer registers a nameless companion
+type for a `TypeKind::Int` type the first time that type carries an `Int` VALUE; a `Field` no
+longer carries one, so the companion is never created and every trace containing a `Field` has one
+fewer type-table entry. Measured with a baseline `nargo` built in a separate worktree, across three
+Noir fixtures: `assert` goes `[None, Field, type_1]` -> `[None, Field]`, `a_2_function_calls` goes
+`[None, Field, type_1, ()]` -> `[None, Field, ()]`, and `types_test` loses the entry after `Field`
+while the companions after `u32` and `i8` survive and renumber (`type_3` -> `type_2`,
+`type_6` -> `type_5`). `a_1_mul`, whose only companion follows `u32`, is unchanged. It is recorded
+in `tracer_glue.rs` beside the rendering and in `tests/test_tracer.rs`' header, because it is the
+half of this change that a reader of the diff cannot see.
 
 Two options exist and the reason for preferring the first is recorded:
 

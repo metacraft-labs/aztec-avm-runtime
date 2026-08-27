@@ -95,7 +95,7 @@ assert_false "a needle in neither Noir file does not match" \
 assert_true "the document records that 'match it exactly' was not available, with its reason" \
   str_has_sub "$DOC_TEXT" 'could not render a full-width 254-bit field at all'
 assert_true "…and records the change M26 made, by file and line" \
-  str_has_sub "$DOC_TEXT" 'noir/tooling/tracer/src/tracer_glue.rs:148-152'
+  str_has_sub "$DOC_TEXT" 'noir/tooling/tracer/src/tracer_glue.rs:160-189'
 assert_true "…and records that M26 landed it, rather than leaving §4.4 as an instruction" \
   str_has_sub "$DOC_TEXT" 'M26 LANDED OPTION 1'
 assert_true "…and records the cost, which is that a small field now reads as 0x…04 instead of 4" \

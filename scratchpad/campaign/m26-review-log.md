@@ -280,3 +280,213 @@ what I measured — is that **there is no built `ct` binary anywhere in it**: th
 debugger nobody has stood up, which is a different sentence from a debugger nobody has, and the
 milestone entry says the measured one now. The entry stays `pending`, correctly: a deliverable that
 names a product must be closed by that product opening the file.
+
+## Phase 5 — the review's own mutations: every added assertion has one
+
+`scratchpad/campaign/m26-review-mutations.sh`, three arms, one at a time, each restored and verified
+by sha256 (`revmut.log`). Each arm is only satisfied if the NAMED assertion goes red.
+
+| arm | mutation | result | which assertions went red |
+|---|---|---|---|
+| J | a retained line of a vendored file **repeated** | 133/**4** | the pinned content-line count (106 vs 109), `ORDERED`, and both of the duplication control's own legs |
+| K | two adjacent retained lines **swapped** | 133/**3** | `ORDERED` only — **every count came back unmoved**, which is the demonstration that nothing else in the check can see a reordering |
+| L | the builder handed a plain `{}` instead of the tripwire | 133/**3** | all three new tripwire assertions, on `NOT-THROWN` and on the observation count 0 vs 1 |
+
+**Arm L is the one that matters most**, and its shape is the point: the ORIGINAL assertion —
+`len(merkleTouches) == 0`, the one RI-72's whole entry rests on — **stayed GREEN** under it. A
+tripwire wired to nothing produces exactly the same zero as a tripwire that works.
+
+(In arm K the check's own reorder control also reddens, because that control is built FROM the file
+under test and swapping an already-swapped pair restores upstream's order. It fails loudly rather
+than hiding, which is the safe direction, and it is worth knowing when reading arm K's output.)
+
+## Phase 6 — the numbers
+
+`just verify-m26` after the fixes: **133 / 65 / 36 / 79 = 313, 0 failures, exit 0.**
+Declared 293; the twenty are +16 in `verify_tx_builder_vendored_not_reimplemented` (8 in the
+per-file loop, 5 in the two new controls, 3 on the tripwire) and +4 in
+`test_join_fallback_two_recordings`. Exact in both parts.
+
+### R15 — the sweep summariser's own reference table is stale
+
+`scratchpad/campaign/m26-sweep-sum.py:36` declares `"m26": 279`. M26 was declared at **293**. 279 is
+`117 + 65 + 36 + 61` — the count BEFORE step 10 grew `test_join_fallback_two_recordings` from 61 to
+75. So the impl agent's own sweep must have printed `m26 293 <-- MOVED, reference 279 (+14)` and the
+impl log records 293 with no mention of the flag. The instrument disagreed with the result and
+nobody reconciled them. (Its usage line also still says `m25-sweep-sum.py`.)
+
+## Phase 7 — OQ-7's demonstration, read out of the container rather than out of the document
+
+Decoded the artefacts with the pinned reader and `_ct_frames.py` directly:
+
+```
+oq7-shared.ct        EVENTS 146  STEPS 32  CALLS 8  RETURNS 6  UNBALANCED 2
+  FRAME 0 depth 0 <toplevel>                31 steps
+  FRAME 1 depth 1 main                      31 steps
+  FRAME 2 depth 2 foo    6      FRAME 3 depth 3 bar    3
+  FRAME 4 depth 2 foo    6      FRAME 5 depth 3 bar    3
+  EVENT ct.trace-join  join=aztec-tx-01949fcc7d927e9c-join half=both halves=1 arm=shared reason=…
+  FRAME 6 depth 2 Token.transfer_in_public   6 steps, 1 call argument
+  FRAME 7 depth 2 Token.balance_of_public    6 steps, 1 call argument
+
+oq7-split.public.ct  EVENTS 93  STEPS 12  CALLS 3  RETURNS 2  UNBALANCED 1
+  FRAME 0 depth 0 <toplevel>  12   FRAME 1 depth 1 Token.transfer_in_public 6
+                                   FRAME 2 depth 1 Token.balance_of_public  6
+  EVENT ct.trace-join   … half=public halves=2 arm=split …
+  EVENT ct.mapping-rung 0x3051e7a9… rung=1 …
+```
+
+Every figure in `JOIN-SHAPE.md` §3 reproduces: 146 events, 32 steps, 8 calls, 6 returns, the two
+public frames at **depth 2 inside `main`** in enqueue order, `<toplevel>` and `main` still open
+(`UNBALANCED 2`) when they open. The frames are computed from the Call/Return sequence, so they are
+real rather than a listing order. And `32 = 20 + 12` — the shared container's steps are the sum of
+the two split containers', which is the identity that replaced the value compared with itself.
+
+**Fact 2 verified independently too**: the two single-process instances report 6 and 4 module
+events, and the containers differ (`sha256` `4ff95eea…` vs `ae449447…`). Had either seen the
+other's, both would read 10.
+
+**Fact 6 verified**: `noir/Cargo.toml:144` is
+`codetracer_trace_writer = { path = "../codetracer-trace-format/codetracer_trace_writer_nim", package = "codetracer_trace_writer_nim" }`.
+**Fact 7 verified**: `git -C noir-wt4-webpage for-each-ref refs/remotes --contains f0e7edcd2` is
+**empty**, while the same predicate over `refs/remotes/origin/master` in the same repository answers
+**10**. The control is sound and the two commits are asserted different.
+
+## Phase 8 — the vendoring claims, item by item
+
+| claim | verdict |
+|---|---|
+| 880 lines to the line | **VERIFIED exactly.** 329 / 275 / 154 / 122 out of the object store at `3a68d68ac2`, all four blobs newline-terminated so `wc -l` and content lines agree, and the check re-derives it every run |
+| `PROVENANCE.md` F20–F23 + F24 | **VERIFIED.** Five rows, right paths, right anchor, RI-72 cited, class `tx-builder-calldata-half`, all five tracked |
+| `check-drift` covers all five rows | **TOUCHES all five; one of the five is a TAUTOLOGY.** `tools/provenance.py:543-566` loops with no filter and prints `OK differs` ×4 and `OK missing-upstream` ×1. But F20–F23 get only a DIRECTION assertion — the repo's own documented limitation — and **F24's `missing-upstream` is returned by construction**: `git show <anchor>:"(none — added in this repo)"` cannot resolve, so it would pass over an empty `gas_compat.ts` or over ten thousand lines of anything. F24's real content pin is Part 4 of the named check, not `check-drift` |
+| five numbered edits | **VERIFIED**, and the fifth's count was wrong: "FOUR functions" against six declarations carrying four escaping edges, in two documents. Fixed |
+| `lodash.merge` escapes RI-72's `@aztec/*` scope | **VERIFIED, and it is out of scope for every rule the repo enforces.** Upstream imports it at the anchor; the vendored copy does not; it is absent from `orchestration/package.json`, from `package-lock.json` and from `node_modules`. **DD-9 says nothing about npm dependencies** — its text is one sentence about never exposing the upstream `PublicProcessor` constructor — and `verify_differential_containment` forbids only `optionalDependencies`, `@aztec/native` and `@aztec/bb.js`. Keeping `allSameExcept` would have been a **load failure**, not a rule violation. The trim is a correctness fix and RI-72's correction is honest |
+| F24 exists because the nightly does not export `FALLBACK_TEARDOWN_{DA,L2}_GAS_LIMIT` | **VERIFIED BY MEASUREMENT.** `@aztec/stdlib/gas` exports 30 keys, none matching `FALLBACK`; it DOES export `GAS_ESTIMATION_TEARDOWN_{DA,L2}_GAS_LIMIT`, so the check's narrow `/FALLBACK_TEARDOWN/` filter is load-bearing and a looser `TEARDOWN` needle would have gone red for the wrong reason. Both names present at the anchor (`gas_settings.ts:14,16`). `gas_compat.ts` recomputes from `@aztec/constants` — L2 817500, DA 98304, no literals — and both halves are asserted |
+| RI-72's load-bearing claim is EXECUTED, not grepped | **VERIFIED that it is executed. REFUTED that it was controlled** — see R8. The `Proxy` traps `get`, `has` and `ownKeys` and throws on each, which covers the claim's axis (`merkleTree.x()` needs a `[[Get]]`; `Object.keys` hits `ownKeys` first). `set`, `delete`, `defineProperty`, `getOwnPropertyDescriptor` and `getPrototypeOf` pass silently — measured, off-axis, recorded. The list can never be non-empty in a readable report, so the assertion on it was a tautology with nothing behind it until this review added the arming control |
+
+## Phase 9 — publication, and one instruction that collides with the milestone's own verdict
+
+`pins.json`'s five anchors all resolve to **published** commits: `cpp`, `ts` and
+`historical-protocol-specs` upstream, `trace_format` `592fa42cbf` (1 remote ref) and
+`trace_format_nim` `baea074019` (1 remote ref in each of the two checkouts). M24's review's rule
+holds.
+
+**`noir-wt4-webpage` IS DELIBERATELY LEFT UNCOMMITTED, and this is a decision rather than an
+oversight.** It is a git worktree of `noir` sitting on `wasm/webpage`, carrying one uncommitted
+edit to `tracer_glue.rs`. Committing it locally would produce an unpushed commit, which this
+campaign's own rule calls a local file. **Pushing it would publish `wasm/webpage` — which is
+precisely fact 7 of OQ-7's verdict, the fact the whole "not shippable" conclusion rests on, and
+`JOIN-SHAPE.md` §6 names publishing that branch as one of the two things that would REOPEN OQ-7.**
+`verify_oq7_shared_writer_verdict_recorded` asserts its refcount is 0 and would go red the moment
+it were pushed. A review agent does not reopen a settled question as a side effect of tidying a
+working tree. The probe's build script tolerates exactly this one edit by design
+(`build_oq7_shared_writer_probe.sh:72`, `ALLOWED_EDIT`), and the file's content is asserted
+identical to `noir`'s in both checkouts, so nothing about the demonstration depends on the commit.
+
+The other three repositories are committed: `noir` (`eb8b28c27`), `aztec-avm-runtime` (`5c6d37c`),
+`codetracer-specs` (`50bfbf19`). Nothing in any of them pins a commit of any other, so no ordering
+can leave a pin naming an unpublished commit; they are pushed after the sweep, not before it.
+
+## Phase 10 — THE SWEEP, and one milestone the review's own edit reddened
+
+Run `setsid`-detached from this repository's own dev shell, one milestone at a time, `TMPDIR` and
+the log under `~/.cache`, **after** the three commits. No hole in the log; the summariser printed a
+total, which it refuses to do while one is open.
+
+```
+m0 156  m1 175  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 324  m22 260  m23 509  m24 350  m25 272  m26 313
+                                                        CAMPAIGN TOTAL 9,352
+```
+
+**Every milestone at its reference value TO THE ASSERTION, delta +0**, 9,039 (m0–m25) + 313 = 9,352.
+M26's own move is the only one: 293 → 313, +16 and +4 in two checks, itemised in Phase 6.
+
+**M9 DID NOT FLAKE — 807, 7/7, exit 0 in 1,341 s, IN the sweep**, immediately after M8's build.
+
+### R16 — M24 went red in the sweep, at an unchanged count, because of a COMMENT this review fixed
+
+`m24 rc=1, 15 failing assertions, 350 assertions` — the count did not move, which is the shape that
+distinguishes "a check grew" from "a check saw something". `_m24_oq6_stamp` hashes the module plus
+`ct-host/src/{writer,abi,config}.ts` and `tools/run_oq6_arms.mjs` **by file content**. R11's
+one-sentence docstring correction in `abi.ts` invalidated it, the twelve-session OQ-6 benchmark
+re-ran inside the sweep, and `TRACE-ABI.md` §2 was left quoting run 9 against an `arms.tsv` holding
+run 10.
+
+**Reverting does not undo it**: the stamp on disk now names the post-edit inputs, so a revert is
+another mismatch and another benchmark. The document is rendered from the new data instead —
+**run 10: +1.21 %, [+0.58, +1.85] %, `within-noise`, control −0.35 %, crossing-only pair +18.71 %,
+crossing ~8.7 ns** — §8 gains its tenth row and **runs 8, 9 and 10 are now THREE replicates of one
+module**, reading +0.74 / +1.34 / +1.21. M24 re-run: **350, 6/6, exit 0.** The lesson is in the
+brief: a content stamp that hashes source wholesale makes a comment expensive.
+
+### The post-sweep edits were re-measured rather than assumed
+
+`TRACE-ABI.md`, `SOURCE-MAPPING.md`, `CAMPAIGN-BRIEF.md`, `DRIFT.md`, the M25 check and the
+milestone file all changed after the sweep. Re-run: **m1 175, m15 537, m19 180, m20 237, m22 260,
+m23 509, m24 350, m25 272, m26 313 — every one at reference, exit 0.**
+
+## Phase 11 — THE HEADLINE CLAIM, finished by execution rather than by inspection
+
+The earlier baseline in Phase 1 was **WRONG, and wrong in the direction that exonerates the change**.
+Reverting the two files in the LIVE checkout and re-running `cargo test` reproduces all six
+failures — but **`cargo test -p noir_tracer` does not rebuild `nargo`**, and these tests SPAWN it,
+so that run compared the OLD expectations against the NEW recorder. Re-taken in a separate
+`git worktree` at the parent commit `6db58caad`, with `nargo` rebuilt into its own target dir, the
+attribution splits in two:
+
+| test | assertion | got | pinned | whose |
+|---|---|---|---|---|
+| `a_1_mul` | `values` | 10 | 19 | **pre-existing** |
+| `a_2_function_calls` | `types` | 3 | 4 | **M26** |
+| `assert` | `types` | 2 | 3 | **M26** |
+| `if_then_else_reduced` | `values` | 78 | 155 | **pre-existing** |
+| `types_test` | `types` | 10 | 11 | **M26** |
+| `multi_stmt_per_line` | columns | `[9,27,45]` | `[1,9,1,27,1,45]` | **pre-existing** |
+
+**The pre-existing half is explained**: `noir/Cargo.toml:144` resolves the writer to the sibling
+`codetracer-trace-format` checkout **by bare path at no pinned revision**, 45 commits have landed
+there, and `register_step_with_column`'s own doc comment now says *"one absolute step at the
+requested `(line, column)` instead of an intermediate column-1 step plus a separate delta step"* —
+which is the column list exactly, and `values` going from `2·steps−1` to `steps`.
+
+**The other half is M26's, and it was NOT declared.** Rendering a `Field` as `ValueRecord::String`
+instead of `ValueRecord::Int` removes exactly one type-table entry: the writer registers a nameless
+companion type for a `TypeKind::Int` type the first time that type carries an `Int` VALUE, and a
+`Field` no longer carries one. Measured with a baseline `nargo` in a clean worktree:
+
+```
+assert              [None, Field, type_1]           ->  [None, Field]
+a_2_function_calls  [None, Field, type_1, ()]       ->  [None, Field, ()]
+types_test          [None, Field, type_1, u32, type_3, Point, i8, type_6, Bool, String, Array<2,..>]
+                ->  [None, Field,         u32, type_2, Point, i8, type_5, Bool, String, Array<2,..>]
+a_1_mul             [None, u32, type_1]             ->  unchanged  (its companion follows u32)
+```
+
+The type RECORD is unchanged, still `(TypeKind::Int, "Field")` — which is what `tracer_glue.rs`
+claimed and it is true. The type TABLE is not, and nothing said so.
+
+### M26's OWN ASSERTIONS PASS, AND THAT IS NOW EXECUTED
+
+With the stale pins repinned from measurement, **`test_assert_via_ct_print_full` and
+`test_types_test_via_ct_print_full` are GREEN** — the two tests that call `field_small_int`, so
+every one of M26's updated Field expectations runs and passes: `3 passed, 3 failed`, from
+`0 passed, 6 failed`.
+
+### Three remain red, all pre-existing, and deliberately NOT repinned
+
+1. `a_1_mul`'s per-step `x` sequence is shifted by one leading `None`. Same cause as `values`, but
+   the right expectation is a question about which step a stepper should stop on.
+2. `a_2_function_calls` records its last step as **`("main", 142)` in a thirteen-line file**.
+   Present byte-for-byte in the baseline decode — a recorder defect, and repinning it would write a
+   bogus line number into a test.
+3. `multi_stmt`'s `assert` step on line 4 no longer carries column 1.
+
+Two of the three are asking whether today's output is right, which is the question. They belong to
+the Noir fixture-parity milestone and the test header names each one.
+
+**Recommendation, and it is what was done: FIX NOW.** Not because the pins were tidy to move, but
+because one of the two causes is M26's own undeclared consequence — leaving it unfixed would have
+shipped a behavioural change nobody had written down, behind a suite that could not reach the
+assertions meant to catch it.

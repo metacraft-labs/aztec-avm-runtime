@@ -333,11 +333,43 @@ family as "the repository's own `.envrc` is the shell; the workspace root's is n
 out: there, the wrong shell was too high; here, the right shell was next door.
 
 **And updated-but-unexecuted expectations are the artefact this rule exists to prevent.** Executed,
-they turned out to be *correct* — but the suite around them is **red at `HEAD`, six of six**, for
-reasons that predate the change and fire *earlier in each test*, so the new assertions are not
-merely unrun, they are unreachable. A reader who runs that suite gets six failures none of which is
-about the change that touched the file. **If you cannot run a test you changed, say what you tried,
+M26's own expectations turned out to be *correct* and they now PASS — but only after six unrelated
+pins were sorted out, because they fire *earlier in each test*, so the new assertions were not
+merely unrun, they were unreachable. **If you cannot run a test you changed, say what you tried,
 and put it in the test file rather than in a milestone document in another repository.**
+
+**AND THE FIRST BASELINE OF THAT SUITE WAS WRONG, IN THE DIRECTION THAT INVENTS AN INNOCENT PARTY.**
+The review reverted the two changed files in the LIVE checkout, re-ran `cargo test`, got the same
+six failures, and concluded all six predated the change. **`cargo test -p noir_tracer` does not
+rebuild `nargo`**, and these tests SPAWN it — so that run measured the OLD expectations against the
+NEW recorder. Re-taken in a separate `git worktree` at the parent commit, with `nargo` rebuilt,
+**three of the six are the change's own doing**: rendering a `Field` as a `String` instead of an
+`Int` removes a nameless companion type from the type TABLE, which nobody had declared. A stale
+binary is state you did not produce, and a baseline taken in the tree you are changing is the
+easiest place in this campaign to produce one. **Take baselines in a worktree, and rebuild every
+artefact the test spawns.**
+
+### A CONTENT STAMP THAT HASHES SOURCE WHOLESALE MAKES A COMMENT EXPENSIVE
+
+**One instance, and it reddened a milestone nobody had touched.** `_m24_oq6_stamp` hashes the
+module plus `ct-host/src/{writer,abi,config}.ts` and `tools/run_oq6_arms.mjs` **by file content**,
+so M26's review correcting one sentence of a docstring in `abi.ts` — a change that cannot move a
+measurement — invalidated the stamp, re-ran the twelve-session OQ-6 benchmark inside the sweep, and
+left `TRACE-ABI.md` §2 quoting run 9 against an `arms.tsv` holding run 10: **M24 exit 1, fifteen
+failing assertions, and the assertion COUNT unchanged at 350**. The check behaved perfectly — it
+re-derives §2 from the data and compares — so this is a fact about the stamp, not about the check.
+
+**There is no way back except forward.** Reverting the comment does not restore green: the stamp on
+disk now names the post-edit inputs, so a revert is another mismatch and another benchmark, and the
+document is stale either way. The remedy is to re-render the document from the new data
+(`scratchpad/campaign/m24-render-trace-abi.py`, fed by `verification/_oq6_compare.py`) and add the
+run to §8's retained table. Run 10 came out **+1.21 %, [+0.58, +1.85] %, within-noise** — a third
+replicate of runs 8 and 9 on the same module, which is evidence §8 did not have.
+
+**Rule:** before editing a comment in `ct-host/src` or `tools/run_oq6_arms.mjs`, know that you are
+buying a benchmark and a document re-render. Loosening the stamp is not obviously right — a stamp
+that tries to tell a comment from code is harder to get right than a re-render is to run — so the
+cost is documented rather than removed.
 
 ### Conjunctions need a negative case per conjunct
 A four-tree conjunction whose only negative case exercised one tree: dropping any
@@ -477,7 +509,16 @@ the dev shell (M19's review's PATH pin still holds), M11 at 259 (upstream has no
 time) and M24 at 350 — unmoved even though M26 changed the module under it three times, because
 M24's checks re-derive `TRACE-ABI.md` from the artefact rather than pinning literals.
 
-**M9 FLAKED IN THAT SWEEP AND PASSED ALONE, WHICH IS THE SETTLED PROCEDURE.** In the sweep: 524,
+**M9 DID NOT FLAKE IN THE REVIEW'S SWEEP — 807, 7/7, exit 0 in 1,341 s, IN the sweep**, split
+140/143/113/73/126/83/129, immediately after M8's build as always. That is worth as much as a
+sighting: "a build finished seconds earlier" is D19's standing hypothesis and this run had that
+condition and did not truncate. **And the four sightings of `burn` truncate at FOUR DIFFERENT
+points** — 39,113 / 16,719 / 14,572 / 17,866 — same input, same module, same host, so the cause is
+NOT a particular record and a content-dependent defect is ruled out. `steps.burn.17592` is M26's
+sighting's truncation POINT, not a trigger; the trigger is still not established. `DRIFT.md` D19
+carries the ledger now, which it had asked for and not been given three times.
+
+**M9 FLAKED IN M26's OWN SWEEP AND PASSED ALONE, WHICH IS THE SETTLED PROCEDURE.** In the sweep: 524,
 exit 1, twelve failing assertions, the V8 step transcript truncated after 17,866 lines at
 `steps.burn.17592` with the `avmSteps.done` sentinel never arriving — the recorded signature
 exactly. `807 - 524 = 283 = 140 + 143`, so the whole shortfall is the two checks that correctly

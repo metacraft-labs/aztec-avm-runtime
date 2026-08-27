@@ -872,8 +872,34 @@ were absorbed silently.
 - sides: what the guest WROTE to fd 1 versus what the transcript file CONTAINS, on the same run —
   so it is a disagreement between two things that both exist, which is what makes it drift rather
   than a gap
-- what: TWO SIGHTINGS, in two different milestones, on two different programs, both under Node's
-  V8 with `node:wasi`.
+- what: **FIVE SIGHTINGS ACROSS FIVE MILESTONES**, on two different programs, both under Node's V8
+  with `node:wasi`. This entry said "TWO SIGHTINGS" and asked for a third to record the line count
+  and the last key that arrived; **three more have happened since and none was carried back here**,
+  which is this campaign's prose-drifts-from-measurement in the one place that exists to hold the
+  measurement. M26's review collected them:
+
+  | # | when | check | transcript | last key |
+  |---|---|---|---|---|
+  | a | pre-M21 | `verify_observation_hook_step_records_identical` | 39,113 lines of 39,115 | recorded in `m9_completeness`'s own comment |
+  | b | M9's original flake | same | 16,719 records of 38,915 | inside `burn`; `oob` produced none |
+  | c | M20's review | `test_revert_program_does_not_trap_module` (M8) | 259 lines of 1,318 | first 259 byte-identical, then stops mid-record |
+  | d | M24's review sweep | `verify_observation_hook_step_records_identical` + `test_observer_does_not_perturb` | 14,572 lines | `steps.burn.14298` |
+  | e | M26's sweep | same two | 17,866 lines | `steps.burn.17592` |
+
+  **THE LEDGER NARROWS IT, WHICH IS THE FIRST NARROWING SINCE THIS ENTRY OPENED — AND IT IS NOT A
+  TRIGGER.** Four sightings of the SAME program (`burn`) truncate at FOUR DIFFERENT points —
+  39,113 / 16,719 / 14,572 / 17,866 — with the same input, the same module and the same host. So
+  the cause **is not a particular record**: a content-dependent defect in the writer, the encoder
+  or the decoder would stop in the same place every time, and this does not. That rules out the
+  hypothesis a reader reaches for first. `steps.burn.17592` is sighting e's truncation POINT and
+  must not be read as a trigger; it is the fourth different answer to the same question.
+
+  **AND M26'S REVIEW SWEEP DID NOT REPRODUCE IT.** M9 ran IN the sweep, immediately after M8's
+  build, and came out **807, 7/7, exit 0 in 1,341 s**, split 140/143/113/73/126/83/129 — the
+  reference exactly. So "a build finished seconds earlier" is not sufficient, which is the one
+  standing hypothesis this entry could test for free and had not.
+
+  The original two sightings, in full:
 
   1. M9, `verify_observation_hook_step_records_identical`: the V8 step transcript stopped inside
      `burn` at record **16,719 of 38,915**, `oob` produced no records at all, and the terminal

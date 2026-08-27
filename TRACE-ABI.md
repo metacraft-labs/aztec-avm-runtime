@@ -101,17 +101,17 @@ silently.
 
 | arm | median (µs) | min (µs) | crossings | container (B) |
 |---|---|---|---|---|
-| `batched` | 632,180 | 611,129 | 25 | 4,694,016 |
-| `perEvent` | 637,251 | 620,531 | 100,000 | 4,694,016 |
-| `control` | 631,108 | 609,668 | 25 | 4,694,016 |
-| `nopBatched` | 4,769 | 4,538 | 25 | 159,744 |
-| `nopPerEvent` | 5,540 | 4,861 | 100,000 | 159,744 |
+| `batched` | 627,120 | 616,408 | 25 | 4,694,016 |
+| `perEvent` | 632,951 | 621,529 | 100,000 | 4,694,016 |
+| `control` | 623,664 | 608,135 | 25 | 4,694,016 |
+| `nopBatched` | 4,711 | 4,488 | 25 | 159,744 |
+| `nopPerEvent` | 5,584 | 4,945 | 100,000 | 159,744 |
 
 | comparison | median | 95 % interval | reads as |
 |---|---|---|---|
-| `perEvent - batched` | **+1.34 %** | **[+0.67, +2.00] %** | within noise |
-| `control - batched` | -0.12 % | [-0.57, +0.33] % | the instrument is calibrated |
-| `nopPerEvent - nopBatched` | +17.24 % | [+14.49, +19.98] % | the crossing, priced alone |
+| `perEvent - batched` | **+1.21 %** | **[+0.58, +1.85] %** | within noise |
+| `control - batched` | -0.35 % | [-0.62, -0.07] % | the instrument is calibrated |
+| `nopPerEvent - nopBatched` | +18.71 % | [+15.64, +21.78] % | the crossing, priced alone |
 
 **Verdict: `within-noise`.** The comparator resolves a verdict only when the whole interval lies
 OUTSIDE ±3 %, and none of the nine runs comes close. Within a *single* run the interval is narrow
@@ -158,7 +158,7 @@ criterion is:
 > **The per-event ABI's cost is linear in an engine constant this project has not measured and
 > does not control; the batched ABI's is linear in one it does.**
 
-7.7 ns per crossing is *V8-in-node-24*'s number. M27 packages this runtime for a browser and M28
+8.7 ns per crossing is *V8-in-node-24*'s number. M27 packages this runtime for a browser and M28
 gates on one, and neither engine has been measured. A per-event ABI makes a 38,903-step `burn`
 recording's overhead a function of whichever engine the page happens to run in; a batched ABI
 makes it a function of `encodeStep`, which is ours and which every arm above exercises.
@@ -411,15 +411,15 @@ reconsidered if any of these changed:
 
 | quantity | measured | where |
 |---|---|---|
-| `perEvent - batched`, median | +1.34 % | §2 |
-| its 95 % interval | [+0.67, +2.00] % | §2 |
-| cost of one boundary crossing in V8 | ~7.7 ns | §2 |
-| the crossing's share of a 100k-event recording | 0.12 % | §2 |
-| writer work versus boundary work | ~820× | §2 |
+| `perEvent - batched`, median | +1.21 % | §2 |
+| its 95 % interval | [+0.58, +1.85] % | §2 |
+| cost of one boundary crossing in V8 | ~8.7 ns | §2 |
+| the crossing's share of a 100k-event recording | 0.14 % | §2 |
+| writer work versus boundary work | ~719× | §2 |
 | containers produced by the two ABIs | byte-identical | §3 |
 | host-side buffer at 250,000 events | 65,536 B, constant | §7 |
 
-**All nine runs, retained**, because the disagreement between them is the finding rather than a
+**All ten runs, retained**, because the disagreement between them is the finding rather than a
 nuisance. None is wrong; they are what this measurement does.
 
 | # | engine | `perEvent - batched` | 95 % interval | `control - batched` | `nopPerEvent - nopBatched` | crossing |
@@ -432,17 +432,30 @@ nuisance. None is wrong; they are what this measurement does.
 | 6 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M25's module) | +0.98 % | [+0.29, +1.67] % | -0.38 % | +4.56 % | ~3.1 ns |
 | 7 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M26's module, join records) | +0.85 % | [+0.50, +1.21] % | -0.21 % | +15.65 % | ~8.6 ns |
 | 8 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M26's module, + frames) | +0.74 % | [+0.11, +1.36] % | -0.16 % | +18.40 % | ~7.9 ns |
-| 9 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **the SAME module as run 8**) | **+1.34 %** | **[+0.67, +2.00] %** | -0.17 % | +17.24 % | ~7.7 ns |
+| 9 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **the SAME module as run 8**) | +1.34 % | [+0.67, +2.00] % | -0.17 % | +17.24 % | ~7.7 ns |
+| 10 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **the SAME module as runs 8 and 9**) | **+1.21 %** | **[+0.58, +1.85] %** | -0.35 % | +18.71 % | ~8.7 ns |
 
-Run 9 is the one §2 tabulates, because it is the one `arms.tsv` currently holds and the one the
+Run 10 is the one §2 tabulates, because it is the one `arms.tsv` currently holds and the one the
 check compares this file against. **Runs 2, 3 and 4 are the same engine, the same module and the
 same binary**, and runs 2 and 3 have disjoint intervals with opposite signs — which is why §2 says
 the sign is not stable rather than quoting any one run's interval as a precision. **Runs 5 to 8
 are the same engine and DIFFERENT modules**, so none is a replicate of runs 2–4 and none is
 offered as one. What they do is put the instability to a test it could have failed four times —
 any of them could have come back with runs 3 and 4's sign and a tight interval, and all four came
-back with run 2's. **Runs 8 and 9 ARE replicates of each other**, same engine and same module, and
-they read +0.74 % and +1.34 %: the point estimate nearly doubles between two runs of one binary.
-In all nine the control reports no difference beyond the margin, so the instrument is calibrated
-in all nine; what is not stable is the subject.
+back with run 2's. **Runs 8, 9 AND 10 are replicates of each other**, same engine and same module, and
+they read +0.74 %, +1.34 % and +1.21 %: the point estimate nearly doubles between two runs of one
+binary, and the third lands between them. Three replicates is what the earlier eight runs never
+had, and they span +0.74 to +1.34 with overlapping intervals — the between-run nuisance measured
+directly rather than inferred from runs that differed in something else.
+In all ten the control reports no difference beyond the margin, so the instrument is calibrated
+in all ten; what is not stable is the subject.
+
+**RUN 10 EXISTS BECAUSE A COMMENT WAS CORRECTED**, which is a fact about the instrument worth
+having in the record. `_m24_oq6_stamp` hashes `ct-host/src/{writer,abi,config}.ts` and
+`tools/run_oq6_arms.mjs` WHOLE, so M26's review changing one sentence of a docstring in `abi.ts` —
+a change that cannot move a measurement — invalidated the stamp, re-ran the twelve-session
+benchmark, and left this file quoting run 9 against an `arms.tsv` holding run 10: fifteen red
+assertions in a milestone nobody had touched, with the assertion COUNT unchanged at 91. The
+document is rendered from the new data rather than the stamp being loosened, because a stamp that
+tries to tell a comment from code is a harder thing to get right than a re-render is to run.
 
