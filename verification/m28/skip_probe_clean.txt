@@ -4,3 +4,9 @@
 # This half of the probe is the DISCRIMINATION control — without it, a predicate that reported
 # everything it was shown would satisfy the other half and look like a working instrument.
 echo hello
+# The two lines below carry the LITERAL tokens, which the first version of this probe did not: it
+# described "a skip statement and a zero exit" in prose and contained neither, so both predicates
+# answered 0 for the trivial reason and the discrimination control discriminated nothing. Found by
+# M28's review. A control has to contain the thing it is showing the instrument not to report.
+# A sentence about a bare exit 0
+# A sentence naming a SKIP line
