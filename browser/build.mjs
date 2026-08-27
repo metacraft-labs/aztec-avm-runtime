@@ -341,6 +341,8 @@ for (const { meta, prefix } of metas) {
   }
 }
 
+const unresolvedEagerEdges = new Set();
+
 function eagerClosure(entry) {
   const seen = new Set();
   const stack = [entry];
@@ -349,7 +351,14 @@ function eagerClosure(entry) {
     if (seen.has(cur)) continue;
     seen.add(cur);
     const out = outputs.get(cur);
-    if (!out) continue;
+    // A KEY THAT DOES NOT RESOLVE IS THE RESIDUE, AND IT IS PRINTED RATHER THAN SKIPPED. Silently
+    // dropping an edge undercounts the eager total in the direction that reads as good news, which
+    // is the scanner shape CAMPAIGN-BRIEF.md names. The entry itself missing is already a `fail()`
+    // below; anything else reached from it that this build did not emit is a real inconsistency.
+    if (!out) {
+      if (cur !== entry) unresolvedEagerEdges.add(`${entry} -> ${cur}`);
+      continue;
+    }
     const prefix = cur.startsWith('node/') ? 'node/' : '';
     for (const imp of out.imports ?? []) {
       if (imp.kind === 'dynamic-import') continue;
@@ -381,6 +390,11 @@ for (const b of entryBudgets) {
       `  ${b.entry}: ${gzipKB} KB gzipped eagerly exceeds ${b.maxGzipKB} KB (${b.name} — ${b.description})`,
     );
   }
+}
+
+if (unresolvedEagerEdges.size) {
+  fail('these eager-closure edges name an output this build did not emit, so the eager totals above\n'
+    + '      would be undercounts:\n  ' + [...unresolvedEagerEdges].join('\n  '));
 }
 
 measured.sort((a, b) => b.gzipBytes - a.gzipBytes);

@@ -72,10 +72,21 @@ assert_eq "…and no budget was exceeded" "0" "$(printf '%s\n' "$SUMMARY" | sed 
 echo "== 2. the numbers DD-11 is about, read out of the build's own report"
 
 BROWSER_EAGER="$(printf '%s\n' "$SUMMARY" | sed -n 's/^EAGER browser.js //p' | cut -d' ' -f1)"
+# THE BUDGET COMES FROM THE BUDGETS FILE, not from a `307200` typed in here. `CAMPAIGN-BRIEF.md`:
+# if a check needs a number that also exists in the thing under test, take it FROM the thing under
+# test. The literal duplicated `chunk-budgets.json`'s own `maxGzipKB: 300` for this entry — and
+# `$SUMMARY` was already carrying that value, in the field the old `cut` discarded.
+BROWSER_BUDGET_KB="$(printf '%s\n' "$SUMMARY" | sed -n 's/^EAGER browser.js //p' | cut -d' ' -f2)"
 BROWSER_FILES="$(printf '%s\n' "$SUMMARY" | sed -n 's/^EAGER browser.js //p' | cut -d' ' -f3)"
-note "the browser entry's EAGER set is $BROWSER_EAGER bytes gzipped across $BROWSER_FILES file(s)"
+note "the browser entry's EAGER set is $BROWSER_EAGER bytes gzipped across $BROWSER_FILES file(s), budget ${BROWSER_BUDGET_KB} KB"
 assert_ge "the eager set is non-trivial, i.e. it is the real runtime" 100000 "$BROWSER_EAGER"
-assert_true "…and it is under 300 KB gzipped" test "$BROWSER_EAGER" -lt 307200
+assert_eq "…and the budget it is measured against is the DECLARED one" \
+  "$(python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(next(r["maxGzipKB"] for r in d["entryBudgets"] if r["entry"] == "browser.js"))' "$M27_BUDGETS")" \
+  "$BROWSER_BUDGET_KB"
+assert_true "…and the eager set is under it" test "$BROWSER_EAGER" -lt "$((BROWSER_BUDGET_KB * 1024))"
 assert_ge "…across several chunks, i.e. splitting happened" 3 "$BROWSER_FILES"
 
 # THE PROVING WASM AND THE ARTIFACTS ARE RECORDED AND ARE NOT IN THAT SET. Their SIZES are budgeted
@@ -85,10 +96,14 @@ assert_ge "the barretenberg proving chunk is recorded, and it is enormous" 20000
 EAGER_FILE_LIST="$(python3 - "$BROWSER_DIST/chunks.json" <<'PY'
 import json, sys
 c = json.load(open(sys.argv[1]))
-row = next(r for r in c["eager"] if r["entry"] == "browser.js")
-print("\n".join(row["files"]))
+row = next((r for r in c["eager"] if r["entry"] == "browser.js"), None)
+print("\n".join(row["files"]) if row else "")
 PY
 )"
+# NON-EMPTINESS BESIDE THE THREE ABSENCES. `next(...)` used to raise on a missing row, the command
+# substitution swallowed the traceback, and all three absences then passed over an empty string.
+assert_ge "the browser entry's eager file list was read" 3 \
+  "$(printf '%s\n' "$EAGER_FILE_LIST" | grep -c . || true)"
 assert_false "…and it is NOT in the browser entry's eager set" str_has_sub "$EAGER_FILE_LIST" 'barretenberg'
 assert_false "…nor is any protocol-contract artifact" str_has_sub "$EAGER_FILE_LIST" 'Registry'
 assert_false "…nor FeeJuice" str_has_sub "$EAGER_FILE_LIST" 'FeeJuice'
