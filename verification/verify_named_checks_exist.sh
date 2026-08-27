@@ -116,6 +116,13 @@ for entry in sorted(os.listdir(verification)):
 # TypeScript plus M19's harness on top of it, whose vitest test names (`test_utils`,
 # `verify_three_way_differential_runs`) follow a different convention entirely and are not this
 # campaign's checks. Scanning them would make the rule about upstream's naming.
+# `browser` — THE WHOLE PACKAGE, not `browser/src` and `browser/demo`, which is how M27 first
+# added it. `browser/build.mjs`, `browser/esbuild-driver.mjs` and `browser/crypto_differential.mjs`
+# sit directly under `browser/` and name four checks between them, and the two-subdirectory spelling
+# left every one of them unpinned: rename a check and leave `build.mjs` naming the old spelling and
+# nothing goes red, which is this file's own subject happening to this file. `dist` is excluded the
+# way `node_modules` is, because it is build output. (`browser/chunk-budgets.json` also names a
+# check and is still not scanned — `.json` is not in the extension list for any root.)
 # `browser/src` and `browser/demo` were added by M27 for exactly the reason `ct-host/src` was
 # added by M24: those files name checks in order to tell a reader that a property is pinned —
 # `poseidon.ts` names the differential that says its hash agrees with bb.js, `entry_browser.ts`
@@ -128,7 +135,7 @@ for entry in sorted(os.listdir(verification)):
 # in the same commit as the sources. It moves no assertion count — every assertion below is an
 # `assert_ge` or an emptiness comparison — only the `SEEN` note.
 roots = [os.path.join(repo, r) for r in
-         ("orchestration/src", "node-host/src", "ct-host/src", "browser/src", "browser/demo",
+         ("orchestration/src", "node-host/src", "ct-host/src", "browser",
           "verification", "tools")]
 if extra:
     roots.append(extra)
@@ -144,7 +151,7 @@ for base in roots:
     if not os.path.isdir(base):
         continue
     for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = [d for d in dirnames if d != "node_modules"]
+        dirnames[:] = [d for d in dirnames if d not in ("node_modules", "dist")]
         for fn in filenames:
             if not fn.endswith((".ts", ".sh", ".mjs", ".js", ".py", ".md")):
                 continue
