@@ -118,7 +118,8 @@ assert_false "a needle absent from the builder does not match" \
 #
 #   * It COULD NOT FAIL. The needle is a class name and the haystack is the file that DECLARES that
 #     class, so the count is >= 1 by construction. It is this campaign's oldest family — an
-#     assertion incapable of failing — and the twenty-fifth instance.
+#     assertion incapable of failing. The running total is CAMPAIGN-BRIEF.md's and is
+#     deliberately not repeated here.
 #   * It stood in for a SEMANTIC property with a NAME GREP, which is the "a citation is the
 #     opposite of a dependency" shape one level up.
 #   * And the property it claimed IS FALSE. `resident_merkle_operations.ts` says in its own

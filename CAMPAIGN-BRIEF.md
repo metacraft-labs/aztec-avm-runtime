@@ -35,7 +35,7 @@ load).
 Each of these is a defect that shipped, not a precaution.
 
 ### An assertion must be capable of failing
-**Twenty-four instances.** (Five places quote the running total: this line, the two M18 checks
+**Twenty-five instances.** (Five places quote the running total: this line, the two M18 checks
 `lib_m18_orchestration.sh` and `verify_no_telemetry_client_in_import_graph.sh`, and the two M19
 files `fault_injection.ts` and `e2e_differential_wasm_vs_native_cpp.sh`. M18's review added three,
 M19 added one, M19's review added one, M21 added one, and M22 added one. If you add one, move all
@@ -44,6 +44,11 @@ the other three to "nineteen", which is the drift this parenthetical exists to p
 declared its 21st instance in three documents and moved none of the five**, which is the same drift
 caught by its review instead of by its author. M22 moved all five in one edit, which is what the
 rule asks for, and M22's review moved all five again for the 23rd, and M23's review for the 24th.
+M25's review found the 25th and moved this line only — because four of the five now name the family
+and point here instead of quoting a number, which is what the remedy above asked for. **The fifth
+had not been converted**: `e2e_differential_wasm_vs_native_cpp.sh:19` still said "twenty-four
+assertions that could not", found by grepping the spelling rather than trusting the paragraph that
+claims all five were done. It points here now, so this line is the only place the number lives.)
 
 **AND THE FIVE ARE NOT THE ONLY PLACES — THAT WAS MEASURED, NOT ASSUMED.** M22 reported two
 pre-existing strays outside the declared five. There are **five**, and one of them quotes a
@@ -139,6 +144,24 @@ The forms seen so far:
   and the comparison is still `0 == 0` three times. The arm where the deviation is REAL existed in
   the same run and did not record the field. **When an identity is asserted over data, assert that
   the data is not degenerate** — the fix is one more assertion, that at least one row is non-zero.
+
+- **A NAME GREPPED IN THE FILE THAT DECLARES THAT NAME — VACUOUS AND FALSE AT ONCE, HOLDING UP A
+  TWELVE-ENTRY DECISION.** M25's `verify_transaction_builder_closure_measured` supported the one
+  sentence its whole unblocking rests on with
+  `assert_ge "this runtime already has a MerkleTreeWriteOperations implementation" 1 "$(grep -c 'ResidentMerkleWriteOperations' orchestration/src/resident_merkle_operations.ts)"`.
+  The haystack is the file that **declares** that class, so the count cannot be less than 1. It is
+  the second form on this list wearing `grep -c … >= 1` instead of `== 0`, and the direction is
+  what hides it — a non-emptiness check *looks* like a control, which is why it survived a
+  self-review that was hunting for exactly this. It was also standing in for a SEMANTIC property
+  with a name grep, which is "a citation is the opposite of a dependency" one level up. **And the
+  property was false**: three lines from where the grep matched, the same file says the class is
+  *"deliberately NOT declared `implements MerkleTreeWriteOperations`"*. Found by M25's review; the
+  conclusion survived, on a stronger fact that nobody had measured. The lesson is narrower than
+  "check your assertions": **when a check greps for a name to establish a property, ask what the
+  haystack is — if the haystack is where the name is defined, the grep is a tautology.** The
+  replacement pattern to copy is the paired zero: `merkleTree.` is 0 in the builder with 7 mentions
+  as its control, so a needle that silently stopped matching drives both to zero and the control
+  fails.
 
 **And `check-drift` cannot be the backstop for this, by construction.** It compares every vendored
 file against `git show <anchor>:<path>` and asserts only the DIRECTION of the result: a file

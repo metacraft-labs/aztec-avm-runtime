@@ -16,7 +16,10 @@
 # THE CONTROLS ARE THE POINT. ELEVEN fault injections — one per compared field, plus the pre-state
 # proof, the input encoding and the TypeScript arm's presence — each run as its own arm invocation.
 # Every one must turn the suite RED. A differential never observed to fail is indistinguishable from
-# one that cannot fail, and this campaign has shipped twenty-four assertions that could not.
+# one that cannot fail, and this campaign has shipped a long run of assertions that could not. The
+# family is "an assertion must be capable of failing" and the running total is CAMPAIGN-BRIEF.md's,
+# deliberately not repeated here — this line was the last of the five declared sites still quoting a
+# number, and it was one behind when M25's review found it.
 #
 # What this loop asserts is that the arm goes red and that at least one TEST failed. It does NOT
 # assert the injection's name appears in the message; an earlier version of this comment said it

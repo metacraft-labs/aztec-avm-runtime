@@ -288,6 +288,200 @@ re-measured rather than corrected, which is the only safe direction. And the com
 is closed by the module's sha matching §7 and the OQ-6 stamp being a content hash of that same
 module: a stale figure could not survive either check.
 
+### F8 — TWO WRITERS: a mutation harness and a verification sweep are the same hazard
+
+Three sweeps ran over one working copy today, and the damage did not come from the sweeps racing
+each other directly. It came from what one of them was *doing to the tree when it died*:
+`verify_provenance_complete` proves its detection works by **mutating a tracked file** and
+restoring it on exit. A killed process has no trap, so `gas.hpp` was left zeroed and the next
+sweep's M1 read 164/169 in 16 s (F1).
+
+I then reproduced the same class of hazard against myself: my mutation tests of my own new
+assertions rewrote `SOURCE-MAPPING.md` and `REUSE-INVENTORY.md` while the sweep was mid-run.
+`REUSE-INVENTORY.md` is read by `verify_reuse_inventory_complete` in **M1** — had the sweep been
+in M1 rather than M4 at that moment, it would have gone red for my mutation and I would have had a
+plausible number rather than an obvious one.
+
+**The standing brief has a gap here and it is the gap both of today's incidents went through.** It
+says a sweep must not run while a script is being *edited*, and it says two agents must not sweep
+concurrently. It does not say that **a mutation harness is a writer**, and that a sweep and any
+tree-mutating harness — the milestone's own mutation matrix, a check's internal negative control,
+or a reviewer testing their own assertions — must be serialised against each other. The failure
+mode is worse than a red milestone: a mutation that lands *between two assertions of the same
+check* produces a plausible number rather than a failure, and that is unrecoverable after the fact.
+
+Resolution here: the racing sweep was **discarded, not summarised** (kept as
+`~/.cache/m25rev/DISCARDED-race-with-gashpp-residue.log`), all mutations were restored and verified
+byte-identical against backups, the tree was confirmed clean (`provenance.py headers --check`
+exits 0, `git status` empty), everything was committed, and a single final sweep was started over
+the committed tree with no further writes. Its M0 and M1 came back **156 and 169 — both exactly at
+reference** — which is the evidence that F1 was collateral and not a regression.
+
+**And m0/m2/m3 were checked rather than assumed** before discarding: 156, 292, 199, all at
+reference. M1 was the only casualty.
+
+### F9 — the sweep summariser could never print a total, for any run
+
+`m25-sweep.sh` ends `printf 'SWEEPDONE\n'`. The summariser tested
+`line.startswith("######## SWEEP DONE")` — prefix and space. The two never match, so `done` stayed
+False forever, the "no 'SWEEP DONE' marker" hole was permanently open, and **no run however clean
+could get a total printed**.
+
+It fails safe, which is exactly why it survived a milestone: an instrument whose only output is a
+refusal does not look broken, and the operator reads "there is a hole in this log" rather than "I
+cannot see holes at all". A 100 % false-refusal rate is indistinguishable from a bad log. Fixed to
+accept both spellings, still anchored at column 0; the refusal on a genuinely truncated log is
+unchanged, verified against the discarded log, which still refuses on M4's open marker.
+
+## The fixes, and their controls
+
+| # | fix | assertions |
+|---|---|---|
+| F-FIX-1 | §2.2's stride claim re-derived; §2.3's 8-vs-9 explained | `verify_oq5…` 61 → **68** |
+| F-FIX-2 | RI-72's false "already implements" retracted; the vacuous grep replaced | `verify_transaction_builder…` 42 → **53** |
+| F-FIX-3 | the milestone section's stale `1f785f24…` sha, false stride claim, false implements claim | 0 (prose) |
+| F-FIX-4 | the summariser's unreachable completion marker | 0 (instrument) |
+
+**Both fixes were mutation-tested against themselves**, because replacing an assertion that cannot
+fail with more of the same would be the worst possible outcome here:
+
+```
+MUT-A  the doc's stride census moved by ONE (8,580 -> 8,581)
+       verify_oq5_source_mapping_verdict_recorded: 68 assertion(s), 1 failure(s)
+       FAIL §2.2's stride census is stated in the row that names it
+
+MUT-B  RI-72's correction sentence deleted
+       verify_transaction_builder_closure_measured: 53 assertion(s), 1 failure(s)
+       FAIL …and that the reduced set needs no merkle implementation at all
+```
+
+Both restored and verified byte-identical against backups afterwards.
+
+The ten replacement assertions in F-FIX-2 each carry a control, and the two that matter most are
+paired zeros: `merkleTree.` is **0** in the builder with **7** mentions as the control, and
+`merkletree|world-?state` is **0** in the tx-building leaf with **10** in the builder as the
+control. A broken needle drives both members of each pair to zero and the control fails — which is
+the property the assertion it replaced did not have.
+
+I also checked the 236th assertion the coordinator flagged — the non-emptiness control beside the
+`assert_eq "" ""` on the tsavm worktree. **It discriminates**: against the real worktree
+`git ls-files 'yarn-project/simulator/src/public/*'` counts **131**, and against a directory that
+is not a git repository at all — the case where `git status --porcelain` prints nothing and the
+emptiness assertion passes vacuously — it counts **0** and the `assert_ge 100` fails.
+
+### F10 — OQ-4's verdict, verified end to end on the container rather than on the source
+
+Read out of `~/.cache/aztec-m25-trace/field.ct` by the pinned reference reader, by me:
+
+```
+"name": "contractAddress"                     (not M24's contractAddressLow)
+  "kind": "String"
+  "text": "0x2f1abcde…090a0b0c"               66 characters, 64 lowercase hex
+type record: "kind": "tkInt",  "lang_type": "Field"    the Noir tracer's own type
+ct-print exit 0
+```
+
+And the refusal that decided against the obvious choice reproduces exactly, with the split probe's
+blindness beside it (F4). **OQ-4 survives in full.**
+
+### F11 — the count reconciliation, and the "41" in the brief is the stale figure
+
+The closure check is **42**, not 41: the extra assertion is the non-emptiness control beside the
+`assert_eq "" ""` on the tsavm worktree, and I verified it discriminates (131 versus 0). The M10
+mutation arm's output and the restore arm's both read 42, so 42 is the figure in every artefact.
+**M25 as delivered is 236, not 235** — 61 / 50 / 83 / 42.
+
+After this review's two fixes it is **254** — 68 / 50 / 83 / 53. Accounted in both directions:
+
+```
+verify_oq5_source_mapping_verdict_recorded   61 -> 68   +7  the stride census (6) + its doc row (1)
+test_fr_rendering_matches_noir_tracer        50 -> 50    0
+test_trace_metadata_declares_mapping_rung    83 -> 83    0
+verify_transaction_builder_closure_measured  42 -> 53  +11  -1 vacuous, +10 replacements, +2 inventory
+                                                       ---
+                                            236 -> 254  +18
+```
+
+`verify-m25` invokes exactly those four and nothing else (`Justfile:2060-2078`).
+
+### F12 — OQ-6 run 6 re-derived from `arms.tsv`, and the aggregation is the interesting part
+
+I recomputed §2's table from the raw 72 rows. **My first pass disagreed with the document on every
+median while matching every minimum exactly** — which is the signature of a different aggregation
+rather than a different measurement:
+
+```
+arm            flat median   2-stage   document
+batched            625,262   625,653   625,653
+perEvent           631,348   631,290   631,290
+control            622,152   621,202   621,202
+nopBatched           4,746     4,758     4,758
+nopPerEvent          5,046     5,070     5,070
+```
+
+A flat median over all 72 rows is the naive estimator. The document's is the **two-stage** one —
+median of the six reps within a session, then median across the twelve sessions — which is what
+this brief means by *"the session is the unit of replication"*. All five then match **exactly**.
+
+The percentage deltas still did not match, and for the same reason one level up: they are **paired
+within session**, not a ratio of the two aggregate medians. Computed per session and then averaged,
+with a t-based 95 % interval over the twelve sessions:
+
+```
+perEvent    - batched     mean +0.98 %   95% CI [+0.29, +1.67]     document +0.98 %, [+0.29, +1.67]
+control     - batched     mean -0.38 %   95% CI [-0.78, +0.02]     document -0.38 %
+nopPerEvent - nopBatched  mean +4.56 %   95% CI [+0.49, +8.63]     document +4.56 %
+```
+
+**Every figure reproduces to the stated precision, including both bounds of the interval.** The
+verdict holds: +0.98 % is inside the pre-declared 3 % margin, so `within-noise` stands and §4's
+secondary criterion still decides. Worth stating precisely, because the interval excludes zero: the
+per-event arm really is slower, and the claim is that it is slower by less than the margin — not
+that the difference is undetectable.
+
+**A ratio of medians is not a paired comparison, and only one of them is the measurement.** Had I
+stopped at my first pass I would have reported three figures as wrong that are right.
+
+## Recommendation: should M25 have vendored the 880-line builder?
+
+**No — but pricing it must be the last time it is deferred, and the reason to act is not the line
+count.**
+
+Not vendoring in M25 was right for a sequencing reason rather than a scope one:
+
+1. **Vendoring alone does not deliver any of the four pending entries.** Each also needs the four
+   collection flags at `shipped_module_config.ts:42`, and those flags move the delta comparison in
+   **another milestone's** check (`e2e_form_a_external_tx_roundtrip` Part 8). Landing an 880-line
+   vendoring and a cross-milestone flag change in the same session as two open-question
+   settlements would have produced a change whose failures nobody could attribute — which is the
+   attribution discipline this campaign spends most of its brief on.
+2. **It is a deliverable, not a fix.** It wants its own mutation matrix and four new
+   `PROVENANCE.md` rows, and `verify_provenance_complete` makes +2 assertions per vendored file, so
+   it moves M1 as well.
+3. The implementation agent's sweep had not run. Stacking it on an unverified milestone compounds.
+
+But the decision itself is now unambiguous, and **more secure than RI-72 originally made it**:
+
+- **880 < 1,580**, the `PublicProcessor` vendoring this campaign already judged obvious.
+- **No new package dependency** — every `@aztec/*` specifier resolves inside the four
+  `orchestration/package.json` already has.
+- **A pinned copy of the largest file is already in the tree** at the same anchor, with a
+  provenance header, so the pattern is established rather than invented.
+- **All eight escaping edges are enumerated by name**, five severed by dropping the simulator half
+  and three by dropping three functions.
+- And the true justification — **the calldata half never calls a method on the merkle parameter at
+  all** — is strictly stronger than the false one it replaces.
+
+**The finding worth carrying is not the price. It is that this question has now been settled twice
+on claims nobody checked, in opposite directions.** Eight deferrals rested on *"upstream's only
+builder constructs a `NativeWorldStateService`"* — false; it receives one, in a static factory it
+need not use. The unblocking then rested on *"`ResidentMerkleWriteOperations` already implements
+`MerkleTreeWriteOperations`"* — also false, and contradicted by a docstring three lines from where
+the supporting grep matched. Both were resolvable by **reading the file**, and neither was read for
+eight milestones. A question deferred repeatedly on an unchecked claim and then unblocked on
+another unchecked claim is a worse failure than either claim alone, because the second one is what
+a future agent will cite.
+
 ### F5 — §2.3's "nine paths" is right, and reads like a contradiction of its own table
 
 The table says `source paths interned | 8`; the prose below says the container reports *"nine
