@@ -17,7 +17,7 @@
 # because it tells the next reader to stop looking. All five were found by reading, one at a time,
 # which is exactly the way a sixth would be missed.
 #
-# So: every `verify_*` / `test_*` / `e2e_*` identifier mentioned anywhere in this repository's own
+# So: every `verify_*` / `test_*` / `e2e_*` / `smoke_*` identifier mentioned anywhere in this repository's own
 # sources must RESOLVE — to a check script, to a shell function, or to a `TEST_NAME`. It is a
 # cheap, total rule over a class of claim this campaign has now got wrong five times.
 #
@@ -145,7 +145,15 @@ if extra:
 # carry those five with reasons and a file that documents a rule should not be its own subject.
 SELF = "verification/verify_named_checks_exist.sh"
 
-NAME = re.compile(r"\b((?:verify|test|e2e)_[a-z0-9_]{4,}_?)\b")
+# `smoke` IS IN THIS LIST AND WAS NOT, AND THE OMISSION WAS A WHOLE NAMING CONVENTION.
+# M27 and M28 added three checks named `smoke_*` — `smoke_browser_token_transfer`,
+# `smoke_browser_produces_block_on_real_timer`, `smoke_browser_headless_full_flow` — and
+# `browser/src/entry_testing.ts` and `browser/src/wasi.ts` cite two of them to tell a reader that a
+# property is pinned, which is EXACTLY the claim this file exists to hold to account. None of the
+# three was in scope. Measured by M28's review; `ci_browser_gate.sh` section 7 already used the
+# four-family spelling, so M28's own document check saw a wider class than the repository-wide rule
+# did. "An absence claim is only as wide as the spellings you enumerated", in the instrument.
+NAME = re.compile(r"\b((?:verify|test|e2e|smoke)_[a-z0-9_]{4,}_?)\b")
 seen, prefixes, unresolved = set(), set(), {}
 for base in roots:
     if not os.path.isdir(base):
