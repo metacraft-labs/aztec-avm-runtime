@@ -118,6 +118,37 @@ export interface TokenTransferReport {
   readonly outcome: string;
   /** The whole outcome record, so a check can read a reason rather than a word. */
   readonly outcomeRecord: unknown;
+  /**
+   * UPSTREAM'S OWN `ProcessedTx.revertCode`. 0 is `RevertCodeEnum.OK`; 1 is `REVERTED`.
+   *
+   * ===========================================================================================
+   * ADDED BY M29's REVIEW, AND THE REASON IS THE MILESTONE'S OWN HEADLINE ONE STEP FURTHER ON.
+   * ===========================================================================================
+   *
+   * M29 found that M27's demo transaction reverted at its first instruction and that nothing could
+   * see it. Four seeding gaps were closed — and no assertion was added that would notice a FIFTH.
+   * Measured by this review: remove `isStaticCall` from the `#[view]` call, which is seeding gap 4
+   * exactly, and the transaction runs 471 instructions across two contexts, ends on `REVERT_8` and
+   * reports `processed` — while `just verify-m29` is **105 of 105 green**, and so are
+   * `smoke_browser_token_transfer` and the product-claim check. Every floor M29 added (>= 100
+   * steps, >= 2 contexts, no sentinel opcode, >= 1 positioned) is satisfied by a transaction that
+   * runs and then reverts.
+   *
+   * `outcome` cannot answer this and is not wrong to be unable to: `processed` is UPSTREAM's
+   * vocabulary for "the public processor turned it into a `TxEffect`", and a reverted transaction
+   * is still processed and still pays its fee — `@aztec/stdlib`'s `ProcessedTx` carries
+   * `revertCode` and `revertReason` precisely because the two facts are different.
+   * `TxOutcomeRecord` in `orchestration/src/chain.ts` has no revert dimension, so this is read off
+   * upstream's `ProcessedTx` in the sealed block, matched by transaction hash.
+   *
+   * `null` means the block carries no `ProcessedTx` for this hash — which is a failure to measure
+   * and is asserted against, not an absence that reads as a pass.
+   */
+  readonly revertCode: number | null;
+  /** `RevertCode.getDescription()`, so a red assertion carries a sentence. */
+  readonly revertDescription: string | null;
+  /** `ProcessedTx.revertReason`'s message, when the AVM supplied one. */
+  readonly revertReason: string | null;
   readonly blockNumber: number | null;
   readonly blockTxHashes: readonly string[];
   /** §8.4, off the receipt the caller would show somebody else. */
@@ -346,6 +377,18 @@ export async function runTokenTransfer(
   const block = await opened.runtime.produceBlock();
   const settled = opened.runtime.receiptFor(receipt.txHash);
 
+  // WHETHER IT REVERTED, from upstream's own `ProcessedTx` in the sealed block. See the field
+  // documentation on `TokenTransferReport.revertCode`: `outcome` is the BLOCK's verdict and says
+  // nothing about this, by upstream's design, and a transaction that reverts after 471 real
+  // instructions passes every floor this milestone added.
+  const processedTx = (
+    (block as never as { processed?: readonly {
+      hash: { toString(): string };
+      revertCode: { getCode(): number; getDescription(): string };
+      revertReason?: { message?: string } | undefined;
+    }[] } | null)?.processed ?? []
+  ).find(p => p.hash.toString() === receipt.txHash);
+
   return {
     artifactName: artifact.name,
     contractAddress: contractInstance.address.toString(),
@@ -372,6 +415,9 @@ export async function runTokenTransfer(
         ? settled.outcome
         : String((settled.outcome as { kind?: string } | null)?.kind ?? JSON.stringify(settled.outcome)),
     outcomeRecord: settled.outcome,
+    revertCode: processedTx === undefined ? null : processedTx.revertCode.getCode(),
+    revertDescription: processedTx === undefined ? null : processedTx.revertCode.getDescription(),
+    revertReason: processedTx?.revertReason?.message ?? null,
     blockNumber: settled.blockNumber,
     blockTxHashes: block ? [...block.txHashes] : [],
     simulated: settled.simulated,

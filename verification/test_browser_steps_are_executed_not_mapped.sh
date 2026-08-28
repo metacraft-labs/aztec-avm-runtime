@@ -147,6 +147,65 @@ assert_eq "no opcode is above M9's LAST_OPCODE_SENTINEL" "0" "$ABOVE"
 # pc 0, with the sentinel opcode, and reports itself `processed`.
 assert_eq "…and none of them is the sentinel, so no fetch threw" "0" "$SENTINELS"
 
+echo "== 3b. AND THE TRANSACTION THOSE INSTRUCTIONS BELONG TO DID NOT REVERT"
+
+# ===========================================================================================
+# THIS SECTION EXISTS BECAUSE M29's OWN HEADLINE FINDING HAD NO ASSERTION BEHIND IT.
+# ===========================================================================================
+#
+# M29 found that M27's demo transaction reverted at its FIRST instruction, closed four seeding
+# gaps, and added no check that would see a fifth. Measured by M29's review: remove `isStaticCall`
+# from the `#[view]` call — seeding gap 4 exactly, the LAST one M29 itself found — and the
+# transaction executes 471 instructions across two contexts, ends on `REVERT_8`, reports
+# `processed`, produces a 192,512-byte container the reference reader parses, and
+#
+#     just verify-m29  ->  105 assertions, 0 failures, 3 of 3
+#     smoke_browser_token_transfer                        -> 37, 0
+#     e2e_browser_downloads_ct_container_and_ct_print_parses -> 36, 0
+#
+# Every floor this milestone added is satisfied by a transaction that runs and then reverts: 471
+# is over the 100 floor, two contexts is over the 2 floor, no record carries the sentinel, and 342
+# steps are positioned. Every assertion was correct and none of them asked whether the subject did
+# what it was for — which is the shape `CAMPAIGN-BRIEF.md` names most often.
+#
+# `outcome` CANNOT answer this, and it is not wrong to be unable to. `processed` is UPSTREAM's word
+# for "the public processor turned it into a `TxEffect`"; `@aztec/stdlib`'s own `ProcessedTx`
+# carries `revertCode` and `revertReason` beside it precisely because the two facts are different,
+# and `FailedTx` — the other half of upstream's pair — is the processor THROWING, which is a third
+# thing again. Nothing was masking a failure. The revert dimension simply never reached the demo
+# path: `orchestration/src/chain.ts`'s `TxOutcomeRecord` does not carry it, so `token_transfer.ts`
+# now reads it off upstream's `ProcessedTx` in the sealed block, matched by transaction hash.
+REVERT_CODE="$(m27_arm publicOnly transfer.revertCode)"
+REVERT_DESC="$(m27_arm publicOnly transfer.revertDescription)"
+PARITY_REVERT="$(m27_arm nativeParity revertCode)"
+note "the demo transaction's revertCode is $REVERT_CODE ($REVERT_DESC); \
+the parity arm's own program reports $PARITY_REVERT"
+
+# NON-EMPTINESS FIRST. `m27_arm` prints `MISSING` for a JSON null, and `revertCode` is null exactly
+# when the sealed block carries no `ProcessedTx` for this hash — a failure to measure, not a pass.
+REVERT_ABSENT="$(m29_absent "revertCode=$REVERT_CODE" "revertDescription=$REVERT_DESC" \
+  "parityRevertCode=$PARITY_REVERT")"
+assert_eq "the revert code was read off upstream's ProcessedTx for this transaction" "" "$REVERT_ABSENT"
+[ -z "$REVERT_ABSENT" ] || die "the arm report has no revert code ($REVERT_ABSENT); the assertions
+             below would compare absences, and the whole point of this section is that an absent
+             revert dimension is how a reverting transaction passed everything."
+assert_eq "THE DEMO TRANSACTION DID NOT REVERT — RevertCodeEnum.OK" "0" "$REVERT_CODE"
+assert_eq "…and upstream's own description of that code says so" "OK" "$REVERT_DESC"
+# THE CONTROL, IN THE SAME SESSION AND THROUGH THE SAME MODULE. A zero read from a field that is
+# always zero is not a measurement. The parity arm runs `burn` — a corpus program whose whole
+# purpose is to exhaust its gas — through the same `avm.wasm` in the same browser run, and its
+# `revertCode` is 1, computed by `native_parity.ts:122` and, until this review, read by nothing.
+# So the field is shown to be capable of the value the assertion above forbids, and the two
+# readings together say it is a property of the transaction rather than a constant.
+#
+# IT IS DELIBERATELY NOT WRITTEN AS `PARITY != DEMO`. That form is coupled to the subject: when the
+# demo transaction reverts, the control fails too and reads as a broken instrument rather than as
+# the finding. Measured — with `isStaticCall` removed this section reported three failures and the
+# third was that coupling, which is the shape M29's own parity controls had to be corrected for
+# (`BASE + 1` rather than `1`). Two independent readings say the same thing without the noise.
+assert_ge "…while another program in the same browser run reports a NON-ZERO code of upstream's own \
+enumeration, so this field is not a constant 0" 1 "$PARITY_REVERT"
+
 echo "== 4. THE NEGATIVE CONTROL: the synthetic generator's own output must FAIL this check"
 
 ARTIFACT="$(m27_run artifact.root)"
