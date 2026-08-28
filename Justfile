@@ -2523,3 +2523,74 @@ verify-m30:
       echo "verify-m30: all checks passed"
     fi
     exit "$rc"
+
+# ==============================================================================================
+# M31 — `avm-transpiler` to WebAssembly.
+#
+#   just verify-m31-identity   verify_transpiler_wasm_output_identical_to_native
+#   just verify-m31-execute    test_transpiled_contract_registers_and_executes
+#   just verify-m31-rung1      verify_transpiler_rung1_mapping_survives
+#   just verify-m31-neutral    verify_transpiler_native_build_unaffected
+#   just verify-m31            all four, in order
+#
+# WHAT THEY NEED, and the first one is not obvious. `aztec-packages/noir/noir-repo` is an EMPTY
+# DIRECTORY in this workspace — a submodule pinned at `40d6574f…` (Noir 1.0.0-beta.26) that has
+# never been checked out — and all five of `avm-transpiler`'s path dependencies point into it.
+# `verification/build_avm_transpiler_wasm.sh` materialises it with `git archive` out of the
+# sibling `noir` checkout's object store, which HAS that commit, and then builds nargo from it so
+# the fixture contracts are compiled by the version the transpiler's crates expect. The first run
+# is a few minutes; it is content-stamped over the whole materialised source tree afterwards.
+#
+# It also needs a chromium (M31_CHROMIUM, default /usr/bin/chromium) and, for the execution check
+# only, a built `avm.wasm` carrying M27's crypto exports — `just avm-wasm-build-m27`, or
+# AVM_WASM_PATH. The execution arm REFUSES BY NAME rather than skipping if it is absent.
+verify-m31-identity:
+    @verification/verify_transpiler_wasm_output_identical_to_native.sh
+
+verify-m31-execute:
+    @verification/test_transpiled_contract_registers_and_executes.sh
+
+verify-m31-rung1:
+    @verification/verify_transpiler_rung1_mapping_survives.sh
+
+verify-m31-neutral:
+    @verification/verify_transpiler_native_build_unaffected.sh
+
+# Build the module, the native binary and the fixture artifacts, without running a check.
+m31-build:
+    @verification/build_avm_transpiler_wasm.sh
+
+# The same two revisions with the upstream patch NOT applied — the neutrality baseline.
+m31-baseline:
+    @verification/build_avm_transpiler_wasm.sh --baseline
+
+# Re-measure the M31 transpiler arms into $M31_WORK/transpiler.json.
+m31-arms:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    work="${M31_WORK:-$HOME/.cache/aztec-m31-arms}"
+    mkdir -p "$work"
+    eval "$(verification/build_avm_transpiler_wasm.sh 2>/dev/null | grep -E '^(MODULE|NATIVE|ARTIFACTS)=' | sed 's/^/M31_/')"
+    M31_MODULE="$M31_MODULE" M31_NATIVE="$M31_NATIVE" M31_ARTIFACTS="$M31_ARTIFACTS" \
+      node --experimental-strip-types tools/run_transpiler_arms.mjs "$work" > "$work/transpiler.json"
+    echo "m31-arms: wrote $work/transpiler.json"
+
+verify-m31:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_transpiler_wasm_output_identical_to_native \
+      test_transpiled_contract_registers_and_executes \
+      verify_transpiler_rung1_mapping_survives \
+      verify_transpiler_native_build_unaffected
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m31: FAILED" >&2
+    else
+      echo "verify-m31: all checks passed"
+    fi
+    exit "$rc"

@@ -1,0 +1,6 @@
+[package]
+name = "memory"
+type = "contract"
+authors = [""]
+
+[dependencies]

@@ -854,6 +854,42 @@ component is and what it costs us, and does not repeat the deletion.
 - rejection-reason: n/a
 - confidence: measured
 
+### RI-78 — Aztec's own `avm_transpile_bytecode`, which is already the browser's shape
+- upstream: `aztec-packages` @ `233d8e0993` — `avm-transpiler/src/lib.rs:148-186`, with `avm_free_result` at `:196` and the `TranspileResult` struct at `:24`
+- covers: turning a compiled Noir contract artifact into an AVM contract artifact, in memory, with no file, clock, environment variable, thread or process
+- decision: depend
+- milestone: M31
+- why: The milestone opened with a search for what would have to be written to get a transpiler into a page, and the answer is **nothing**: upstream already ships a pure in-memory C ABI beside the file-path one, added for its C++ caller. `avm_transpile_file` (`:72`) reads and writes files and is a *different function*; `avm_transpile_bytecode` takes `(*const u8, usize)` and returns a heap buffer. The whole of the crate's `std::fs` and `std::env` use — ten sites, itemised in `scratchpad/campaign/m31-impl-log.md` §1.5 — is in `main.rs` (the bin target, which a cdylib does not link) and in `avm_transpile_file`. So M31 adds an allocator and a flat return over upstream's entry point and calls it once; `avm-transpiler-wasm/src/lib.rs` is one call and marshalling.
+- rejection-reason: n/a
+- confidence: measured
+
+### RI-79 — `noir`'s own `getrandom` answer for `wasm32-unknown-unknown`, and why M31 took a different branch of it
+- upstream: `noir` @ `40d6574f` — `compiler/wasm/.cargo/config.toml:5`, `acvm-repo/acvm_js/.cargo/config.toml:6`, `tooling/noirc_abi_wasm/.cargo/config.toml:5`, each with `rustflags = ['--cfg', 'getrandom_backend="wasm_js"']` plus the `wasm_js` feature on all three getrandom majors
+- covers: getrandom 0.4's compile-time refusal of `wasm32-unknown-unknown` — the FIRST of M31's two blocking symbols
+- decision: extend
+- milestone: M31
+- why: The problem and its shape are noir's, three times over, and finding them is what stopped M31 inventing an answer. What M31 does **not** copy is which backend: `wasm_js` routes the request to `crypto.getRandomValues`, i.e. it answers with a plausible value, and this campaign's rule is that a refusal is a refusal. Transpilation needs no randomness — the only edges into `getrandom` in the closure are `crypto-bigint` and `crypto-common`, the ECDSA material under `acvm_blackbox_solver` — so `avm-transpiler-wasm/.cargo/config.toml` names getrandom 0.4.1's own `unsupported` backend, whose entire body is `Err(Error::UNSUPPORTED)`. It costs no dependency, no feature and no JS import, and if the assumption is ever wrong the module says so. The import section is the evidence and `verify_transpiler_wasm_output_identical_to_native` §2 reads it.
+- rejection-reason: n/a
+- confidence: measured
+
+### RI-80 — M30's `wasm_host.mjs`, driving a second module unchanged
+- upstream: none — this repository's own, `verification/m30/page/wasm_host.mjs`
+- covers: instantiating an import-free wasm module in a page, satisfying every DECLARED import with a recorder that throws, and calling `(ptr, len)` C ABIs through named `alloc`/`free`/`result_len` exports
+- decision: depend
+- milestone: M31
+- why: M30 wrote it host-agnostic on purpose — it is handed a module's bytes and the names of its exports — and M31 is the test of that claim: the M31 page imports it **with no edit to it at all**, copied into the served site at run time by `tools/run_transpiler_arms.mjs`, and its served digest is compared against the repository's on every run. The one thing M31 does not route through it is `avmt_ok`, because `callWithString`'s `resultIsError` hook has the opposite polarity and passing `avmt_ok` there would report every success as a failure; the page reads that export directly and says why. Reusing it also means the empty `reachedImports` list M31 reports is produced by the same instrument M30's was, which is what makes the two comparable.
+- rejection-reason: n/a
+- confidence: measured
+
+### RI-81 — M25's `ContractSourceMap` and `rungFor`, over a browser-produced artifact
+- upstream: none — this repository's own, `ct-host/src/source_map.ts:174` (`rungFor`) and `:244` (`ContractSourceMap`)
+- covers: deciding a contract artifact's mapping rung and resolving an AVM pc to `(path, line, column)`
+- decision: depend
+- milestone: M31
+- why: M31's rung-1 deliverable is the same question M25 answered for a shipped artifact, asked of one the browser produced, so the instrument has to be the same or the answer is not comparable. `tools/run_transpiler_arms.mjs` decodes `browser-<fixture>.out.json` and drives both functions unchanged; `verify_transpiler_rung1_mapping_survives` reads the result. `rungFor`'s own refusal — a map whose top key is past the end of the bytecode is NOT keyed by AVM byte offset — is the assertion the milestone needed and it already existed. What M31 adds is on the other side of the seam: the key-set comparison (`patch_debug_info_pcs` moved the keys) and the not-re-keyed control, neither of which is a source-map question.
+- rejection-reason: n/a
+- confidence: measured
+
 
 ---
 

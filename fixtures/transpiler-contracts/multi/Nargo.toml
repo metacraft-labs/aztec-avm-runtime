@@ -1,0 +1,6 @@
+[package]
+name = "multi"
+type = "contract"
+authors = [""]
+
+[dependencies]

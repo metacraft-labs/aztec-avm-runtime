@@ -636,6 +636,50 @@ m28 353  m29 127
                                                        CAMPAIGN TOTAL 10,178
 ```
 
+**M31 TOOK IT TO 10,775, AND MOVED EXACTLY ONE OTHER NUMBER — M11's, BY THREE, DECLARED BEFORE THE
+SWEEP RAN.** Re-measured M0-M31 on 2026-08-28 by M31's implementation, after its last edit,
+`setsid`-detached in this repository's own dev shell, one milestone at a time with nothing else
+running, `TMPDIR` and the log under `~/.cache`, **no hole in the log** (64 markers for 32
+milestones), **31 of 32 exit 0**:
+
+```
+m0 156  m1 175  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 262  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
+m28 353  m29 127  m30 218  m31 376
+                                                       CAMPAIGN TOTAL 10,775
+```
+
+**Every one of M0-M30 came out at its reference value TO THE ASSERTION except M11**, and 10,396 +
+376 + 3 = 10,775 exactly, with the summariser reporting `delta +0` against a reference table that
+names both moves in advance. **M31's own 376** is 123 / 59 / 114 / 80 across four checks.
+
+**M11 262, AND THE TWO FACTS ABOUT IT ARE SEPARATE.** The count moved 259 -> 262 because M31 adds
+a **seventh** `aztec-*` directory under `codetracer-specs/upstream-bugs/` and declares it
+`not_carried`
+in `carry/series.json`; `verify_carry_set_complete` makes exactly three assertions per declared
+entry (it exists on disk, its reason is stated, it is not also in the carry set) and reads 46
+where it read 43. That is M31's doing. The **rc=1 with nine failing assertions** is not: it is the
+recorded signature of the ninth upstream move (`7471a61f1a`), unchanged, and `carry/` is left at
+HEAD rather than half-repaired. **M9 DID NOT FLAKE** — 807, 7/7, exit 0 in 1,282 s, the third
+consecutive sweep in which D19's standing hypothesis had its condition and did not fire. **A sweep
+is a writer**: `carry/rebase.json` and `carry/exposure.json` were checksummed before
+(`aaeb6877…`, `ec959b84…`), came out as `79f597b2…` / `3836c2b6…`, and were restored to the
+pre-sweep digests.
+
+**M31 vendors nothing** (`verify_provenance_complete` 64), **declares no new pin**
+(`verify_pinned_nightly_single_source` 28 — its two revisions are READ, one from `pins.json` and
+one from `git ls-tree <anchor> noir/noir-repo`), adds no `| grep -q` predicate
+(`verify_no_pipeline_predicates` 69), and its four `REUSE-INVENTORY.md` entries add no assertion
+(the entry-count check is `>= 20`, so it stays 19). `verify_named_checks_exist` stays 9 and
+`just check-repo-hygiene` stays 28.
+
+(Both this paragraph and M31's own log said "a **sixth**" directory. Measured by M31's review:
+`codetracer-specs` HEAD carries **six** `aztec-*` directories and M31 adds the **seventh**, of
+which two are now `not_carried`. The +3 mechanism and the 43 -> 46 / 259 -> 262 attribution are
+right; only the ordinal was wrong, and it is corrected here because this file is where the campaign
+states such things once.)
+
 **M30's REVIEW TOOK IT TO 10,396, AND MOVED NOTHING ELSE.** Re-measured M0-M30 on 2026-08-28 by
 M30's review, after its last commit, `setsid`-detached in this repository's own dev shell, one
 milestone at a time with nothing else running, `TMPDIR` and the log under `~/.cache`, **no hole in

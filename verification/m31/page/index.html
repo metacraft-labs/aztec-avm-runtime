@@ -1,0 +1,35 @@
+<!doctype html>
+<!--
+  The M31 page: compiled Noir contract bytecode transpiled to AVM bytecode, in a browser.
+
+  Same shape as M30's page and for the same reason: no bundler, no generated wasm-bindgen glue,
+  nothing on the path but a `.wasm` file and its C ABI. If a check finds transpiled AVM bytecode
+  at the end of this, nothing but WebAssembly produced it — there is no JavaScript here that
+  could have.
+
+  It reuses M30's `wasm_host.mjs` UNCHANGED. That module is host-agnostic by construction — it
+  is handed a module's bytes and the names of its `alloc`/`free`/`result_len` exports — so the
+  second module to want it needed no edit to it, which is the test of that design.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Noir contract bytecode to AVM bytecode</title>
+    <style>
+      body { font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2rem; }
+      #status { color: #444; }
+      pre { background: #f6f6f6; padding: 1rem; overflow-x: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>Noir contract bytecode to AVM bytecode</h1>
+    <p id="status">loading…</p>
+    <p>
+      This page holds compiled Noir contract artifacts and turns them into Aztec AVM contract
+      artifacts — Brillig to AVM, with the debug map re-keyed by AVM byte offset — inside
+      WebAssembly, with no filesystem, no clock and no network.
+    </p>
+    <pre id="out"></pre>
+    <script type="module" src="./transpile_page.mjs"></script>
+  </body>
+</html>

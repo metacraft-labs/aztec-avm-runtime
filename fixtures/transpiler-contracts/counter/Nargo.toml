@@ -1,0 +1,6 @@
+[package]
+name = "counter"
+type = "contract"
+authors = [""]
+
+[dependencies]

@@ -1,0 +1,28 @@
+# `getrandom` 0.4 refuses `wasm32-unknown-unknown` at COMPILE time unless a backend is named:
+#
+#   error: The wasm32-unknown-unknown targets are not supported by default; you may need to
+#          enable the "wasm_js" crate feature.
+#     --> getrandom-0.4.1/src/backends.rs:176:17
+#
+# `noir` answers this in three of its own wasm crates — compiler/wasm/.cargo/config.toml:5,
+# acvm-repo/acvm_js/.cargo/config.toml:6, tooling/noirc_abi_wasm/.cargo/config.toml:5 — with
+# `getrandom_backend="wasm_js"`, which routes the request to `crypto.getRandomValues`.
+#
+# This build takes `unsupported` instead, and the reason is the campaign's own rule that a
+# refusal is never a plausible value. Transpilation needs no randomness: the only edges into
+# `getrandom` in the closure are `crypto-bigint` and `crypto-common`, i.e. the ECDSA material
+# under `acvm_blackbox_solver`, which the transpiler does not touch. getrandom's `unsupported`
+# backend is `Err(Error::UNSUPPORTED)` in full (`src/backends/unsupported.rs`), so if that
+# assumption is ever wrong the module says so instead of quietly seeding from JS. It also costs
+# no dependency, no feature and no JS import — the module's import section is the evidence, and
+# `verify_transpiler_wasm_output_identical_to_native` reads it.
+#
+# THE VERSION IS NOT NAMED HERE ANY MORE, AND THAT IS A CORRECTION. This comment said "getrandom
+# 0.4.1's `unsupported` backend", and the error text above is 0.4.1's — but this crate is its own
+# workspace root with a lock resolved at build time, so the module actually links a later 0.4.x
+# (0.4.3 when M31's review measured it). The argument is only sound if the version the build
+# LINKS still has that backend, so `verify_transpiler_native_build_unaffected` §6 now reads the
+# version out of the build's own lock and asserts the backend exists in THAT version's source,
+# rather than quoting a version number nothing re-derives.
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="unsupported"']

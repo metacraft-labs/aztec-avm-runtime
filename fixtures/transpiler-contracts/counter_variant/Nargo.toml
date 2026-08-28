@@ -1,0 +1,6 @@
+[package]
+name = "counter_variant"
+type = "contract"
+authors = [""]
+
+[dependencies]

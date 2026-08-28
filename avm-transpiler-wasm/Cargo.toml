@@ -1,0 +1,43 @@
+[package]
+name = "avm-transpiler-wasm"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# The `cdylib` lives HERE and not in `avm-transpiler` deliberately. Upstream's crate is
+# `["staticlib", "rlib"]`; adding `cdylib` there would make every native `cargo build` link a
+# shared object nobody asked for, which is a cost upstream would be right to refuse. An rlib is
+# all a cdylib needs, and `avm-transpiler` already is one.
+[lib]
+name = "avm_transpiler_wasm"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Materialised by `verification/build_avm_transpiler_wasm.sh` beside this crate, from
+# `aztec-packages` at the campaign anchor. The path is what the build script arranges; it is not
+# a checked-in sibling.
+avm-transpiler = { path = "../avm-transpiler" }
+
+# No `[profile.release]` overrides. The acceptance test is that the wasm module's output is
+# byte-identical to the native transpiler's, and an optimiser setting that changed the answer
+# would be a finding rather than a tuning knob. Module size is recorded, not minimised.
+#
+# THE TWO BUILDS DO NOT DIFFER ONLY IN TARGET, AND THAT WAS MEASURED RATHER THAN ASSUMED. This
+# comment used to end "so the two builds differ in target and in nothing else"; M31's review read
+# both builds' own `.d` files and found otherwise. This crate is its OWN workspace root, so cargo
+# resolves it a `Cargo.lock` of its own at build time, while the native binary builds against
+# upstream's PINNED `avm-transpiler/Cargo.lock`. On the run that measured it:
+#
+#   getrandom  0.4.1 (native) vs 0.4.3 (wasm)
+#   serde_json 1.0.149        vs 1.0.151      — the JSON writer the compared bytes come out of
+#   flate2     1.1.9          vs 1.1.10       — the DEFLATE that packs `debug_symbols`
+#
+# It makes the byte-identity result STRONGER, not weaker: two different JSON writers and two
+# different DEFLATE implementations agreeing to the byte. `verify_transpiler_native_build_unaffected`
+# §6 asserts the difference exists and prints which crates, so this is data and not a sentence.
+#
+# It also means THIS BUILD IS NOT PINNED: nothing passes `--locked` and no lock for this crate is
+# committed, so a cold build resolves whatever is newest and semver-compatible. That is recorded as
+# an Outstanding task on M31 rather than papered over here, because committing a lock is a decision
+# about what this crate is (a reproducible artefact, or a thin shim that follows its dependency)
+# and not a tidy-up.

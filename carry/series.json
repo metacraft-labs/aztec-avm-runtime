@@ -175,6 +175,8 @@
     }
   ],
   "not_carried": {
+    "aztec-transpiler-core-ffi": "M31's contribution: avm-transpiler uses libc for three type aliases core::ffi provides, on ONE line, which is enough to make the crate unbuildable for wasm32-unknown-unknown (error[E0432]: unresolved imports). It is NOT in the carry set because this runtime does not need it carried downstream: M31 applies it while MATERIALISING its own build tree (verification/build_avm_transpiler_wasm.sh) rather than to a fork branch, so there is nothing to rebase and nothing to expose in the ledger. It touches no path any of the five carried patches touches, and it is argued on upstream's own terms \u2014 one fewer crate in the graph \u2014 rather than on ours.",
+
     "_comment": [
       "CANDIDATE CONTRIBUTIONS THAT ARE DELIBERATELY NOT IN THE CARRY SET.",
       "The carry set is the five patches this runtime CARRIES DOWNSTREAM if upstream declines them.",
