@@ -260,7 +260,64 @@ assert_ge "the rule is still WRITTEN DOWN somewhere, so the stripper has somethi
 assert_eq "no browser source COMPUTES an opcode as (pc % 200) + 1" "0" "$SYNTH_RULE_SITES"
 # AND THE BUILT BUNDLE, because a source that no longer says it and a bundle that still does is
 # exactly the stale-artefact shape.
-BUNDLE_SITES="$(grep -rl '% 200' "$BROWSER_DIST" 2>/dev/null | grep -c . || true)"
+#
+# ===========================================================================================
+# THE NEEDLE FOR THE BUNDLE IS NOT THE NEEDLE FOR THE SOURCE, AND THE FIRST DRAFT USED THE SOURCE'S.
+# ===========================================================================================
+#
+# `browser/esbuild-driver.mjs` sets `minify: true`, so the emitted bytes spell the rule
+# `o%200+1` — no spaces, no parentheses. The first version of this line grepped the bundle for
+# `'% 200'`, WITH THE SPACE THE MINIFIER REMOVES, so it answered 0 whatever the bundle contained.
+# Measured by M29's review: with `opcode: (step.pc % 200) + 1` put back at the write site and the
+# bundle rebuilt, `grep -rl '% 200' browser/dist` is **0** and `grep -rl '%200' browser/dist` is
+# **2** — the assertion stayed green over a bundle carrying the rule in two files, and the three
+# failures that did fire were the SOURCE grep and section 7's two container assertions. That is
+# `CAMPAIGN-BRIEF.md`'s "a grep on a needle that could never match", in the half of the deliverable
+# that says the absence is asserted "over the BUILT BUNDLE".
+#
+# So the scan strips whitespace first, and — this is the part that stops the same mistake being made
+# again — THE NEEDLE IS DERIVED BY MINIFYING THE RULE WITH THE SAME esbuild THE BUILD USED, out of
+# the build's own `.build-config.json`, and the scanner is required to FIND it in that fixture
+# before it is believed about the bundle. An absence measured by an instrument nobody has seen
+# succeed is not a measurement.
+m29_synth_hits() { # <file> -> 1 if the minified synthetic rule is in it, else 0
+  tr -d ' \t\n\r' <"$1" 2>/dev/null | grep -c -e '%200+1' -e '%200)+1' >/dev/null 2>&1 && echo 1 || echo 0
+}
+ESBUILD_MOD="$(python3 -c '
+import json, sys
+try:
+    print(json.load(open(sys.argv[1]))["esbuildModule"])
+except Exception:
+    print("MISSING")
+' "$BROWSER_DIST/.build-config.json")"
+assert_file "the esbuild the bundle was built with is on disk, named by the build itself" "$ESBUILD_MOD"
+FIXTURE="$M29_WORK/minified-rule.js"
+node --input-type=module -e "
+import * as esbuild from '$(printf '%s' "$ESBUILD_MOD")';
+import { writeFileSync } from 'node:fs';
+const r = await esbuild.transform('export function f(pc){ return { opcode: (pc % 200) + 1 }; }',
+  { minify: true, loader: 'ts' });
+writeFileSync('$(printf '%s' "$FIXTURE")', r.code);
+" 2>"$M29_WORK/minify.err"
+MINIFY_RC=$?
+assert_eq "the rule was minified through that very esbuild" "0" "$MINIFY_RC"
+assert_ge "…producing a fixture with something in it" 1 "$(wc -c <"$FIXTURE" 2>/dev/null || echo 0)"
+note "the minified rule is: $(cat "$FIXTURE" 2>/dev/null | tr -d '\n')"
+# THE MEASUREMENT THAT SAYS THE OLD NEEDLE WAS BLIND. Kept as an assertion rather than a comment,
+# because the day esbuild stops collapsing that space is the day this section can be simplified.
+assert_eq "the minifier removes the space the SOURCE needle relies on" "0" \
+  "$(grep -c '% 200' "$FIXTURE" 2>/dev/null || true)"
+# THE INSTRUMENT'S POSITIVE CONTROL: it finds the rule in a file that HAS it.
+assert_eq "…and this scanner finds the rule in that minified fixture" "1" "$(m29_synth_hits "$FIXTURE")"
+BUNDLE_SITES=0
+while IFS= read -r f; do
+  [ "$(m29_synth_hits "$f")" = "1" ] && { BUNDLE_SITES=$((BUNDLE_SITES + 1)); note "the rule is in $f"; }
+done <<EOF
+$(find "$BROWSER_DIST" -type f \( -name '*.js' -o -name '*.mjs' \) 2>/dev/null)
+EOF
+BUNDLE_FILES="$(find "$BROWSER_DIST" -type f \( -name '*.js' -o -name '*.mjs' \) 2>/dev/null | grep -c . || true)"
+note "$BUNDLE_FILES emitted script(s) scanned, $BUNDLE_SITES carrying the rule"
+assert_ge "the scan reached the emitted scripts rather than an empty tree" 5 "$BUNDLE_FILES"
 assert_eq "…and neither does any file of the built bundle" "0" "$BUNDLE_SITES"
 assert_true "the recorder REFUSES rather than substituting when there is no executed stream" \
   str_has_sub "$CT_DOWNLOAD" 'throw new ExecutedStepsUnavailable'
