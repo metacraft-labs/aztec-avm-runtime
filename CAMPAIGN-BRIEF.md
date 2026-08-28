@@ -35,7 +35,12 @@ load).
 Each of these is a defect that shipped, not a precaution.
 
 ### An assertion must be capable of failing
-**Thirty instances.** (Five places quote the running total: this line, the two M18 checks
+**Thirty-three instances.** (M29's review added the 31st, 32nd and 33rd — a needle with a space in
+it asked of a minified bundle, an assertion over the number of arguments the check itself passed,
+and a run-time key-set check over keys the function had just built from that very set; all three
+are below, all three were in M29's own work, and all three were found by asking of each green
+assertion what input would make it red.)
+(Five places quote the running total: this line, the two M18 checks
 `lib_m18_orchestration.sh` and `verify_no_telemetry_client_in_import_graph.sh`, and the two M19
 files `fault_injection.ts` and `e2e_differential_wasm_vs_native_cpp.sh`. M18's review added three,
 M19 added one, M19's review added one, M21 added one, and M22 added one. If you add one, move all
@@ -199,6 +204,61 @@ The forms seen so far:
   wrote a control on top of it anyway and it passed only because of the `MISSING` bug above. The
   halved copy is now a reported NOTE and the control is a 512-byte stub, which is refused and emits
   none.
+- **A NEEDLE WITH A SPACE IN IT, ASKED OF A MINIFIED BUNDLE.** M29's deliverable says the deleted
+  synthetic rule's absence is asserted "over the browser SOURCE TREE and over the BUILT BUNDLE".
+  The bundle half was `grep -rl '% 200' "$BROWSER_DIST"`, and `browser/esbuild-driver.mjs` sets
+  `minify: true`, so the emitted bytes spell it `o%200+1`. Measured by M29's review, against the
+  very esbuild the build uses: the minifier turns `(pc % 200) + 1` into `o%200+1`, and with the rule
+  put back at the write site `grep -rl '% 200'` is **0** while `grep -rl '%200'` is **2**. The
+  assertion was green over a bundle carrying the rule in two files. It also had no control, while
+  the SOURCE grep beside it had one — the stripper's own effect is measured, so that half was
+  sound. The remedy is not a better literal: the needle is **derived by minifying the rule through
+  the build's own esbuild**, out of `browser/dist/.build-config.json`, and the scanner must FIND it
+  in that fixture before it is believed about the bundle. *When a check greps an ARTEFACT for
+  something it knows as SOURCE, the toolchain between them is a thing under test.*
+- **AN ASSERTION OVER THE NUMBER OF ARGUMENTS THE CHECK ITSELF PASSED.**
+  `e2e_browser_container_opcodes_match_native` advertises "the exclusion list is EMPTY" as its
+  strongest sentence, and asserted it as `excluded == 0` — where `_m29_record_compare.py` prints
+  `len(sys.argv[3:])` and the call site passes no excluded fields. It reported a property of its own
+  invocation. The exclusion machinery was never run in either direction. It is exercised now: the
+  size is asserted `1` when one field IS named, the field is named back, and excluding the field a
+  planted corruption lives in is shown to HIDE that corruption — so the empty list is a measurement
+  by an instrument seen to produce a non-empty one.
+- **A RUN-TIME KEY-SET CHECK OVER KEYS THE FUNCTION HAD JUST BUILT FROM THAT VERY SET.**
+  `patchFieldsFor` — the one edit M29's whole unblocking rests on — built its object by iterating
+  `Object.keys(PATCH_REQUIRED_CONFIG_FIELDS)` and then compared `Object.keys(out)` against
+  `Object.keys(PATCH_REQUIRED_CONFIG_FIELDS)`, so `produced === declared` for every input that
+  exists and the `throw` was unreachable. The milestone advertises it as "asserts the key set
+  unchanged at run time". *The property was never in doubt — it is guaranteed by construction, which
+  is stronger than an assertion — and that is exactly why the assertion looked fine: a tautology
+  written beside a true statement reads as its proof.* The check is over the CALLER's option keys
+  now, which is the half nothing covered: TypeScript's excess-property rule reaches object literals
+  only, so `patchFieldsFor(opts)` with a misspelled `collectExecutionStep` compiled, silently
+  produced `false`, and the page failed four layers away with `ExecutedStepsUnavailable`.
+
+**AND THE PUREST INSTANCE OF ALL IS NOT ON THAT LIST, BECAUSE THERE WAS NO ASSERTION TO BE WRONG.**
+Not counted in the running total above; it is the family the total keeps pointing at.
+**M29 found that M27's demo transaction reverted at its first instruction, closed four causes of
+it, and shipped nothing that would notice a fifth.** Measured by M29's review: remove `isStaticCall`
+from the `#[view]` call — *seeding gap 4, the last one M29 itself found* — and the demo transaction
+executes 471 instructions across two AVM contexts, ends on `REVERT_8`, reports `processed`, and
+produces a 192,512-byte container the reference reader parses. Over that transaction,
+`just verify-m29` is **105 of 105 green**, `smoke_browser_token_transfer` is 37/0 and the
+product-claim check is 36/0. Every floor M29 added is satisfied by a transaction that runs and then
+reverts: 471 clears the `>= 100`, two contexts clears the `>= 2`, no record carries the sentinel,
+342 steps are positioned. **Every assertion was correct and none of them asked whether the subject
+did what it was for.** `outcome` cannot answer it and is not wrong to be unable to — `processed` is
+UPSTREAM's word for "the public processor turned it into a `TxEffect`", and `@aztec/stdlib`'s
+`ProcessedTx` carries `revertCode` and `revertReason` beside it precisely because the two facts are
+different, with `FailedTx` (the processor THROWING) a third thing again. Nothing was masking a
+failure; the revert dimension simply never reached the demo path, because
+`orchestration/src/chain.ts`'s `TxOutcomeRecord` does not carry one. It is read off upstream's
+`ProcessedTx` in the sealed block now and asserted zero, with the parity arm's own `revertCode` of
+**1** — a number `native_parity.ts` had been computing and no check had been reading — as the
+control that the field is not a constant. *The general form: when a milestone's headline is "the
+subject was not doing anything", the assertion that has to be written is the one that says it is
+doing something now.*
+
 **And `check-drift` cannot be the backstop for this, by construction.** It compares every vendored
 file against `git show <anchor>:<path>` and asserts only the DIRECTION of the result: a file
 `PROVENANCE.md` declares `none` must be byte-identical, a file it declares with an edit class must

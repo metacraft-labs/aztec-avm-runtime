@@ -33,9 +33,9 @@ changed class, which is what the per-entry budgets exist to make visible:
 | entry point | eager, gzipped | files | M27's figure |
 |---|---|---|---|
 | `aztec-avm-runtime/browser` — the DD-5 reference | **255.79 KB** | 7 | 253.94 KB |
-| `aztec-avm-runtime/testing` | 279.70 KB | 8 | 277.43 KB |
-| the demo page | 280.89 KB | 8 | 277.65 KB |
-| `aztec-avm-runtime/node` | 225.31 KB | 4 | 223.61 KB |
+| `aztec-avm-runtime/testing` | 279.77 KB | 8 | 277.43 KB |
+| the demo page | 280.97 KB | 8 | 277.65 KB |
+| `aztec-avm-runtime/node` | 225.36 KB | 4 | 223.61 KB |
 
 and, lazily, never in any eager set:
 
@@ -47,7 +47,7 @@ and, lazily, never in any eager set:
 | `chunks/FeeJuice-*.js` | 185.88 KB | yes, when a fee payer is funded |
 | `chunks/ContractInstanceRegistry-*.js` | 103.25 KB | no |
 
-**8,155.07 KB gzipped across every chunk; 255.79 KB is what the reference entry point costs.** That is
+**8,155.19 KB gzipped across every chunk; 255.79 KB is what the reference entry point costs.** That is
 the whole of DD-11 in two numbers, and the difference between them is exactly the two things DD-11
 names.
 
@@ -241,7 +241,7 @@ and the enumeration below totals 13 requests, which it did not before M27's revi
 
 ```
 1   /index.html                       the demo page
-8   /demo.js + 7 shared chunks        280.89 KB gzipped — the DEMO entry's eager set, which is
+8   /demo.js + 7 shared chunks        280.97 KB gzipped — the DEMO entry's eager set, which is
                                       the browser entry's 255.79 KB plus the page itself
 1   /favicon.ico                      the browser's, not ours
 1   /assets/avm.wasm                  1,621,354 bytes — the AVM and its world state
