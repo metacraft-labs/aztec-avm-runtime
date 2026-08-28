@@ -108,6 +108,18 @@ the busy column is attributable to where the runtime is and to nothing else.
 The main thread's warm cell is what makes its zero mean something: a chain that produced nothing in
 either window would be a broken chain reported as a stalled one.
 
+**And a COUNT inside a window is not production during it.** Sixteen blocks between two readings is
+equally true of a chain that stalled for 3.8 seconds and then delivered sixteen in a burst when the
+thread came back — a backlog draining at the window's right-hand edge, which is the first reading a
+sceptic should reach for. The count cannot tell them apart and the SPACING can, so the check measures
+every interval **from the window's own opening onward** and requires none of them to exceed three
+ticker intervals, with the warm window's worst spacing as the calibration. Measured: 252 ms in both
+windows, at a 250 ms ticker. *This was added by M32's review, and its first form measured only the
+gaps BETWEEN in-window blocks — over a doctored report with all sixteen blocks moved into the last
+200 ms it reported 82 assertions and 0 failures, because a tight cluster looks like perfect cadence
+when the stall in front of it is outside the span you measured. With the window's opening as the
+first point the same report gives 3,812 ms and two failures.*
+
 **The window edges are timed by whoever can time them.** In the worker arm the page cannot — being
 unable to run code is the point — so the edges are the WORKER's own `performance.now()` readings,
 carried back on `NodeState.atMs` from two `state()` calls the page posts and does not await.

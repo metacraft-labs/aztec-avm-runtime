@@ -316,3 +316,88 @@ a mutated tree. Both are right. But a backup re-taken at the start of a run is t
 the tree is**, and the M2 residue proves the tree was already wrong when the fix landed. The marker
 guards a run that DIED mid-mutation; nothing guarded a source that was quietly left in a mutated
 state by an earlier session. That gap is closable now that the files are tracked — see Step 8.
+
+---
+
+## Step 7 — the document figures, ROTTED ON PURPOSE. All three redden.
+
+F17's lesson, and M28's review found `BROWSER-GATE.md` §5 swappable into stating the reverse of D22
+while the gate stayed green. So each figure was made wrong and the owning check re-run.
+
+| figure | rot | result |
+|---|---|---|
+| `BROWSER-PACKAGING.md` §1 total | left at **8,163.43** after the review's source fix moved it to 8,163.44 | `verify_browser_chunk_budget` **33 / 1** — `total-kb expected 8,163.44 in: **8,163.43 KB gzipped across every chunk;…**`. *Found by accident, which is the strongest form of this test: the check caught a figure I had made stale rather than one I had planted.* |
+| `BROWSER-PACKAGING.md` §6 | 15 → **13** requests and 9 → **7** shared chunks | `verify_browser_chunk_budget` **33 / 1**, naming BOTH: `request-count expected 15 …` and `eager-chunk-requests expected 9 …` |
+| `BROWSER-GATE.md` §3 | 1068 → **1064** inputs | `just ci-browser-gate` **104 / 1** — `the doc's browser input count is the metafile's [1068 on the line naming 'The browser bundle's module graph has'] … got [wrong:- … has 1064 inputs.]` |
+
+All three restored and re-confirmed. **And M28's six checks came out at reference in that run**:
+104 / 64 / 44 / 54 / 37 / 50 = **353**, with `verify_browser_entry_points_are_dd5_shaped` at 40
+inside the gate (where M28's own recipe excludes it), exactly as the brief records.
+
+*(One latent weakness, recorded not fixed: `_m27_doc_figures.py`'s `compare` requires the number
+anywhere on the matched LINE, and §6's chunk-count line carries two numbers — `10  /demo.js + 9
+shared chunks`. If the true chunk count were ever 10 it would be satisfied by the request count at
+the start of the same line. It is 9 today, so the assertion discriminates today.)*
+
+## Step 8 — every other claim, checked
+
+| claim | verdict |
+|---|---|
+| 516 instructions, `revertCode` 0, block 1, two named functions | **holds** — read out of `arms.boot.transfer`: `executedSteps` 516 = `instructionsExecuted` 516, `revertCode` 0, `blockNumber` 1, `Token.transfer_in_public` + `Token.balance_of_public` |
+| four worker targets in the restart arm, path B differs | **holds** — the check reads both and asserts the pair answers both ways in one run |
+| "the only `document.` in the four source roots is `offerDownload`" | **true**, and unpinned. `grep -rn 'document\.'` over `orchestration/src node-host/src ct-host/src browser/src` returns three hits: two in `ct_download.ts`'s `offerDownload`, and one inside a COMMENT in `token_transfer.ts` that ends a sentence with the word "document." — a needle hazard if anything ever pins the count. Nothing does; the milestone says it is measured rather than asserted, and it is |
+| `isDedicatedWorker: true, hasDocument: false, hasWindow: false` | **holds**, in both arms that probe it, taken by `Runtime.evaluate` on the worker's own session |
+| M2's first form crashed the arm and was recorded rather than replaced quietly | **holds** — `~/.cache/aztec-m32-mut1.log:30` shows `0 assertion(s), 1 failure(s)` for that arm, and both the harness header and the impl log say so. *That honesty stands; it is the replacement that did not — see Step 4* |
+| the stale-backup defect was found, fixed and written into `CAMPAIGN-BRIEF.md` | **the fix holds and is insufficient** — `snapshot()` does `rm -rf "$BACKUP"` and leaves `.in-progress`; both are right, and neither covers a source left mutated by an earlier session and then backed up, which is what happened. A `git status --porcelain` comparison against HEAD over the mutated file set is added |
+| DD-5's rule is symbol-level, so it cannot see a new operation on `AvmRuntime` | **not a hole.** `browser.js` exports `AvmRuntime` itself, so every method of it IS a capability the reference bundle has. The rule's granularity is correct for the claim it makes |
+| "the worker's fetches are not in the page's log" | **holds** — `arms.throttled.avmWasmRequests` is `[]` while `workerAvmWasmRequests` is `["/assets/avm.wasm"]`, and the DD-11 absence is asserted over the worker's log with `avm.wasm` in it as the positive control |
+| `noir-wt4-webpage` untouched | **holds** — `f0e7edcd2` on `wasm/webpage`, exactly one modified file (`tooling/tracer/src/tracer_glue.rs`), `git for-each-ref --contains HEAD refs/remotes` = **0**, and zero published refs named `wasm/webpage`. Re-measured at the start of the review and again before the sweep. Not committed, not pushed |
+
+---
+
+## Step 9 — A FOURTH FINDING, and I got it wrong first: a COUNT inside a window is not production
+   during it.
+
+Reading the arm report rather than the check, the worker's sixteen busy-window blocks are spaced
+`252.3 252.3 252.0 251.6 …` — evenly, across the whole four-second spin. **Nothing asserted that.**
+The check counts blocks in `(busyOpen, busyClose]`, and a count is equally satisfied by a chain that
+stalled for 3.8 seconds and delivered sixteen in a burst the moment the thread came back — a backlog
+draining at the window's right-hand edge, which is the first alternative a sceptic reaches for and
+the one the whole 2×2 is meant to exclude. The check's own header even names it ("the worker arm's
+warm window is what says its busy-window count is a chain running rather than a backlog draining") —
+but the warm window says nothing about *where inside the busy window* the blocks landed.
+
+**And the first form of my own addition did not catch it.** I asserted that no consecutive pair of
+in-window blocks is more than three ticker intervals apart. Calibrated by doctoring the arm report —
+all sixteen blocks moved into the last 200 ms before the window closes, count unchanged — the check
+reported **82 assertions, 0 failures**: a tight cluster looks like *perfect* cadence, because the 3.8
+second stall in front of it lies between the window OPENING and the first block, which the span I
+measured did not include.
+
+With `busyOpen` as the first point, the same doctored report gives a largest interval of
+**3,812 ms** and **two failures**:
+
+```
+  --   consecutive spacing: 16 gap(s) in the busy window, largest 3812 ms; 15 gap(s) warm, largest 252 ms
+  FAIL …and NO interval from the window OPENING onward is more than three ticker intervals …
+       (command failed: test 3812 -lt 750)
+  FAIL …and its worst spacing is within twice the warm window's (command failed: test 3812 -le 504)
+smoke_worker_chain_survives_main_thread_block: 82 assertion(s), 2 failure(s)
+```
+
+and over the real report, **252 ms in both windows at a 250 ms ticker**, 82 / 0. Arm report restored
+and re-confirmed. *A control that is not run is a control that is the wrong shape* — this one was
+written, read, and wrong, and only running it said so.
+
+`+3`: the gap count (non-degeneracy — with fewer than two points the helper prints `-1`, which must
+fail rather than pass vacuously), the bound, and the warm-window pair.
+
+### And the same data answers the last attribution question about the freeze
+
+`Emulation.setCPUThrottlingRate` at rate **20** is applied to the PAGE and stays applied for the
+freeze plus three seconds after the thaw. Across that post-thaw stretch the worker's own gaps are
+`251.6 252.1 251.7 251.9 252.3 251.7 252.1 251.5 …` — **ordinary cadence while the page is throttled
+20×**. So the page's CPU throttle demonstrably does not reach the worker, and the 4.2 s gap is
+attributable to the freeze alone. The independent probe says the same from the other side: it applied
+**only** the freeze, no CPU throttle anywhere, and produced a 4,024 ms gap in a bare worker's own
+clock.

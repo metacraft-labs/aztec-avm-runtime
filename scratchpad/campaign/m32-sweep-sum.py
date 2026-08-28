@@ -49,13 +49,18 @@ REFERENCE = {
     # eager table and request accounting, and BROWSER-GATE.md's input count — and those were
     # corrected before this sweep, with M27 re-measured at 345 and M28 at 353.
     #
-    # 229 AS DELIVERED; M32'S REVIEW TOOK IT TO 231, in one check and nothing else.
-    # `smoke_worker_chain_survives_main_thread_block` 77 -> 79: §2's operation-list residue was
-    # asked of the WHOLE document rather than of the list, so deleting an operation from §2 left it
-    # empty (§4 names the operation in prose). Scoped to the bullet, it gains the region's own size
-    # and the other direction — a name the document lists that the bundle does not declare.
+    # 229 AS DELIVERED; M32'S REVIEW TOOK IT TO 234, in one check and nothing else.
+    # `smoke_worker_chain_survives_main_thread_block` 77 -> 82, and both halves are +3:
+    #   * §2's operation-list residue was asked of the WHOLE document rather than of the list, so
+    #     deleting an operation from §2 left it empty (§4 names the operation in prose). Scoped to
+    #     the bullet, it gains the region's own SIZE and the other direction — a name the document
+    #     lists that the bundle does not declare. One assertion replaced by three.
+    #   * The busy window's block COUNT cannot tell production during the spin from a backlog
+    #     draining at the window's edge. The SPACING can, measured from the window's own opening;
+    #     a doctored report that keeps the count and moves all sixteen blocks into the last 200 ms
+    #     gives a largest interval of 3,812 ms against 252, and fails two assertions.
     # The `detached` fix is a correction to `entry_worker.ts` and adds no assertion.
-    "m32": 231,
+    "m32": 234,
 }
 REFERENCE["m11"] = 262
 

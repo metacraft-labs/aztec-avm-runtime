@@ -221,6 +221,59 @@ assert_ge "…over a busy window that really was the declared length" "$((BUSY_P
 assert_ge "…and the worker's total is at least the two windows together" "$((W_WARM + W_BUSY))" \
   "$(m32_arm workerBlocked totalBlocks)"
 
+# ===========================================================================================
+# A COUNT INSIDE A WINDOW IS NOT PRODUCTION DURING IT — M32'S REVIEW'S ADDITION.
+# ===========================================================================================
+#
+# "16 blocks landed between these two readings" is also true of a chain that produced NOTHING for
+# 3.7 seconds and then delivered sixteen in a burst when the thread came back — which is exactly
+# what a backlog draining at the window's right-hand edge looks like, and it is the reading a
+# sceptic should reach for first. The count cannot tell them apart; the SPACING can. Measured over
+# this run: every consecutive pair inside the busy window is 251.6-252.3 ms apart, at a 250 ms
+# ticker, so there is no stall inside the window at all.
+#
+# The warm window is the calibration and it is on the same clock, so this is a comparison between
+# two stretches of the same chain rather than against a constant somebody chose.
+#
+# AND THE SPAN INCLUDES THE WINDOW'S OWN LEFT EDGE, WHICH THE FIRST VERSION OF THIS BLOCK DID NOT.
+# Calibrated rather than reasoned about, and the calibration is why this paragraph exists: the arm
+# report was doctored so that all sixteen busy-window blocks keep their COUNT and move into the last
+# 200 ms before the window closes — a backlog draining, exactly the reading this block was written to
+# rule out — and the check reported **82 assertions, 0 failures**. Measuring only the gaps BETWEEN
+# in-window blocks makes a tight cluster look like perfect cadence; the 3.8-second stall that
+# precedes it lies between the window OPENING and the first block, which nothing was looking at.
+# With `busyOpen` as the first point the same doctored report gives a largest gap of 3,800 ms and the
+# assertion fails. *A control that is not run is a control that is the wrong shape.*
+_worker_window_spacing() { # <open-field> <close-field> -> "COUNT<TAB>MAXGAP"
+  python3 - "$M32_ARMS" "$1" "$2" <<'PY'
+import json, sys
+a = json.load(open(sys.argv[1]))["arms"]["workerBlocked"]
+lo, hi = a[sys.argv[2]], a[sys.argv[3]]
+at = [b["producedAtMs"] for b in a["blocks"] if lo < b["producedAtMs"] <= hi]
+# THE WINDOW'S OPENING IS THE FIRST POINT. A stall that happens before the first block in the
+# window is invisible to a between-blocks measurement, and that is the whole of a backlog drain.
+points = [lo] + at
+gaps = [points[i + 1] - points[i] for i in range(len(points) - 1)]
+print("%d\t%d" % (len(gaps), int(max(gaps)) if gaps else -1))
+PY
+}
+BUSY_SPACING="$(_worker_window_spacing busyOpenAtMs busyCloseAtMs)"
+WARM_SPACING="$(_worker_window_spacing warmOpenAtMs warmCloseAtMs)"
+BUSY_GAPS="${BUSY_SPACING%%$'\t'*}"; BUSY_MAXGAP="${BUSY_SPACING##*$'\t'}"
+WARM_GAPS="${WARM_SPACING%%$'\t'*}"; WARM_MAXGAP="${WARM_SPACING##*$'\t'}"
+note "consecutive spacing: ${BUSY_GAPS} gap(s) in the busy window, largest ${BUSY_MAXGAP} ms; \
+${WARM_GAPS} gap(s) warm, largest ${WARM_MAXGAP} ms"
+# NON-DEGENERACY FIRST. With fewer than two blocks in the window there are no gaps, `max` has
+# nothing to take and the helper prints -1 — which must be a failure and not a vacuous pass.
+assert_ge "the busy window holds enough blocks to have spacing at all" 3 "$BUSY_GAPS"
+assert_true "…and NO interval from the window OPENING onward is more than three ticker intervals, \
+so the count is production DURING the spin rather than a backlog draining at its edge" \
+  test "$BUSY_MAXGAP" -lt "$((TICK_PARAM * 3))"
+# THE PAIR. The busy window's worst spacing must be of the same order as the warm window's, which
+# is what says the spin cost the chain nothing rather than merely not stopping it.
+assert_true "…and its worst spacing is within twice the warm window's" \
+  test "$BUSY_MAXGAP" -le "$((WARM_MAXGAP * 2))"
+
 echo "== 8. THE CONTROL: the same load on the main thread DOES stall"
 
 note "main thread: ${M_WARM} block(s) warm, ${M_BUSY} block(s) busy"

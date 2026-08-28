@@ -542,6 +542,26 @@ lock decides which artefact, put every one of them in the content stamp, and if 
 going to be compared, measure the difference between their resolutions rather than asserting there
 is none. This is "a pin that is not published is not a pin" one level out: here there was no pin.
 
+### A COUNT INSIDE A WINDOW IS NOT PRODUCTION DURING IT, AND THE SPAN YOU MEASURE IS PART OF THE CLAIM
+
+**One instance, and the check's own header named the alternative it could not see.** M32's headline
+2x2 counts blocks in `(busyOpen, busyClose]` with the runtime in a worker and on the main thread.
+Sixteen blocks between two readings is equally true of a chain that stalled for 3.8 seconds and
+delivered sixteen in a burst the moment the thread came back — a **backlog draining at the window's
+right-hand edge** — and the check's header says in as many words that the warm window is what rules
+that out, which it is not: the warm window says nothing about WHERE INSIDE the busy window the blocks
+landed. The spacing does, and nothing measured it.
+
+**And the first fix was the wrong shape, which is the part worth carrying.** M32's review asserted
+that no consecutive pair of IN-WINDOW blocks is more than three ticker intervals apart. Calibrated by
+doctoring the arm report — every block moved into the last 200 ms, count unchanged — the check
+reported **82 assertions, 0 failures**: a tight cluster looks like *perfect* cadence, because the
+stall in front of it lies between the window's OPENING and the first block, outside the span
+measured. With the window's opening as the first point the same report gives **3,812 ms** and two
+failures. *A control that is not run is a control that is the wrong shape* — this one was written,
+read, and wrong, and only running it said so. **When you assert over a range, ask what falls between
+its edge and your first data point.**
+
 ### Conjunctions need a negative case per conjunct
 A four-tree conjunction whose only negative case exercised one tree: dropping any
 of the other three passed all twelve cases.
