@@ -400,4 +400,53 @@ assert_ge "the synthetic rule over the executed pcs yields a histogram at all" 1
   "$(grep -c . "$SYNTH_FROM_REAL" || true)"
 assert_false "…and it is NOT the histogram the container carries" cmp -s "$SYNTH_FROM_REAL" "$CONTAINER_OPS"
 
+echo "== 8. SOURCE-MAPPING.md §6's COVERAGE TABLE, RE-DERIVED FROM THE ARM REPORT"
+
+# ===========================================================================================
+# THE THREE FIGURES M29 PUBLISHED ABOUT ITS OWN HOLE WERE RE-DERIVED BY NOTHING.
+# ===========================================================================================
+#
+# `SOURCE-MAPPING.md`'s new §6 states 516 / 389 / 127 and 24.6% — the first numbers §2.4's residual
+# hole 2 has ever had. Two checks open that document and neither reads them. It is the family
+# `CAMPAIGN-BRIEF.md` states as "if a document states a measurement, something must take that
+# measurement again and compare", made worse by the subject: the hole closes the day upstream
+# re-keys `brillig_procedure_locs`, and the document would then be stating a figure about a hole
+# that is not there any more.
+#
+# EACH ROW IS MATCHED ON THE LINE THAT NAMES ITS SUBJECT, not anywhere in the file — M24's review's
+# correction to the OQ-6 check, which once passed a document with two rows swapped because every
+# figure was present somewhere. The paragraph was reflowed into a table for that reason: the
+# original sentence wrapped between `516 executed` and `instructions, of which 389`, and a needle
+# that spans a line break is a needle that stops matching the day somebody reflows a paragraph.
+SM_DOC="$REPO_ROOT/SOURCE-MAPPING.md"
+assert_file "SOURCE-MAPPING.md is where this check expects it" "$SM_DOC"
+sm_row() { grep -F "$1" "$SM_DOC" | head -1; }
+SM_TOTAL_ROW="$(sm_row '| executed instructions |')"
+SM_POS_ROW="$(sm_row '| …resolving to a `(path, line, column)` |')"
+SM_UNPOS_ROW="$(sm_row 'with no `brillig_locations` entry at all')"
+SM_SHARE_ROW="$(sm_row "hole 2's share of one ordinary public transaction")"
+ROWS_ABSENT="$(m29_absent "total=$SM_TOTAL_ROW" "positioned=$SM_POS_ROW" "unpositioned=$SM_UNPOS_ROW" \
+  "share=$SM_SHARE_ROW")"
+assert_eq "every row of §6's coverage table was found by its own subject" "" "$ROWS_ABSENT"
+[ -z "$ROWS_ABSENT" ] || die "SOURCE-MAPPING.md §6 has no row for $ROWS_ABSENT; the assertions below
+             would look for a figure in an empty string, which is the both-sides-absent family."
+
+SM_POS="$(m27_arm download recording.stepsPositioned)"
+SM_UNPOS="$(m27_arm download recording.stepsUnpositioned)"
+SM_SHARE="$(python3 -c 'import sys; print(f"{100.0 * int(sys.argv[1]) / int(sys.argv[2]):.1f}%")' \
+  "$SM_UNPOS" "$REC_EVENTS")"
+note "§6 should read $REC_EVENTS / $SM_POS / $SM_UNPOS / $SM_SHARE"
+assert_true "…and the total row carries the executed instruction count this run measured" \
+  str_has_sub "$SM_TOTAL_ROW" "**$REC_EVENTS**"
+assert_true "…the positioned row the positioned count" str_has_sub "$SM_POS_ROW" "**$SM_POS**"
+assert_true "…the unpositioned row the unpositioned count" str_has_sub "$SM_UNPOS_ROW" "**$SM_UNPOS**"
+# THE PERCENTAGE IS COMPUTED HERE FROM THE OTHER TWO, so a document that carried three consistent
+# numbers and a share belonging to a different transaction would fail on the share alone.
+assert_true "…and the share row the percentage those two imply" str_has_sub "$SM_SHARE_ROW" "**$SM_SHARE**"
+# AND THE INSTRUMENT IS SHOWN TO BE ABLE TO SAY NO. Without this, four `str_has_sub` calls against
+# rows read out of a file are four assertions whose only failure mode is the file vanishing — and
+# `str_has_sub` has no empty-needle guard, which M27's review measured.
+assert_false "…while a figure this run did NOT measure is absent from the total row" \
+  str_has_sub "$SM_TOTAL_ROW" "**$((REC_EVENTS + 1))**"
+
 m29_finish

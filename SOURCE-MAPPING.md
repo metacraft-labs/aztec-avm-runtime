@@ -353,11 +353,24 @@ positioned" was true *by construction*. A declaration that cannot be contradicte
 declaration, and the whole `ct_rung_violations()` / `MappingRungDegraded` apparatus had never been
 exercised by anything but its own deliberate control.
 
-M29 records what the AVM executed. Measured on the browser demo's token transfer: **516 executed
-instructions, of which 389 resolve to a `(path, line, column)` and 127 do not.** The 127 are §2.4's
-residual hole 2 — compiled procedures are appended after the main body (`transpile.rs:489`, `:505`),
-past the end of `brillig_pcs_to_avm_pcs`, and `ContractSourceMap.positionFor` answers `null` for
-them rather than rounding to the nearest lower line.
+M29 records what the AVM executed. Measured on the browser demo's token transfer — and **every cell
+of this table is re-derived from the arm report by `test_browser_steps_are_executed_not_mapped` on
+every run**, one row at a time, anchored to the row that names its subject. It was not, until M29's
+review: three figures stated here and nowhere re-measured, in a document whose subject is a hole
+that will close the day upstream re-keys `brillig_procedure_locs`, which is the shape this campaign
+calls "a figure nobody re-derives rots even when the milestone knows it is wrong".
+
+| what | measured |
+|---|---|
+| executed instructions | **516** |
+| …resolving to a `(path, line, column)` | **389** |
+| …with no `brillig_locations` entry at all | **127** |
+| hole 2's share of one ordinary public transaction | **24.6%** |
+
+The 127 are §2.4's residual hole 2 — compiled procedures are appended after the main body
+(`transpile.rs:489`, `:505`), past the end of `brillig_pcs_to_avm_pcs`, and
+`ContractSourceMap.positionFor` answers `null` for them rather than rounding to the nearest lower
+line.
 
 So a rung-1 declaration for that contract would now be false, the module would count 127 violations,
 and `CtWriter.close()` would refuse the container. **The rung is therefore declared from the
@@ -376,5 +389,5 @@ the implication in the direction that can fail: the declared rung is 1 exactly w
 count is 0.
 
 **And hole 2 has a number now.** §2.4 recorded it as a measured gap with no consequence attached;
-its consequence is 127 of 516 steps on one ordinary public transaction, or **24.6%**. That is the
-figure a sixth upstream contribution would be worth, if one is ever prepared.
+its consequence is the table above. That is the figure a sixth upstream contribution would be
+worth, if one is ever prepared.

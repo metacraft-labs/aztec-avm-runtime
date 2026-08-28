@@ -513,6 +513,18 @@ with the paragraph declaring the difference's cause "not established" two screen
 paragraph establishing it. Setting `TRACE-ABI.md` §7 back to 245,724 passed the whole milestone.
 If a document states a measurement, something must take that measurement again and compare.
 
+**AND A NUMBER A MILESTONE PUBLISHES ABOUT ITS OWN OPEN HOLE IS THE LEAST LIKELY TO BE RE-DERIVED
+AND THE MOST LIKELY TO ROT.** M29's new `SOURCE-MAPPING.md` §6 gave §2.4's residual hole 2 its first
+figures — 516 executed steps, 389 positioned, 127 not, 24.6% — and nothing re-derived any of them,
+in a document TWO checks already open. The hole closes the day upstream re-keys
+`brillig_procedure_locs`, so the document would go on publishing a share of a hole that is not
+there. The sentence also wrapped between `516 executed` and `instructions, of which 389`, which is
+the line-break family waiting for the next reflow. §6 is a TABLE now, one figure per row, each row
+naming its subject, and `test_browser_steps_are_executed_not_mapped` matches **each row by its own
+subject** rather than each figure anywhere in the file — with the percentage COMPUTED from the other
+two, so three consistent numbers and a share belonging to a different transaction fails on the
+share alone. Swapping the positioned and unpositioned figures gives two failures, one per row.
+
 **And a GENERATED document can drift too, if it derives a number from a sentence.**
 `CARRY-LEDGER.md`'s *Upstream changes* column was rendered by
 `re.search(r"at base lines ([0-9]+\.\.[0-9]+)", entry["reason"])` over the acknowledgement's prose.
