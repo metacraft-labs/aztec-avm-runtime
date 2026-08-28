@@ -582,22 +582,51 @@ touch moves, look for a commit that landed between the reference sweep and yours
 repository — before writing a story. Both attributions above were re-derived independently by the
 review and both held; that is the standard, not the presumption.
 
-Current per-milestone counts. Measured **M0-M29, on 2026-08-28**, by M29, one milestone at a time
-with nothing else running, `setsid`-detached, **inside this repository's own dev shell**
+Current per-milestone counts. Measured **M0-M29, on 2026-08-28**, by M29's review, one milestone at
+a time with nothing else running, `setsid`-detached, **inside this repository's own dev shell**
 (`direnv exec` — the engine and the PATH the checks and CI use), `TMPDIR` and the log under
 `~/.cache`, no hole in the log, **28 of 30 exit 0** — the two reds being M11's ninth upstream move
-and M9's disabled-path TIMING assertion, both of them conditions this brief already names:
+and M9's TRUNCATION flake, both of them conditions this brief already names:
 
 ```
 m0 156  m1 175  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
 m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
 m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
-m28 353  m29 105
-                                                       CAMPAIGN TOTAL 10,156
+m28 353  m29 127
+                                                       CAMPAIGN TOTAL 10,178
 ```
 
+**M29'S REVIEW MOVED EXACTLY ONE MILESTONE AND IT IS M29'S OWN.** 105 -> **127**, in two checks and
+nothing else: `test_browser_steps_are_executed_not_mapped` 52 -> **69** (+4 for the revert
+assertion, its non-emptiness partner and the parity arm's own non-zero code as the control; +6 for a
+bundle scan whose needle can match, one of them the measurement that the OLD needle could not; and
++7 for §6's coverage table re-derived row by row) and `e2e_browser_container_opcodes_match_native`
+30 -> **35** (+3 for the exclusion machinery exercised in both directions, +2 for the residue read).
+4 + 6 + 7 = 17, 3 + 2 = 5, 17 + 5 = 22, and 10,156 + 22 = **10,178** exactly.
+**Every one of M0-M28 came out at its reference value TO THE ASSERTION** in the review's own sweep,
+including M27 at 345 with `token_transfer.ts` edited and the browser bundle rebuilt three times,
+M21 at 325, M25 at 272, M24 at 350 (`ct-host/src` untouched, so `_m24_oq6_stamp` did not fire),
+M1 at 175 and M20 at 237 with `shipped_module_config.ts` changed — `e2e_form_a_external_tx_roundtrip`
+stays 62, so Part 8's encoding-delta comparison is unmoved by `patchFieldsFor`'s new guard.
+
+**M9 FLAKED IN THE REVIEW'S SWEEP, AT A FIFTH DISTINCT TRUNCATION POINT.** 524, rc 1, 15 failing
+assertions: `807 - 524 = 283 = 140 + 143`, the two comparers that correctly refuse and print no
+summary while doing it. The truncation is `truncated-after-3943-lines-last-key-steps.burn.3669` —
+the sightings are now **39,113 / 16,719 / 14,572 / 17,866 / 3,943**, five points, same input, same
+module, same host, and the newest is a quarter the length of the shortest before it. A
+content-dependent defect stays ruled out and the trigger stays unestablished; D19's ledger gains a
+row. **AND A SECOND TRANSCRIPT TRUNCATED IN THE SAME RUN** — the fallback event stream, at
+`truncated-after-15306-lines-last-key-events.burn.15101` — which is where 15 of the failing
+assertions come from rather than the recorded 12: `test_existing_event_emitter_path_still_available`
+reads that second transcript and has a completeness assertion on it, so it reports 4 rather than 1.
+That is the check behaving correctly and it is the same fact about the run.
+**AND `test_observer_disabled_is_free` CAME OUT 126 / 0 IN THAT SAME SWEEP** — the timing arm M29
+recorded red at `+1.29% CI [+0.52%, +2.05%]` passed, on a box that had been running headless
+browsers and wasm builds all session, which is the second measurement saying that red was the
+machine and not the patch.
+
 **M29 MOVED THREE NUMBERS AND EVERY UNIT OF ALL THREE IS ACCOUNTED FOR IN BOTH DIRECTIONS.** Its own
-**105** (52 / 30 / 23); **M27 343 -> 345**, all of it
+**105** (52 / 30 / 23), which its review took to 127; **M27 343 -> 345**, all of it
 `e2e_browser_downloads_ct_container_and_ct_print_parses` 34 -> 36, which is *minus three plus five*
 — the two assertions that could not fail (`every step at a resolved SOURCE position` and `none
 unpositioned`, true by construction while the steps WERE the artifact's mapped pcs) and the rung-1
@@ -605,7 +634,7 @@ assertion they rested on, replaced by the positioned/unpositioned identity, a no
 the artifact's own rung, the declared rung's implication and the declared reason's split; and
 **M21 324 -> 325**, all of it `verify_transcript_truncation_detection_uniform` 43 -> 44, because
 M29's differential is the sixth comparer on that check's own list. 10,048 + 105 + 2 + 1 = **10,156**
-exactly. **M25 is unchanged at 272** even though M29 retired one of its verification entries: that
+exactly, and with the review's 22 it is **10,178**. **M25 is unchanged at 272** even though M29 retired one of its verification entries: that
 entry was `pending` and a `pending` entry has no assertions. Every other milestone came out at its
 reference value **to the assertion**, including M24 at 350 (`ct-host/src` was not touched, so
 `_m24_oq6_stamp` did not fire and no benchmark re-ran), M4 at 218 in the dev shell, M12 at 691 and

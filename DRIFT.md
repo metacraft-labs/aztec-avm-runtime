@@ -885,14 +885,31 @@ were absorbed silently.
   | c | M20's review | `test_revert_program_does_not_trap_module` (M8) | 259 lines of 1,318 | first 259 byte-identical, then stops mid-record |
   | d | M24's review sweep | `verify_observation_hook_step_records_identical` + `test_observer_does_not_perturb` | 14,572 lines | `steps.burn.14298` |
   | e | M26's sweep | same two | 17,866 lines | `steps.burn.17592` |
+  | f | M29's review sweep | same two | **3,943 lines** | `steps.burn.3669` |
+  | g | M29's review sweep, SAME RUN | `test_existing_event_emitter_path_still_available` | 15,306 lines | `events.burn.15101` — the FALLBACK EVENT transcript, not the step one |
+
+  **AND SIGHTING f IS A QUARTER THE LENGTH OF THE SHORTEST BEFORE IT**, which is worth more than
+  another row: 3,943 lines against a previous minimum of 14,572. A truncation that can happen at
+  10% of the transcript and at 99.995% of it in the same week is not a buffer that fills at a
+  particular size, and the spread of the five points is now nearly the whole range.
+
+  **AND g IS A SECOND TRANSCRIPT TRUNCATING IN THE SAME RUN, WHICH IS NEW.** Every earlier sighting
+  is of the STEP transcript; g is the fallback EVENT transcript, from a different writer on the same
+  guest's `fd_write` path, truncated in the same process invocation series. That is evidence for the
+  path (WASI `fd_write` under V8) and against anything specific to the step encoder — and it is why
+  M29's review's flake reads **15 failing assertions rather than the recorded 12**:
+  `test_existing_event_emitter_path_still_available` has a completeness assertion on that second
+  transcript and correctly reports 4 rather than 1.
 
   **THE LEDGER NARROWS IT, WHICH IS THE FIRST NARROWING SINCE THIS ENTRY OPENED — AND IT IS NOT A
-  TRIGGER.** Four sightings of the SAME program (`burn`) truncate at FOUR DIFFERENT points —
-  39,113 / 16,719 / 14,572 / 17,866 — with the same input, the same module and the same host. So
+  TRIGGER.** FIVE sightings of the SAME program (`burn`) truncate at FIVE DIFFERENT points —
+  39,113 / 16,719 / 14,572 / 17,866 / 3,943 — with the same input, the same module and the same
+  host. So
   the cause **is not a particular record**: a content-dependent defect in the writer, the encoder
   or the decoder would stop in the same place every time, and this does not. That rules out the
   hypothesis a reader reaches for first. `steps.burn.17592` is sighting e's truncation POINT and
-  must not be read as a trigger; it is the fourth different answer to the same question.
+  must not be read as a trigger; it is the fourth different answer to the same question, and
+  `steps.burn.3669` is the fifth.
 
   **AND M26'S REVIEW SWEEP DID NOT REPRODUCE IT.** M9 ran IN the sweep, immediately after M8's
   build, and came out **807, 7/7, exit 0 in 1,341 s**, split 140/143/113/73/126/83/129 — the
