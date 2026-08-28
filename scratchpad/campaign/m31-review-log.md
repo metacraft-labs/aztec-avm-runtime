@@ -458,3 +458,117 @@ arm-reading checks open with `[ -z "$ABSENT" ] || die` followed by
 the `die` fires first. It is the exact shape `CAMPAIGN-BRIEF.md` prescribes as M29's remedy ("ONE
 assertion that names every absent field … with a `die` behind it"), so the `die` is the instrument
 and the assertion is the record. Left alone, named here.
+
+---
+
+## Step 12 — A SIXTH CLAIM THAT DID NOT SURVIVE, found while checking an Outstanding item
+
+The milestone's second Outstanding task says the fixtures are hand-written Noir rather than
+aztec-nr contracts — which is a fair limitation — and gives as its reason:
+
+> *"Transpiling a real aztec-nr contract needs `aztec-nr` itself, **which is not in
+> `aztec-packages` at either revision**."*
+
+Measured:
+
+```
+git ls-tree -r --name-only 233d8e0993 noir-projects/labs/aztec-nr/   ->  265 files
+                                       (the same 265 at the fork's HEAD ee3c0528d5)
+noir-projects/labs/noir-contracts/contracts/app/  ->  simple_token_contract,
+                                                      private_token_contract,
+                                                      token_blacklist_contract, …
+```
+
+`aztec-nr` **is** in `aztec-packages`, at both revisions, with a tree of real contracts written
+against it. The search had looked at `noir-projects/fnd/` and at the repository root; `labs/` is
+the parallel subdirectory — **the ninth time this campaign has made that exact mistake**, and the
+first time the miss was written down as the *reason* for a limitation. A limitation stated with a
+false reason is worse than one stated with none, because the false reason closes the search.
+
+The limitation itself stands: nothing here has transpiled a real aztec-nr contract, and whether
+`nargo` at the pinned beta.26 compiles those contracts unchanged is a different, open question.
+Corrected in the milestone and added to `CAMPAIGN-BRIEF.md`'s reuse-discipline table.
+
+---
+
+## Step 13 — THE SWEEP, taken after my last commit
+
+`setsid`-detached, `direnv exec <aztec-avm-runtime>`, one milestone at a time with nothing else
+running, `TMPDIR` and the log under `~/.cache`. **64 markers for 32 milestones: no hole.**
+
+```
+m0 156  m1 175  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 262  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
+m28 353  m29 127  m30 218  m31 421
+                                                       CAMPAIGN TOTAL 10,820
+```
+
+`10,396 + 421 + 3 = 10,820` exactly, `delta +0` against a reference table naming both moves in
+advance. **31 of 32 exit 0.**
+
+- **Every one of M0–M30 came out at its reference value TO THE ASSERTION.**
+- **M11 = 262, rc 1, NINE failing assertions** — `verify_carry_set_complete` **46** (43 + 3, the
+  one new `not_carried` entry at three assertions), and the nine failures are the recorded
+  signature of the ninth upstream move `7471a61f1a`, unchanged. `carry/` left at HEAD.
+  **The attribution is verified end to end**, not accepted: the check makes exactly three
+  assertions per declared entry (read from its source), and `codetracer-specs` HEAD carries six
+  `aztec-*` directories against M31's seven.
+- **M9 flaked** — 524, rc 1, twelve failures, `807 − 524 = 283 = 140 + 143`, at a **sixth distinct
+  truncation point**: `truncated-after-15688-lines-last-key-steps.burn.15414`. The ledger is now
+  39,113 / 16,719 / 14,572 / 17,866 / 3,943 / 15,688 — same input, same module, same host, so a
+  content-dependent defect stays ruled out. Re-run alone: **807, 7/7, exit 0 in 1,433 s**, split
+  140/143/113/73/126/83/129, the reference exactly.
+- **M15 went red for the first time in this chain, at ONE assertion, and it is the OTHER family.**
+  `test_checkpoint_cost_characterised` 90/1: one half of an ABBA pair at population 100 read
+  **−36 µs** where the five-tree arm costs ~5 µs, while the other half of the same pair read +8 µs
+  and the check's own note recorded a run-to-run spread of **41 µs** at that population — noise
+  exceeding the effect, on a box that had been building wasm modules and driving headless Chromium
+  all session. **The COUNT was unchanged at 537**, which is what says it is not structural. Re-run
+  alone: **537, 6/6, exit 0 in 385 s**. A timing measurement on a loaded machine is not a
+  regression; the two conditions are not to be conflated.
+- **Nothing else moved**: `verify_provenance_complete` 64, `verify_pinned_nightly_single_source`
+  28, `verify_no_pipeline_predicates` 69, `verify_reuse_inventory_complete` 19,
+  `verify_named_checks_exist` 9, `just check-repo-hygiene` 28,
+  `verify_oq7_shared_writer_verdict_recorded` 65.
+- **A sweep is a writer.** `carry/rebase.json` and `carry/exposure.json` were `ec959b84…` /
+  `aaeb6877…` before, came out `3836c2b6…` / `79f597b2…`, and were restored to the pre-sweep
+  digests.
+- **`codetracer-specs` moved under me between the implementation's sweep and mine** (`01e79f1c` →
+  `425e3d44`, ten commits). Checked before believing anything: none of them touches
+  `upstream-bugs/`, and the aztec-* directory count is unchanged, so M11's 262 is M31's doing and
+  not theirs.
+
+### 13.1 `noir-wt4-webpage` and OQ-7 fact 7
+
+Untouched throughout. `wasm/webpage` at `f0e7edcd2` with **exactly** its one pre-existing edit
+(`tooling/tracer/src/tracer_glue.rs`), and the branch tip is contained in **zero** published refs —
+which `verify_transpiler_wasm_output_identical_to_native` §9 now re-measures on every run as the
+publication predicate's negative control.
+
+---
+
+## VERDICT
+
+**Byte-identity: it holds, and it is the strongest claim in the milestone.** Reproduced with an
+instrument of my own, over the whole artifact with no exclusion list, calibrated seven ways by
+seven distinct digests, and surviving a control-flow perturbation I introduced. The framing was
+wrong in two directions at once — three "producers" are two, and the two are *more* independent
+than anyone claimed because they resolve different dependency versions — but the fact is a fact.
+
+**Six claims overturned**, none of which changes the verdict:
+
+1. "Three independent producers" — two producers, three measurement points.
+2. "The two builds differ in target and in nothing else" — six transitive crate versions differ,
+   two of them on the serialisation path the digests run over.
+3. The getrandom argument cites 0.4.1; the build links 0.4.3.
+4. "None of the seven fixtures has a compiled procedure" — two do, and the hole is exercised.
+5. "`noir` has zero `refs/remotes/*` refs" — 57, and the pin is in two of them.
+6. "`aztec-nr` is not in `aztec-packages` at either revision" — 265 files at
+   `noir-projects/labs/aztec-nr`.
+
+Plus three smaller ones: the module is **not pinned** (no committed lock, no `--locked`); the
+`425 / 2,293` narrowing does not reproduce (`423 / 2,435`) and nothing asserts it; `PR.md`'s
+`+3 / −7` is git's `3 insertions, 8 deletions`, and both re-derivations share the blind spot.
+
+**M31 = 421** (130 / 59 / 135 / 97). **Campaign total 10,820**, M0–M31, 31 of 32 exit 0.

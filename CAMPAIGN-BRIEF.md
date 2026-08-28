@@ -483,6 +483,32 @@ buying a benchmark and a document re-render. Loosening the stamp is not obviousl
 that tries to tell a comment from code is harder to get right than a re-render is to run — so the
 cost is documented rather than removed.
 
+### A SUB-WORKSPACE INSIDE A PINNED BUILD RESOLVES ITS OWN DEPENDENCIES, AND NOTHING SAYS SO
+
+**One instance, and the comment beside it asserted the opposite.** M31 builds the transpiler two
+ways from two pinned revisions and compares the outputs byte for byte. The NATIVE binary builds
+against upstream's pinned `avm-transpiler/Cargo.lock`. The WASM module builds in
+`avm-transpiler-wasm/`, a shim crate with a `path` dependency on it — **and a `path` dependency
+does not make you a member of the other crate's workspace.** The shim is its own workspace root, so
+cargo resolves it a `Cargo.lock` of its own, from crates.io, at build time; nothing passes
+`--locked` and no lock for it is committed. Measured by M31's review out of the two builds' own
+`.d` files: `getrandom` 0.4.1 vs **0.4.3**, `serde_json` 1.0.149 vs **1.0.151**, `flate2` 1.1.9 vs
+**1.1.10**, `chrono` 0.4.43 vs **0.4.45**, `base64` 0.23.0 vs **0.23.1**.
+
+Three consequences and they do not point the same way. The result is **stronger** than claimed —
+two different JSON writers and two different DEFLATE implementations producing the same bytes. The
+crate's own manifest comment said *"the two builds differ in target and in nothing else"*, which is
+**false**, and it is the kind of sentence a reader trusts because it sits beside the code. And the
+module is **not reproducible**: a cold build a week later resolves something else, which is why the
+same milestone recorded 4,970,171 bytes in one section and 5,196,936 in another for "the" module.
+The build's own content stamp did not catch it either — it hashed `.rs`, `Cargo.toml`,
+`config.toml` and one unrelated lock, and **neither lock that decides the build was in it**.
+
+**Rule:** if a build has more than one workspace root, it has more than one resolution. Say which
+lock decides which artefact, put every one of them in the content stamp, and if two artefacts are
+going to be compared, measure the difference between their resolutions rather than asserting there
+is none. This is "a pin that is not published is not a pin" one level out: here there was no pin.
+
 ### Conjunctions need a negative case per conjunct
 A four-tree conjunction whose only negative case exercised one tree: dropping any
 of the other three passed all twelve cases.
@@ -636,7 +662,49 @@ m28 353  m29 127
                                                        CAMPAIGN TOTAL 10,178
 ```
 
-**M31 TOOK IT TO 10,775, AND MOVED EXACTLY ONE OTHER NUMBER — M11's, BY THREE, DECLARED BEFORE THE
+**M31'S REVIEW TOOK IT TO 10,820, AND MOVED EXACTLY ONE MILESTONE — M31'S OWN.** Re-measured
+M0-M31 on 2026-08-28 by M31's review, after its last commit, `setsid`-detached in this
+repository's own dev shell, one milestone at a time with nothing else running, `TMPDIR` and the log
+under `~/.cache`, **no hole in the log** (64 markers for 32 milestones), **31 of 32 exit 0**:
+
+```
+m0 156  m1 175  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 262  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
+m28 353  m29 127  m30 218  m31 421
+                                                       CAMPAIGN TOTAL 10,820
+```
+
+**Every one of M0-M30 came out at its reference value TO THE ASSERTION**, and 10,396 + 421 + 3 =
+10,820 exactly. **M31's own 421** is 130 / 59 / 135 / 97 across four checks — declared at 376, and
+the 45 the review added are itemised in M31's Verification section, in three checks and nothing
+else. **M11 is 262 with rc=1 and NINE failing assertions**, which is the recorded signature of the
+ninth upstream move (`7471a61f1a`) and unchanged; `verify_carry_set_complete` reads **46**, which
+is the whole of the +3 and is M31's doing, verified mechanically (three assertions per declared
+`not_carried` entry, and `codetracer-specs` carries six `aztec-*` directories at HEAD and seven
+with M31's).
+
+**TWO MILESTONES FLAKED IN THE SWEEP AND BOTH PASSED ALONE, WHICH IS THE SETTLED PROCEDURE.**
+**M9 read 524, rc 1, twelve failing assertions** — `807 - 524 = 283 = 140 + 143`, the two comparers
+that correctly refuse and print no summary while doing it — with the V8/WASI stdout truncation at a
+**SIXTH distinct point**: `truncated-after-15688-lines-last-key-steps.burn.15414`. The sightings are
+now **39,113 / 16,719 / 14,572 / 17,866 / 3,943 / 15,688**; same input, same module, same host, so a
+content-dependent defect stays ruled out and the trigger stays unestablished. Re-run alone:
+**807, 7/7, exit 0 in 1,433 s**, the reference split 140/143/113/73/126/83/129 exactly.
+**AND M15 WENT RED FOR THE FIRST TIME IN THIS CHAIN, AT ONE ASSERTION, AND IT IS THE OTHER FAMILY.**
+`test_checkpoint_cost_characterised` reported 90/1: one half of an ABBA pair at population 100 read
+**-36 µs** where the five-tree arm should cost ~5 µs, while the other half of the same pair read
++8 µs and the check's own note recorded a run-to-run spread of **41 µs** at that population — a
+measurement whose noise exceeds its effect, on a box that had been building wasm modules and
+running headless Chromium all session. **The COUNT was unchanged at 537**, which is what says it is
+not structural. Re-run alone: **537, 6/6, exit 0 in 385 s**. A timing measurement on a loaded
+machine is not a regression, and the two conditions are not to be conflated.
+
+**A SWEEP IS A WRITER**: `carry/rebase.json` and `carry/exposure.json` were checksummed before
+(`aaeb6877…`, `ec959b84…`), came out as `79f597b2…` / `3836c2b6…`, and were restored to the
+pre-sweep digests.
+
+**M31 WAS DECLARED AT 10,775, AND MOVED EXACTLY ONE OTHER NUMBER — M11's, BY THREE, DECLARED BEFORE THE
 SWEEP RAN.** Re-measured M0-M31 on 2026-08-28 by M31's implementation, after its last edit,
 `setsid`-detached in this repository's own dev shell, one milestone at a time with nothing else
 running, `TMPDIR` and the log under `~/.cache`, **no hole in the log** (64 markers for 32
@@ -1099,10 +1167,11 @@ is the right behaviour and it is what this section asked for.
 
 ## The reuse discipline
 
-**The campaign has been wrong eight times about whether something needed
-building.** Every miss was a *parallel subdirectory* to the one being searched:
+**The campaign has been wrong NINE times about whether something needed
+building — or, the ninth time, about whether it EXISTS.** Every miss was a *parallel subdirectory*
+to the one being searched:
 
-Five of the eight, the ones with a location crisp enough to be worth memorising:
+Six of the nine, the ones with a location crisp enough to be worth memorising:
 
 | believed absent | actually at |
 |---|---|
@@ -1111,6 +1180,17 @@ Five of the eight, the ones with a location crisp enough to be worth memorising:
 | a chatty merkle DB | `barretenberg/vm2_wsdb/` |
 | a TypeScript msgpack encoder | `@aztec/stdlib/avm` — upstream calls it on the same type |
 | a telemetry no-op | `telemetry-client/src/noop.ts` + 16 stubs in `txe/esbuild/stubs/` |
+| **`aztec-nr` itself, and real contracts written against it** | **`noir-projects/labs/aztec-nr` (265 files) and `noir-projects/labs/noir-contracts/contracts/`, present at BOTH the anchor and the fork's HEAD** |
+
+**The ninth is worth its own sentence because it was written as a REASON in an Outstanding task.**
+M31's fixtures are hand-written Noir rather than aztec-nr contracts, which is a fair limitation —
+but the milestone gave as its reason *"which is not in `aztec-packages` at either revision"*, and
+that is false: `git ls-tree 233d8e0993 noir-projects/labs/aztec-nr/` returns 265 files, and
+`noir-projects/labs/noir-contracts/contracts/app/` holds `simple_token_contract`,
+`private_token_contract` and `token_blacklist_contract`. The search had looked at
+`noir-projects/fnd/` and at the repository root; `labs/` is the parallel subdirectory. *A
+limitation stated with a false reason is worse than one stated with none, because the false reason
+closes the search.*
 
 **Enumerate across the whole fork and the published `@aztec/*` packages, by
 subdirectory, before concluding anything is ours to write.** An entry marked
