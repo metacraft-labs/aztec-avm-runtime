@@ -56,10 +56,21 @@ done
   die "$CRATE_DIR/.cargo/config.toml is missing; cargo reads the wasm target and the getrandom
      backend from it, and only from the INVOCATION directory"
 
-# The stamp: every source file that goes into this module's behaviour, by content. The
-# evaluator file is in the list because M30 changed it (the SSA pass timer's unconditional
-# clock read, which is what made the bare path reach a JS import) and a module built before
-# that change would answer a different question about imports.
+# THE TOUCH LIST: the files this milestone edits, which are also the ones cargo has to be
+# told about (see the mtime paragraph below). The evaluator file is here because M30 changed
+# it — the SSA pass timer's unconditional clock read, which is what made the bare path reach
+# a JS import — and a module built before that change answers a different question about
+# imports.
+#
+# THIS LIST IS **NOT** THE STAMP, AND THAT DISTINCTION IS A FINDING RATHER THAN A DESIGN.
+# It used to be: `STAMP_WANT` was the sha256 of these nine files, and when it matched the
+# script exited BEFORE invoking cargo at all. But the module links the whole Noir compiler —
+# 711 `.rs` files under `compiler/` and `tooling/` — so a change to any of the other 702 left
+# the stamp matching, no cargo running, and the four checks measuring a module built before
+# the change while reporting green. That is "a mutated artefact outlived its restored source"
+# with a wider aperture than the `cp -p` case below: there, cargo was invoked and declined;
+# here it was never invoked. Found by M30's review. Closing it costs **62 ms** — measured, by
+# hashing all 711 on this host — which is nothing beside the build it guards.
 STAMP_INPUTS=(
   "$CRATE_DIR/src/vfs.rs"
   "$CRATE_DIR/src/compile_vfs.rs"
@@ -72,9 +83,25 @@ STAMP_INPUTS=(
   "$NOIR_ROOT/compiler/noirc_evaluator/src/ssa/builder.rs"
 )
 for f in "${STAMP_INPUTS[@]}"; do
-  [ -f "$f" ] || die "the stamp names $f, which does not exist"
+  [ -f "$f" ] || die "the touch list names $f, which does not exist"
 done
-STAMP_WANT="$(sha256sum "${STAMP_INPUTS[@]}" | sha256sum | cut -d' ' -f1)"
+
+# The stamp proper: every Rust source and every manifest the module could link, sorted so the
+# digest does not depend on `find`'s directory order, plus the two files that are neither
+# (`.cargo/config.toml` carries the target and the getrandom backend; `Cargo.lock` carries
+# the dependency revisions).
+STAMP_TREE="$(find "$NOIR_ROOT/compiler" "$NOIR_ROOT/tooling" "$NOIR_ROOT/acvm-repo" \
+                -type f \( -name '*.rs' -o -name 'Cargo.toml' \) 2>/dev/null | LC_ALL=C sort)"
+STAMP_TREE_COUNT="$(printf '%s\n' "$STAMP_TREE" | grep -c . || true)"
+# A STAMP OVER NOTHING MATCHES EVERYTHING. If the paths above ever stop resolving, the digest
+# of an empty list is a constant and every build would report "up to date" forever — the
+# emptiest form of the defect this stamp exists to prevent. Refuse instead.
+[ "${STAMP_TREE_COUNT:-0}" -ge 100 ] || \
+  die "the stamp found only ${STAMP_TREE_COUNT:-0} source files under $NOIR_ROOT/{compiler,tooling,acvm-repo};
+     a stamp taken over an empty list matches every build. Check the paths."
+STAMP_WANT="$( { printf '%s\n' "$STAMP_TREE" | xargs sha256sum
+                 sha256sum "$CRATE_DIR/.cargo/config.toml" "$NOIR_ROOT/Cargo.lock"; } \
+               | sha256sum | cut -d' ' -f1)"
 
 if [ "$FORCE" = 0 ] && [ -f "$OUT" ] && [ -f "$STAMP" ] && \
    [ "$(cat "$STAMP" 2>/dev/null)" = "$STAMP_WANT" ]; then

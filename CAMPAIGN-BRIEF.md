@@ -636,7 +636,33 @@ m28 353  m29 127
                                                        CAMPAIGN TOTAL 10,178
 ```
 
-**M30 TOOK IT TO 10,381, AND MOVED NOTHING ELSE.** Re-measured M0-M30 on 2026-08-28 by M30's
+**M30's REVIEW TOOK IT TO 10,396, AND MOVED NOTHING ELSE.** Re-measured M0-M30 on 2026-08-28 by
+M30's review, after its last commit, `setsid`-detached in this repository's own dev shell, one
+milestone at a time with nothing else running, `TMPDIR` and the log under `~/.cache`, **no hole in
+the log** (62 markers for 31 milestones), **30 of 31 exit 0**:
+
+```
+m0 156  m1 175  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
+m28 353  m29 127  m30 218
+                                                       CAMPAIGN TOTAL 10,396
+```
+
+**Every one of M0-M29 came out at its reference value TO THE ASSERTION**, and 10,381 + 15 = 10,396
+exactly. The fifteen are M30's own, in two checks: `test_vfs_multifile_compiles` 67 -> **80** (+3
+for the decoy calibration turned from a pair of numbers into an arm, +10 for `[package].entry`
+measured IN THE BROWSER, which M5 had shown only the native suite could see) and
+`test_vfs_compile_errors_carry_positions` 41 -> **43** (the `Diagnostic` envelope pinned beside its
+label, because the header claimed "no line and no column anywhere" and only the label half was read
+out of the file). **M9 did not flake** — 807, 7/7, exit 0 in 1,281 s, immediately after M8's build,
+D19's standing hypothesis, twice in a row now. **M11 is the one red and it is still the ninth
+upstream move** at `7471a61f1a`: 259 with nine failing assertions and the count unchanged, not
+repaired, `carry/` left at HEAD. The two files `verify-m11` rewrites were checksummed before
+(`aaeb6877…`, `ec959b84…`), came out as `79f597b2…` / `3836c2b6…`, and were restored to the
+pre-sweep digests.
+
+**M30 WAS DECLARED AT 10,381, AND MOVED NOTHING ELSE.** Re-measured M0-M30 on 2026-08-28 by M30's
 implementation, `setsid`-detached in this repository's own dev shell, one milestone at a time with
 nothing else running, `TMPDIR` and the log under `~/.cache`, **no hole in the log** (62 markers for
 31 milestones), **30 of 31 exit 0**:

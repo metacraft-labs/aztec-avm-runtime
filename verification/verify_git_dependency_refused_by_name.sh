@@ -22,9 +22,29 @@
 #     `git clone --depth 1 --branch <tag>` into `$HOME/nargo`, and discards the status
 #     (`:61-64`), so a failed clone still returns `Ok`.
 #
+# THE NEEDLE CENSUS, RE-TAKEN, BECAUSE THE PUBLISHED ONE DID NOT REPRODUCE. This header said
 # `grep -rn 'refus|not supported|only github'` over `compiler/wasm/src`,
-# `tooling/nargo_toml/src` and `tooling/tracer_wasm/src` finds exactly two hits, and both are
-# about the GitHub resolver declining a NON-github URL so the next resolver can try.
+# `tooling/nargo_toml/src` and `tooling/tracer_wasm/src` finds "exactly two hits, and both are
+# about the GitHub resolver declining a NON-github URL so the next resolver can try". Measured
+# by M30's review, over exactly those trees and excluding M30's own `vfs.rs` and
+# `compile_vfs.rs`, there is **ONE**:
+#
+#     compiler/wasm/src/noir/dependencies/github-dependency-resolver.ts:50:
+#         throw new Error('Only github dependencies are supported');
+#
+# and it is not a decline-and-continue: `resolveDependency:35-37` has ALREADY `return null`ed
+# for any non-github host, and the guard beside the throw compares a `URL` object with `null`,
+# which is always true — so it is unreachable, and it names no dependency either way. The
+# decline-and-continue is the `return null`, which these needles do not match at all.
+# `tooling/tracer_wasm/src` (which exists only in the `wasm/webpage` worktree) has zero.
+#
+# And the census has already gone stale inside its own repository: run today WITHOUT excluding
+# M30's own work it is about forty hits, because `vfs.rs` and `compile_vfs.rs` live in
+# `compiler/wasm/src` and are full of the word. A census whose haystack now contains the thing
+# whose absence it was counting is `CAMPAIGN-BRIEF.md`'s "ask what the haystack is".
+#
+# So the stable statement is: **one pre-existing hit, unreachable, naming nothing.** §7's three
+# re-derived facts, each with a paired negative control, are what hold this deliverable up.
 #
 # So "a virtual filesystem cannot fetch" had three possible answers and none of them was a
 # refusal: fetch it anyway, clone it anyway, or throw a sentence with no nouns in it. M30's
