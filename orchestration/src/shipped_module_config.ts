@@ -38,9 +38,12 @@
 // `{ collectExecutionSteps }` now.
 //
 // What is deliberately NOT relaxed is the key SET. `patchFieldsFor` builds its object from
-// `PATCH_REQUIRED_CONFIG_FIELDS`' own keys and asserts, at run time, that what it produced has
-// exactly those keys — so this door cannot become a second, undeclared way to add a field to the
-// encoding. That is the same discipline `encodingDifferences` enforces from the other end: the
+// `PATCH_REQUIRED_CONFIG_FIELDS`' own keys and from nowhere else, so this door cannot become a
+// second, undeclared way to add a field to the encoding — a guarantee of CONSTRUCTION, which is
+// why the run-time check beside it is over the CALLER's option keys rather than over the ones this
+// function just built out of the declared list. (It was the latter until M29's review, and a
+// comparison of `Object.keys(X)` with `Object.keys(X)` cannot fail; see the function.) That is the
+// same discipline `encodingDifferences` enforces from the other end: the
 // delta between the two encodings is computed from the bytes, and a second key would fail it. A
 // value change does not move that delta — `config.collectExecutionSteps` is "present on the right
 // only" whichever way it is set — which is why the assertion is on the keys and the check that
@@ -74,25 +77,39 @@ export interface ShippedModuleOptions {
 /**
  * The patch-required fields, with the values this caller asked for.
  *
- * **The key set is asserted, not assumed.** It is built from `PATCH_REQUIRED_CONFIG_FIELDS`' own
- * keys and compared against them afterwards, so this function cannot become a second way to add a
- * field to the encoding. The comparison is over sorted key lists rather than a count, because two
- * different keys have the same count.
+ * **The key set is enforced by CONSTRUCTION, and the run-time check is over the CALLER's keys.**
+ * That distinction is M29's review's correction and it is worth stating, because the first version
+ * of this function claimed the stronger thing and delivered a check that could not fire: `out` was
+ * built by iterating `Object.keys(PATCH_REQUIRED_CONFIG_FIELDS)` and then compared against
+ * `Object.keys(PATCH_REQUIRED_CONFIG_FIELDS)`, so `produced === declared` for every input that
+ * exists and the `throw` was unreachable — `CAMPAIGN-BRIEF.md`'s "an assertion must be capable of
+ * failing", in the function the milestone advertises as asserting something at run time.
+ *
+ * The property itself was never in doubt and is not weakened here: `out` still takes its keys from
+ * the declared set and nowhere else, so a caller cannot add one, and
+ * `e2e_form_a_external_tx_roundtrip` Part 8 computes the encoding DELTA from the decoded bytes and
+ * injects a second key to prove that comparison can fail. What is checked here now is the half
+ * nothing covered: an OPTION KEY THIS FUNCTION DOES NOT KNOW. TypeScript's excess-property check
+ * only reaches object literals, so `patchFieldsFor(opts)` with a misspelled `collectExecutionStep`
+ * compiled, silently produced `false`, and the page then failed four layers away with
+ * `ExecutedStepsUnavailable`. That is now a named error at the boundary, and it is an error the
+ * tests can produce.
  */
 export function patchFieldsFor(options: ShippedModuleOptions = {}): Readonly<Record<string, boolean>> {
-  const asked: Record<string, boolean> = { collectExecutionSteps: options.collectExecutionSteps ?? false };
-  const out: Record<string, boolean> = {};
-  for (const key of Object.keys(PATCH_REQUIRED_CONFIG_FIELDS)) {
-    out[key] = asked[key] ?? PATCH_REQUIRED_CONFIG_FIELDS[key]!;
-  }
-  const declared = Object.keys(PATCH_REQUIRED_CONFIG_FIELDS).sort().join(',');
-  const produced = Object.keys(out).sort().join(',');
-  if (declared !== produced) {
+  const declaredKeys = Object.keys(PATCH_REQUIRED_CONFIG_FIELDS);
+  const unknown = Object.keys(options).filter(k => !declaredKeys.includes(k));
+  if (unknown.length > 0) {
     throw new Error(
-      `patchFieldsFor produced the keys [${produced}] where PATCH_REQUIRED_CONFIG_FIELDS declares `
-        + `[${declared}]. The encoding delta this runtime declares is exactly the declared set; a `
-        + 'field added here rather than there would ride into the module unannounced.',
+      `patchFieldsFor was asked for [${unknown.sort().join(', ')}], which PATCH_REQUIRED_CONFIG_FIELDS `
+        + `does not declare; it declares [${declaredKeys.sort().join(', ')}]. A key this function does `
+        + 'not know is silently dropped, and the caller then gets the DEFAULT for the field it meant '
+        + 'to set — which is how a page asking for an executed step stream comes to have none.',
     );
+  }
+  const asked = options as Record<string, boolean | undefined>;
+  const out: Record<string, boolean> = {};
+  for (const key of declaredKeys) {
+    out[key] = asked[key] ?? PATCH_REQUIRED_CONFIG_FIELDS[key]!;
   }
   return Object.freeze(out);
 }
