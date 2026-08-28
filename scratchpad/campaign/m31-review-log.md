@@ -572,3 +572,24 @@ Plus three smaller ones: the module is **not pinned** (no committed lock, no `--
 `+3 / −7` is git's `3 insertions, 8 deletions`, and both re-derivations share the blind spot.
 
 **M31 = 421** (130 / 59 / 135 / 97). **Campaign total 10,820**, M0–M31, 31 of 32 exit 0.
+
+---
+
+## Step 14 — the documentation commits, confirmed inert
+
+The sweep was taken after my last code commit; the two documentation commits (this log, the brief's
+two new entries, the milestone's sweep block) landed after it, which is the shape that has read as
+a regression three times in this campaign. Re-run afterwards, in the same dev shell, the milestones
+that read those documents or the specs tree:
+
+```
+m0 156 rc=0    m1 175 rc=0    m11 262 rc=1    m16 223 rc=0    m31 421 rc=0
+```
+
+Every one at its reference value to the assertion, and M11's rc=1 is still the ninth upstream move.
+`carry/` restored to its pre-run digests afterwards.
+
+**And `codetracer-specs` moved twice under this review** — ten foreign commits before my first push
+and five more before my second. Both times the range was checked against `upstream-bugs/` before
+anything was concluded, and the `aztec-*` directory count is 7 with M31's one addition, which is
+what M11's 262 rests on.
