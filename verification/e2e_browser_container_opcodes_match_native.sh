@@ -126,6 +126,13 @@ m29_cmp() { awk -F'\t' -v k="$1" '$1 == k { print $2; found = 1 } END { if (!fou
 note "$(m29_cmp compared) compared, $(m29_cmp mismatches) mismatch(es), $(m29_cmp excluded) field(s) excluded"
 assert_eq "every record was compared" "$COUNT" "$(m29_cmp compared)"
 assert_eq "…field for field, with NOTHING excluded" "0" "$(m29_cmp excluded)"
+# AND THE COMPARISON IS NOT SHALLOW: the residue is what the parser could not PLACE, and a regex
+# too narrow for its input silently shortens both sides equally. It is printed by the comparator
+# (`CAMPAIGN-BRIEF.md`'s "write scanners that PRINT the residue") and was read by nothing until
+# M29's review; a zero here is what says all 38,903 lines were parsed into six fields each rather
+# than dropped into a bucket nobody looked in.
+assert_eq "…having placed every line of the native transcript into six fields" "0" "$(m29_cmp leftResidue)"
+assert_eq "…and every line of the browser's" "0" "$(m29_cmp rightResidue)"
 assert_eq "…and the browser's stream is the native one, record for record" "0" "$(m29_cmp mismatches)"
 assert_eq "…including the first" "$(head -1 "$NATIVE_RECORDS")" "$(head -1 "$BROWSER_RECORDS")"
 assert_eq "…and the last" "$(tail -1 "$NATIVE_RECORDS")" "$(tail -1 "$BROWSER_RECORDS")"
@@ -152,6 +159,22 @@ assert_false "the context control really differs from the subject" cmp -s "$BROW
 python3 "$VERIFY_DIR/_m29_record_compare.py" "$NATIVE_RECORDS" "$CTL_DIR/ctx.records" >"$CTL_DIR/ctx.txt"
 assert_eq "one altered context id adds exactly one mismatch" "$((BASE_MM + 1))" \
   "$(awk -F'\t' '$1 == "mismatches" { print $2 }' "$CTL_DIR/ctx.txt")"
+
+# THE EXCLUSION MACHINERY, EXERCISED IN BOTH DIRECTIONS — because until M29's review the assertion
+# "with NOTHING excluded" above read `len(sys.argv[3:])` of an invocation THIS FILE makes with no
+# arguments, so it reported a property of its own call site and could not fail. An empty exclusion
+# list is only a claim worth making if a non-empty one is a thing the instrument can produce and if
+# excluding a field demonstrably changes the answer. Both are measured here, over the ctx-corrupted
+# copy whose one mismatch is known from the assertion above.
+python3 "$VERIFY_DIR/_m29_record_compare.py" "$NATIVE_RECORDS" "$CTL_DIR/ctx.records" ctx \
+  >"$CTL_DIR/ctx-excluded.txt"
+assert_eq "the comparator reports the SIZE of an exclusion list it is actually given" "1" \
+  "$(awk -F'\t' '$1 == "excluded" { print $2 }' "$CTL_DIR/ctx-excluded.txt")"
+assert_eq "…naming the excluded field rather than only counting it" "ctx" \
+  "$(awk -F'\t' '$1 == "excludedField" { print $2 }' "$CTL_DIR/ctx-excluded.txt")"
+assert_eq "…and excluding the field the corruption is IN hides that corruption, which is why the \
+list above is asserted empty" "$BASE_MM" \
+  "$(awk -F'\t' '$1 == "mismatches" { print $2 }' "$CTL_DIR/ctx-excluded.txt")"
 
 sed '23s/ op=\([0-9]*\) / op=99 /' "$BROWSER_RECORDS" >"$CTL_DIR/op.records"
 assert_false "the opcode control really differs from the subject" cmp -s "$BROWSER_RECORDS" "$CTL_DIR/op.records"
