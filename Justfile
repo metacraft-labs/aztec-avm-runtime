@@ -2434,3 +2434,92 @@ verify-m29:
       echo "verify-m29: all checks passed"
     fi
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M30 — compiling Noir from a virtual filesystem
+#
+#   just verify-m30-multifile      test_vfs_multifile_compiles
+#   just verify-m30-positions      test_vfs_compile_errors_carry_positions
+#   just verify-m30-retrace        e2e_vfs_edit_recompile_retrace
+#   just verify-m30-git-refusal    verify_git_dependency_refused_by_name
+#   just verify-m30                all four, in order
+#
+# WHAT THEY NEED. Two wasm modules and a chromium, and `lib_m30_vfs.sh` builds both itself
+# because "never depend on state you did not produce":
+#
+#   `noir_wasm.wasm`         M30's own — `../noir` (branch `blocktracer`), `compiler/wasm`,
+#                            built by `verification/build_noir_vfs_wasm.sh` through
+#                            `nix shell nixpkgs#rustup`, because neither dev shell carries a
+#                            wasm32-unknown-unknown rust std. Stamped on the CONTENT of its
+#                            sources rather than on a revision, because the milestone's own
+#                            work is uncommitted by construction.
+#   `noir_tracer_wasm.wasm`  M24's and M26's — `../noir-wt4-webpage`, built READ-ONLY by
+#                            `verification/build_noir_tracer_wasm.sh`, which refuses to build
+#                            from a worktree carrying any edit but M26's one tolerated file
+#                            and refuses if that worktree's HEAD has become published. It also
+#                            needs `nixpkgs#capnproto`: without it the build dies with
+#                            `exit status: 101` four crates deep, which reads like a broken
+#                            branch rather than a missing tool.
+#
+# THE ARMS ARE M30's OWN and are not M27's. `tools/run_vfs_arms.mjs` serves
+# `verification/m30/page/` with the two modules beside it and drives it through
+# `tools/browser_cdp.mjs` — the same dependency-free CDP client M27 uses, and nothing else of
+# M27's. There is no bundler in this path: the page fetches two `.wasm` files and calls their
+# C ABIs, so if a check finds a compiled Noir program at the end of it, no JavaScript
+# compiled it.
+#
+# A NOTE ON COST. The first run builds two wasm modules and then compiles Noir programs
+# eighteen times inside a browser. `M30_ARMS_TIMEOUT` (1800 s) and `M30_BUILD_TIMEOUT`
+# (1800 s) bound it; exceeding either is a named failure rather than a hang.
+# ---------------------------------------------------------------------------
+
+verify-m30-multifile:
+    @verification/test_vfs_multifile_compiles.sh
+
+verify-m30-positions:
+    @verification/test_vfs_compile_errors_carry_positions.sh
+
+verify-m30-retrace:
+    @verification/e2e_vfs_edit_recompile_retrace.sh
+
+verify-m30-git-refusal:
+    @verification/verify_git_dependency_refused_by_name.sh
+
+# Build the two wasm modules M30's page loads, without running a check.
+m30-modules:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    verification/build_noir_vfs_wasm.sh
+    verification/build_noir_tracer_wasm.sh
+
+# Re-measure the M30 VFS arms into $M30_WORK/vfs.json.
+m30-arms:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    work="${M30_WORK:-$HOME/.cache/aztec-m30-vfs}"
+    mkdir -p "$work"
+    noir="$(verification/build_noir_vfs_wasm.sh | tail -1)"
+    tracer="$(verification/build_noir_tracer_wasm.sh | tail -1)"
+    M30_NOIR_WASM="$noir" M30_TRACER_WASM="$tracer" \
+      node tools/run_vfs_arms.mjs "$work" > "$work/vfs.json"
+    echo "m30-arms: wrote $work/vfs.json"
+
+verify-m30:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      test_vfs_multifile_compiles \
+      test_vfs_compile_errors_carry_positions \
+      e2e_vfs_edit_recompile_retrace \
+      verify_git_dependency_refused_by_name
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m30: FAILED" >&2
+    else
+      echo "verify-m30: all checks passed"
+    fi
+    exit "$rc"

@@ -1,0 +1,31 @@
+<!doctype html>
+<!--
+  The M30 page: a tree of Noir sources held in the browser, compiled and traced in-page.
+
+  There is no bundler and no generated glue here. `vfs_page.mjs` fetches two `.wasm` files
+  and talks to them through their C ABIs, which is the point: the compile and the trace
+  demonstrably happen inside WebAssembly, because nothing else is present that could be
+  doing them.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Noir from a virtual filesystem</title>
+    <style>
+      body { font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2rem; }
+      #status { color: #444; }
+      pre { background: #f6f6f6; padding: 1rem; overflow-x: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>Noir from a virtual filesystem</h1>
+    <p id="status">loading…</p>
+    <p>
+      This page holds a tree of Noir sources in memory, resolves its <code>Nargo.toml</code>,
+      compiles it, and traces the result to a <code>.ct</code> container — all inside
+      WebAssembly, with no filesystem and no network.
+    </p>
+    <pre id="out"></pre>
+    <script type="module" src="./vfs_page.mjs"></script>
+  </body>
+</html>

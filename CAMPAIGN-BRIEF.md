@@ -35,11 +35,36 @@ load).
 Each of these is a defect that shipped, not a precaution.
 
 ### An assertion must be capable of failing
-**Thirty-three instances.** (M29's review added the 31st, 32nd and 33rd — a needle with a space in
+**Thirty-six instances.** (M29's review added the 31st, 32nd and 33rd — a needle with a space in
 it asked of a minified bundle, an assertion over the number of arguments the check itself passed,
 and a run-time key-set check over keys the function had just built from that very set; all three
 are below, all three were in M29's own work, and all three were found by asking of each green
-assertion what input would make it red.)
+assertion what input would make it red. **M30 added the 34th and the 35th and found both in its
+OWN work, before the milestone closed, with the instrument that exists for it** — its decoy
+control compared two artifacts after EDITING a `.nr` file that is not part of the program, and an
+edit to a file the compiler never reads cannot change the artifact whatever the resolver does, so
+the mutation that made the resolver swallow the WHOLE virtual filesystem left those assertions
+GREEN; and its dependency-sensitivity fixture changed `x + x` to `x + x + x - x`, which is
+different SOURCE and the same CIRCUIT, folded back by the SSA passes. The first is fixed by making
+the decoy an ADDITION rather than an edit — a file that enters the source set enters the
+`FileManager` and shifts every later `FileId`, which is what the program `hash` is based on, so
+the hash discriminates and the bytecode does not. The second went red on its own first run.
+**M30's REVIEW ADDED THE 36th, AND IT IS THE PAIR THAT PROVED THE 34th.** M30 published the decoy
+calibration as a measured pair in four places — "the hash goes from 1206613220 to 4090147220" —
+and nothing re-derived it; re-taken by the review against the same module the checks build, the
+true pair is **1076565353 -> 848041253**, because the fixture had moved under the figure. That is
+the "a figure nobody re-derives rots" family. But the *assertion* that could not fail is the one
+beside it, in BOTH browser checks: `trees.sha256 == trees.servedSha256`, where the arms runner
+COPIES the fixture into the served site and then hashes both ends itself, in one process — two
+digests of one file, equal by construction, advertised as "the trees the page compiled are
+byte-identical to the ones this check names". The check named nothing; it read two numbers out of
+the report. It takes the left-hand digest itself now, and a report measured over a different
+fixture is red: demonstrated at
+`a372fb3c…` (disk) against `450b56b6…` (served), one failure, where the old form was green.
+**And the remedy for the rotted pair is not a corrected number** — it is
+`multifileDecoyAddedUnderSrc`, the same file one directory lower where the resolver's own rule
+puts it IN the program, so the calibration "the hash CAN move, and even then the bytecode does
+not" is three assertions measured on every run and neither number appears anywhere.)
 (Five places quote the running total: this line, the two M18 checks
 `lib_m18_orchestration.sh` and `verify_no_telemetry_client_in_import_graph.sh`, and the two M19
 files `fault_injection.ts` and `e2e_differential_wasm_vs_native_cpp.sh`. M18's review added three,
@@ -480,6 +505,21 @@ crossing identity, the non-degeneracy and the heap ratio. **Rule:** when a mutat
 *which* assertions went red. "The check failed" and "the check saw what I broke" are different
 statements, and only the second is coverage.
 
+**AND THERE IS A THIRD STATE: A MUTATION THAT GOES GREEN BECAUSE IT WAS SILENTLY UNDONE, PRINTED
+AS THE ARM'S RESULT.** M30's M11 arm hollows the shared browser arm report to exercise the
+die-before-summary path. Run alone it produces the 1 / 2 it is written for; run as `M10 M11` —
+which is how a full matrix runs — M30's review measured **67 / 0 and 44 / 0, rc 0, with nothing
+saying the mutation had been undone**. The cause is a race the arm cannot win: every preceding arm
+leaves the module's content stamp naming ITS mutated sources, `m30_require_modules` runs BEFORE
+the staleness predicate, so the first check rebuilds the module, the fresh module is newer than
+the report the arm just `touch`ed, and the harness helpfully re-measures over the hollow. **This
+is worse than a mutation that reddens for the wrong reason, because a green arm reads as absent
+coverage of a property that is in fact covered — or, if the author happened to run it in a
+working order, as coverage that is in fact fragile.** The remedy generalises to any arm that
+mutates a *cached measurement* rather than a source: bring the cache's producer current BEFORE
+mutating it, and then assert after the run that the mutation is STILL THERE — if it is not, fail
+naming the cause instead of printing a result.
+
 ### Exit status *and* the specific failure mode
 Counts alone miss a binary printing `132 ran / 132 PASSED` while exiting 7.
 Exit status alone misses a discriminator failing for the wrong reason.
@@ -595,6 +635,31 @@ m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
 m28 353  m29 127
                                                        CAMPAIGN TOTAL 10,178
 ```
+
+**M30 TOOK IT TO 10,381, AND MOVED NOTHING ELSE.** Re-measured M0-M30 on 2026-08-28 by M30's
+implementation, `setsid`-detached in this repository's own dev shell, one milestone at a time with
+nothing else running, `TMPDIR` and the log under `~/.cache`, **no hole in the log** (62 markers for
+31 milestones), **30 of 31 exit 0**:
+
+```
+m0 156  m1 175  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
+m28 353  m29 127  m30 203
+                                                       CAMPAIGN TOTAL 10,381
+```
+
+**Every one of M0-M29 came out at its reference value TO THE ASSERTION**, and 10,178 + 203 = 10,381
+exactly. M30 added four checks and moved no other milestone's count: it vendors nothing
+(`verify_provenance_complete` 64), declares no pin (`verify_pinned_nightly_single_source` 28), adds
+no `| grep -q` predicate (`verify_no_pipeline_predicates` 69), and its two new `REUSE-INVENTORY.md`
+entries add no assertion (`verify_reuse_inventory_complete` is `>= 20` on the entry count, so it
+stays 19). `verify_named_checks_exist` stays 9 and `just check-repo-hygiene` stays 28.
+**The one non-zero exit is M11's and it is the ninth upstream move** — 259 with **nine** failing
+assertions and the count unchanged, which is the recorded signature; `carry/` is left at HEAD, and
+the two files `verify-m11` rewrites were checksummed before the sweep (`aaeb6877…`, `ec959b84…`)
+and restored to those exact digests after it. **M9 did NOT flake**: 807, 7/7, exit 0 in 1,281 s,
+immediately after M8's build, which is D19's standing hypothesis and it did not fire.
 
 **M29'S REVIEW MOVED EXACTLY ONE MILESTONE AND IT IS M29'S OWN.** 105 -> **127**, in two checks and
 nothing else: `test_browser_steps_are_executed_not_mapped` 52 -> **69** (+4 for the revert

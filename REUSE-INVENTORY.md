@@ -836,10 +836,29 @@ component is and what it costs us, and does not repeat the deletion.
 - confidence: measured
 
 
+### RI-76 — The in-memory compile seam in `noir/compiler/wasm`
+- upstream: `noir-lang/noir`'s `compiler/wasm` — `PathToFileSourceMap` and `file_manager_with_source_map` (`src/compile.rs:131-159`, `:248-265`), `compile_new.rs`'s `CompilerContext`, and the TypeScript resolver chain in `src/noir/*.ts`
+- covers: -
+- decision: extend
+- milestone: M30
+- why: M30's deliverable is a tree of Noir sources held in a browser that compiles in-page. **What already existed, and it is most of it**: `compiler/wasm` is built around an in-memory `path -> source` map — `PathToFileSourceMap` — that becomes an `fm::FileManager` through `file_manager_with_source_map`, and `compiler/fm/src/lib.rs` has no `std::fs` in it at all; `test/compiler/browser/compile.test.ts:30-35` already compiles `test/fixtures/with-deps` — a local `path` dependency, transitively onto a second one — in a browser, through webpack's `resolve.alias: { fs: 'memfs' }`. So the multi-file case is what the seam was designed for and none of it was rewritten. **What did not exist**, measured with the needles named before any of it was written: (1) the Rust side never parses a `Nargo.toml` — the crate graph arrives pre-computed from JavaScript as a `DependencyGraph` (`compile.rs:126-130`), and everything that produces one needs `@ltd/j-toml`, a `FileManager` shim and, for anything remote, a live `fetch`; (2) `[package].entry` is ignored (`src/noir/package.ts:62-80` hard-codes `lib.nr`/`main.nr`) where native `nargo` honours it (`tooling/nargo_toml/src/lib.rs:193-200`), so a manifest declaring a custom entry compiles a **different file** through `noir_wasm` than through `nargo`, silently; (3) a `git` dependency is *fetched* rather than refused — see RI-77's sibling paragraph and `verify_git_dependency_refused_by_name`'s header; (4) `errors.rs:83-104`'s `Diagnostic` carries byte offsets and no line and no column, and its consumer reconstructs one with `lineOffsets.findIndex((offset) => offset > secondary.start)` — an index printed as a line number. `compiler/wasm/src/vfs.rs` adds those four to the crate that already had the seam, rather than starting a fifth in-memory compiler beside `compile.rs`, `compile_new.rs`, the TypeScript chain and `tooling/tracer_wasm`'s `compile_source`. It registers each package with `prepare_dependency` at its own VFS entry path, the way `tooling/nargo/src/lib.rs:35-50` does natively, rather than re-keying library sources to `<alias>/<suffix>` the way `package.ts:112-114` does — which is what lets a diagnostic inside a dependency name a path the caller actually supplied.
+- rejection-reason: n/a
+- confidence: measured
+
+### RI-77 — A `.ct` container from Noir source inside WebAssembly
+- upstream: none — `tooling/tracer_wasm` is this organisation's own, on `noir`'s unpublished `wasm/webpage` branch (`src/lib.rs:233-282`, `src/ctfs_sink.rs`)
+- covers: -
+- decision: depend
+- milestone: M30
+- why: M30's third deliverable is a page that edits a file, recompiles and re-traces. The re-trace half already exists and is already built against the writer this campaign pins: `TeeSink` over `CtfsTraceWriter` at `pins.json`'s `trace_format` anchor, reached through the import-free `ct_trace_source_container` C ABI, which takes a `path -> source` map and an entry point and hands back real `.ct` bytes. M24 established that it builds against the same writer crates at the same revision and M26 demonstrated a joined container with it, so M30 **depends on it unchanged** and adds nothing to it. The worktree it lives in is treated as read-only and that is enforced rather than instructed: `verification/build_noir_tracer_wasm.sh` refuses to build from a worktree carrying any edit but the one `build_oq7_shared_writer_probe.sh` already tolerates by name, and refuses if that branch's HEAD has become reachable from a published remote ref — which would contradict `JOIN-SHAPE.md` §2 fact 7, the fact OQ-7's whole "not shippable" verdict rests on. What M30 does NOT do is give the tracer a manifest: `TraceRequest` carries `files` and `entry_point` and nothing else, and `compile_source` builds exactly one crate with no `prepare_dependency` and no `add_dep`. The join is therefore that the tracer is handed `plan.sources` and `plan.entry_point` and nothing else, and `e2e_vfs_edit_recompile_retrace` §4 compares what it was handed against what the resolver decided rather than asserting that they must agree.
+- rejection-reason: n/a
+- confidence: measured
+
+
 ---
 
 ## Not in this inventory, and why
 
 - **wasi-sdk** — a binary toolchain release, consumed and deliberately not forked. Packaged in `nix/wasi-sdk.nix` only because nixpkgs has no `wasi-sdk` attribute. Recorded in M0's reuse audit.
-- **`noir-lang/noir`** — belongs to the separate Noir tracing campaign and is untouched here. Its `tooling/ssa_fuzzer` is a *driver* for RI-34, not a component of this runtime.
+- **`noir-lang/noir`** — its `tooling/ssa_fuzzer` is a *driver* for RI-34, not a component of this runtime. **This bullet said "untouched here" until M30, and M30 made that false**: `compiler/wasm` is where M30's virtual-filesystem resolver lives (RI-76) and `tooling/tracer_wasm` is what produces its `.ct` (RI-77). Recorded rather than deleted, because the sentence was true for twenty-nine milestones and a reader of the history needs to know when it stopped being.
 - **`AztecProtocol/protocol-specs-pdf` and `AztecProtocol/engineering-designs`** — both **unlicensed** (`license: null`, `/license` 404, no LICENSE file). Read-only. Must not be vendored or redistributed, and are not.
