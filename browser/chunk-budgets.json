@@ -1,10 +1,10 @@
 {
   "//": [
-    "CHUNK BUDGETS \u2014 recorded, enforced, and a BUILD FAILURE when exceeded.",
+    "CHUNK BUDGETS — recorded, enforced, and a BUILD FAILURE when exceeded.",
     "",
     "M27's deliverable: 'chunk budgets recorded and enforced, so a regression is a build failure",
-    "rather than a discovery'. The shape is upstream's \u2014 aztec-packages/playground/vite.config.ts",
-    "declares a list of { pattern, maxSizeKB, description } and its plugin THROWS on a violation \u2014",
+    "rather than a discovery'. The shape is upstream's — aztec-packages/playground/vite.config.ts",
+    "declares a list of { pattern, maxSizeKB, description } and its plugin THROWS on a violation —",
     "and so is the discipline: their limits carry a per-bump log naming what grew and why. Ours is",
     "the `bumps` array, which is data rather than a comment so that a check can read it.",
     "",
@@ -16,7 +16,7 @@
     "    no budget FAILS THE BUILD. 'the budget did not catch it' and 'nothing had a budget' are",
     "    indistinguishable from the outside.",
     "  * PER-ENTRY EAGER TOTALS as well as per-file sizes. A per-file budget cannot see the",
-    "    regression that matters for DD-11 \u2014 a lazily-loaded megabyte moving into the eager set \u2014",
+    "    regression that matters for DD-11 — a lazily-loaded megabyte moving into the eager set —",
     "    because every individual file can stay the same size while the SET grows. `entryBudgets`",
     "    is the transitive closure of an entry point's STATIC imports, which is exactly what a page",
     "    pays before it does anything.",
@@ -29,7 +29,7 @@
       "name": "entry-browser",
       "pattern": "^browser\\.js$",
       "maxGzipKB": 4,
-      "description": "the reference entry point's own module \u2014 DD-5's browser surface",
+      "description": "the reference entry point's own module — DD-5's browser surface",
       "bumps": []
     },
     {
@@ -44,6 +44,20 @@
       "pattern": "^demo\\.js$",
       "maxGzipKB": 5,
       "description": "the demo page's own script",
+      "bumps": []
+    },
+    {
+      "name": "entry-worker",
+      "pattern": "^worker\\.js$",
+      "maxGzipKB": 4,
+      "description": "M32: the worker entry's own module — the dev node's dispatcher, the comlink transport and the protocol declarations. The runtime it hosts is in the shared chunks it imports, which is why this number is a kilobyte rather than a hundred.",
+      "bumps": []
+    },
+    {
+      "name": "entry-worker-demo",
+      "pattern": "^worker-demo\\.js$",
+      "maxGzipKB": 5,
+      "description": "M32: the worker demo page's own script — the client, the five arms and the main-thread control",
       "bumps": []
     },
     {
@@ -116,6 +130,20 @@
       "entry": "node/node.js",
       "maxGzipKB": 245,
       "description": "the Node entry's eager set. Larger than the browser entry's only because the Node pass does not share chunks with the browser pass, not because it carries anything the browser entry does not.",
+      "bumps": []
+    },
+    {
+      "name": "worker",
+      "entry": "worker.js",
+      "maxGzipKB": 320,
+      "description": "M32, and it is the DD-5 number for the worker: everything the WORKER thread downloads before it can do anything. It hosts the same runtime the browser entry does plus comlink and the protocol's zod schemas, and it must contain no more of the proving stack or the contract artifacts than the browser entry does — which is nothing.",
+      "bumps": []
+    },
+    {
+      "name": "worker-demo",
+      "entry": "worker-demo.js",
+      "maxGzipKB": 320,
+      "description": "what the worker demo page costs on first paint. It carries the main-thread CONTROL as well as the client, so it necessarily reaches the runtime too.",
       "bumps": []
     }
   ]

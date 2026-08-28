@@ -35,7 +35,7 @@ load).
 Each of these is a defect that shipped, not a precaution.
 
 ### An assertion must be capable of failing
-**Thirty-six instances.** (M29's review added the 31st, 32nd and 33rd — a needle with a space in
+**Thirty-seven instances.** (M29's review added the 31st, 32nd and 33rd — a needle with a space in
 it asked of a minified bundle, an assertion over the number of arguments the check itself passed,
 and a run-time key-set check over keys the function had just built from that very set; all three
 are below, all three were in M29's own work, and all three were found by asking of each green
@@ -261,6 +261,25 @@ The forms seen so far:
   only, so `patchFieldsFor(opts)` with a misspelled `collectExecutionStep` compiled, silently
   produced `false`, and the page failed four layers away with `ExecutedStepsUnavailable`.
 
+- **A CONTROL OVER A SECOND COPY OF THE MECHANISM IT CONTROLS, WITH THE COMMENT ABOVE THE LINE
+  STATING THE LINE'S NEGATION.** M32's third headline measurement is "the `.ct` container was
+  TRANSFERRED, and `detached` is `ArrayBuffer.prototype.detached` — the platform's own answer, not an
+  inference from a zero length". The worker shipped
+  `detached: buffer === null ? false : buffer.byteLength === 0` — *the inference* — with that sentence
+  as the comment directly above it, and in `WORKER-NODE.md` §4, and in the milestone section twice,
+  and in the check's own §5 header. The milestone had ALREADY seen the hazard and answered it with a
+  `zeroLengthControl`: a zero-length buffer that was never transferred, `{0, false}`, "the one
+  combination an inference cannot produce". **But the control was a SECOND EXPRESSION over a SECOND
+  buffer** — `empty.detached === true` — so it constrained its own code and not the container's, and
+  the only zero-length buffer the container path produces IS the transferred one, so the inference
+  and the platform agreed at every reading the check takes. Confirmed in the BUILT bundle
+  (`detached:e===null?!1:e.byteLength===0`), not only in the source. *A control has to run through the
+  instrument, not beside it*: the fix is one `read(b)` used for the container and for the control
+  alike, so one edit moves both. **The substantive claim survived on two legs the defect does not
+  touch** — `byteLength` 196608 -> 0 IS the platform reporting detachment, and the second take is
+  refused by a guard that does read `buffer.detached` — which is why this is on the list rather than
+  in the section above it.
+
 **AND THE PUREST INSTANCE OF ALL IS NOT ON THAT LIST, BECAUSE THERE WAS NO ASSERTION TO BE WRONG.**
 Not counted in the running total above; it is the family the total keeps pointing at.
 **M29 found that M27's demo transaction reverted at its first instruction, closed four causes of
@@ -323,6 +342,20 @@ because two independent walks of the same closure disagreed, which is the only r
 published. `verification/_import_closure.py` uses `[^;]` now, prints its residue and has the count
 asserted at zero. **The lesson is the census one, one level up from the `mktemp -d` count: when the
 derivation IS the number, run the derivation twice, differently, before believing it.**
+
+**A RESIDUE SCANNER ASKED OF THE WHOLE FILE, IN THE CHECK WHOSE COMMENT DECLARES THE OPPOSITE.**
+M32's `_m32_doc_ops.py` exists so that "a document that states '19 operations' and lists eighteen of
+them passes a size comparison and fails this one, naming the missing one" — and it asked whether
+`` `name` `` occurred **anywhere in `WORKER-NODE.md`**. Measured by M32's review: delete
+`containerBufferState` from §2's LIST and the residue is empty, because §4 mentions the operation in
+prose. So the document could lose an entry, keep the number, and pass both comparisons. It is
+"anchor the needle to the row, not to the file" — M24's OQ-6 finding — in the instrument written to
+enforce the row-level version of it. Scoped to one bullet now, with the region's own SIZE asserted so
+"both residues are empty" cannot be "the region is empty", and with the OTHER direction added: a name
+the list carries that the bundle does not declare. **And the first draft of the fix was too wide** —
+it ended the region at the next blank line, and §2's bullets are not blank-separated, so it swallowed
+three neighbouring bullets and reported their subjects as undeclared names. A region that is too wide
+is the same defect one notch smaller; calibrate a region by running it, not by reading it.
 
 **A CHARACTER CLASS WITHOUT A DOT.** M22's vendored-diff classifier matched a relative `.ts`
 import specifier with `[A-Za-z0-9_/]+`, so `'../../telemetry.ts'` — a path with dots in it — fell
@@ -546,6 +579,29 @@ mutates a *cached measurement* rather than a source: bring the cache's producer 
 mutating it, and then assert after the run that the mutation is STILL THERE — if it is not, fail
 naming the cause instead of printing a result.
 
+**AND A FOURTH STATE, WHICH IS THE WORST YET BECAUSE THE ARM PRINTS THE RESULT IT PREDICTED: A
+MUTATION THAT NEVER APPLIED.** M32's arm M2 — "`detached` computed from the length instead of read
+from the platform" — is two substitutions. The FIRST one's needle was not in the file, because the
+source already carried the inference the mutation claims to introduce (above). `sub` printed
+`MUTATION MISS in browser/src/entry_worker.ts: '… buffer.detached === true,'` and **returned**; the
+harness runs `set -uo pipefail` without `-e`, so the arm rebuilt, ran the check, and reported
+`71 assertion(s), 1 failure(s)` — its predicted result, produced by the SECOND substitution, which
+mutated the CONTROL alone. The matrix recorded it as "the most precise arm in the matrix: one
+failure, the one assertion written for it", over a subject it had never touched. The miss is twelve
+lines above the result in the same log.
+
+This is one step past "a mutation that crashes has not exercised the assertion it was written for" —
+here nothing crashed, and one step past M30's "a mutation silently undone and printed as the arm's
+result" — here it was never applied. **Rule: a substitution that does not find its needle must abort
+the run, restore, and say so.** And the arm's PREDICTION agreeing with the arm's RESULT is not
+evidence the arm ran: it is the condition under which nobody re-reads the log.
+
+**AND A BACKUP IS ONLY AS GOOD AS THE TREE IT WAS TAKEN FROM.** The residue above is how M32's own
+stale-backup defect (below) ended: the harness's two remedies — wipe and re-take every run, and an
+in-progress marker — are both right and neither covers a source left mutated by an EARLIER session
+and then backed up. `git status --porcelain` over the mutated file set, before the backup, is the
+guard, with the tracked-ness of each path asserted rather than inferred from empty output.
+
 ### Exit status *and* the specific failure mode
 Counts alone miss a binary printing `132 ran / 132 PASSED` while exiting 7.
 Exit status alone misses a discriminator failing for the wrong reason.
@@ -661,6 +717,79 @@ m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
 m28 353  m29 127
                                                        CAMPAIGN TOTAL 10,178
 ```
+
+**M32 TOOK IT TO 11,049, AND MOVED NO OTHER MILESTONE'S COUNT.** Measured M0-M32 on 2026-08-28 by
+M32's implementation, after its last edit, `setsid`-detached in this repository's own dev shell, one
+milestone at a time with nothing else running, `TMPDIR` and the log under `~/.cache`, **no hole in
+the log** (66 markers for 33 milestones), **32 of 33 exit 0**:
+
+```
+m0 156  m1 175  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 262  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
+m28 353  m29 127  m30 218  m31 421  m32 229
+                                                       CAMPAIGN TOTAL 11,049
+```
+
+**Every one of M0-M31 came out at its reference value TO THE ASSERTION**, and 10,820 + 229 = 11,049
+exactly, with `delta +0` against a reference table naming M32's 229 in advance. **M11 is the one red
+and it is still the ninth upstream move** — 262 with nine failing assertions and the count
+unchanged, not repaired, `carry/` left at HEAD. **M9 did NOT flake** (807, 7/7, 1,290 s, immediately
+after M8's build, which is D19's standing hypothesis) and neither did M15 (537, 382 s).
+**A sweep is a writer**: `carry/rebase.json` and `carry/exposure.json` were `aaeb6877…` / `ec959b84…`
+before, came out `79f597b2…` / `3836c2b6…` — the same two post-sweep digests M31's review recorded —
+and were restored.
+
+**M32 moved no COUNT and three document FIGURES**, all three of them figures a check re-derives from
+the artefact on every run, which is how they were found. It adds two entry points to the SAME esbuild
+pass, so esbuild's splitting re-partitioned the shared chunks: `BROWSER-PACKAGING.md` §1's four eager
+rows (`browser.js` 255.79 -> **255.87 KB**, 7 -> **8** files; `testing.js` 279.77 -> **279.93**,
+8 -> **10**; the demo 280.97 -> **281.12**, 8 -> **10**; `node/node.js` unmoved, because the Node
+pass is a separate one) and its total 8,155.19 -> **8,163.43**; §6's request accounting, 13 -> **15**
+requests and 7 -> **9** shared chunks; and `BROWSER-GATE.md` §3's browser metafile input count,
+1,064 -> **1,068**. M27 re-measured at **345** and M28 at **353**, both to the assertion.
+
+**AND AN EXACT ROUNDING TIE PUT THE BUILD AND THE CHECK ONE HUNDREDTH APART.** `browser/build.mjs`
+prints `+(gzip/1024).toFixed(2)` and both `_m27_doc_figures.py` and M32's own check use Python's
+`round(gzip/1024, 2)`. The demo entry landed on exactly **281.125 KB**: JavaScript rounds half away
+from zero and printed **281.13**, Python is banker's and gives **281.12**, and a document carrying
+the build's figure is red against the check that re-derives it. The document must carry the CHECK's
+value. Recorded because the next figure that lands on a tie will do this again.
+
+### A STALE BACKUP OUTLIVING ITS SOURCE — "a mutated artefact outlived its restored source", INVERTED
+
+**One instance, in M32's own mutation harness, and it read as a defect in the subject.** The harness
+took its backup with `[ -f "$BACKUP/$f" ] || cp "$f" "$BACKUP/$f"` — copy only if one is not already
+there. That is right within one run and wrong across sessions. Measured: the backup was taken during
+a two-arm trial run; two of the five backed-up files were IMPROVED afterwards; and the next run's
+very first `restore_all` **reverted both improvements in the working tree**. The check then reported
+`MISSING` for a field whose source had been silently undone — which reads as a defect in the thing
+under test rather than in the instrument.
+
+It is the same family as the artefact that outlives its restored source, with the arrow reversed, and
+the remedy is the same rule — never depend on state you did not produce in this run. The backup
+directory is wiped and re-taken at the start of every run, and an **in-progress marker** is left
+while mutations are live so a run that died mid-mutation is refused (with an explicit
+`--restore-previous`) rather than having a fresh backup taken *of a mutated tree*, which is the same
+defect with the sign flipped.
+
+### A WORKER'S FETCHES ARE NOT IN ITS PAGE'S NETWORK LOG
+
+**One instance, caught on the first run of M32's arms, before anything was asserted on it.** The
+boot arm's page log carries `/worker.js` and **not** `/assets/avm.wasm`, because the worker fetched
+the module. So DD-11's question — "no request contained 'barretenberg'" — asked of the PAGE's log
+would have been an absence measured against a log from which the subject is excluded by
+construction, which this brief already lists twice as a defect that shipped, in a third disguise.
+The runner attaches to the worker's own CDP target with `Target.setAutoAttach`, enables `Network`
+there, and the absence is asserted over the WORKER's log with `avm.wasm` present in it as the
+positive control. `Runtime.evaluate` on that same session is also what lets the worker be *asked*
+whether it has a `document` rather than having it inferred from the file it was built into.
+
+**And `Emulation.setCPUThrottlingRate` is refused on a worker target** — `Operation is only supported
+for pages, not workers` — so the only real throttling this repository can apply to a dedicated worker
+is `Page.setWebLifecycleState('frozen')`. That is a fact about Chromium, it is measured on every run
+rather than believed, and whether the freeze *reached* the worker is measured by the worker: a gap in
+`producedAtMs`, stamped inside the worker at block-seal time, against the median gap between blocks.
 
 **M31'S REVIEW TOOK IT TO 10,820, AND MOVED EXACTLY ONE MILESTONE — M31'S OWN.** Re-measured
 M0-M31 on 2026-08-28 by M31's review, after its last commit, `setsid`-detached in this

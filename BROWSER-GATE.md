@@ -68,7 +68,7 @@ Each is taken from one of the two metafiles `browser/build.mjs` writes, and each
 §6 from the line that names it — one figure per line, because a table row carrying two numbers can
 have them swapped and still contain both.
 
-- The browser bundle's module graph has 1064 inputs.
+- The browser bundle's module graph has 1068 inputs.
 - The node bundle's module graph has 969 inputs.
 - Node builtins left external in the browser bundle: 0.
 - Node builtins left external in the node bundle: 22.

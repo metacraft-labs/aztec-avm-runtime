@@ -166,10 +166,19 @@ for (const [target, replacement] of Object.entries(REDIRECTS)) {
 // bundler saying DD-5's rule back at you. The two entry points cannot share a target, so they do
 // not share a pass, and `verify_browser_entry_points_are_dd5_shaped` then compares their EXPORT
 // SETS across the two artefacts rather than trusting that they were built the same way.
+//
+// M32 ADDS TWO ENTRIES TO THE SAME PASS, AND THE SAME PASS IS THE POINT. The worker hosts the same
+// runtime the page does; building it in a pass of its own would give it a second copy of every
+// shared chunk and make "the worker adds no capability the browser reference lacks" a comparison
+// between two differently-built artefacts. In one pass esbuild's splitting puts the runtime in the
+// chunks both entries already share, which is also why adding them moves no existing entry's eager
+// total — measured, and recorded in `WORKER-NODE.md` §5.
 const BROWSER_ENTRIES = {
   browser: path.join(HERE, 'src/entry_browser.ts'),
   testing: path.join(HERE, 'src/entry_testing.ts'),
   demo: path.join(HERE, 'demo/main.ts'),
+  worker: path.join(HERE, 'src/entry_worker.ts'),
+  'worker-demo': path.join(HERE, 'demo/worker_main.ts'),
 };
 const NODE_ENTRIES = {
   node: path.join(HERE, 'src/entry_node.ts'),
@@ -236,11 +245,16 @@ try {
 // The demo page's HTML, copied beside its script. It is COPIED rather than emitted so that the
 // file a person reads and the file the browser loads are the same file — a generated HTML page is
 // one more place for the demo and the harness to come apart.
-const html = readFileSync(path.join(HERE, 'demo/index.html'), 'utf8');
-if (!html.includes('./demo.js')) {
-  fail('demo/index.html does not load ./demo.js; the copied page would be blank');
+for (const [source, target, script] of [
+  ['demo/index.html', 'index.html', './demo.js'],
+  ['demo/worker.html', 'worker.html', './worker-demo.js'],
+]) {
+  const page = readFileSync(path.join(HERE, source), 'utf8');
+  if (!page.includes(script)) {
+    fail(`${source} does not load ${script}; the copied page would be blank`);
+  }
+  writeFileSync(path.join(DIST, target), page);
 }
-writeFileSync(path.join(DIST, 'index.html'), html);
 
 // ---------------------------------------------------------------------------------------------
 // THE REDIRECTS MUST HAVE FIRED, RE-CHECKED HERE BECAUSE THE PLUGIN'S OWN GUARD DOES NOT FAIL.

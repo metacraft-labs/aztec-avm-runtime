@@ -28,13 +28,22 @@ Measured here, on 2026-08-28, by `browser/build.mjs`, which fails the build on a
 **M29 moved every figure in this section**, by a few kilobytes each: the reference entry now reaches
 `browser/src/executed_steps.ts` (the drain over M12's `avm_steps_batch`) and the demo additionally
 reaches `browser/src/native_parity.ts` (the differential arm). Nothing lazy moved and no chunk
-changed class, which is what the per-entry budgets exist to make visible:
+changed class, which is what the per-entry budgets exist to make visible.
+
+**AND M32 MOVED THEM AGAIN, BY LESS, FOR A REASON THAT IS NOT ABOUT THIS PAGE.** It adds two entry
+points to the SAME esbuild pass — `worker.js` and `worker-demo.js` — and esbuild's splitting is a
+function of which entries reach which module, so the chunk boundaries moved: three of the existing
+entries gained files (7 -> 8, 8 -> 10, 8 -> 10) and a tenth to a fifth of a kilobyte each,
+`node/node.js` is unmoved because the Node pass is a separate one, and the total gained 8.19 KB. No
+chunk changed CLASS and nothing lazy became eager, which is the property these budgets exist for and
+which the per-entry rows below are what make visible. `WORKER-NODE.md` §5 carries the before/after
+pair; the second column here is the after:
 
 | entry point | eager, gzipped | files | M27's figure |
 |---|---|---|---|
-| `aztec-avm-runtime/browser` — the DD-5 reference | **255.79 KB** | 7 | 253.94 KB |
-| `aztec-avm-runtime/testing` | 279.77 KB | 8 | 277.43 KB |
-| the demo page | 280.97 KB | 8 | 277.65 KB |
+| `aztec-avm-runtime/browser` — the DD-5 reference | **255.87 KB** | 8 | 253.94 KB |
+| `aztec-avm-runtime/testing` | 279.93 KB | 10 | 277.43 KB |
+| the demo page | 281.12 KB | 10 | 277.65 KB |
 | `aztec-avm-runtime/node` | 225.36 KB | 4 | 223.61 KB |
 
 and, lazily, never in any eager set:
@@ -47,14 +56,14 @@ and, lazily, never in any eager set:
 | `chunks/FeeJuice-*.js` | 185.88 KB | yes, when a fee payer is funded |
 | `chunks/ContractInstanceRegistry-*.js` | 103.25 KB | no |
 
-**8,155.19 KB gzipped across every chunk; 255.79 KB is what the reference entry point costs.** That is
+**8,163.44 KB gzipped across every chunk; 255.87 KB is what the reference entry point costs.** That is
 the whole of DD-11 in two numbers, and the difference between them is exactly the two things DD-11
 names.
 
 `verify_browser_chunk_budget` re-derives every cell of both tables above OUT OF `chunks.json` and
 compares it to this file, row by row, and proves the enforcement can fail — in three directions, of
 which the third is the one this paragraph is about. (Making one contract artifact eager takes the
-reference entry from 255.79 KB to **750.09 KB** and the build refuses; that is the number that makes
+reference entry from 255.87 KB to **750.09 KB** and the build refuses; that is the number that makes
 this section's claim falsifiable, and it took M27's review to find that nothing exercised the
 per-entry rule at all.) The
 per-entry EAGER totals are budgeted separately from the per-file sizes, because a per-file budget
@@ -236,13 +245,13 @@ superset over a bundle nobody could import.
 
 ## 6. What a page actually fetches
 
-`verify_public_only_page_never_fetches_barretenberg`, on the browser's own log. Thirteen requests,
-and the enumeration below totals 13 requests, which it did not before M27's review:
+`verify_public_only_page_never_fetches_barretenberg`, on the browser's own log. Fifteen requests,
+and the enumeration below totals 15 requests, which it did not before M27's review:
 
 ```
 1   /index.html                       the demo page
-8   /demo.js + 7 shared chunks        280.97 KB gzipped — the DEMO entry's eager set, which is
-                                      the browser entry's 255.79 KB plus the page itself
+10  /demo.js + 9 shared chunks        281.12 KB gzipped — the DEMO entry's eager set, which is
+                                      the browser entry's 255.87 KB plus the page itself
 1   /favicon.ico                      the browser's, not ours
 1   /assets/avm.wasm                  1,621,354 bytes — the AVM and its world state
 1   /assets/token_contract-Token.json the contract artifact, fetched when a contract is needed
@@ -250,8 +259,13 @@ and the enumeration below totals 13 requests, which it did not before M27's revi
 ```
 
 (It said "`/demo.js` + 6 shared chunks / 253.94 KB" and enumerated to twelve under a heading that
-says thirteen. Both are M27's review's corrections: the chunk count is seven, and 255.79 KB is §1's
-**browser** row, whose entry file `browser.js` this page never requests.)
+says thirteen. Both are M27's review's corrections: the chunk count was seven, and 253.94 KB was a
+different entry point's number — `browser.js`, which this page never requests. **M32 took the chunk
+count from seven to nine and the request total from thirteen to fifteen**, by adding two entry
+points to the same esbuild pass and moving the chunk boundaries; the two new ones are 0.06 KB
+each, so the page pays 0.15 KB more and makes two more round trips. Both figures are re-derived from
+the arm run by `_m27_doc_figures.py` on every run, which is how the change was found rather than
+argued about.)
 
 and **`barretenbergRequests: []`**.
 
@@ -379,8 +393,13 @@ the runtime, and is not asserted.**
   store is `./sqlite-opfs` and is DD-9-neutral — it pulls `@aztec/sqlite3mc-wasm`, which ships
   `vendor/jswasm/sqlite3.wasm` and no `.node` — so the door is open and deliberately not walked
   through. See `CHAIN-LOOP.md` §6.
-- **No web worker.** The design document says the main thread by default and a worker wrapper is a
-  follow-up, not v1.
+- **No web worker — UNTIL M32, WHICH IS THE FOLLOW-UP THIS BULLET NAMED.** The design document says
+  the main thread by default and a worker wrapper is a follow-up, and that is still true of the
+  entry points in §5: `aztec-avm-runtime/browser` runs on the calling thread and nothing here
+  changed. M32 adds `worker.js` and `worker-demo.js` beside them — a dev node hosted in a Web
+  Worker, with the page holding a client — and `WORKER-NODE.md` is its write-up. The two new entry
+  points are budgeted in `chunk-budgets.json` like every other, and §1's figures above are the
+  post-M32 ones.
 - **No prover, and there never will be one.** §8.4; `receipt.proving` is the literal `'none'` and the
   disclosure is written before a runtime exists at all.
 - **`@aztec/bb.js` is still in the graph, on purpose.** Aliasing it away entirely would have been

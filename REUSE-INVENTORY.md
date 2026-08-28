@@ -891,6 +891,43 @@ component is and what it costs us, and does not repeat the deletion.
 - confidence: measured
 
 
+### RI-82 — Upstream's own worker-boundary protocol discipline (`ApiSchema` + `jsonStringify`)
+- upstream: `@aztec/foundation/schemas` (`schemaHasMethod`, `getSchemaParameters`, `parseWithOptionals`, `getSchemaReturnType`) and `@aztec/foundation/json-rpc` (`jsonStringify`), driven exactly as `aztec-packages/yarn-project/end-to-end/src/test-wallet/` drives them — `worker_wallet.ts` (216 lines), `wallet_worker_script.ts` (66), `worker_wallet_schema.ts` (14)
+- covers: carrying a typed API across a worker boundary, with the arguments and the replies parsed on both ends
+- decision: depend
+- milestone: M32
+- why: M32 opened with a search for what a worker-hosted node would have to invent, and the protocol layer turned out to be the thing upstream had **already done for a wallet**. `WorkerWalletSchema` is a record of `z.function({ input: z.tuple([...]), output: ... })`; the worker script does `schemaHasMethod` -> `JSON.parse` -> `parseWithOptionals(args, getSchemaParameters(schema[fn]))` -> dispatch -> `jsonStringify`, and the client does the mirror through `getSchemaReturnType`. `browser/src/worker_protocol.ts` is the same kind of object over `AvmRuntime` instead of over `Wallet`, and the four helpers and the JSON codec are imported, not re-written. **The value codecs come with it**: a `Tx` crossing this boundary is encoded by `Tx.schema`, a contract class by `ContractClassPublicSchema`, an address by `AztecAddress.schema`, a field by `schemas.Fr` and a block timestamp by `schemas.BigInt` — upstream's own, the same ones its JSON-RPC servers use, so nothing here invents a wire format for somebody else's type. What is ours is the list of operations and nothing else.
+- rejection-reason: n/a
+- confidence: measured
+
+### RI-83 — `comlink`, which is upstream's own browser-worker transport
+- upstream: `comlink` 4.4.2, a runtime `dependencies` entry of `@aztec/bb.js` (`^4.4.1`) and therefore installed transitively here; `@aztec/foundation` lists it under `devDependencies`, which a consumer does not install — this entry said "a declared dependency of BOTH" and M32's review measured otherwise; used at `barretenberg/ts/bb.js/src/barretenberg_wasm/barretenberg_wasm_main/factory/browser/main.worker.ts` (`expose(new BarretenbergWasmMain()); postMessage(Ready)`) and `.../helpers/browser/index.ts` (`wrap<T>(worker)` plus a `readinessListener`)
+- covers: request/response over `postMessage`, callbacks across a worker boundary, and marking a payload's buffers as transferables
+- decision: depend
+- milestone: M32
+- why: The transport is the one part of RI-82's shape that upstream's wallet solves for **Node** (`NodeConnector` over `worker_threads`) and not for a browser — see RI-84 — and the browser answer is in a parallel subdirectory: bb.js's own worker factory. It is already installed — `orchestration/node_modules/comlink/`, resolved from `@aztec/bb.js`'s own `dependencies` and hoisted; it is NOT a direct dependency of `orchestration/package.json`, and `@aztec/foundation`'s entry is a devDependency, so one of the four packages puts it here rather than two — and it builds for the browser with **zero** unresolved Node builtins (10.5 KB unminified), which `smoke_worker_chain_survives_main_thread_block` §10 re-measures on every run as the control for RI-84's rejection. `Comlink.transfer(payload, [buffer])` is what makes the `.ct` container cross without a copy, and `Comlink.proxy(cb)` is what carries the `block`/`tx`/`trace` subscriptions. M32's own readiness handshake is bb.js's `Ready` message, same shape and same reason.
+- rejection-reason: n/a
+- confidence: measured
+
+### RI-84 — `@aztec/foundation/transport`, which is the right library for the wrong target
+- upstream: `yarn-project/foundation/src/transport/` — `TransportClient`, `TransportServer`, `Socket`, `Connector`, `Listener`, `Transfer`/`TransferDescriptor`, `createDispatchProxy`, 787 lines, exported as `@aztec/foundation/transport`
+- covers: multiplexed request/response, broadcast events and transferable descriptors over an abstract socket — every structural requirement of M32's second deliverable
+- decision: replace
+- milestone: M32
+- why: This is the closest thing upstream has to the thing M32 needs, and its own `Socket` docstring says *"implementations could use e.g. MessagePorts for communication between browser workers"*. It is not used, and the reason is measured rather than argued: see the rejection below. What IS taken from it is not code — the `ApiSchema` protocol discipline it carries (RI-82), the `Transfer`/`TransferDescriptor` idea, and its own separation of a socket from a protocol, which is why `entry_worker.ts` exposes three methods and declares two of them as named exceptions.
+- rejection-reason: cannot-reach-target: the target is the browser bundle whose entire CI gate (M28) is "no Node builtin is reachable". Only the NODE sockets ship — `node/node_connector.ts` and `node/node_listener.ts`, over `worker_threads` — and there is no browser `Socket` implementation anywhere in the package; `@aztec/foundation` declares **72 export subpaths and not one wildcard**, so `./transport` (which resolves to `dest/transport/index.js`, and which re-exports `./node/index.js`) is the only door and the browser-safe half cannot be imported alone. Built for `platform: browser` with the four shims this repository's build already applies, it leaves **four unresolved Node builtins — `events` three times and `worker_threads` once**. Reaching it would mean adding an `events` shim and neutralising a node-only submodule inside the artefact the gate is about, to obtain 787 lines of which two would be used. `smoke_worker_chain_survives_main_thread_block` §10 re-runs that build on every run and asserts the count, with `comlink` (RI-83) through the same esbuild and the same flags as the control that reports zero.
+- confidence: measured
+
+### RI-85 — M27's browser harness, driving a worker target instead of a page
+- upstream: none — this repository's own, `tools/browser_cdp.mjs` and `verification/lib_m27_browser.sh`
+- covers: launching a real headless Chromium over the DevTools protocol, serving a site, bounding every wait, and finding/validating the module, the bundle and the browser
+- decision: depend
+- milestone: M32
+- why: M32's checks reuse `m27_require_module`, `m27_require_bundle`, `m27_require_chromium` and `m27_esbuild` **unchanged**, and `tools/run_worker_arms.mjs` imports `browser_cdp.mjs` with no edit to it — the worker entries are built into the SAME `browser/dist` out of the SAME esbuild pass, so a second bundle predicate would be a second answer to one question. What M32 adds is on the other side of the seam and is genuinely new: `Target.setAutoAttach` on the page's session, so the arms can reach the WORKER's own CDP session. Two things needed it, and the first would have been a defect: **a worker's fetches are not in its page's network log** — measured, the page's log carries `/worker.js` and not `/assets/avm.wasm` — so DD-11's absence had to be asserted over `Network.requestWillBeSent` on the worker's session with `avm.wasm` in it as the positive control, and `Runtime.evaluate` on that session is what lets the worker be asked whether it has a `document` rather than having it inferred from the file it was built into.
+- rejection-reason: n/a
+- confidence: measured
+
+
 ---
 
 ## Not in this inventory, and why

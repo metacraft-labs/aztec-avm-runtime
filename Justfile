@@ -2594,3 +2594,72 @@ verify-m31:
       echo "verify-m31: all checks passed"
     fi
     exit "$rc"
+
+# ==============================================================================================
+# M32 — the worker-hosted dev node.
+#
+#   just verify-m32-mainthread   smoke_worker_chain_survives_main_thread_block
+#   just verify-m32-transferable test_worker_transferable_container_not_copied
+#   just verify-m32-throttled    smoke_worker_produces_blocks_while_throttled
+#   just verify-m32-restart      test_worker_restart_from_snapshot
+#   just verify-m32              all four, in order
+#
+#   just m32-arms                re-measure the six worker arms into $M32_WORK/worker.json
+#   just worker-serve            serve the worker demo page for a person to click
+#
+# WHAT THEY NEED, and none of it is new: M27's thirteen-overlay `avm.wasm` (`just avm-wasm-build-m27`,
+# or AVM_WASM_PATH), M24's `ct_writer.wasm`, the built browser bundle — which now carries two more
+# entry points, `worker.js` and `worker-demo.js`, out of the SAME esbuild pass — and a chromium
+# (M32_CHROMIUM, default the one M27 finds). The checks reuse M27's module search, bundle predicate
+# and chromium discovery unchanged; what M32 adds is its own arm run.
+#
+# THE ARMS ARE MEASURED ONCE into $M32_WORK/worker.json (default ~/.cache/aztec-m32-worker) and
+# shared by all four checks, which is M20's convention. Six arms, each in its own page: `boot`,
+# `workerBlocked`, `mainBlocked` (the CONTROL — the same load with the runtime on the main thread),
+# `throttled`, `transferable` and `restart`. The whole run is about three minutes.
+verify-m32-mainthread:
+    @verification/smoke_worker_chain_survives_main_thread_block.sh
+
+verify-m32-transferable:
+    @verification/test_worker_transferable_container_not_copied.sh
+
+verify-m32-throttled:
+    @verification/smoke_worker_produces_blocks_while_throttled.sh
+
+verify-m32-restart:
+    @verification/test_worker_restart_from_snapshot.sh
+
+# Re-measure the M32 worker arms into $M32_WORK/worker.json.
+m32-arms:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    work="${M32_WORK:-$HOME/.cache/aztec-m32-worker}"
+    mkdir -p "$work"
+    : "${AVM_WASM_PATH:=${M27_WORK:-$HOME/.cache/aztec-m27-browser}/m27/barretenberg/cpp/build-wasm-avm/bin/avm.wasm}"
+    export AVM_WASM_PATH
+    node tools/run_worker_arms.mjs "$work" > "$work/worker.json"
+    echo "m32-arms: wrote $work/worker.json"
+
+# Serve the worker demo page for a person to click. Ctrl-C to stop.
+worker-serve:
+    @node tools/serve_browser_demo.mjs "${M32_WORK:-$HOME/.cache/aztec-m32-worker}/site"
+
+verify-m32:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      smoke_worker_chain_survives_main_thread_block \
+      test_worker_transferable_container_not_copied \
+      smoke_worker_produces_blocks_while_throttled \
+      test_worker_restart_from_snapshot
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m32: FAILED" >&2
+    else
+      echo "verify-m32: all checks passed"
+    fi
+    exit "$rc"
