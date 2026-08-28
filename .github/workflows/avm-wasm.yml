@@ -172,7 +172,7 @@ jobs:
           path: aztec-avm-runtime
 
       - name: Clone the aztec-packages fork
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
           ref: aztec-avm-runtime
@@ -187,7 +187,7 @@ jobs:
       # published on. `main` is 292 commits behind it and carries no
       # `upstream-bugs/` at all, which made this step fail deterministically.
       - name: Clone codetracer-specs (the prepared patch series)
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-specs
           ref: latest
@@ -195,7 +195,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup Dev Environment
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
@@ -360,7 +360,7 @@ jobs:
           path: aztec-avm-runtime
 
       - name: Clone the aztec-packages fork
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
           ref: aztec-avm-runtime
@@ -370,7 +370,7 @@ jobs:
       # `latest` for the same reason as the job above: it is that repository's
       # default branch and the only one carrying `upstream-bugs/`.
       - name: Clone codetracer-specs (the prepared patch series)
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-specs
           ref: latest
@@ -378,7 +378,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup Dev Environment
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
@@ -514,7 +514,7 @@ jobs:
           path: aztec-avm-runtime
 
       - name: Clone the aztec-packages fork
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
           ref: aztec-avm-runtime
@@ -522,7 +522,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Clone codetracer-specs (the prepared patch series)
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-specs
           ref: latest
@@ -530,7 +530,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup Dev Environment
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
@@ -665,7 +665,7 @@ jobs:
           path: aztec-avm-runtime
 
       - name: Clone the aztec-packages fork
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
           ref: aztec-avm-runtime
@@ -673,7 +673,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Clone codetracer-specs (the prepared patch series)
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-specs
           ref: latest
@@ -681,7 +681,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup Dev Environment
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
@@ -821,7 +821,7 @@ jobs:
           path: aztec-avm-runtime
 
       - name: Clone the aztec-packages fork
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
           ref: aztec-avm-runtime
@@ -829,7 +829,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup Dev Environment
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
@@ -976,7 +976,7 @@ jobs:
           path: aztec-avm-runtime
 
       - name: Clone the aztec-packages fork
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
           ref: aztec-avm-runtime
@@ -984,7 +984,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup Dev Environment
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
@@ -1129,7 +1129,7 @@ jobs:
           path: aztec-avm-runtime
 
       - name: Clone the aztec-packages fork
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
           ref: aztec-avm-runtime
@@ -1137,7 +1137,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup Dev Environment
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
@@ -1262,7 +1262,7 @@ jobs:
           path: aztec-avm-runtime
 
       - name: Clone the aztec-packages fork
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
           ref: aztec-avm-runtime
@@ -1270,7 +1270,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Clone codetracer-specs (the prepared patch series)
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-specs
           ref: latest
@@ -1278,7 +1278,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup Dev Environment
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
@@ -1433,7 +1433,7 @@ jobs:
           path: aztec-avm-runtime
 
       - name: Clone the aztec-packages fork
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
           ref: aztec-avm-runtime
@@ -1441,7 +1441,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Clone codetracer-specs (the prepared patch series)
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-specs
           ref: latest
@@ -1449,7 +1449,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup Dev Environment
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
@@ -1608,7 +1608,7 @@ jobs:
           path: aztec-avm-runtime
 
       - name: Clone the aztec-packages fork
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
           ref: aztec-avm-runtime
@@ -1616,7 +1616,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Clone codetracer-specs (the prepared patch series)
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-specs
           ref: latest
@@ -1624,7 +1624,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup Dev Environment
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
 
@@ -1748,7 +1748,7 @@ jobs:
           path: aztec-avm-runtime
 
       - name: Clone the aztec-packages fork
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
           ref: aztec-avm-runtime
@@ -1756,7 +1756,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Clone codetracer-specs (the prepared patch series)
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-specs
           ref: latest
@@ -1764,7 +1764,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup Dev Environment
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
 
@@ -1915,7 +1915,7 @@ jobs:
           path: aztec-avm-runtime
 
       - name: Clone the aztec-packages fork
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
           ref: aztec-avm-runtime
@@ -1923,7 +1923,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Clone codetracer-specs (the prepared patch series)
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-specs
           ref: latest
@@ -1931,7 +1931,7 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup Dev Environment
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
 
