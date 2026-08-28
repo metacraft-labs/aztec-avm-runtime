@@ -24,14 +24,18 @@ itself is a rounding error and the size is two dependencies. DD-11 then made cod
 requirement rather than an optimisation, with one concrete demand — *"a page which only executes a
 public transaction never fetches the barretenberg wasm at all"*.
 
-Measured here, on 2026-08-27, by `browser/build.mjs`, which fails the build on a regression:
+Measured here, on 2026-08-28, by `browser/build.mjs`, which fails the build on a regression.
+**M29 moved every figure in this section**, by a few kilobytes each: the reference entry now reaches
+`browser/src/executed_steps.ts` (the drain over M12's `avm_steps_batch`) and the demo additionally
+reaches `browser/src/native_parity.ts` (the differential arm). Nothing lazy moved and no chunk
+changed class, which is what the per-entry budgets exist to make visible:
 
-| entry point | eager, gzipped | files |
-|---|---|---|
-| `aztec-avm-runtime/browser` — the DD-5 reference | **253.94 KB** | 7 |
-| `aztec-avm-runtime/testing` | 277.43 KB | 8 |
-| the demo page | 277.65 KB | 8 |
-| `aztec-avm-runtime/node` | 223.61 KB | 4 |
+| entry point | eager, gzipped | files | M27's figure |
+|---|---|---|---|
+| `aztec-avm-runtime/browser` — the DD-5 reference | **255.79 KB** | 7 | 253.94 KB |
+| `aztec-avm-runtime/testing` | 279.70 KB | 8 | 277.43 KB |
+| the demo page | 280.89 KB | 8 | 277.65 KB |
+| `aztec-avm-runtime/node` | 225.31 KB | 4 | 223.61 KB |
 
 and, lazily, never in any eager set:
 
@@ -43,14 +47,14 @@ and, lazily, never in any eager set:
 | `chunks/FeeJuice-*.js` | 185.88 KB | yes, when a fee payer is funded |
 | `chunks/ContractInstanceRegistry-*.js` | 103.25 KB | no |
 
-**8,149.89 KB gzipped across every chunk; 253.94 KB is what the reference entry point costs.** That is
+**8,155.07 KB gzipped across every chunk; 255.79 KB is what the reference entry point costs.** That is
 the whole of DD-11 in two numbers, and the difference between them is exactly the two things DD-11
 names.
 
 `verify_browser_chunk_budget` re-derives every cell of both tables above OUT OF `chunks.json` and
 compares it to this file, row by row, and proves the enforcement can fail — in three directions, of
 which the third is the one this paragraph is about. (Making one contract artifact eager takes the
-reference entry from 253.94 KB to **750.09 KB** and the build refuses; that is the number that makes
+reference entry from 255.79 KB to **750.09 KB** and the build refuses; that is the number that makes
 this section's claim falsifiable, and it took M27's review to find that nothing exercised the
 per-entry rule at all.) The
 per-entry EAGER totals are budgeted separately from the per-file sizes, because a per-file budget
@@ -237,8 +241,8 @@ and the enumeration below totals 13 requests, which it did not before M27's revi
 
 ```
 1   /index.html                       the demo page
-8   /demo.js + 7 shared chunks        277.65 KB gzipped — the DEMO entry's eager set, which is
-                                      the browser entry's 253.94 KB plus the page itself
+8   /demo.js + 7 shared chunks        280.89 KB gzipped — the DEMO entry's eager set, which is
+                                      the browser entry's 255.79 KB plus the page itself
 1   /favicon.ico                      the browser's, not ours
 1   /assets/avm.wasm                  1,621,354 bytes — the AVM and its world state
 1   /assets/token_contract-Token.json the contract artifact, fetched when a contract is needed
@@ -246,7 +250,7 @@ and the enumeration below totals 13 requests, which it did not before M27's revi
 ```
 
 (It said "`/demo.js` + 6 shared chunks / 253.94 KB" and enumerated to twelve under a heading that
-says thirteen. Both are M27's review's corrections: the chunk count is seven, and 253.94 KB is §1's
+says thirteen. Both are M27's review's corrections: the chunk count is seven, and 255.79 KB is §1's
 **browser** row, whose entry file `browser.js` this page never requests.)
 
 and **`barretenbergRequests: []`**.
@@ -267,10 +271,11 @@ Measured:
 
 ```
 downloaded by the browser   aztec-avm-01949fcc-7d92-7e9c-8000-000000002701.ct
-                            176,128 bytes, sha256 8b7d0aeb… — equal to the bytes the page held
-the recording               64 events, 2 frames, 4 interned paths,
-                            64 steps POSITIONED and 0 unpositioned, rung 1
-ct-print --full             exit 0, 3,355 lines, 64 Step records
+                            196,608 bytes — equal to the bytes the page held
+the recording               516 events, 2 frames, 14 interned paths,
+                            389 steps POSITIONED and 127 unpositioned,
+                            artifact rung 1, DECLARED rung 2
+ct-print --full             exit 0, 26,011 lines, 516 Step records
 the paths it names          /aztec/tx.avm
                             …/aztec-nr/aztec/src/macros/dispatch.nr
                             …/aztec-nr/aztec/src/oracle/avm.nr
@@ -290,9 +295,31 @@ that survive a truncation are still well formed. That exit status is recorded ra
 The controls that do discriminate corrupt something every reader must parse: a 512-byte stub, and a
 `recording_id` shortened to 35 characters. Both are refused, the second naming `meta.dat`.
 
-**And the step count is not an instruction count.** The program counters are the artifact's own
-first N mapped pcs, which is M25's shape and M26's; `test_trace_step_count_matches_instruction_count`
-is still `pending`, for the same reason it is pending in Node.
+**M29 REPLACED THE NUMBERS ABOVE, AND THE PARAGRAPH THAT USED TO BE HERE.** It read: *"the step
+count is not an instruction count — the program counters are the artifact's own first N mapped pcs,
+and `test_trace_step_count_matches_instruction_count` is still `pending`."* It is not pending any
+more. The container's 516 steps are the 516 instructions the AVM executed, drained through M12's
+`avm_steps_batch` and ingested through M24's `ct_ingest`, and the count equals
+`stats["total_instructions_executed"]` for the same transaction. The synthesised path is deleted
+rather than kept as a fallback.
+
+**Three of the numbers moved for a reason that is not the step stream, and it is the more
+interesting half.** M27's demo transaction *reverted at its first instruction*: the contract was
+registered in the module's contract DB but never given a deployment nullifier, so the AVM answered
+its address with no bytecode and executed one record — pc 0, opcode 68, M9's `LAST_OPCODE_SENTINEL`.
+Nothing could see it, because the block still reported the transaction `processed` (a revert is a
+legitimate outcome inside a block) and the steps came from the artifact rather than from the run.
+Three seeding gaps were found this way and are now closed in `browser/src/token_transfer.ts`: the
+deployment nullifier, the public initialization nullifier, and a token balance for the sender; plus
+`isStaticCall` on the `#[view]` second call. `revertCode` is 0.
+
+**The declared rung is now MEASURED over the executed stream, and it is 2.** 389 of the 516 executed
+steps resolve to a `(path, line, column)`; the other 127 are in regions the artifact's
+`brillig_locations` does not key — `SOURCE-MAPPING.md` §2.4's residual hole 2, compiled procedures
+appended after the main body. While the steps *were* the mapped pcs, every one of them had a
+position by construction and "rung 1, 64 of 64 positioned" was true and said nothing. M25's rule is
+that a rung is never rounded up, and this is the first place it has had to bite: the artifact is
+still rung 1, the recording declares rung 2, and the reason carries the split.
 
 ---
 

@@ -159,6 +159,8 @@ export {
   PATCH_REQUIRED_CONFIG_FIELDS,
   encodeForShippedModule,
   encodeForShippedModuleOnly,
+  patchFieldsFor,
+  type ShippedModuleOptions,
 } from './shipped_module_config.ts';
 
 // M22 — block assembly. NOTE WHAT IS NOT HERE, AND WHY THE ONE THING THAT IS DOES NOT BREACH DD-9.

@@ -39,6 +39,7 @@ import {
 } from '../../orchestration/src/index.ts';
 
 import { compileAvmFromUrl, instantiateAvm, type CompiledAvm } from './loader.ts';
+import { DEFAULT_STEP_BATCH, ExecutedStepCollector } from './executed_steps.ts';
 import { createAvmPoseidon2, installPoseidon2, type Poseidon2Backend } from './poseidon.ts';
 import { createAvmGrumpkin, installGrumpkin, type GrumpkinBackend } from './grumpkin.ts';
 import type { Reactor } from '../../node-host/src/reactor.ts';
@@ -59,6 +60,21 @@ export interface OpenOptions {
   readonly fetch?: typeof globalThis.fetch;
   /** L2 gas fees for the arm's global variables. Defaults to 1/1, as the Node drivers use. */
   readonly gasFees?: GasFees;
+  /**
+   * M29. Drive M9's observation hook and drain the executed step stream after every simulation.
+   *
+   * OFF BY DEFAULT, and that is a cost decision rather than a caution: the observer is measured at
+   * +2.6%..+2.8% on wasm and it materialises one 48-byte record per instruction, so a transaction
+   * nobody is recording should not pay for either. A page that means to produce a `.ct` sets it,
+   * which is what `openAvmRuntime({ collectExecutionSteps: true })` is for.
+   *
+   * It also turns `collect_statistics` on, because the statistic the recorded step count is
+   * checked against — `stats["total_instructions_executed"]` — is behind that flag and a step
+   * count with nothing to check it against is the thing M29 exists to stop shipping.
+   */
+  readonly collectExecutionSteps?: boolean;
+  /** Records per `avm_steps_batch` call. Defaults to {@link DEFAULT_STEP_BATCH}. */
+  readonly stepBatchRecords?: number;
 }
 
 export interface OpenedRuntime {
@@ -74,6 +90,14 @@ export interface OpenedRuntime {
   readonly contractsDb: ResidentContractsDB;
   readonly publicDataTree: ResidentMerkleDb;
   readonly simulator: WasmAvmPublicTxSimulator;
+  /**
+   * M29. The executed step stream, drained at the boundary after every simulation.
+   *
+   * `steps.last` is `null` when `collectExecutionSteps` was not asked for — which is a different
+   * statement from an empty stream, and `recordAndDownload` refuses on it by name rather than
+   * writing a container with no steps in it.
+   */
+  readonly steps: ExecutedStepCollector;
   /** Releases the module's DB handles. The instance itself is reclaimed by the collector. */
   close(): Promise<void>;
 }
@@ -107,22 +131,39 @@ export async function openAvmRuntime(options: OpenOptions): Promise<OpenedRuntim
   const merkleDb = new ResidentMerkleWriteOperations(reactor, merkleDbHandle);
   const contractsDb = new ResidentContractsDB(reactor, contractDbHandle);
   const publicDataTree = new ResidentMerkleDb(reactor, merkleDbHandle);
-  const config = defaultPublicSimulatorConfig();
+  // M29. The observer and the statistic travel together: the statistic is what the recorded step
+  // count is checked against, and asking for the stream without it would leave the check with
+  // nothing on the other side of the comparison.
+  const collectExecutionSteps = options.collectExecutionSteps === true;
+  const config = defaultPublicSimulatorConfig(
+    collectExecutionSteps ? { collectStatistics: true } : {},
+  );
   const globals = GlobalVariables.from({
     ...GlobalVariables.empty(),
     gasFees: options.gasFees ?? new GasFees(1n, 1n),
   });
+  // THE DRAIN IS THE BOUNDARY'S, NOT A LATER CALLER'S. `g_steps` inside the module is replaced by
+  // every `avm_simulate`; see `executed_steps.ts` for why asking afterwards is the wrong shape.
+  const steps = new ExecutedStepCollector(reactor, {
+    enabled: collectExecutionSteps,
+    batchRecords: options.stepBatchRecords ?? DEFAULT_STEP_BATCH,
+  });
   const simulator = new WasmAvmPublicTxSimulator(
     {
-      simulate: (input, c, m) => reactor.simulate(input, c, m),
+      simulate: (input, c, m) => steps.simulate(input, c, m),
       get moduleCalls() {
         return reactor.moduleCalls;
       },
     },
     { contractDb: contractDbHandle, merkleDb: merkleDbHandle },
     globals,
-    (t, g) => encodeForShippedModuleOnly(t, g, config, residentWorldStateRevision(1)),
-    () => decodePublicTxResult(reactor.result()!),
+    (t, g) =>
+      encodeForShippedModuleOnly(t, g, config, residentWorldStateRevision(1), { collectExecutionSteps }),
+    // THE BYTES THE COLLECTOR COPIED, NOT `reactor.result()`. The batched drain writes into the
+    // same module-owned result buffer, so re-reading it here after a drain would decode a window of
+    // step records as a `TxSimulationResult` — a plausible wrong object rather than a failure. The
+    // copy is taken in the same turn as the simulation, before anything else crosses.
+    () => decodePublicTxResult(steps.lastResultBytes!),
   );
 
   const runtime = AvmRuntime.create(
@@ -153,6 +194,7 @@ export async function openAvmRuntime(options: OpenOptions): Promise<OpenedRuntim
     contractsDb,
     publicDataTree,
     simulator,
+    steps,
     async close() {
       await runtime.stop();
       reactor.destroyMerkleDb(merkleDbHandle);

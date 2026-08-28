@@ -20,6 +20,13 @@
 //                    browser's own download machinery, then read by `ct-print`.
 //   modules          what the page's own JavaScript can see of the module: the twelve imports, the
 //                    fifty-three exports, and which poseidon it is using.
+//   nativeParity     M29. One corpus program, executed IN THE PAGE from the native x86-64 driver's
+//                    own msgpack blobs, every record printed in the driver's own shape so
+//                    `e2e_browser_container_opcodes_match_native` compares per record. Present only
+//                    when `M29_PARITY_INPUTS` names a `avm_differential reactorinputs` transcript;
+//                    otherwise the arm records WHY it is absent, and M29's check requires it to be
+//                    present — so a missing arm is red in M29 and invisible in M27, rather than a
+//                    silently smaller milestone.
 //
 // A FRESH PAGE PER ARM, because a network log is per page and an arm that inherited another arm's
 // requests could not distinguish "this page fetched barretenberg" from "some page did". The
@@ -110,6 +117,54 @@ copyTree(DIST, SITE);
 copyFileSync(AVM_WASM, path.join(SITE, 'assets/avm.wasm'));
 copyFileSync(CT_WRITER, path.join(SITE, 'assets/ct_writer.wasm'));
 copyFileSync(artifactHit.file, path.join(SITE, 'assets/token_contract-Token.json'));
+
+// ---------------------------------------------------------------------------------------------
+// M29's fourth asset: the NATIVE driver's own reactor inputs, reshaped as JSON a page can fetch.
+//
+// `avm_differential reactorinputs` prints `reactorInputs.<program>.<key> <hex>` lines, and the five
+// keys a resident-DB simulation needs are the four setup blobs and `faststeps` — the
+// `AvmFastSimulationInputs` with `collect_execution_steps = true`. They are UPSTREAM's own
+// serialisations, produced by the same binary that prints the transcript the page is compared
+// against, which is what makes the comparison one of interpreters rather than one of assemblers.
+//
+// Absent input is recorded as a REASON rather than skipped silently; see the header.
+// ---------------------------------------------------------------------------------------------
+const PARITY_KEYS = ['setup.class', 'setup.instance', 'setup.nullifier', 'setup.publicdata', 'faststeps'];
+const PARITY_INPUTS = process.env.M29_PARITY_INPUTS ?? '';
+let parityPrograms = null;
+let parityReason = null;
+if (!PARITY_INPUTS) {
+  parityReason = 'M29_PARITY_INPUTS is not set';
+} else if (!existsSync(PARITY_INPUTS)) {
+  parityReason = `M29_PARITY_INPUTS names no file: ${PARITY_INPUTS}`;
+} else {
+  const kv = new Map();
+  for (const line of readFileSync(PARITY_INPUTS, 'utf8').split('\n')) {
+    const i = line.indexOf(' ');
+    if (i > 0) kv.set(line.slice(0, i), line.slice(i + 1));
+  }
+  const programs = {};
+  const residue = [];
+  for (const key of kv.keys()) {
+    const m = /^reactorInputs\.([a-z0-9_]+)\.faststeps$/.exec(key);
+    if (!m) continue;
+    const name = m[1];
+    const entry = {};
+    let complete = true;
+    for (const k of PARITY_KEYS) {
+      const v = kv.get(`reactorInputs.${name}.${k}`);
+      if (typeof v !== 'string' || v.length === 0) { complete = false; residue.push(`${name}.${k}`); break; }
+      entry[k] = v;
+    }
+    if (complete) programs[name] = entry;
+  }
+  if (Object.keys(programs).length === 0) {
+    parityReason = `no complete program in ${PARITY_INPUTS} (missing: ${residue.join(', ') || 'no faststeps key at all'})`;
+  } else {
+    parityPrograms = programs;
+    writeFileSync(path.join(SITE, 'assets/native-parity.json'), JSON.stringify(programs));
+  }
+}
 
 const sha = (f) => createHash('sha256').update(readFileSync(f)).digest('hex');
 
@@ -271,6 +326,28 @@ try {
     })()`);
     arms.modules = { ...pageFacts(page), ...facts };
     await page.close();
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // ARM 6 — M29. The NATIVE DIFFERENTIAL, measured in the browser.
+  //
+  // A fresh page, because the parity run seeds its own DB handles into the module instance and an
+  // arm that inherited another arm's page would be measuring a module that had already executed a
+  // token transfer. The records come back as strings in `avm_differential steps`' own shape.
+  // -------------------------------------------------------------------------------------------
+  {
+    if (parityPrograms === null) {
+      arms.nativeParity = { skipped: parityReason };
+    } else {
+      const program = process.env.M29_PARITY_PROGRAM ?? 'burn';
+      const page = await openPage(conn, `${server.origin}/index.html`);
+      await page.eval('globalThis.avmDemoReady === true');
+      const parity = await page.eval(
+        `window.avmDemo.armNativeParity(${JSON.stringify({ program })})`,
+      );
+      arms.nativeParity = { ...pageFacts(page), ...parity, inputs: PARITY_INPUTS };
+      await page.close();
+    }
   }
 } catch (e) {
   exitCode = 1;

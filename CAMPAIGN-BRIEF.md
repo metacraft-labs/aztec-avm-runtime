@@ -1,6 +1,6 @@
 # Standing Campaign Brief — Aztec AVM Runtime
 
-Durable brief for every remaining milestone (M19–M28). Read this **before** the
+Durable brief for every remaining milestone (M19–M36; M29 opened the M29–M36 extension). Read this **before** the
 milestone's own section in
 `codetracer-specs/Planned-Work/Aztec-AVM-Runtime.milestones.org`.
 
@@ -35,7 +35,7 @@ load).
 Each of these is a defect that shipped, not a precaution.
 
 ### An assertion must be capable of failing
-**Twenty-seven instances.** (Five places quote the running total: this line, the two M18 checks
+**Thirty instances.** (Five places quote the running total: this line, the two M18 checks
 `lib_m18_orchestration.sh` and `verify_no_telemetry_client_in_import_graph.sh`, and the two M19
 files `fault_injection.ts` and `e2e_differential_wasm_vs_native_cpp.sh`. M18's review added three,
 M19 added one, M19's review added one, M21 added one, and M22 added one. If you add one, move all
@@ -172,6 +172,33 @@ The forms seen so far:
   as its control, so a needle that silently stopped matching drives both to zero and the control
   fails.
 
+- **A NUMBER READ FROM THE PRODUCER'S OWN REPORT INSTEAD OF FROM WHAT THE PRODUCER PRODUCED.** M29's
+  `test_browser_steps_are_executed_not_mapped` exists to say that a `.ct` container's opcodes are the
+  AVM's and not a fabrication. It read the opcode histogram out of the browser arm's DRAINED records
+  and out of the recording's own `distinctOpcodes` field — and the recorder computed that field from
+  the same drained steps. Both are upstream of the writer. Measured by M29's own mutation harness:
+  put M27's `opcode: (pc % 200) + 1` back into the recorder, changing what is WRITTEN and leaving
+  what was DRAINED alone, and the check reports **42 assertions, 1 failure** — the one failure being
+  a `grep` of the source tree. Every behavioural assertion passed over a container full of
+  fabricated opcodes, in the check whose entire subject is fabricated opcodes. It reads them back
+  out of the CONTAINER through the pinned reader now. *The general form is one step past "read it
+  from the artefact": ask WHICH artefact. A producer's report about itself is not its output.*
+- **TWO MISSING KEYS AGREEING, TWICE IN ONE MILESTONE, IN CHECKS WHOSE AUTHOR HAD READ THIS LIST
+  THAT DAY.** M29 pointed five assertions at `arms.publicOnly.executed` when the field is at
+  `arms.publicOnly.transfer.executed`; `m27_arm` prints `MISSING` for a path that is not there, and
+  two of the five went GREEN. The same slip in a second check made a CONTROL pass on a bash error:
+  `assert_false test "$HALVED_STEPS" -eq "$STAT"` with `$STAT` = `MISSING` is `test 516 -eq MISSING`,
+  which is a syntax error, which `assert_false` reads as the false it wanted. The remedy that
+  generalises is not another `assert_true … != MISSING` per value: it is `m29_absent name=value …`,
+  ONE assertion that names every absent field, run before the first comparison, with a `die` behind
+  it — because a report with no data in it is a failure and not a smaller check.
+- **AND THE CONTROL THAT DOES NOT CONTROL, MEASURED RATHER THAN INHERITED.** The same check's
+  "the reader does not emit the full count over half a container" is FALSE of this format: a `.ct`
+  is a directory of independent streams and `ct-print --full` over a halved copy still emits all
+  516 Step records. M27 had already recorded that halving does not make the reader refuse; M29
+  wrote a control on top of it anyway and it passed only because of the `MISSING` bug above. The
+  halved copy is now a reported NOTE and the control is a 512-byte stub, which is refused and emits
+  none.
 **And `check-drift` cannot be the backstop for this, by construction.** It compares every vendored
 file against `git show <anchor>:<path>` and asserts only the DIRECTION of the result: a file
 `PROVENANCE.md` declares `none` must be byte-identical, a file it declares with an edit class must
@@ -483,18 +510,47 @@ touch moves, look for a commit that landed between the reference sweep and yours
 repository — before writing a story. Both attributions above were re-derived independently by the
 review and both held; that is the standard, not the presumption.
 
-Current per-milestone counts. Measured **M0-M28, on 2026-08-27**, by M28's REVIEW, one milestone at a time
+Current per-milestone counts. Measured **M0-M29, on 2026-08-28**, by M29, one milestone at a time
 with nothing else running, `setsid`-detached, **inside this repository's own dev shell**
 (`direnv exec` — the engine and the PATH the checks and CI use), `TMPDIR` and the log under
-`~/.cache`, no hole in the log, **28 of 29 exit 0**:
+`~/.cache`, no hole in the log, **28 of 30 exit 0** — the two reds being M11's ninth upstream move
+and M9's disabled-path TIMING assertion, both of them conditions this brief already names:
 
 ```
 m0 156  m1 175  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
 m10 450  m11 259  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
-m19 180  m20 237  m21 324  m22 260  m23 509  m24 350  m25 272  m26 313  m27 343
-m28 353
-                                                       CAMPAIGN TOTAL 10,048
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
+m28 353  m29 105
+                                                       CAMPAIGN TOTAL 10,156
 ```
+
+**M29 MOVED THREE NUMBERS AND EVERY UNIT OF ALL THREE IS ACCOUNTED FOR IN BOTH DIRECTIONS.** Its own
+**105** (52 / 30 / 23); **M27 343 -> 345**, all of it
+`e2e_browser_downloads_ct_container_and_ct_print_parses` 34 -> 36, which is *minus three plus five*
+— the two assertions that could not fail (`every step at a resolved SOURCE position` and `none
+unpositioned`, true by construction while the steps WERE the artifact's mapped pcs) and the rung-1
+assertion they rested on, replaced by the positioned/unpositioned identity, a non-degeneracy floor,
+the artifact's own rung, the declared rung's implication and the declared reason's split; and
+**M21 324 -> 325**, all of it `verify_transcript_truncation_detection_uniform` 43 -> 44, because
+M29's differential is the sixth comparer on that check's own list. 10,048 + 105 + 2 + 1 = **10,156**
+exactly. **M25 is unchanged at 272** even though M29 retired one of its verification entries: that
+entry was `pending` and a `pending` entry has no assertions. Every other milestone came out at its
+reference value **to the assertion**, including M24 at 350 (`ct-host/src` was not touched, so
+`_m24_oq6_stamp` did not fire and no benchmark re-ran), M4 at 218 in the dev shell, M12 at 691 and
+M20 at 237.
+
+**M11 WENT RED FOR THE NINTH UPSTREAM MOVE** — `7471a61f1a92f5b2f474db714f34430253892d99` — with
+nine failing assertions and **the count unchanged at 259**, which is the recorded signature. It is
+not repaired: the seventh move's `barretenberg/cpp` conjunct is still open and `carry/` is left at
+HEAD rather than half-repaired. **M9 flaked in the sweep at 524 / rc 1 / 12 failures** — `807 - 524
+= 283 = 140 + 143`, the two checks that correctly refuse to compare and print no summary while doing
+it — and was re-run alone, which is the settled procedure: **807 in 1,291 s, the reference split
+140/143/113/73/126/83/129, with the truncation NOT recurring** (both comparers ran, 140/0 and
+143/0). One assertion failed and it is the OTHER M9 condition: `test_observer_disabled_is_free`'s
+timing arm, `+1.29% CI [+0.52%, +2.05%]` against a `+2%` budget — the point estimate inside it and
+the CI's upper bound over it by 0.05 percentage points, on a box that had been running headless
+browsers, wasm builds and a thirty-milestone sweep all session. A timing measurement on a loaded
+machine, not a regression, and the two conditions are not to be conflated.
 
 **M28 MOVED EXACTLY ONE NUMBER AND IT IS ITS OWN.** 9,695 + 353 = 10,048 exactly, and 353 is the sum
 of M28's six checks and nothing else — `just ci-browser-gate` 104, `verify_browser_bundle_no_node_builtins`
@@ -928,13 +984,13 @@ Format spec: `~/ah/dev/agent-harbor/ah-lib/specs/Milestones-Files.md`.
   `233d8e0993` against base-plus-patches as *separate trees*. Never repoint it at
   the `codetracer` branch — that would turn base-versus-patched into
   patched-versus-patched and make every claim a tautology while staying green.
-- **Upstream moves — EIGHT times now, and it is M11's work every time. THIS BULLET IS THE ONE PLACE
+- **Upstream moves — NINE times now, and it is M11's work every time. THIS BULLET IS THE ONE PLACE
   THE CHAIN IS STATED; everything else points here.** `upstream/next` has gone `233d8e0993`
   (base) → three commits → `44a57f8c4a` (seven) → `9487ed3e9b` (nine) → `142dfcf4b2` (twelve,
   2026-08-26) → `9df414ec0e` (fourteen, 2026-08-26) → `9d9523b973` (**2026-08-27 20:28**) →
   `703d896149` (**2026-08-27 20:59**, seventeen) → `7df97dce1b` (**2026-08-27 22:29**, eighteen
-  commits past the base, 10,933 changed paths). **FOUR MOVES IN TWENTY-SIX HOURS, THREE OF THEM
-  INSIDE TWO HOURS**, all by fetches in the sibling checkout; M28's sweep ran M11 between the sixth
+  commits past the base, 10,933 changed paths) → `7471a61f1a` (**2026-08-28**, measured by M29's
+  sweep). **FIVE MOVES IN THIRTY HOURS, THREE OF THEM INSIDE TWO HOURS**, all by fetches in the sibling checkout; M28's sweep ran M11 between the sixth
   and the seventh, and its review's sweep started M11 in the minute the eighth landed. **This chain
   has now gone stale four times, and it will keep going stale**: the "one place states it" remedy
   fixes duplication, not the fact that the number is a property of a moving target rather than of

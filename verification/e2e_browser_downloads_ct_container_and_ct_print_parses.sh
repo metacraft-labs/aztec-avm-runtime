@@ -16,9 +16,18 @@
 #      DISK, from the directory `Browser.setDownloadBehavior` pointed the browser at, and its
 #      sha256 is compared against the bytes the page held. Those are two independent readings of
 #      the same object and they must agree.
-#   2. IT IS A REAL RECORDING. Events, frames, interned paths, and steps that are POSITIONED —
-#      64 of 64, with zero unpositioned, which is what rung 1 means and what the writer REFUSES to
-#      let anybody claim falsely (`MappingRungDegraded`).
+#   2. IT IS A REAL RECORDING. Events, frames, interned paths, and steps that are POSITIONED.
+#
+#      **THIS CLAUSE CHANGED IN M29 AND THE REASON IS WORTH KEEPING.** It used to read "64 of 64,
+#      with zero unpositioned, which is what rung 1 means" — and that was true BY CONSTRUCTION and
+#      therefore said nothing: the 64 steps WERE the artifact's own first 64 mapped program
+#      counters, so every one of them had a position because every one of them had been chosen for
+#      having one. M29 replaced them with what the AVM executed, and an executed stream walks
+#      through regions the artifact's `brillig_locations` does not key — `SOURCE-MAPPING.md` §2.4's
+#      residual hole 2, compiled procedures appended after the main body. So the assertion is now
+#      the INVARIANT (positioned + unpositioned accounts for every event, and the positioned count
+#      is non-zero) plus the rule that ties the DECLARED rung to the coverage, which is a property
+#      that can fail in both directions rather than one that cannot fail at all.
 #   3. THE REFERENCE READER READS IT. `ct-print --full`, the pinned reader M24 builds, exit 0.
 #   4. IT SAYS SOMETHING. The reader's output names real Aztec.nr source files from the Token
 #      contract's own `file_map`, so the recording is at SOURCE level and not at pc level.
@@ -78,19 +87,31 @@ PATHS="$(m27_arm download recording.pathsInterned)"
 POS="$(m27_arm download recording.stepsPositioned)"
 UNPOS="$(m27_arm download recording.stepsUnpositioned)"
 RUNG="$(m27_arm download recording.rung)"
+DECLARED="$(m27_arm download recording.declaredRung)"
 KIND="$(m27_arm download recording.writerKind)"
-note "$EVENTS event(s), $FRAMES frame(s), $PATHS path(s), $POS positioned / $UNPOS unpositioned, rung $RUNG"
+note "$EVENTS event(s), $FRAMES frame(s), $PATHS path(s), $POS positioned / $UNPOS unpositioned, \
+artifact rung $RUNG, declared rung $DECLARED"
 
 assert_ge "the recording carries a real number of steps" 32 "$EVENTS"
 assert_eq "…split across the transaction's two enqueued calls" "2" "$FRAMES"
 assert_ge "…referring to several source files" 2 "$PATHS"
-assert_eq "…every step at a resolved SOURCE position" "$EVENTS" "$POS"
-assert_eq "…and none unpositioned" "0" "$UNPOS"
-assert_eq "…declared at rung 1, the source rung" "1" "$RUNG"
+assert_eq "…with positioned and unpositioned accounting for every event" "$EVENTS" "$((POS + UNPOS))"
+assert_ge "…and a non-zero number of them at a resolved SOURCE position" 1 "$POS"
+assert_eq "…the artifact itself earning rung 1, the source rung" "1" "$RUNG"
+# THE DECLARED RUNG FOLLOWS THE COVERAGE, and the implication is asserted in the direction that can
+# fail: rung 1 exactly when nothing was left unpositioned. A rung-1 declaration over an unpositioned
+# step is what `CtWriter.close()` throws `MappingRungDegraded` on, so a producer that got this wrong
+# would not have produced a container at all — which is the enforcement, and this is the reading.
+assert_eq "…and the DECLARED rung is 1 exactly when every step of the contract was positioned" \
+  "$([ "$UNPOS" -eq 0 ] && echo 1 || echo 2)" "$DECLARED"
 # DD-7: which writer path produced this, read off the module rather than declared by the host.
 assert_eq "…written by Path A, the pure-Rust writer, per ct_writer_kind()" "1" "$KIND"
 assert_true "…and the rung verdict names the mechanism it rests on" \
   str_has_sub "$(m27_arm download recording.rungReason)" 'brillig_locations'
+# M29: the declared rung's reason carries the SPLIT, not just the number. A rung with no reason is
+# what M25's ladder exists to refuse, and "389 of 516" is a different fact from "rung 2".
+assert_true "…and the declared rung's reason carries the positioned/unpositioned split" \
+  str_has_sub "$(m27_arm download recording.declaredRungReason)" "$POS of $EVENTS executed step(s)"
 
 echo "== 3. THE PRODUCT CLAIM: ct-print --full parses it"
 

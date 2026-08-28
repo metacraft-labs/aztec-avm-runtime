@@ -2385,3 +2385,52 @@ verify-m28:
       echo "verify-m28: all checks passed"
     fi
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M29 — executed steps, not mapped ones
+#
+#   just verify-m29-executed        test_browser_steps_are_executed_not_mapped
+#   just verify-m29-native-parity   e2e_browser_container_opcodes_match_native
+#   just verify-m29-step-count      test_trace_step_count_matches_instruction_count
+#   just verify-m29                 all three, in order
+#
+# WHAT THEY NEED. The M27 browser stack (a built bundle, M27's thirteen-overlay module, a chromium)
+# AND M12's native `avm_differential`, which `lib_m29_steps.sh` locates through `m12_measured` and
+# runs itself — `steps` for the reference transcript and `reactorinputs` for the blobs the page is
+# handed, 3.0 s and 0.9 s respectively. Both transcripts are produced in the run that reads them,
+# because "never depend on state you did not produce".
+#
+# THE ARMS ARE M27's, EXTENDED. `run_browser_arms.mjs` gains a sixth arm — one corpus program run in
+# the page from the native driver's own bytes — which is present only when `M29_PARITY_INPUTS` is in
+# the environment. `m29_require_arms` puts it there and forces one refresh if a previous M27 run
+# left a report without it, so a missing arm is a NAMED failure in M29 rather than a silently
+# smaller milestone.
+# ---------------------------------------------------------------------------
+
+verify-m29-executed:
+    @verification/test_browser_steps_are_executed_not_mapped.sh
+
+verify-m29-native-parity:
+    @verification/e2e_browser_container_opcodes_match_native.sh
+
+verify-m29-step-count:
+    @verification/test_trace_step_count_matches_instruction_count.sh
+
+verify-m29:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      test_browser_steps_are_executed_not_mapped \
+      e2e_browser_container_opcodes_match_native \
+      test_trace_step_count_matches_instruction_count
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m29: FAILED" >&2
+    else
+      echo "verify-m29: all checks passed"
+    fi
+    exit "$rc"

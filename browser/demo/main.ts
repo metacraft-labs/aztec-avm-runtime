@@ -38,10 +38,13 @@ import {
   type OpenedRuntime,
   type TokenTransferReport,
 } from '../src/entry_testing.ts';
+import { hexToBytes, runNativeParity } from '../src/native_parity.ts';
 
 const MODULE_URL = './assets/avm.wasm';
 const CT_WRITER_URL = './assets/ct_writer.wasm';
 const ARTIFACT_URL = './assets/token_contract-Token.json';
+/** The native driver's own `reactorinputs` blobs. See `armNativeParity` and `native_parity.ts`. */
+const PARITY_URL = './assets/native-parity.json';
 
 // A UUID. `ct-print` refuses a `recording_id` that is not exactly 36 characters — measured in M26,
 // which is why this is a well-formed id and not a readable label.
@@ -67,6 +70,10 @@ async function open(production?: { intervalMs: number; minBlockSpacingSeconds?: 
   opened = await openAvmRuntime({
     moduleUrl: MODULE_URL,
     clock,
+    // M29. The page records, so it drives M9's observation hook. It is off by default in
+    // `openAvmRuntime` — the observer costs on every instruction — and a page that means to
+    // produce a `.ct` is exactly the caller that should pay for it.
+    collectExecutionSteps: true,
     ...(production ? { production: production as never } : {}),
     disclosureSink: (line: string) => say(`[disclosure] ${line}`),
     writeLine: (fd: number, line: string) => {
@@ -105,8 +112,41 @@ async function armTokenTransfer(): Promise<Record<string, unknown>> {
   const report = await runTokenTransfer(o, await loadArtifact());
   transfer = report;
   say(`${report.artifactName}.${report.debugFunctionNames[0] ?? '?'} -> ${report.outcome} in block ${report.blockNumber}`);
+  const executed = o.steps.last;
+  say(
+    executed === null
+      ? '[steps] the observation hook is off for this runtime'
+      : `[steps] the AVM executed ${executed.count} instruction(s), drained in ${executed.crossings} crossing(s)`,
+  );
   return {
     ...report,
+    // M29. What the AVM actually executed, reported beside the transaction rather than derived
+    // from it later: `g_steps` inside the module is replaced by the next simulation.
+    executed: executed === null ? null : {
+      count: executed.count,
+      decoded: executed.steps.length,
+      crossings: executed.crossings,
+      batchRecords: executed.batchRecords,
+      instructionsExecuted: executed.instructionsExecuted,
+      inResult: executed.inResult,
+      drainedMatchesResult: executed.drainedMatchesResult,
+      distinctOpcodes: new Set(executed.steps.map((s) => s.opcode)).size,
+      contexts: [...new Set(executed.steps.map((s) => s.contextId))],
+      // THE HISTOGRAM IS THE DISCRIMINATOR. `test_browser_steps_are_executed_not_mapped` reads it
+      // and requires it not to be the synthetic `(pc % 200) + 1`; a count alone cannot say that.
+      opcodeHistogram: Object.fromEntries(
+        [...executed.steps.reduce((m, s) => m.set(s.opcode, (m.get(s.opcode) ?? 0) + 1), new Map<number, number>())]
+          .sort((a, b) => a[0] - b[0])
+          .map(([op, n]) => [String(op), n]),
+      ),
+      // Every record, in `avm_differential steps`' own shape, so the native comparison is PER
+      // RECORD rather than by count — this campaign has had a count agree while the records did not.
+      records: executed.steps.map(
+        (s) =>
+          `ctx=${s.contextId} pc=${s.pc} op=${s.opcode} l2=${s.gasUsed.l2Gas} da=${s.gasUsed.daGas} `
+          + `addr=0x${Array.from(s.contractAddress, (b) => b.toString(16).padStart(2, '0')).join('')}`,
+      ),
+    },
     poseidonInstalled: o.poseidon.calls > 0,
     atOpen,
     wasiCalls: { ...o.wasi.calls },
@@ -186,9 +226,16 @@ async function armRecord(options: { download?: boolean } = {}): Promise<Record<s
     contractAddress: address,
     frameNames: transfer!.debugFunctionNames,
     recordingId: RECORDING_ID,
+    // M29. What the AVM executed. There is no fallback: `recordAndDownload` throws
+    // `ExecutedStepsUnavailable` on `null` rather than synthesising a stream.
+    executed: o.steps.last,
     ...(options.download === false ? { download: false } : {}),
   });
-  say(`.ct container: ${recording.bytes} bytes, ${recording.events} events, rung ${recording.rung}`);
+  say(
+    `.ct container: ${recording.bytes} bytes, ${recording.events} events, `
+      + `${recording.executedSteps} executed step(s) from ${recording.stepProducer}, `
+      + `artifact rung ${recording.rung}, declared rung ${recording.declaredRung}`,
+  );
   const { container, ...rest } = recording;
   return { ...rest, containerBase64: bytesToBase64(container) };
 }
@@ -199,6 +246,37 @@ function bytesToBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   }
   return btoa(binary);
+}
+
+// ---------------------------------------------------------------------------------------------
+// ARM: the NATIVE DIFFERENTIAL. A measurement surface, not a feature — see `native_parity.ts`.
+//
+// The native x86-64 `avm_differential` printed a per-record transcript of one corpus program AND
+// the msgpack blobs that produce it. This runs those same bytes through the `avm.wasm` this PAGE
+// fetched, and hands back every record in the driver's own shape, so
+// `e2e_browser_container_opcodes_match_native` compares per record rather than by count.
+//
+// It creates and destroys its own DB handles, so it cannot leave a corpus contract in the trees the
+// demo's own transaction runs against.
+// ---------------------------------------------------------------------------------------------
+async function armNativeParity(options: { url?: string; program?: string } = {}): Promise<Record<string, unknown>> {
+  const o = await open();
+  const response = await fetch(options.url ?? PARITY_URL);
+  if (!response.ok) throw new Error(`${options.url ?? PARITY_URL}: ${response.status}`);
+  const blobs = (await response.json()) as Record<string, Record<string, string>>;
+  const program = options.program ?? Object.keys(blobs)[0]!;
+  const hex = blobs[program];
+  if (hex === undefined) throw new Error(`no parity inputs for program '${program}'`);
+  const result = runNativeParity(o.reactor, {
+    program,
+    setupClass: hexToBytes(hex['setup.class']!),
+    setupInstance: hexToBytes(hex['setup.instance']!),
+    setupNullifier: hexToBytes(hex['setup.nullifier']!),
+    setupPublicData: hexToBytes(hex['setup.publicdata']!),
+    fastSteps: hexToBytes(hex['faststeps']!),
+  });
+  say(`[parity] ${program}: ${result.count} record(s) in ${result.crossings} crossing(s)`);
+  return { ...result, programsAvailable: Object.keys(blobs) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -217,6 +295,7 @@ const api = {
   armTokenTransfer,
   armRealTimer,
   armRecord,
+  armNativeParity,
   startTicking,
   stopTicking,
   loadProvingStack,

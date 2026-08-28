@@ -30,6 +30,9 @@ import { loadContractArtifact } from '@aztec/stdlib/abi';
 import { PublicKeys } from '@aztec/stdlib/keys';
 import { computeInitializationHash } from '@aztec/stdlib/contract';
 import { makeContractClassPublic, makeContractInstanceFromClassId } from '@aztec/stdlib/testing';
+import { computePublicDataTreeLeafSlot, deriveStorageSlotInMap, siloNullifier } from '@aztec/stdlib/hash';
+import { poseidon2HashWithSeparator } from '@aztec/foundation/crypto/poseidon';
+import { CONTRACT_INSTANCE_REGISTRY_CONTRACT_ADDRESS, DomainSeparator } from '@aztec/constants';
 
 import {
   PUBLIC_DISPATCH_FN_NAME,
@@ -50,6 +53,47 @@ export const BALANCE_FUNCTION = 'balance_of_public';
 /** Fee juice credited to the sender before the transaction. M20's shortcut, DD-2. */
 export const DEMO_FUNDING = new Fr(10n ** 12n);
 
+/** Public token balance credited to the sender. Fee juice is not tokens; see below. */
+export const DEMO_TOKEN_BALANCE = 1_000n;
+
+/** How many tokens the demo transfers. Less than {@link DEMO_TOKEN_BALANCE}, deliberately. */
+export const DEMO_TRANSFER_AMOUNT = 5n;
+
+/**
+ * A named storage slot, read out of the ARTIFACT rather than typed in.
+ *
+ * `outputs.globals.storage` is Noir's own comptime rendering of the contract's `Storage` struct:
+ * a list of `{ name, value: { fields: [{ name: 'slot', value: { kind: 'integer', value: <hex> } }] } }`.
+ * It is not `storage_layout` — that key does not exist in this artifact, which is why the first
+ * draft of this function found `null` and would have needed a constant.
+ *
+ * It THROWS when the name is absent. A slot that silently defaulted to zero would put the balance
+ * in the wrong leaf and produce a transaction that reverts for a reason nobody could see, which is
+ * the failure this whole milestone is about.
+ */
+export function storageSlotOf(rawArtifact: unknown, name: string): Fr {
+  const globals = (rawArtifact as { outputs?: { globals?: { storage?: unknown[] } } }).outputs?.globals?.storage;
+  const entries = Array.isArray(globals) && globals.length > 0
+    ? ((globals[0] as { fields?: { name: string; value: unknown }[] }).fields ?? [])
+    : [];
+  const fieldsEntry = entries.find(e => e.name === 'fields');
+  const members = ((fieldsEntry?.value as { fields?: { name: string; value: unknown }[] } | undefined)?.fields) ?? [];
+  const member = members.find(m => m.name === name);
+  if (member === undefined) {
+    throw new Error(
+      `the artifact's outputs.globals.storage declares no member named '${name}'; it declares `
+        + `[${members.map(m => m.name).join(', ')}]`,
+    );
+  }
+  const slotField = ((member.value as { fields?: { name: string; value: { value?: string } }[] }).fields ?? [])
+    .find(f => f.name === 'slot');
+  const hex = slotField?.value?.value;
+  if (typeof hex !== 'string') {
+    throw new Error(`the artifact's storage member '${name}' carries no integer slot value`);
+  }
+  return new Fr(BigInt(`0x${hex}`));
+}
+
 export interface TokenTransferReport {
   readonly artifactName: string;
   readonly contractAddress: string;
@@ -67,6 +111,8 @@ export interface TokenTransferReport {
   readonly txHash: string;
   readonly feePayer: string;
   readonly fundedLeafSlot: string;
+  /** The contract-address nullifier that makes the instance CALLABLE. M29; see below. */
+  readonly deploymentNullifier: string;
   readonly enqueuedPublicCalls: number;
   /** What the block did with it: `processed`, `failed` or `queued`. Descriptive, never asserted here. */
   readonly outcome: string;
@@ -178,9 +224,13 @@ export async function runTokenTransfer(
     {
       address: contractInstance.address,
       fnName: TRANSFER_FUNCTION,
-      args: [sender, deployer, 5n, new Fr(0)],
+      args: [sender, deployer, DEMO_TRANSFER_AMOUNT, new Fr(0)],
     },
-    { address: contractInstance.address, fnName: BALANCE_FUNCTION, args: [sender] },
+    // STATIC, AND THE STREAM IS WHY. `balance_of_public` is `#[view]`, and aztec-nr's generated
+    // dispatch for a view function asserts the call is static — the executed stream ended on
+    // `GETENVVAR_16`, `JUMPI_32`, `INTERNALCALL`, `REVERT_8` inside context 2 until this flag was
+    // set. Another thing that could not be seen while the steps were the artifact's debug map.
+    { address: contractInstance.address, fnName: BALANCE_FUNCTION, args: [sender], isStaticCall: true },
   ]);
 
   const transferSelector = await getFunctionSelector(TRANSFER_FUNCTION, artifact);
@@ -191,6 +241,93 @@ export async function runTokenTransfer(
   }
 
   const registered = await opened.runtime.registerContract(contractClass, contractInstance);
+
+  // ===========================================================================================
+  // THE DEPLOYMENT NULLIFIER, AND WITHOUT IT THE AVM EXECUTES EXACTLY ONE INSTRUCTION.
+  // ===========================================================================================
+  //
+  // FOUND BY M29, BY LOOKING AT THE EXECUTED STEP STREAM FOR THE FIRST TIME. Registering the class
+  // and the instance puts the bytecode in the module's resident contract DB, and that is not what
+  // makes an address CALLABLE: the AVM decides a contract exists by looking for its address
+  // nullifier — `siloNullifier(CONTRACT_INSTANCE_REGISTRY_CONTRACT_ADDRESS, address)` — in the
+  // nullifier tree, and answers an undeployed address with no bytecode at all. The symptom is
+  // silent in every field M27 asserted: the block still reports the transaction `processed`,
+  // because "processed" is the BLOCK's verdict and a revert is a legitimate outcome inside it.
+  // What it actually did, measured through M9's hook, was ONE step — `pc=0`, opcode 68, which is
+  // M9's `LAST_OPCODE_SENTINEL` for "read_instruction threw before the opcode was known" — a
+  // `revertCode` of 1, and `stats["total_instructions_executed"] == 1`.
+  //
+  // This is exactly the gap M29 exists to close, one level further back than expected: M27's
+  // container did not merely FABRICATE its opcodes, it fabricated them over a transaction that had
+  // not run. Nothing could see it while the steps were synthesised from the artifact's debug map,
+  // because that map is a property of the artifact and not of the execution.
+  //
+  // The derivation is upstream's own, and it is the same one the vendored
+  // `createContractClassAndInstance` performs at `orchestration/src/vendor/avm_fixtures_utils.ts:111`
+  // — which this file deliberately does not call, for the `deriveKeys`/DD-11 reason above. It is
+  // spelled out here rather than reached through that helper so the two crypto calls a page makes
+  // stay visible; `verify_public_only_page_never_fetches_barretenberg` is what would notice if
+  // either of them reached the proving stack.
+  const deploymentNullifier = await siloNullifier(
+    await AztecAddress.fromNumber(CONTRACT_INSTANCE_REGISTRY_CONTRACT_ADDRESS),
+    contractInstance.address.toField(),
+  );
+  opened.publicDataTree.insertNullifier(deploymentNullifier);
+
+  // ===========================================================================================
+  // AND THE PUBLIC INITIALIZATION NULLIFIER, WITHOUT WHICH THE DISPATCH REVERTS AFTER 175 STEPS.
+  // ===========================================================================================
+  //
+  // The second thing the executed stream showed, and it is a different fact from the first. With
+  // the deployment nullifier alone the AVM runs `Token.public_dispatch` properly — 175 instructions,
+  // nineteen distinct opcodes — and then ends on `NULLIFIEREXISTS`, `JUMPI_32`, `INTERNALCALL`,
+  // `REVERT_8`. That tail is `assert_is_initialized_public`, which every `#[public]` function of a
+  // contract with an initializer calls unless it is `#[noinitcheck]`:
+  //
+  //     aztec-nr/aztec/src/macros/functions/initialization_utils.nr
+  //       assert(context.nullifier_exists_unsafe(init_nullifier, context.this_address()),
+  //              "Not initialized");
+  //       fn compute_public_initialization_nullifier(address) =
+  //           poseidon2_hash_with_separator([address], DOM_SEP__PUBLIC_INITIALIZATION_NULLIFIER)
+  //
+  // and the nullifier that ends up in the tree is that value SILOED by the contract that emitted
+  // it, because `push_nullifier_unsafe` silos with `this_address`. Both halves are upstream's own
+  // functions and upstream's own constant; nothing here re-derives a hash by hand.
+  //
+  // WHY UPSTREAM'S OWN TESTER DOES NOT DO THIS AND STILL WORKS: `PublicTxSimulationTester` inserts
+  // the contract-address nullifier only (`base_avm_simulation_tester.ts:160`), and its corpus is
+  // `AvmTest`, which has no initializer, so no dispatch of it asserts initialization. Token does.
+  // The demo would have kept reverting for as long as nobody looked at the step stream — which is
+  // the whole argument of this milestone.
+  //
+  // The poseidon2 is the MODULE's (DD-11): `installPoseidon2` ran in `openAvmRuntime`, so this
+  // costs a page no barretenberg download, and `verify_public_only_page_never_fetches_barretenberg`
+  // is what would notice if it did.
+  const publicInitNullifier = await poseidon2HashWithSeparator(
+    [contractInstance.address.toField()],
+    DomainSeparator.PUBLIC_INITIALIZATION_NULLIFIER,
+  );
+  const initializationNullifier = await siloNullifier(contractInstance.address, publicInitNullifier);
+  opened.publicDataTree.insertNullifier(initializationNullifier);
+
+  // ===========================================================================================
+  // AND A TOKEN BALANCE, BECAUSE THE THIRD THING THE STREAM SHOWED WAS AN EMPTY WALLET.
+  // ===========================================================================================
+  //
+  // With both nullifiers seeded the dispatch runs the FUNCTION — 222 instructions, twenty-four
+  // distinct opcodes — and ends on `LT_16`, `JUMPI_32`, `INTERNALCALL`, `REVERT_8`: the
+  // `assert(balance >= amount)` inside `transfer_in_public`. The sender was funded with FEE JUICE
+  // and never with tokens, which is a different tree and a different slot.
+  //
+  // The slot derivation is upstream's, twice: `deriveStorageSlotInMap(public_balances, sender)`
+  // for the map entry and `computePublicDataTreeLeafSlot(contract, slot)` for the siloed leaf. The
+  // map's slot — 5 — is read out of the ARTIFACT's own `outputs.globals.storage` rather than typed
+  // in, because a slot typed in here is a constant that drifts away from the contract silently and
+  // this campaign has a rule about exactly that.
+  const publicBalancesSlot = storageSlotOf(rawArtifact, 'public_balances');
+  const senderBalanceSlot = await deriveStorageSlotInMap(publicBalancesSlot, sender);
+  const senderBalanceLeaf = await computePublicDataTreeLeafSlot(contractInstance.address, senderBalanceSlot);
+  opened.publicDataTree.insertPublicDataLeaf(senderBalanceLeaf, new Fr(DEMO_TOKEN_BALANCE));
 
   // The fee payer is the transaction's own, read off the transaction rather than assumed: funding
   // a different address is how a transaction comes to fail for insufficient funds with the funding
@@ -226,6 +363,7 @@ export async function runTokenTransfer(
     txHash: receipt.txHash,
     feePayer: feePayer.toString(),
     fundedLeafSlot: fundedLeafSlot.toString(),
+    deploymentNullifier: deploymentNullifier.toString(),
     enqueuedPublicCalls: calldataAll.length,
     // The word, and the record beside it. `String(record)` is `[object Object]`, which is what the
     // first version of this reported: a field that looked like a measurement and carried nothing.

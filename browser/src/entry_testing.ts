@@ -25,8 +25,11 @@ export * from './entry_browser.ts';
 export {
   BALANCE_FUNCTION,
   DEMO_FUNDING,
+  DEMO_TOKEN_BALANCE,
+  DEMO_TRANSFER_AMOUNT,
   TRANSFER_FUNCTION,
   runTokenTransfer,
+  storageSlotOf,
   type TokenTransferReport,
 } from './token_transfer.ts';
 
@@ -40,4 +43,4 @@ export { PublicTxSimulationTester } from '../../orchestration/src/vendor/public_
 export { SimpleContractDataSource } from '../../orchestration/src/vendor/simple_contract_data_source.ts';
 
 // ---- the recorder, with the download suppressible so a probe can read the bytes ---------------
-export { DEMO_STEPS, base64ToBytes, inflateRaw, offerDownload } from './ct_download.ts';
+export { base64ToBytes, inflateRaw, offerDownload } from './ct_download.ts';

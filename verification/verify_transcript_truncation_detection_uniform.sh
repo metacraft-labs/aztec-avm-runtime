@@ -99,7 +99,14 @@ POP="$(grep -rlE '[A-Za-z]+\.done\b|_TRANSCRIPT_COMPARE|_STEPS_COMPARE' "$V" --i
        | sort || true)"
 N_POP="$(printf '%s\n' "$POP" | grep -c . || true)"
 note "$N_POP check(s) depend on a transcript having finished"
-assert_eq "the derived population is exactly the recorded size, in both directions" "30" "$N_POP"
+# M29 ADDED THE THIRTY-FIRST, AND IT REACHES THE SHARED IMPLEMENTATION.
+# `e2e_browser_container_opcodes_match_native` compares the native x86-64 driver's per-record
+# transcript against the same program run in a browser, so it is a comparer in this section's sense
+# and is on section 3's list. Its first draft asserted `avmSteps.done 1` by hand — the eighth
+# spelling of the question this milestone unified — and THIS CENSUS is what caught it, in M29's own
+# sweep, before anything was declared. 30 -> 31 with the reaching set 8 -> 9 and the not-reaching
+# set unchanged at 22, which is the split that says the new member did not join the backlog.
+assert_eq "the derived population is exactly the recorded size, in both directions" "31" "$N_POP"
 
 # Declared exceptions, each with a reason. An exception that no longer matches a real file FAILS,
 # which is what stops this list from silently outliving what it excuses.
@@ -126,7 +133,7 @@ EOF
 # the first word of a command substitution, and it must be followed by whitespace or a quote rather
 # than by more identifier characters. Section 2's control below plants both directions.
 #
-# Measured before the narrowing and after: the census is 30 / 22 / 8 either way, because all eight
+# Measured before the narrowing and after: the census was 30 / 22 / 8 either way, because all eight
 # reaching files call it as well as mentioning it. The fix closes the hole without moving a number,
 # which is the only way to tell a narrowing from a re-pin.
 # Written with `lib.sh`'s builtin line predicate rather than as `grep -v … | grep -q …`, and that
@@ -170,8 +177,8 @@ EOF
 # found and named.
 note "not reaching the shared implementation:$MISSING"
 assert_eq "the set that does not reach it is exactly the recorded size" "22" "$N_MISSING"
-assert_eq "…and the eight that DO are the five comparers, the node-host runs and M21's two probes" \
-  "8" "$((N_POP - N_MISSING))"
+assert_eq "…and the nine that DO are the six comparers, the node-host runs and M21's two probes" \
+  "9" "$((N_POP - N_MISSING))"
 
 # THE NEEDLE IS A THING UNDER TEST, in both directions. A file that only MENTIONS the name must not
 # count as reaching it, and a file that CALLS it must. Without the first of these, the census above
@@ -223,7 +230,8 @@ COMPARERS="verify_native_wasm_transcripts_identical.sh
 test_revert_program_does_not_trap_module.sh
 verify_observation_hook_step_records_identical.sh
 test_avm_reactor_transcripts_match_driver.sh
-e2e_ts_wasm_result_decodes_as_upstream_types.sh"
+e2e_ts_wasm_result_decodes_as_upstream_types.sh
+e2e_browser_container_opcodes_match_native.sh"
 while IFS= read -r name; do
   [ -n "$name" ] || continue
   assert_true "$name refuses on an incomplete transcript rather than asserting about it" \

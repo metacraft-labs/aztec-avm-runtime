@@ -342,3 +342,39 @@ because skipping one would shift every later step in the batch onto a real-looki
   `source_map.ts` takes a decoded `DebugInfo` and a file map as plain data; the deflate/base64/JSON
   decode is in `tools/run_trace_arms.mjs`, which is a tool.
 - The module still has **zero wasm imports**.
+
+### M29 — executed steps, and the first time "never rounded up" had to bite
+
+**§3's ladder was written against a stream that could not degrade, and M29 gave it one that can.**
+Until M29 every step this repository recorded was one of the artifact's own MAPPED program counters
+— M25's arms drove "the artifact's first 200 mapped pcs", M26's join driver did the same, and M27's
+browser container did the same for 64 — so "the contract is rung 1 and 200 of 200 steps are
+positioned" was true *by construction*. A declaration that cannot be contradicted is not a
+declaration, and the whole `ct_rung_violations()` / `MappingRungDegraded` apparatus had never been
+exercised by anything but its own deliberate control.
+
+M29 records what the AVM executed. Measured on the browser demo's token transfer: **516 executed
+instructions, of which 389 resolve to a `(path, line, column)` and 127 do not.** The 127 are §2.4's
+residual hole 2 — compiled procedures are appended after the main body (`transpile.rs:489`, `:505`),
+past the end of `brillig_pcs_to_avm_pcs`, and `ContractSourceMap.positionFor` answers `null` for
+them rather than rounding to the nearest lower line.
+
+So a rung-1 declaration for that contract would now be false, the module would count 127 violations,
+and `CtWriter.close()` would refuse the container. **The rung is therefore declared from the
+EXECUTION rather than from the artifact**: rung 1 when every executed step of that contract
+resolved, rung 2 otherwise, with the reason carrying the split, the first unmapped pc, and the
+artifact's own verdict. `browser/src/ct_download.ts` does that in a pass of its own before the first
+step is ingested, because the declaration has to be on the module's list before the records it is
+judged against arrive.
+
+**Two rungs, two questions, and they are not the same question.** The SESSION's rung stays
+`RUNG_SOURCE` and columns stay on: §3.1's rule is that columns are recordable when the recording
+resolves to rung 1, and this recording really does resolve a real `(path, line, column)` — with a
+real column — for every step it positions. The CONTRACT's declaration is the coverage claim, and it
+is the one that is now measured. `e2e_browser_downloads_ct_container_and_ct_print_parses` asserts
+the implication in the direction that can fail: the declared rung is 1 exactly when the unpositioned
+count is 0.
+
+**And hole 2 has a number now.** §2.4 recorded it as a measured gap with no consequence attached;
+its consequence is 127 of 516 steps on one ordinary public transaction, or **24.6%**. That is the
+figure a sixth upstream contribution would be worth, if one is ever prepared.

@@ -183,4 +183,24 @@ export {
   type StepEvent,
 } from '../../ct-host/src/index.ts';
 
-export { fetchCtWriter, recordAndDownload, type BrowserRecording } from './ct_download.ts';
+export {
+  ExecutedStepsUnavailable,
+  STEP_PRODUCER,
+  STEP_PRODUCER_METADATA,
+  fetchCtWriter,
+  recordAndDownload,
+  type BrowserRecording,
+} from './ct_download.ts';
+
+// ---- M29: the executed step stream -------------------------------------------------------------
+//
+// The drain itself is `node-host/src/steps.ts` — reused, not re-implemented; every import in that
+// file is an `import type`, so it carries no runtime dependency and is browser-safe as written.
+export {
+  DEFAULT_STEP_BATCH,
+  ExecutedStepCollector,
+  INSTRUCTIONS_EXECUTED_STAT,
+  formatExecutedStep,
+  type ExecutedTransaction,
+  type ExecutionStep,
+} from './executed_steps.ts';
