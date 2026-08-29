@@ -610,3 +610,47 @@ m0 156  m1 175  m12 691  m15 537  m16 223  m17 297  m19 180  m28 353  m32 234
 **Every one at its reference value to the assertion, rc 0, zero failing assertions.** So the
 11,054 stands over the tree at `6c8eae3`, and `carry/` is still at its pre-sweep digests
 (`sha256sum -c`, both OK).
+
+---
+
+## Step 16 — the tree, as it is left
+
+| repo | branch | HEAD | published | tree |
+|---|---|---|---|---|
+| `aztec-avm-runtime` | `dev` | `0ee83b9` | pushed to `origin/dev` | clean |
+| `codetracer-specs` | `latest` | carries `f6ea33a4`, `4747662a`, `ded1475d` | pushed to `origin/latest` | clean |
+| `noir-wt4-webpage` | `wasm/webpage` | **`f0e7edcd2`** | **contained in ZERO published refs** | exactly its one pre-existing edit (`tooling/tracer/src/tracer_glue.rs`) |
+| `aztec-packages` | — | — | — | clean, untouched |
+| `noir` | — | — | — | clean, untouched |
+
+`carry/rebase.json` and `carry/exposure.json` verified against their pre-sweep digests with
+`sha256sum -c` after the sweep, after M9's re-run, and after the post-CI re-measure.
+
+Four commits, one per confirmed finding plus the sweep:
+
+```
+844b6d4  m32: a dev node hosted in a Web Worker, and the review's strengthening of it
+07d3055  m32 review: a count inside a window is not production during it
+6c8eae3  m32 review: the M0-M32 sweep at 11,054, taken after the last commit
+0ee83b9  m32 review: a CI commit landed mid-sweep, and it moves nothing
+```
+
+## Claims that did not survive
+
+1. **`detached` is `ArrayBuffer.prototype.detached` rather than an inference from a zero length** —
+   false in the code, in four places of prose, and in the built bundle. Fixed.
+2. **Mutation arm M2, "the most precise arm in the matrix"** — its first substitution printed
+   `MUTATION MISS` and the arm reported its predicted result from the other one, which mutated the
+   control alone. The harness now refuses on a miss.
+3. **A COUNT inside the busy window is production during it** — it is not, and nothing measured the
+   spacing; my own first fix did not catch it either, and the calibration is what said so.
+4. **`_m32_doc_ops.py`'s residue is over §2's operation list** — it was over the whole document.
+5. **`comlink` is "a declared dependency of BOTH `@aztec/bb.js` and `@aztec/foundation`"** — a
+   `devDependency` of the second, so "two of the four packages" is one.
+6. **The eager total** — `8,163.38` in the milestone, `8,163.43` in two documents, **8,163.44**
+   measured.
+7. **The freeze's recorded gap** — `4,222` / `4,223` / `4,224.7` for one run, now `≈4.2 s`
+   everywhere with one labelled exact figure.
+
+Two of the seven were in M32's own instruments rather than in its subject, and one of them was in
+mine.
