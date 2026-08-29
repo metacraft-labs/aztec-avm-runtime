@@ -1,0 +1,52 @@
+{
+  "name": "@aztec-avm-runtime/replay",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "L0 of the live-chain replay campaign: a node client narrowed to what a replay needs",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "//": [
+    "WHY THIS TREE IS ON `npm.current` AND orchestration/ IS NOT. pins.json declares two @aztec",
+    "nightly lines on purpose. `deletion_era` (5.0.0-nightly.20260626) is FROZEN EVIDENCE: the",
+    "published line whose src/public tree is byte-comparable with the `ts` anchor, which is what",
+    "lets the deleted TypeScript AVM run at all. It has nothing to say about which protocol a",
+    "RUNNING chain speaks. `current` (5.3.0-nightly.20260819) declares",
+    "`corresponds_to_anchor: cpp`, and the cpp anchor is the one every L0 enumeration is",
+    "re-derived from, so it is the line a client that talks to a live node belongs on.",
+    "",
+    "CONSEQUENCE, STATED SO IT IS NOT DISCOVERED: this package and orchestration/ have DIFFERENT",
+    "@aztec/stdlib installs, and importing across the boundary is a wrong answer rather than an",
+    "inefficiency — `serializeWithMessagePack` recognises an `Fr` by the class object of its own",
+    "install, which lib_m21_form_b.sh already records. That is the stated rejection reason for",
+    "not importing orchestration/src/settled_read_source.ts's `strictSurface`; replay/src has its",
+    "own, citing M21's design decision by decision.",
+    "",
+    "@aztec/noir-protocol-circuits-types IS A devDependency AND MUST STAY ONE. It is 92 MB and it",
+    "is needed by exactly one thing: verify_client_uses_upstream_schema, which re-derives",
+    "live_chain.protocol_version.l2CircuitsVkTreeRoot from `getVKTreeRoot()` so that the pin is a",
+    "measurement rather than a transcription. Nothing the client ships imports it, and DD-9's",
+    "browser boundary is the reason that matters at L4.",
+    "",
+    "@aztec/protocol-contracts is a runtime dependency of nothing here either, and is declared for",
+    "the same re-derivation (`protocolContractsHash`). It is 2.6 MB and L1 will need it for real,",
+    "so it is a plain dependency rather than a dev one.",
+    "",
+    "NO @aztec/aztec.js AND NO @aztec/pxe. A PXE is the private half's home and a replayed",
+    "transaction has no private half; aztec.js would bring a wallet, a key store and a note",
+    "database for a client that only reads. The one thing this package needs from that direction —",
+    "`createAztecNodeClient` — is in @aztec/stdlib/interfaces/client, which is already here."
+  ],
+  "dependencies": {
+    "@aztec/foundation": "5.3.0-nightly.20260819",
+    "@aztec/protocol-contracts": "5.3.0-nightly.20260819",
+    "@aztec/stdlib": "5.3.0-nightly.20260819"
+  },
+  "devDependencies": {
+    "@aztec/noir-protocol-circuits-types": "5.3.0-nightly.20260819"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

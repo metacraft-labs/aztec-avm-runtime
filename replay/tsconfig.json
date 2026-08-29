@@ -1,0 +1,35 @@
+{
+  "//": [
+    "Type-checking only, the same shape orchestration/ and node-host/ use: Node 24 runs the .ts",
+    "sources by stripping types, so there is no emit step and no build artefact to keep in sync.",
+    "",
+    "`erasableSyntaxOnly` refuses enums, namespaces and parameter properties — anything Node's",
+    "stripper cannot erase — so a source that type-checks is a source Node can run. This matters",
+    "here more than usual, because every L0 check drives the client through a probe that Node runs",
+    "directly from these sources.",
+    "",
+    "`skipLibCheck` is true for the same reason it is true in orchestration/: the dependencies are",
+    "@aztec/* .d.ts files whose own errors are not ours to fix, and turning it off would make this",
+    "a check about @aztec/stdlib's typings rather than about the replay client."
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "NodeNext",
+    "moduleResolution": "nodenext",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": false,
+    "noEmit": true,
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": []
+  },
+  "include": ["src/**/*.ts"]
+}
