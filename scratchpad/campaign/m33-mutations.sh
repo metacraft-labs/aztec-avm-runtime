@@ -269,7 +269,19 @@ d = json.load(open(sys.argv[1]))
 sys.exit(0 if d["arms"] == {"handshake": {}} else 1)' "$ARMS_FILE"; then
         echo "M7 held: the report is still hollow after the run" | tee -a "$LOG"
       else
+        # AND IT FAILS RATHER THAN PRINTING A RESULT. `CAMPAIGN-BRIEF.md`'s remedy for M30's third
+        # state is "assert after the run that the mutation is STILL THERE — if it is not, FAIL
+        # naming the cause instead of printing a result". The first version diagnosed and carried
+        # on, so the log carried the arm's green number and the diagnosis side by side. Measured by
+        # M33's review, which reproduced the race deliberately: with the bundle touched newer than
+        # the hollowed report the check reports 67 assertions, 0 failures, exit 0 — a fully green
+        # arm over a mutation that had been undone. A reader skimming the matrix sees the 67.
         echo "M7 DID NOT HOLD: the report was re-measured under the arm" | tee -a "$LOG"
+        echo "   The result printed above is NOT this arm's result: the mutation was undone before" \
+             "the check read it. Do not record it." | tee -a "$LOG" >&2
+        restore_all
+        verify_restored || true
+        exit 5
       fi
       M33_ARMS_REFRESH=1 direnv exec "$REPO" bash -c 'M33_ARMS_REFRESH=1 verification/verify_wallet_protocol_is_upstreams.sh' >> "$LOG" 2>&1
       ;;
