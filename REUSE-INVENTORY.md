@@ -981,6 +981,25 @@ component is and what it costs us, and does not repeat the deletion.
 - rejection-reason: cannot-reach-target: its declared `dependencies` include **both** `@aztec/pxe` and `@aztec/wallet-sdk`, so its `@aztec` closure is a superset of RI-88's and reaches `@aztec/native` and `@aztec/world-state` — re-derived offline from the anchor's own manifests and asserted by `verify_provider_half_dd9_clean` §6. The target is the browser bundle whose entire CI gate (M28) is "no Node builtin, no native dependency is reachable". Nothing of it is imported; what M33 takes from it is the knowledge that it exists.
 - confidence: measured
 
+||||||| parent of 6aac029 (L1: the fixtures indexed in pins.json, and the retention horizon that bounds when a capture is possible)
+### RI-92 — `Tx`'s own public-call accessors, rather than a walk of the kernel public inputs
+- upstream: `yarn-project/stdlib/src/tx/tx.ts` at `anchors.cpp` — `Tx.getPublicCallRequestsWithCalldata()`, `getTeardownPublicCallRequestWithCalldata()`, `numberOfPublicCalls()`, `hasPublicCalls()`; and `kernel/public_call_request.ts`'s `PublicCallRequest.contractAddress`
+- covers: enumerating which contracts a settled transaction's public half will execute against, in execution order
+- decision: depend
+- milestone: L1 (Aztec-Live-Chain-Replay)
+- why: `publicCallTargets` needs the addresses in the order the AVM will meet them, and upstream already partitions them — non-revertible, then revertible, then teardown — inside these accessors, because the private tail circuit fills the two arrays by partitioning a single one and propagates teardown separately. Reading `tx.data.forPublic` and re-deriving that partition here would be re-implementing a circuit's own convention in a consumer, which is where a silent ordering divergence lives. The teardown request is asked for through its OWN accessor as well as through the combined one, because a transaction can carry a teardown and no enqueued calls and two accessors disagreeing is exactly the kind of thing that would otherwise be found by an empty replay.
+- rejection-reason: n/a
+- confidence: measured
+
+### RI-93 — recording a live chain at upstream's `JsonRpcFetch`, rather than at the object layer
+- upstream: `yarn-project/foundation/src/json-rpc/client/fetch.ts` at `anchors.cpp` — the `JsonRpcFetch` type and `defaultFetch`, which `createSafeJsonRpcClient` takes as an injectable transport
+- covers: L1's committed fixtures — capturing a settled transaction from a live node and replaying it offline
+- decision: depend
+- milestone: L1 (Aztec-Live-Chain-Replay)
+- why: upstream's client already takes its transport as a parameter, so a fixture can be a recording of THAT function and nothing else has to be built — no fake server, no port, no second schema. The seam matters more than the saving: a fixture captured at the OBJECT layer (a JSON dump of a `Tx` and a `TxEffect`) is read back by code we wrote, so upstream's zod schemas never run and a fixture that has drifted reads exactly like one that has not. Captured at the transport, the committed bytes are validated by `AztecNodeApiSchema` on every single run, and `e2e_fetch_settled_transaction` demonstrates that in both directions by corrupting one recorded response and watching upstream refuse it while the intact one answers in the same process. The one thing that is ours is the refusal: a request the recording does not carry THROWS `FixtureMiss` rather than answering `null`, because `null` would make an incomplete recording read as a chain that does not have the transaction.
+- rejection-reason: n/a
+- confidence: measured
+
 
 ---
 
