@@ -391,11 +391,14 @@ m28 353  m29 127  m30 218  m31 421  m32 234  m33 245
 **Measured, not assumed.** L0's three checks are in `just verify-l0`, which no `verify-m<N>` recipe
 invokes: `verify_node_client_surface_narrow`, `test_node_client_refusals_distinguishable` and
 `verify_client_uses_upstream_schema` appear **zero times in the whole sweep log**. So the entire
-11,303 is M0–M33's, and L0's own **188** (74 / 52 / 62, its declared figure) is a separate number
-that is not in it. I could not re-take the 188 here — `just verify-l0` exits 1 with
-`ERR_MODULE_NOT_FOUND: '@aztec/stdlib'` because `replay/node_modules` is not installed in this
-workspace, which L0's own Justfile comment names as its one precondition. That is an environment
-fact about this checkout, not a finding about L0.
+11,303 is M0–M33's, and L0's own **188** is a separate number that is not in it.
+
+**And the 188 was re-taken rather than quoted.** `just verify-l0` first exited 1 with
+`ERR_MODULE_NOT_FOUND: '@aztec/stdlib'` — `replay/node_modules` was not installed in this workspace,
+which L0's own Justfile comment names as its one precondition, so that was an environment fact about
+this checkout and not a finding about L0. With `npm ci` run in `replay/` (its `node_modules` is
+gitignored, so the tree stays clean), **`just verify-l0` is 188, 3/3, exit 0 — 74 / 52 / 62, its
+declared split to the assertion.**
 
 ### M33's own 245, and where the 21 came from
 
