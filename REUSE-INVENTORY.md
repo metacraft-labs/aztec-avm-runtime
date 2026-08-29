@@ -981,7 +981,6 @@ component is and what it costs us, and does not repeat the deletion.
 - rejection-reason: cannot-reach-target: its declared `dependencies` include **both** `@aztec/pxe` and `@aztec/wallet-sdk`, so its `@aztec` closure is a superset of RI-88's and reaches `@aztec/native` and `@aztec/world-state` — re-derived offline from the anchor's own manifests and asserted by `verify_provider_half_dd9_clean` §6. The target is the browser bundle whose entire CI gate (M28) is "no Node builtin, no native dependency is reachable". Nothing of it is imported; what M33 takes from it is the knowledge that it exists.
 - confidence: measured
 
-||||||| parent of 6aac029 (L1: the fixtures indexed in pins.json, and the retention horizon that bounds when a capture is possible)
 ### RI-92 — `Tx`'s own public-call accessors, rather than a walk of the kernel public inputs
 - upstream: `yarn-project/stdlib/src/tx/tx.ts` at `anchors.cpp` — `Tx.getPublicCallRequestsWithCalldata()`, `getTeardownPublicCallRequestWithCalldata()`, `numberOfPublicCalls()`, `hasPublicCalls()`; and `kernel/public_call_request.ts`'s `PublicCallRequest.contractAddress`
 - covers: enumerating which contracts a settled transaction's public half will execute against, in execution order

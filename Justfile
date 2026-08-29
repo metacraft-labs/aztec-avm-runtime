@@ -2798,7 +2798,6 @@ verify-m33:
       echo "verify-m33: all checks passed"
     fi
     exit "$rc"
-||||||| parent of d3377bf (L1: three checks and their controls — 280 assertions, 125 / 94 / 61, none of them touching a network)
 
 # ---------------------------------------------------------------------------
 # L1 — fetching a settled transaction
