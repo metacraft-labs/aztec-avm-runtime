@@ -562,6 +562,32 @@ failures. *A control that is not run is a control that is the wrong shape* — t
 read, and wrong, and only running it said so. **When you assert over a range, ask what falls between
 its edge and your first data point.**
 
+### A CONFIG-LEVEL ASSERTION IS NOT A BEHAVIOURAL ONE, AND A METAFILE RECORDS IMPORTS
+
+**One instance, and it was measured rather than argued.** M33 ships a browser entry point whose
+whole browser-shape claim was read off the esbuild **metafile** — no `@aztec/native`, no
+`@aztec/world-state`, no `@aztec/pxe`, no Node builtin IMPORT — over a control build where the
+forbidden packages are planted and resolvable, which is the right remedy for the defect this file
+records twice. The handshake itself was measured in Node against the BUILT bundle, which is also
+right: a `MessagePort` and WebCrypto are the same thing in both engines.
+
+**What nothing covered is that a page can EVALUATE the file.** A free identifier is not an import,
+and a metafile only records imports. Measured by M33's review with
+`const _nodeOnlyProbe = setImmediate;` at the top of a module the entry reaches — a Node global read
+at module-evaluation time, and neither `Buffer` nor `process`, so `browser/src/globals.js`'s
+injection does not supply it and `verify_browser_bundle_builds`'s free-identifier scan does not name
+it. The rebuilt bundle imported cleanly in Node and died in Chromium with
+`ReferenceError: setImmediate is not defined`, while `just verify-m33` reported **224 assertions,
+4/4, exit 0**, `verify_browser_bundle_no_node_builtins` **64 / 0**,
+`verify_browser_bundle_no_native_deps` **44 / 0** and `smoke_browser_headless_full_flow` **50 / 0** —
+that last one DOES drive Chromium, over a different entry point. **Nothing in the repository
+referenced the wallet entry from a page**, which is why nobody would have noticed.
+
+**Rule:** if a milestone ships something a browser is meant to load, something must load it in one.
+The smallest closing claim is enough — it evaluates, and it exports what it declares — and it needs
+a control that does NOT evaluate, run through the same probe, the same server and the same browser.
+`verify_provider_half_dd9_clean` §10 is the shape to copy; it reuses M27's harness unchanged.
+
 ### Conjunctions need a negative case per conjunct
 A four-tree conjunction whose only negative case exercised one tree: dropping any
 of the other three passed all twelve cases.
@@ -737,6 +763,58 @@ m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
 m28 353  m29 127
                                                        CAMPAIGN TOTAL 10,178
 ```
+
+**M33'S REVIEW TOOK IT TO 11,303, AND MOVED EXACTLY ONE MILESTONE — M33'S OWN.** Re-measured
+M0-M33 on 2026-08-29 by M33's review, **after the rebase onto `origin/dev` and after its last
+commit**, `setsid`-detached in this repository's own dev shell (node v24.19.0), one milestone at a
+time with nothing else running, `TMPDIR` and the log under `~/.cache`, **no hole in the log** (68
+markers for 34 milestones), **31 of 34 exit 0**:
+
+```
+m0 156  m1 179  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 262  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
+m28 353  m29 127  m30 218  m31 421  m32 234  m33 245
+                                                       CAMPAIGN TOTAL 11,303
+```
+
+**Every one of M0-M32 came out at its reference value TO THE ASSERTION**, and 11,282 + 21 = 11,303
+exactly, with the summariser reporting `delta +0` against a reference table naming the move in
+advance. **M33's own 245** is 33 / 105 / 40 / 67, declared at 224, and all 21 are in
+`verify_provider_half_dd9_clean` — itemised in M33's Verification section, in two places and nothing
+else. Nothing else moved: `verify_provenance_complete` 68, `verify_pinned_nightly_single_source` 28,
+`verify_no_pipeline_predicates` 69, `verify_named_checks_exist` 9, `check-drift` 22,
+`check-repo-hygiene` 28, `verify_reuse_inventory_complete` 19, M27 345 and M28 353.
+
+**THE PARALLEL L0 TRACK CONTRIBUTES ZERO TO THIS TOTAL, AND THAT IS A MEASUREMENT.** `origin/dev`
+had moved four commits ahead with the L0 live-chain-replay track; M33's work was rebased onto it
+(both textual conflicts — `Justfile`, `REUSE-INVENTORY.md` — are pure appends and both appends were
+kept). L0's three checks live in `just verify-l0`, which no `verify-m<N>` recipe invokes: grepped,
+their names appear **zero** times in the whole sweep log. Its own **188** (74 / 52 / 62) is a
+separate figure and is not part of the campaign total. The inventory ids do not collide either —
+`REUSE-INVENTORY.md` carries 91 headings, RI-01..RI-91, all distinct, none missing, none repeated,
+with RI-86/RI-87 L0's and RI-88..RI-91 M33's.
+
+**THREE NON-ZERO EXITS AND ONLY ONE OF THEM IS THIS REPOSITORY'S OWN WORK.**
+**M9 is 807 with FOUR failing assertions and the count is the reference split exactly**
+(140/143/113/73/126/83/129) — because this time the V8/WASI stdout truncation hit the **fallback
+EVENT stream** and not the step transcript, so both comparers ran and neither refused:
+`truncated-after-10617-lines-last-key-events.burn.10412`. That is the second sighting on the events
+stream (M29's review recorded 15,306) beside the seven on `steps`. Re-run alone: **807, 7/7, exit 0**,
+the reference split exactly. Not a regression.
+**M11 is 262 with NINE failing assertions**, the recorded ninth-upstream-move signature; the count is
+the signature and it is unchanged. Not repaired, `carry/` left at HEAD.
+**M28 is 353 with ONE failing assertion AND IT IS L0'S, NOT M33'S.**
+`verify_npm_pack_no_optional_native` pins the tracked `package.json` list EXACTLY — "the three
+shipped plus the four harness trees" — and `replay/package.json` is a fifth tree, added by L0's
+`541bf5f`. The COUNT is unchanged at 353, which is what says it is a pinned list and not a structure.
+L0's own log enumerates the repo-wide checks it re-took and this one is not among them. **It is
+recorded here and deliberately NOT fixed**: a second track editing the first track's expectations is
+the collision this campaign has already paid for three times.
+
+**A sweep is a writer**: `carry/rebase.json` and `carry/exposure.json` were `aaeb6877…` / `ec959b84…`
+before, came out `79f597b2…` / `3836c2b6…` — the same two post-sweep digests every run since M30 has
+recorded — and were restored, confirmed by `sha256sum -c`, all four OK.
 
 **M33 TOOK IT TO 11,282, AND MOVED EXACTLY ONE OTHER MILESTONE — M1's, BY FOUR, DECLARED BEFORE
 THE SWEEP RAN.** Measured M0-M33 on 2026-08-29 by M33's implementation, after its last edit,

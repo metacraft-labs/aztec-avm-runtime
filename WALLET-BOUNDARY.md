@@ -179,7 +179,11 @@ milestone rests on, and only the offline one is asserted.)*
   `MessagePort` — `DiscoveredWallet` holds one — so this is a third socket under an unchanged
   protocol rather than a new protocol. `port_connection_handler.ts` is
   `iframe_connection_handler.ts`'s state machine with `window.addEventListener('message')` replaced
-  by `port.onmessage`, and its message-flow comment is upstream's, unchanged.
+  by `port.onmessage` — measured member for member against the anchor, all nine of upstream's
+  present (two renamed) beside the four M33 declares as its own. **Its message-flow comment is a
+  PARAPHRASE of upstream's, not a copy**, and three places said "unchanged" until M33's review
+  compared them: four lines against five, `parent →` against `dApp ->`, and a PING/PONG line added
+  that upstream's handler implements and upstream's comment omits.
 
 ### Two divergences from upstream's handler, both declared and both STRICTER
 

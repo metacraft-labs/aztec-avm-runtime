@@ -17,8 +17,14 @@
 // the secure session but reaches through `browser.runtime` to establish. So this file is the
 // iframe handler's state machine — pending sessions, approve/reject, ECDH, encrypted dispatch,
 // PING, terminate — with `window.addEventListener('message')` replaced by `port.onmessage`, and
-// nothing else moved. The message flow comment below is upstream's, unchanged, because the flow
-// IS unchanged: that is the point of speaking somebody else's protocol.
+// nothing else moved. The FLOW below is upstream's; the comment rendering it is a PARAPHRASE of
+// upstream's, and M33's review corrected that sentence rather than leaving it. Upstream writes four
+// lines with `parent →` and Unicode arrows ("show approval UI", "send DISCOVERY_RESPONSE",
+// "terminate session"); this writes five with `dApp ->` and ASCII, and the fifth is PING/PONG —
+// which upstream's handler IMPLEMENTS (`case WalletMessageType.PING`, and the `PONG` reply) and
+// upstream's comment omits. A comment that claims to be a copy is a claim and needs the same
+// evidence as any other; the claim that survives is about the flow, and it was checked member for
+// member against `iframe_connection_handler.ts` at the anchor.
 //
 //   dApp -> DISCOVERY            -> approval -> DISCOVERY_RESPONSE
 //   dApp -> KEY_EXCHANGE_REQUEST -> ECDH     -> KEY_EXCHANGE_RESPONSE

@@ -77,14 +77,32 @@ REFERENCE = {
     # them a figure a check re-derives from the artefact on every run, all corrected before this
     # sweep and re-measured.
     #
-    # M33's own 224 is 33 / 84 / 40 / 67. Declared before the sweep read it: the fourth check went
+    # M33's own 245 is 33 / 105 / 40 / 67 AFTER ITS REVIEW; it was DECLARED at 224 (33 / 84 / 40 /
+    # 67) and the 21 are all in `verify_provider_half_dd9_clean`, in two places and nothing else:
+    #   * +14 for §10, which LOADS the built wallet.js in a real page. M33 asserted the browser half
+    #     on the esbuild METAFILE, and a metafile records IMPORTS while a free identifier is not one:
+    #     with `const _nodeOnlyProbe = setImmediate;` planted (not Buffer, not process, so no shim
+    #     supplies it and no free-identifier scan names it), `just verify-m33` was 224 / 4-of-4 /
+    #     exit 0, verify_browser_bundle_no_node_builtins 64/0 and smoke_browser_headless_full_flow
+    #     50/0, over a bundle that died in Chromium with `ReferenceError: setImmediate is not
+    #     defined`. Nothing anywhere loaded wallet.js in a page. The control is that plant, kept as a
+    #     second served site the same probe must report as a ReferenceError.
+    #   * +7 for §8's census of the spellings the closure walker CANNOT follow — zero dynamic
+    #     `import()` and zero `require()` in the provider half, with the wallet half's three and the
+    #     scanner's own fixture as two controls that the zero is a reading rather than a scanner that
+    #     stopped matching.
+    # The review's other two fixes add NO assertion: the document comparer's needle is delimited
+    # rather than a bare substring (two of its nineteen figures could not fail), and it now covers
+    # the two pxe counts as well — 21 figures against 19, under the same three assertions.
+    #
+    # The 224 it was declared at: the fourth check went
     # 63 -> 67 during the self-review pass, when `assert_ge "the handshake completed inside a sane
     # wall-clock window" 0 "$ELAPSED"` was found to be the campaign's purest family — a wall-clock
     # duration is never negative, so the assertion could not fail. One removed, five added, on the
     # three declared handshake BOUNDS read out of the built bundle (each positive, key exchange the
     # shortest, discovery the longest), which is what "every wait is bounded" can actually assert.
     "m1": 179,
-    "m33": 224,
+    "m33": 245,
 }
 REFERENCE["m11"] = 262
 

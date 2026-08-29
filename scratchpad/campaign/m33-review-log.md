@@ -313,3 +313,133 @@ dynamic-import census and its two controls. **M33 is 245** (33 / 105 / 40 / 67),
 Nothing else moved, measured rather than assumed after the additions: `verify_named_checks_exist`
 **9**, `just check-repo-hygiene` **28**, `verify_no_pipeline_predicates` **69**,
 `verify_reuse_inventory_complete` **19**, `verify_provenance_complete` **68**.
+
+---
+
+## FINDING 5 — "THE MESSAGE-FLOW COMMENT IS UPSTREAM'S, UNCHANGED" IS FALSE, IN THREE PLACES
+
+RI-90's whole decision is *"the SHAPE is reused and the code is not"*, and the sentence offered as
+evidence that the shape really is upstream's appears three times — in `REUSE-INVENTORY.md` RI-90
+(*"the message-flow comment in `port_connection_handler.ts` is upstream's, unchanged, because the
+flow is unchanged"*), in `WALLET-BOUNDARY.md` §3 (*"its message-flow comment is upstream's,
+unchanged"*), and in `port_connection_handler.ts`'s own header (*"The message flow comment below is
+upstream's, unchanged"*). Nothing checks it. Compared against
+`yarn-project/wallet-sdk/src/iframe/handlers/iframe_connection_handler.ts` at the anchor, out of the
+object store:
+
+| upstream | ours |
+|---|---|
+| `parent → DISCOVERY            → show approval UI → send DISCOVERY_RESPONSE` | `dApp -> DISCOVERY            -> approval -> DISCOVERY_RESPONSE` |
+| `parent → KEY_EXCHANGE_REQUEST → ECDH             → send KEY_EXCHANGE_RESPONSE` | `dApp -> KEY_EXCHANGE_REQUEST -> ECDH     -> KEY_EXCHANGE_RESPONSE` |
+| `parent → SECURE_MESSAGE       → decrypt → Wallet → encrypt → SECURE_RESPONSE` | same, ASCII arrows |
+| — | **`dApp -> PING                 -> PONG`** |
+| `parent → DISCONNECT           → terminate session` | `dApp -> DISCONNECT           -> terminate` |
+
+Four lines against five, `parent` against `dApp`, Unicode arrows against ASCII, and three of the
+five re-worded. It is a **paraphrase**, and the added PING/PONG line is a real improvement rather
+than an error — upstream's handler DOES implement it (`case WalletMessageType.PING` and the `PONG`
+reply are both in that file); it is upstream's *comment* that omits it.
+
+**The substantive claim survives and the evidence offered for it did not**, which is the shape
+`CAMPAIGN-BRIEF.md` records for M23's wall-clock needles. Compared member for member, the
+correspondence is real: upstream has `constructor / start / stop / approveDiscovery /
+rejectDiscovery / terminateSession / getPendingSessions / handlePing / handleDiscoveryRequest`, and
+ours has all nine (two renamed `pendingSessions` and `onPing`/`onDiscovery`) plus the four M33
+declares as its own additions — `activeSessions`, `disclosure`, `refusals`, `refuse`.
+
+All three sentences corrected to what is true. **A comment that claims to be a copy is a claim, and
+it needs the same evidence as any other**; this one was three copies of an unchecked sentence.
+
+---
+
+## Independent re-derivations I took rather than read
+
+| claim | how I re-took it | result |
+|---|---|---|
+| the three vendored files are byte-identical to the anchor | `git show <anchor>:…` against the local copy with the provenance header stripped by hand, not by the check's own stripper | **identical**, 204 + 603 + 317 = **1,124 lines** exactly |
+| `@aztec/wallet-sdk`'s `dependencies` names `@aztec/pxe` | straight out of the object store, and again from the npm registry at the published pin | both: **yes**, and `peerDependencies` is empty, so the edge is hard |
+| `@aztec/aztec.js` reaches none of the four | same two sources | both: **none** |
+| exactly three packages added, no `.node` binary | the lock diff and `find … -name '*.node'` over the three installed trees | **3 packages, 0 `.node`, no `optionalDependencies`** |
+| the new dependency uses the declared pin | `orchestration/package.json` against `pins.json`'s `npm.deletion_era` | all five at `5.0.0-nightly.20260626` |
+| RI-90's divergence 1 is real | upstream's handler at the anchor passes `appId` straight to `getWallet(appId, chainInfo)` with no comparison to the session's | **real, and stricter as declared** |
+| §4's disclosure is recorded BEFORE dispatch | read at `port_connection_handler.ts:400-407`, above the `schemaHasMethod` dispatch | **yes** |
+| the M18 pin moved rather than loosened | the diff: `assert_eq` on the full five-package list, not a `>=` or a subset | **exact, not loosened** |
+| M33's checks carry none of the campaign's vacuity shapes | scanned all four checks + the lib for self-comparisons, `assert_ge … 0`, and pipeline predicates | **none** |
+
+---
+
+## Step 7 — THE REBASED SWEEP: M0–M33 at 11,303, delta +0
+
+`setsid`-detached, `direnv exec <aztec-avm-runtime>` — this repository's own dev shell, node
+v24.19.0 — one milestone at a time with nothing else running, `TMPDIR` and the log under `~/.cache`,
+started 09:52, **68 markers for 34 milestones: no hole**, 31 of 34 exit 0. Taken **after** the
+rebase and after my last commit.
+
+```
+m0 156  m1 179  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 262  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
+m28 353  m29 127  m30 218  m31 421  m32 234  m33 245
+                                                       CAMPAIGN TOTAL 11,303
+```
+
+**Every one of M0–M32 at its reference value TO THE ASSERTION**, and 11,282 + 21 = 11,303 exactly,
+`delta +0` against a reference table naming the move in advance.
+
+### L0's contribution, separated — and it is ZERO
+
+**Measured, not assumed.** L0's three checks are in `just verify-l0`, which no `verify-m<N>` recipe
+invokes: `verify_node_client_surface_narrow`, `test_node_client_refusals_distinguishable` and
+`verify_client_uses_upstream_schema` appear **zero times in the whole sweep log**. So the entire
+11,303 is M0–M33's, and L0's own **188** (74 / 52 / 62, its declared figure) is a separate number
+that is not in it. I could not re-take the 188 here — `just verify-l0` exits 1 with
+`ERR_MODULE_NOT_FOUND: '@aztec/stdlib'` because `replay/node_modules` is not installed in this
+workspace, which L0's own Justfile comment names as its one precondition. That is an environment
+fact about this checkout, not a finding about L0.
+
+### M33's own 245, and where the 21 came from
+
+33 / **105** / 40 / 67, declared at 224 (33 / 84 / 40 / 67). All 21 are in
+`verify_provider_half_dd9_clean`: **+14** for §10's browser arm (13, plus one for splitting
+`m33_absent` so the verdict is read before the fields that depend on it) and **+7** for §8's
+dynamic-import census and its two controls. The other two review fixes add **no** assertion — the
+document comparer's needle became delimited and grew from 19 figures to 21 under the same three
+assertions.
+
+### M1 179 — claim 8's attribution, verified mechanically
+
+`verify_provenance_complete` 64 → 68, and the mechanism was read out of the check rather than
+believed: **one `assert_true "single-file row <f> is tracked"` per single-file `PROVENANCE.md` row**
+(F25, F26, F27 → +3) and **one `pass "<id> justifies vendoring"` per distinct inventory id the
+mapping cites** (RI-88 is new → +1). 3 + 1 = 4, exact in both parts. L0 touches neither file.
+
+### The three non-zero exits, and only one is this repository's own work
+
+**M9 = 807, four failing assertions, and the COUNT is the reference split exactly** —
+140/143/113/73/126/83/129. This time the V8/WASI stdout truncation hit the **fallback EVENT stream**
+rather than the step transcript, so both comparers ran and neither refused:
+`truncated-after-10617-lines-last-key-events.burn.10412`. That is the second sighting on the events
+stream (M29's review recorded 15,306) beside the seven on `steps`. **Re-run alone: 807, 7/7, exit 0**,
+the reference split exactly. Not a regression, and the settled procedure worked.
+
+**M11 = 262, nine failing assertions** — the recorded ninth-upstream-move signature. The count is the
+signature and it is unchanged. Not repaired; `carry/` left at HEAD.
+
+**M28 = 353, ONE failing assertion, AND IT IS L0'S.**
+`verify_npm_pack_no_optional_native` pins the tracked `package.json` list EXACTLY — *"the three
+shipped plus the four harness trees"* — and got `ct-host diffsim drift node-host orchestration
+probe-mt **replay** spike`. `replay/package.json` was added by L0's `541bf5f`. The COUNT is unchanged
+at 353, which is what says it is a pinned list rather than a structure, and L0's own log enumerates
+the repo-wide checks it re-took with this one not among them. **Recorded and deliberately NOT
+fixed**: a second track editing the first track's expectations is the collision this campaign has
+already paid for three times.
+
+### A sweep is a writer
+
+`carry/rebase.json` and `carry/exposure.json` were `aaeb6877…` / `ec959b84…` before, came out
+`79f597b2…` / `3836c2b6…` — the same two post-sweep digests every run since M30 — and were restored
+from HEAD, confirmed by `sha256sum -c`, all four OK.
+
+### `noir-wt4-webpage` was not touched
+
+`f0e7edcd2` on `wasm/webpage`, its one pre-existing edit, zero published refs. No commit, no push.
