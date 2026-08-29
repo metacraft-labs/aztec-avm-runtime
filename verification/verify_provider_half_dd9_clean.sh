@@ -359,6 +359,31 @@ assert_eq "…while the provider half's workspace-package count is nine, so the 
   "9" "$(printf '%s\n' "$PROVIDER" | awk -F'\t' '$1=="WS_PKGS" {print $2}')"
 assert_eq "…and it is exactly the three files this repository vendors" "3" "$T_FILES"
 
+# THE SPELLINGS THE WALKER CANNOT FOLLOW, COUNTED — because "the provider half reaches no
+# @aztec/pxe" is an absence, and an absence is only as wide as the spellings that were enumerated.
+# `CAMPAIGN-BRIEF.md` says to write down which those were: this walker matches STATIC `import … from`,
+# `export … from` and bare `import '…'`, and does NOT follow `import()` or `require()`. So the count
+# of what it cannot follow is asserted zero for the provider half rather than left unsaid — an
+# `import('@aztec/pxe')` added upstream would otherwise leave every pxe assertion green over a graph
+# that reaches it.
+assert_eq "the provider closure contains no dynamic import() the walker cannot follow" "0" \
+  "$(field DYNAMIC "$PROVIDER")"
+assert_eq "…and no require() either" "0" "$(field REQUIRE "$PROVIDER")"
+# TWO CONTROLS, because a scanner that stopped matching would report zero for the same reason.
+# The first is a real tree: the WALLET half has three, all of them JSON contract artifacts.
+assert_eq "…while the WALLET half has three, so the scanner finds them where they exist" "3" \
+  "$(field DYNAMIC "$WALLETH")"
+assert_true "…and they are the lazily-loaded contract artifacts, not a door to a package" \
+  str_has_sub "$(printf '%s\n' "$WALLETH" | sed -n 's/^DYNAMIC_SPEC\t//p')" 'artifacts/FeeJuice.json'
+# The second is the scanner's own fixture, which it must FIND before its zero is believed — M29's
+# review's remedy, where a needle was believed about a bundle without being seen to match anything.
+assert_eq "the dynamic-import scanner matches both shapes in its own fixture" "2" \
+  "$(field DYN_FIXTURE_SITES "$PROVIDER")"
+assert_eq "…and reads the literal specifier out of the one that has one" "1" \
+  "$(field DYN_FIXTURE_SPECS "$PROVIDER")"
+assert_eq "…and the require() scanner matches its fixture too" "1" \
+  "$(field REQUIRE_FIXTURE_SITES "$PROVIDER")"
+
 # THE SIX GENERATED FILES, counted rather than assumed away.
 assert_eq "the provider closure's unresolved specifiers are the six generated files" "6" \
   "$(field UNRESOLVED "$PROVIDER")"
@@ -380,5 +405,99 @@ note "$(d CHECKED) figure(s) re-derived and compared against $M33_DOC"
 assert_ge "the comparer found the document's rows" 20 "$(d CHECKED)"
 assert_eq "every figure in the write-up equals what the artefacts measure" "" "$(d BAD)"
 assert_eq "…and every row the comparer is about is present in the document" "" "$(d MISSING)"
+
+echo "== 10. AND THE ARTEFACT IS LOADED IN A PAGE, because §1-§9 are all config-level"
+
+# ===========================================================================================
+# THE ONE CLAIM NODE CANNOT MAKE, AND M33 SHIPPED WITHOUT IT
+# ===========================================================================================
+#
+# Everything above this line reads the METAFILE, the emitted bytes or a package manifest. That is
+# the right instrument for "which packages are in the graph" and it is the wrong one for "a page can
+# evaluate this", and `CAMPAIGN-BRIEF.md` records M27's lesson that a config-level assertion is
+# weaker than an observed one. M33's review measured the size of the gap rather than asserting it:
+#
+#   `const _nodeOnlyProbe = setImmediate;` at the top of `port_wallet_provider.ts` — a Node GLOBAL,
+#   read at module-evaluation time. Not an import, so no metafile records it. Not `Buffer` and not
+#   `process`, so `browser/src/globals.js` does not supply it and `verify_browser_bundle_builds`'s
+#   free-identifier scan does not name it.
+#
+# Rebuilt, that bundle imports fine in Node and dies in Chromium with
+# `ReferenceError: setImmediate is not defined` — and `just verify-m33` was **224, 4/4, exit 0**,
+# `verify_browser_bundle_no_node_builtins` **64 / 0**, `verify_browser_bundle_no_native_deps`
+# **44 / 0**, `smoke_browser_headless_full_flow` **50 / 0** (it drives Chromium, over `browser.js`).
+# Nothing in the repository referenced `wallet.js` from a page — grepped, and the answer was zero.
+#
+# So the smallest browser claim that closes it is made here: the module EVALUATES in a page and
+# exports what it declares. The handshake stays in Node, and `WALLET-BOUNDARY.md` §5 stays the
+# boundary, because a `MessagePort` and WebCrypto are the same thing in both engines. The CONTROL is
+# the plant above, kept: a second served site whose `wallet.js` carries that one free identifier,
+# which the page must REPORT — so "it evaluated" is an answer this instrument has been seen to give
+# both ways.
+
+m33_require_browser_arm
+
+# THE VERDICT FIRST, AND ITS OWN PRESENCE CHECK, because everything below it is a field the probe
+# only records when the module evaluated. Calibrated with the plant: read in the other order the
+# check dies at `m33_absent` naming six absent fields, which is true and is the wrong diagnosis —
+# the defect is that the module did not evaluate, and this is the line that says so.
+B_EVAL="$(m33_browser subject.evaluated)"
+m33_absent "subject.evaluated=$B_EVAL"
+assert_eq "the wallet entry EVALUATES in a page" "true" "$B_EVAL"
+[ "$B_EVAL" = "true" ] || die "the built wallet entry did not evaluate in Chromium:
+             $(m33_browser subject.name): $(m33_browser subject.message)
+             This is the condition no metafile assertion can reach. See $M33_BROWSER_ARM."
+
+B_EXPORTS="$(m33_browser subject.exports)"
+B_OPS="$(m33_browser subject.ops)"
+B_TYPES="$(m33_browser subject.messageTypeCount)"
+B_DOC="$(m33_browser subject.hasDocument)"
+B_SUBTLE="$(m33_browser subject.hasSubtleCrypto)"
+B_CHANNEL="$(m33_browser subject.hasMessageChannel)"
+B_ERRORS="$(m33_browser subject.pageErrors)"
+B_FETCHED="$(m33_browser subject.requestedWalletJs)"
+C_EVAL="$(m33_browser control.evaluated)"
+C_NAME="$(m33_browser control.name)"
+C_MSG="$(m33_browser control.message)"
+m33_absent "subject.exports=$B_EXPORTS" "subject.ops=$B_OPS" \
+  "subject.messageTypeCount=$B_TYPES" "subject.hasDocument=$B_DOC" \
+  "subject.hasSubtleCrypto=$B_SUBTLE" "subject.hasMessageChannel=$B_CHANNEL" \
+  "subject.pageErrors=$B_ERRORS" "subject.requestedWalletJs=$B_FETCHED" \
+  "control.evaluated=$C_EVAL" "control.name=$C_NAME" "control.message=$C_MSG"
+
+# IT REALLY IS A PAGE. Asked of the page rather than inferred from the file it was built into,
+# which is M32's finding about a worker being asked whether it has a `document`.
+assert_eq "the probe ran in something that HAS a document, so this is a page" "true" "$B_DOC"
+assert_eq "…and the module was FETCHED over HTTP rather than inlined into the probe" "1" "$B_FETCHED"
+
+assert_eq "…with no page-level exception beside it" "[]" "$B_ERRORS"
+# The export set the PAGE sees, against the declaration read out of the same bundle by Node. Two
+# engines, two readings, one artefact.
+assert_eq "…and the exports the PAGE sees are the declared operations plus the declaration itself" \
+  "$(python3 -c '
+import json, sys
+print(",".join(sorted(json.loads(sys.argv[1]) + ["WALLET_ENTRY_OPS"])))' "$(m33_arm protocol.declaredOps)")" \
+  "$(python3 -c '
+import json, sys
+print(",".join(sorted(json.loads(sys.argv[1]))))' "$B_EXPORTS")"
+assert_eq "…and the operation list the page reads is the one Node reads" \
+  "$(m33_arm protocol.declaredOps)" "$B_OPS"
+assert_eq "…and the protocol enum crossed intact: the same eleven members" \
+  "$(python3 -c '
+import json, sys
+print(len(json.loads(sys.argv[1])))' "$(m33_arm protocol.messageTypes)")" "$B_TYPES"
+
+# THE TWO PLATFORM FACTS THE HANDSHAKE NEEDS, measured where it would run rather than assumed.
+# `crypto.subtle` is the sharp one: a browser withholds it outside a SECURE CONTEXT, and Node has
+# no such rule, so this is a condition the Node arms cannot see at all.
+assert_eq "the page has WebCrypto's SubtleCrypto — which Node cannot tell us, because a browser
+             withholds it outside a secure context" "true" "$B_SUBTLE"
+assert_eq "…and a MessageChannel, which is the transport" "true" "$B_CHANNEL"
+
+# THE CONTROL, through the same probe, the same server and the same browser.
+assert_eq "the SAME probe reports a module that does NOT evaluate" "false" "$C_EVAL"
+assert_eq "…as a ReferenceError" "ReferenceError" "$C_NAME"
+assert_true "…naming the Node-only global, which is the defect no metafile can see" \
+  str_has_sub "$C_MSG" 'setImmediate'
 
 m33_finish

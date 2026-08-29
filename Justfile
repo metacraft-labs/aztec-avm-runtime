@@ -2739,13 +2739,20 @@ verify-l0:
 #   just m33-arms                re-measure the seven wallet arms into $M33_WORK/wallet.json
 #
 # WHAT THEY NEED, AND IT IS LESS THAN M32's: the built browser bundle, which now carries a seventh
-# entry point, `wallet.js`, out of the SAME esbuild pass. NO CHROMIUM AND NO avm.wasm. M32's arms
-# had to be in a browser because their subject was a Web Worker, CPU throttling and
-# `Page.setWebLifecycleState`; M33's subject is a `MessagePort` and WebCrypto, both of which Node 24
-# implements to the same specifications, so the arms IMPORT the built bundle and run the real
-# handshake in-process. That is a smaller claim than "it works in Chromium" and it is stated as one
-# in `WALLET-BOUNDARY.md` §5; `verify_provider_half_dd9_clean` is the check that says the artefact
-# is browser-shaped, over the esbuild metafile.
+# entry point, `wallet.js`, out of the SAME esbuild pass. NO avm.wasm — and CHROMIUM for one arm
+# only, which M33's review added. M32's arms had to be in a browser because their subject was a Web
+# Worker, CPU throttling and `Page.setWebLifecycleState`; M33's subject is a `MessagePort` and
+# WebCrypto, both of which Node 24 implements to the same specifications, so the HANDSHAKE arms
+# import the built bundle and run in-process. That is a smaller claim than "it works in Chromium"
+# and it is still stated as one in `WALLET-BOUNDARY.md` §5.
+#
+# WHAT CHROMIUM IS FOR IS THE ONE CLAIM NODE CANNOT MAKE: that a PAGE can evaluate `wallet.js`.
+# `verify_provider_half_dd9_clean` §10 loads it in a real page and requires the exports the page
+# sees to be the ones Node sees, with a served control whose copy carries one Node-only free
+# identifier and must be REPORTED as a `ReferenceError`. It is there because M33 shipped with that
+# half asserted on the esbuild metafile, and a free identifier is not an import: with
+# `const _nodeOnlyProbe = setImmediate;` planted, `just verify-m33` was 224 / 4-of-4 / exit 0 and
+# the same bundle died in Chromium.
 #
 # THE ARMS ARE MEASURED ONCE into $M33_WORK/wallet.json (default ~/.cache/aztec-m33-wallet) and
 # shared by all four checks, which is M20's convention. Seven arms: `handshake`, `refusalsDirect`,

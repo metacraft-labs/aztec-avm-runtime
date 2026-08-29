@@ -218,7 +218,7 @@ string is read out of `disclosure.ts` rather than typed into the check.
 
 ## 5. What is measured in Node, and what that does NOT say
 
-**Owned by `verify_provider_half_dd9_clean`.**
+**Owned by `verify_provider_half_dd9_clean` §10.**
 
 M32's arms had to run in Chromium because their subject was a Web Worker, CPU throttling and
 `Page.setWebLifecycleState`. M33's subject is a `MessagePort` and WebCrypto, and Node 24 implements
@@ -227,13 +227,35 @@ both to the same specifications the browser does. So `tools/run_wallet_arms.mjs`
 AES-256-GCM, real structured-clone message passing. Every refusal, every message type and every
 method name the checks read is a property of the built module.
 
-**What that does not say is that the bundle loads in a page**, and this section exists so nobody
-reads it as if it did. That claim belongs to two checks that already make it: M28's browser gate,
-and `verify_provider_half_dd9_clean`, which asserts on the esbuild **metafile** that the wallet
-entry reaches no `@aztec/native`, no `@aztec/world-state`, no `@aztec/pxe` and no Node builtin —
-over a control build in which those packages are planted and resolvable, because
-`CAMPAIGN-BRIEF.md` records twice that an absence asked of a tree which excludes its subject by
-construction is not a measurement.
+**What that does not say is that the bundle loads in a page.** M33 shipped with that half asserted
+on the esbuild **metafile** — the wallet entry reaches no `@aztec/native`, no `@aztec/world-state`,
+no `@aztec/pxe` and no Node builtin, over a control build in which those packages are planted and
+resolvable — plus M28's browser gate. **M33's review measured how much weaker that is, and then
+closed it.**
+
+*A free identifier is not an import, and a metafile only records imports.* With
+`const _nodeOnlyProbe = setImmediate;` planted at the top of `port_wallet_provider.ts` — a Node
+global, read at module-evaluation time, and neither `Buffer` nor `process`, so no shim supplies it
+and no free-identifier scan names it — the rebuilt bundle imported cleanly in Node and died in
+Chromium with `ReferenceError: setImmediate is not defined`. Over that bundle: `just verify-m33`
+**224, 4/4, exit 0**; `verify_browser_bundle_no_node_builtins` **64 / 0**;
+`verify_browser_bundle_no_native_deps` **44 / 0**;
+`verify_verification_code_unreachable_from_browser` **37 / 0**; `smoke_browser_headless_full_flow`
+**50 / 0** — and that last one does drive Chromium, over `browser.js`. Nothing anywhere referenced
+`wallet.js` from a page.
+
+So `verify_provider_half_dd9_clean` **§10** now loads it in one: a served copy of `browser/dist`, a
+probe page that `import()`s `./wallet.js`, and assertions that it evaluated, that the module was
+FETCHED over HTTP, that the exports the page sees are the operations Node reads out of the same
+file, that the protocol enum crossed with all eleven members, and that the page has a `document`, a
+`MessageChannel` and — the one Node cannot speak to, because a browser withholds it outside a
+secure context — `crypto.subtle`. **The control is the plant, kept**: a second served site whose
+`wallet.js` carries that one free identifier, which the same probe must report as a
+`ReferenceError` naming it.
+
+**The handshake is still measured in Node and that is still right**, because a `MessagePort` and
+WebCrypto are the same thing in both engines. What changed is that "the artefact is browser-shaped"
+is an observation with a control beside it rather than a property of a config file.
 
 ---
 

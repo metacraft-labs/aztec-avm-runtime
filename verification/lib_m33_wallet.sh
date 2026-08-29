@@ -114,6 +114,70 @@ m33_require_arms() {
   [ -s "$M33_ARMS" ] || die "there is no arm report at $M33_ARMS even after running"
 }
 
+# ---------------------------------------------------------------------------
+# THE BROWSER ARM. One claim, and it is the one Node cannot make.
+#
+# M33 measured its handshake in Node — rightly, because a `MessagePort` and WebCrypto are the same
+# thing in both engines — and asserted the BROWSER half on the esbuild metafile instead. M33's
+# review measured how much weaker that is, and the answer is: a free identifier is not an import,
+# and a metafile only records imports. With `const _nodeOnlyProbe = setImmediate;` planted at the
+# top of `port_wallet_provider.ts` — not `Buffer`, not `process`, so no shim supplies it and no
+# free-identifier scan names it — `just verify-m33` reported **224, 4/4, exit 0**, M28's
+# `verify_browser_bundle_no_node_builtins` reported **64 / 0**, and the same `wallet.js` died in
+# Chromium with `ReferenceError: setImmediate is not defined`. Nothing anywhere loaded it in a
+# browser, because no page referenced it.
+#
+# So this arm loads it, and only that. The handshake stays in Node and `WALLET-BOUNDARY.md` §5 stays
+# the boundary; what moves is that "the artefact is browser-shaped" is now an OBSERVATION with a
+# control beside it rather than a property of a config file.
+# ---------------------------------------------------------------------------
+M33_BROWSER_ARM="$M33_WORK/browser.json"
+export M33_BROWSER_ARM
+
+m33_browser_arm_newer_inputs() {
+  [ -s "$M33_BROWSER_ARM" ] || { printf 'browser.json\n'; return 0; }
+  find "$REPO_ROOT/tools/run_wallet_browser_arm.mjs" -newer "$M33_BROWSER_ARM" -print -quit 2>/dev/null || true
+  find "$REPO_ROOT/tools/browser_cdp.mjs" -newer "$M33_BROWSER_ARM" -print -quit 2>/dev/null || true
+  find "$BROWSER_DIST" -type f ! -name '.*' -newer "$M33_BROWSER_ARM" -print -quit 2>/dev/null || true
+}
+
+m33_require_browser_arm() {
+  m27_require_chromium
+  mkdir -p "$M33_WORK"
+  local stale=0 newer rc
+  newer="$(m33_browser_arm_newer_inputs)"
+  [ -n "$newer" ] && stale=1
+  [ "${M33_ARMS_REFRESH:-0}" = "1" ] && stale=1
+  if [ "$stale" = "1" ]; then
+    note "loading $BROWSER_DIST/wallet.js in $M27_CHROMIUM_VERSION (timeout ${M33_ARMS_TIMEOUT}s)"
+    ( cd "$REPO_ROOT" && env NODE_NO_WARNINGS=1 BROWSER_DIST="$BROWSER_DIST" \
+        M27_CHROMIUM="$M27_CHROMIUM" M27_CHROMIUM_VERSION="$M27_CHROMIUM_VERSION" \
+        timeout -s KILL "$M33_ARMS_TIMEOUT" \
+        node "$REPO_ROOT/tools/run_wallet_browser_arm.mjs" "$M33_WORK" ) \
+      > "$M33_BROWSER_ARM.tmp" 2> "$M33_WORK/browser.stderr"
+    rc=$?
+    if [ "$rc" != "0" ]; then
+      mv -f "$M33_BROWSER_ARM.tmp" "$M33_WORK/browser.failed.json" 2>/dev/null || true
+      die "the wallet browser arm exited $rc. See $M33_WORK/browser.stderr"
+    fi
+    mv -f "$M33_BROWSER_ARM.tmp" "$M33_BROWSER_ARM"
+  fi
+  [ -s "$M33_BROWSER_ARM" ] || die "there is no browser arm report at $M33_BROWSER_ARM"
+}
+
+# One value out of the BROWSER arm report, same MISSING discipline as `m33_arm`.
+#
+# The save/restore is explicit rather than a `VAR=val m33_arm …` prefix: bash leaves a variable
+# assignment that precedes a FUNCTION call in place after the function returns, which would silently
+# repoint every later `m33_arm` in the check at the browser report — two readers of two files
+# agreeing because they had become one file.
+m33_browser() { # <dotted path, rooted at the report's `arms` object>
+  local saved="$M33_ARMS"
+  M33_ARMS="$M33_BROWSER_ARM"
+  m33_arm "$1"
+  M33_ARMS="$saved"
+}
+
 # One value out of the arm report, by dotted path. Prints MISSING rather than empty, so a typo'd
 # key FAILS instead of comparing two absences — M29's `arms.publicOnly.executed` defect, where two
 # missing keys agreed and two assertions went green.

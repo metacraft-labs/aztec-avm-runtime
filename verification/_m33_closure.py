@@ -79,6 +79,22 @@ GROUPS = {
     "schema": ["yarn-project/aztec.js/src/wallet/wallet.ts"],
 }
 
+# THE SPELLINGS THIS WALKER ENUMERATES, WRITTEN DOWN, because an absence claim is only as wide as
+# them. `CLAUSE_RE` and `BARE_RE` below match STATIC `import … from`, `export … from` and bare
+# `import '…'`. They do NOT match `import()` or `require()`. Measured by M33's review over all 408
+# provider-closure files: zero dynamic imports of either kind, so the closure is complete at this
+# anchor — but complete by MEASUREMENT, not by construction, and an `import('@aztec/pxe')` added
+# upstream would leave every pxe assertion green over a graph that reaches it. So the count is
+# reported and asserted, and the scanner is calibrated against a fixture it must FIND before it is
+# believed about the tree.
+DYN_RE = re.compile(r"""(?<![.\w$])import\s*\(""")
+DYN_SPEC_RE = re.compile(r"""(?<![.\w$])import\s*\(\s*['"]([^'"]+)['"]""")
+REQUIRE_RE = re.compile(r"""(?<![.\w$])require\s*\(\s*['"]([^'"]+)['"]""")
+
+# The calibration fixture. If the scanner stops matching, this stops matching too, and the check
+# asserts on it before it believes the zero.
+DYN_FIXTURE = "const a = await import('@aztec/pxe/server');\nconst b = import(spec);\nconst c = require('fs');\n"
+
 CLAUSE_RE = re.compile(r"""(?:^|[\n;}])(\s*(?:import|export)\b[^;]*?\bfrom\s+['"]([^'"]+)['"])""")
 BARE_RE = re.compile(r"""(?:^|[\n;}])\s*import\s+['"]([^'"]+)['"]""")
 
@@ -204,6 +220,7 @@ def main(root, group):
     # the whole set, and the difference between them IS the type-erasure argument. M33's review
     # found the two conflated in two places that ship.
     pxe_clauses = []
+    dyn_count, require_count, dyn_specs = 0, 0, []
     q = deque(entries)
     while q:
         rel = q.popleft()
@@ -211,6 +228,10 @@ def main(root, group):
             continue
         seen.add(rel)
         text = ic.strip_comments(open(os.path.join(root, rel), encoding="utf-8").read())
+        dyn_count += len(DYN_RE.findall(text))
+        require_count += len(REQUIRE_RE.findall(text))
+        for spec in DYN_SPEC_RE.findall(text):
+            dyn_specs.append((rel, spec))
         specs = []
         for clause, spec in CLAUSE_RE.findall(text):
             k = classify(clause)
@@ -258,6 +279,14 @@ def main(root, group):
     print("UNPLACEABLE\t%d" % len(unplaceable))
     for imp, spec in unplaceable[:20]:
         print("UNPLACEABLE_SPEC\t%s\t%s" % (imp, spec))
+    # THE SPELLINGS THIS WALKER CANNOT FOLLOW, counted rather than left unsaid.
+    print("DYNAMIC\t%d" % dyn_count)
+    for rel, spec in sorted(set(dyn_specs)):
+        print("DYNAMIC_SPEC\t%s\t%s" % (rel, spec))
+    print("REQUIRE\t%d" % require_count)
+    print("DYN_FIXTURE_SITES\t%d" % len(DYN_RE.findall(DYN_FIXTURE)))
+    print("DYN_FIXTURE_SPECS\t%d" % len(DYN_SPEC_RE.findall(DYN_FIXTURE)))
+    print("REQUIRE_FIXTURE_SITES\t%d" % len(REQUIRE_RE.findall(DYN_FIXTURE)))
     print("UNRESOLVED\t%d" % len(unresolved))
     for imp, spec in sorted(set(unresolved)):
         print("UNRESOLVED_SPEC\t%s\t%s" % (imp, spec))

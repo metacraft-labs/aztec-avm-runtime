@@ -219,3 +219,97 @@ MISSING and CHECKED are three assertions however many figures they cover.
 **The document carries the two counts on separate LINES on purpose.** With both on one line, a swap
 satisfies both needles, which is M24's review's row-swap finding at field level. Verified: the swap
 (3 clauses / 5 edges) is now caught on both, and each figure perturbed alone is caught.
+
+---
+
+## FINDING 3 — CLAIM 7: THE CONFIG-LEVEL ASSERTION IS NOT SUFFICIENT, AND I MEASURED HOW MUCH
+
+The question the task poses is whether `verify_provider_half_dd9_clean`'s browser-*shape* assertion
+on the metafile stands in for a browser run. **It does not, and the gap is a measurement rather than
+an opinion.**
+
+**First: nothing evaluated `wallet.js` in a browser.** Grepped — no `.html` in the repository
+references it, and every reading of it is `node --input-type=module -e "await import(…)"` or
+`tools/run_wallet_arms.mjs`. `smoke_browser_headless_full_flow` does drive Chromium, over
+`browser.js`.
+
+**Then the plant.** A metafile records IMPORTS. A **free identifier** is not an import:
+
+```ts
+const _nodeOnlyProbe = setImmediate;      // Node has it as a global; a page does not
+```
+
+at the top of `port_wallet_provider.ts`. It is not `Buffer` and not `process`, so
+`browser/src/globals.js`'s injection does not supply it and `verify_browser_bundle_builds`'s
+free-identifier scan does not name it. Rebuilt — the build is green — the results are:
+
+| | |
+|---|---|
+| `node -e "await import('./wallet.js')"` | **OK, 19 exports, `READY_TIMEOUT_MS=15000`** |
+| the same file, in Chromium 150 | **`ReferenceError: setImmediate is not defined`** |
+| `just verify-m33` | **224 assertions, 4/4, exit 0** |
+| `verify_browser_bundle_no_node_builtins` | 64 / 0 |
+| `verify_browser_bundle_no_native_deps` | 44 / 0 |
+| `verify_verification_code_unreachable_from_browser` | 37 / 0 |
+| `smoke_browser_headless_full_flow` | 50 / 0 |
+
+(The first `verify-m33` run over the plant reported one failure and it was **not** browser shape — it
+was `wallet-own-kb expected 16.25`, the document size figure moving by the planted 60 bytes. With
+the two size figures updated to match, all four checks are green: 33 / 84 / 40 / 67, exit 0, over a
+bundle that dies on the first line a page evaluates. That is the exact statement.)
+
+**So M33 owed a browser arm, and it is added** — deliberately the smallest one that closes this gap.
+`tools/run_wallet_browser_arm.mjs` reuses M27's harness unchanged (`serveDirectory`,
+`launchChromium`, `openPage`, `page.eval` — no new machinery), serves a copy of `browser/dist`, and
+loads a probe page that `import()`s `./wallet.js`. `verify_provider_half_dd9_clean` §10 asserts:
+
+- it EVALUATED, with its own presence check first and a `die` naming the Chromium error behind it —
+  calibrated: read in the other order the check dies at `m33_absent` naming six absent fields, which
+  is true and is the wrong diagnosis;
+- the module was FETCHED over HTTP (so the probe measured the artefact, not an inline copy);
+- the exports the PAGE sees are the operations Node reads out of the same file — two engines, two
+  readings, one artefact;
+- the protocol enum crossed with all eleven members;
+- the page HAS a `document` (so this is a page, asked of it rather than inferred — M32's finding),
+  a `MessageChannel`, and **`crypto.subtle`**, which is the one Node genuinely cannot speak to,
+  because a browser withholds SubtleCrypto outside a secure context and Node has no such rule;
+- **the CONTROL is the plant, kept**: a second served site whose `wallet.js` carries that one free
+  identifier, which the same probe, the same server and the same browser must report as a
+  `ReferenceError` naming `setImmediate`.
+
+Calibrated in both directions: with the plant re-applied the check reports
+`FAIL the wallet entry EVALUATES in a page  expected [true], got [false]` and dies naming the
+Chromium error; restored, it is green.
+
+**What is NOT owed, and this is a judgment I am making explicitly**: the handshake does not need to
+run in Chromium. Its substance is a `MessagePort` and WebCrypto, and Node 24 and the browser
+implement both to the same specifications; running it against the BUILT bundle in Node is a real
+measurement of the artefact. `WALLET-BOUNDARY.md` §5 remains the right boundary and is rewritten to
+say what is now observed and what is still inferred.
+
+## FINDING 4 — AN ABSENCE AS WIDE AS ITS SPELLINGS, AND THE SPELLINGS WERE NOT WRITTEN DOWN
+
+`_m33_closure.py` matches static `import … from`, `export … from` and bare `import '…'`. It does
+**not** match `import()` or `require()`, and nothing said so. "The provider half reaches no
+`@aztec/pxe`" is an absence, and an `import('@aztec/pxe')` added upstream would leave every pxe
+assertion green over a graph that reaches it.
+
+Measured over all 408 provider-closure files: **zero dynamic imports of either shape** — so the
+enumeration is complete at this anchor. But complete by measurement, not by construction, and
+nothing recorded it. The census is emitted and asserted now, with **two** controls: the WALLET half
+has **three** dynamic imports (all lazily-loaded JSON contract artifacts, named), so the scanner is
+seen finding them in a real tree; and the scanner is run over its own fixture and must match both
+shapes there before its zero is believed, which is M29's review's remedy for a needle believed about
+an artefact without being seen to match anything.
+
+---
+
+## Where the counts stand after the review's additions
+
+`verify_provider_half_dd9_clean` **84 → 105**: +14 for §10's browser arm (13, plus one for splitting
+`m33_absent` so the verdict is read before the fields that depend on it) and +7 for §8's
+dynamic-import census and its two controls. **M33 is 245** (33 / 105 / 40 / 67), 4/4, exit 0.
+
+Nothing else moved, measured rather than assumed after the additions: `verify_named_checks_exist`
+**9**, `just check-repo-hygiene` **28**, `verify_no_pipeline_predicates` **69**,
+`verify_reuse_inventory_complete` **19**, `verify_provenance_complete` **68**.
