@@ -20,9 +20,29 @@ ANCHORED TO THE ROW, NOT TO THE FILE. M24's review's finding: a check that match
 document stated the reverse of the data with 91 assertions and 0 failures. Here a figure is looked
 for on the line that NAMES ITS SUBJECT, and a subject line the document does not have is a MISSING
 rather than a silent pass.
+
+AND ANCHORED TO THE FIELD, NOT TO THE ROW — WHICH IS THE SAME DEFECT ONE NOTCH FINER, AND IT WAS
+LIVE. The first draft asked `wanted in row`: bare substring containment anywhere in the matched line.
+Measured by M33's review over all nineteen figures, by perturbing the document one figure at a time
+and reading `BAD`: **two of the nineteen could not fail.** The wallet entry's eager FILE COUNT is
+`8`, and the row is
+
+    | its eager set | **245.87 KB** gzipped across **8** files |
+
+so `245.87` supplies an `8` and a document saying **7** files passed with `CHECKED 19, BAD <empty>`.
+And `@aztec/aztec.js` bytes in `browser.js`'s eager set is `0`, which is a substring of every number
+containing a zero digit — a document saying **900** where the artefact measures 0 passed too. The
+zero is the more dangerous of the two, because it is the assertion holding up DD-11's whole reason
+for a separate entry point: *a page that attaches no wallet must not download a wallet protocol.*
+
+The remedy is not a longer needle, it is a DELIMITED one: the value must appear bounded by
+characters that cannot be part of a number, so a digit borrowed from a neighbouring figure does not
+satisfy it. Both perturbations above are red now, and all fifteen perturbations the review ran are
+caught.
 """
 
 import json
+import re
 import sys
 
 
@@ -33,6 +53,20 @@ def fmt(value):
     text = ("%.2f" % value).rstrip("0").rstrip(".")
     whole, _, frac = text.partition(".")
     return "{:,}".format(int(whole)) + ("." + frac if frac else "")
+
+
+def states(row, wanted):
+    """Does `row` state `wanted` AS A FIGURE — delimited, not merely as a run of characters?
+
+    `(?<![\\d.,])` / `(?![\\d.,])` are the whole fix: a digit that belongs to a neighbouring number
+    is preceded or followed by a digit, a decimal point or a thousands separator, and is therefore
+    refused. Both spellings of a thousands-separated value are accepted, because the document writes
+    `47,330` and a reader may write `47330`.
+    """
+    for form in {wanted, wanted.replace(",", "")}:
+        if re.search(r"(?<![\d.,])%s(?![\d.,])" % re.escape(form), row):
+            return True
+    return False
 
 
 def main(doc_path, chunks_path, meta_path, arms_path, closure_path, deps_path):
@@ -63,7 +97,7 @@ def main(doc_path, chunks_path, meta_path, arms_path, closure_path, deps_path):
             return
         checked += 1
         wanted = fmt(value)
-        if wanted not in row and wanted.replace(",", "") not in row:
+        if not states(row, wanted):
             bad.append("%s expected %s in: %s" % (label, wanted, row.strip()))
 
     # ---- §1: the closure table, one row per group, each naming its own subject.
