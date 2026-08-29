@@ -1,8 +1,9 @@
 // index.ts — the replay package's public surface.
 //
-// L0 only. This package talks to a node and refuses everything else; it does not execute, it does
-// not write a container, and it does not know what a `.ct` is. L1 adds the fetch of a settled
-// transaction, L2 the historical state, L3 the recording.
+// L0 and L1. This package talks to a node, refuses everything else, and turns a transaction hash
+// into an upstream `Tx` plus the block coordinates and contract artifacts a replay needs. It does
+// not execute, it does not write a container, and it does not know what a `.ct` is. L2 adds the
+// historical state, L3 the recording.
 
 export {
   ANCHOR_ONLY_METHODS,
@@ -45,3 +46,42 @@ export {
   type MembershipWitnessQuery,
   type MembershipWitnessSource,
 } from './membership_witness_source.ts';
+
+// ---- L1 ------------------------------------------------------------------------------------
+
+export {
+  CONTRACT_RESOLUTION_METHODS,
+  CONTRACT_RESOLUTION_REFERENCE_BLOCK,
+  MISSING_ARTIFACT_STAGES,
+  MissingContractArtifact,
+  SettlingBlockUnavailable,
+  declarePublicHalf,
+  fetchSettledTransaction,
+  publicCallTargets,
+  resolvePublicContracts,
+  resolvePublicContractsUnguardedForControls,
+  type ContractResolution,
+  type MissingArtifactStage,
+  type PublicHalfDeclaration,
+  type SettledTransaction,
+} from './settled_transaction.ts';
+
+export {
+  PRIVATE_HALF_AVAILABLE,
+  PRIVATE_HALF_AVAILABLE_REASON,
+  PRIVATE_HALF_UNAVAILABLE,
+  PRIVATE_HALF_UNAVAILABLE_REASON,
+  declarePrivateHalf,
+  measureLocalPrivateExecution,
+  type LocalPrivateExecution,
+  type PrivateHalfDeclaration,
+  type PrivateHalfSource,
+  type PublishedPrivateEffects,
+} from './private_half.ts';
+
+// THE FIXTURE FORMAT IS DELIBERATELY NOT RE-EXPORTED HERE. It lives in `replay/tools/
+// settled_fixture.ts` because it assembles a JSON-RPC envelope by hand, and L0's
+// `verify_client_uses_upstream_schema` asserts that nothing in `replay/src` declares a wire type —
+// which is the invariant that says this client's request and response types are upstream's alone.
+// That check is what moved the file; see its header. A caller who wants to record or replay a
+// fixture imports it from `replay/tools/settled_fixture.ts` on purpose.
