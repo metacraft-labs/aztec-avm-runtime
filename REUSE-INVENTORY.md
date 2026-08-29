@@ -927,6 +927,24 @@ component is and what it costs us, and does not repeat the deletion.
 - rejection-reason: n/a
 - confidence: measured
 
+### RI-86 — `createAztecNodeClient` and `AztecNodeApiSchema`, which are the replay client's whole wire
+- upstream: `yarn-project/stdlib/src/interfaces/aztec-node.ts` at `anchors.cpp` — `AztecNode` (55 methods), `AztecNodeApiSchema` (`ApiSchemaFor<AztecNode>`, one zod entry per method) and `createAztecNodeClient`, published as `@aztec/stdlib/interfaces/client`; plus `createSafeJsonRpcClient` / `defaultFetch` from `@aztec/foundation/json-rpc/client` underneath it
+- covers: talking to a live Aztec node — request encoding, response validation, method namespacing and protocol-version detection
+- decision: depend
+- milestone: L0 (Aztec-Live-Chain-Replay)
+- why: L0's deliverable is "a client over upstream's own JSON-RPC schema — **upstream's types, not ours**", and the whole of it is published. `replay/src/node_client.ts` calls `createAztecNodeClient(url, expected, fetch)` and adds nothing to the wire: the namespacing (`aztec_<name>`), the batching, the zod validation of every response and the version handler are upstream's. **The version check is upstream's too, and that was the find**: `getVersioningResponseHandler` compares `x-aztec-*` response headers against a `Partial<ComponentsVersions>` on every call and throws `ComponentsVersionsError`, and `yarn-project/aztec/src/cli/versioning.ts` shows that a PARTIAL of exactly the two protocol-level fields is upstream's own answer when there is no chain config — which is the shape `pins.json`'s `live_chain.protocol_version` takes. What is ours is one narrowing and three refusals, and `verify_client_uses_upstream_schema` measures the dependency on the WIRE (namespaced method names observed at the node) and in the PARSE (a `Tx` instance rather than a plain object, and a schema-invalid response refused) rather than by grepping our own source for upstream's name.
+- rejection-reason: n/a
+- confidence: measured
+
+### RI-87 — M21's `strictSurface`, reused as a design and re-implemented as code
+- upstream: none — this repository's own, `orchestration/src/settled_read_source.ts`
+- covers: refusing every member outside an enumerated surface, on `get` and on `has`
+- decision: build
+- milestone: L0 (Aztec-Live-Chain-Replay)
+- why: `replay/src/strict_surface.ts` is M21's guard, decision for decision, and its header says so: `get` and `has` both trapped because probing is the dangerous direction, `ownKeys` deliberately open so `util.inspect` keeps working, symbols passed through because they are the language's protocol keys, and the receiver bound to the TARGET rather than to the proxy — the last of which M21 found by running it, when a permitted getter's own field access re-entered the trap. Nothing about the design is new here; only the allow-list and the error class are.
+- rejection-reason: cannot-reach-target: the target is one `@aztec/stdlib` install per process, and importing across the two package trees would produce two. `orchestration/` is a declared consumer of `npm.deletion_era` (5.0.0-nightly.20260626, frozen evidence of the pre-deletion TypeScript AVM) and `replay/` is a declared consumer of `npm.current` (5.3.0-nightly.20260819, which `pins.json` declares corresponds to the `cpp` anchor a live chain speaks); `lib_m21_form_b.sh` already records why that is a correctness question and not a tidiness one — `serializeWithMessagePack` recognises an `Fr` by the class object of ITS OWN install, so two installs in one process is a wrong ANSWER rather than a slow one. Hoisting the guard into a shared package with no `@aztec` dependency is the obvious third option and is deliberately deferred rather than taken silently: it would be a new published subtree for seventy lines, and L1–L4 may show that the two guards want different allow-list semantics (this one has to admit adapter members that M21's does not). The duplication is thirty lines and is pinned in both directions by `verify_node_client_surface_narrow` and `test_aztec_node_adapter_surface_minimal`, which exercise the two independently.
+- confidence: measured
+
 
 ---
 

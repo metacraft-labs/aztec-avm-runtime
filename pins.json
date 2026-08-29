@@ -9,7 +9,6 @@
     "Verified by verification/verify_pinned_nightly_single_source.sh.",
     "The re-pin POLICY (when to bump, what a bump must record) is PINS.md."
   ],
-
   "anchors": {
     "cpp": {
       "repo": "AztecProtocol/aztec-packages",
@@ -55,7 +54,6 @@
       "what": "THE READER, and it is a deliverable rather than a convenience. A wasm-produced Path A container cannot be read by stock ct-print: the Rust writer's zstd frames carry no pledged content size and the stock reader exits 1 with 'chunk compressed data extends beyond events.log'. The fix is one commit on this branch, baea074 'fix(reader): read an events.log written by the Rust CtfsTraceWriter', which adds decompressFrameOfUnknownSize. control_commit is baea074^ -- the SAME tree one commit earlier -- and verification/build_ct_print.sh builds BOTH out of the object store so 'this container needs that reader' is a measurement over a ONE-COMMIT difference rather than a claim. THE COMMIT PINNED IS THE FIX ITSELF AND NOT THE BRANCH TIP, deliberately: the tip is one commit further on (branch_tip_at_pin, 'accept a boolean value without the redundant text key'), pinning it would make the difference two commits, and a reader built at baea074 produces output BYTE-IDENTICAL to one built at the tip on M24's containers -- measured, which is why the smaller claim is the one made. Not vendored; PROVENANCE.md has no row. PUBLISHED: origin/wasm/nim-to-wasm at metacraft-labs/codetracer-trace-format-nim contains BOTH this commit and control_commit (its tip is branch_tip_at_pin). It was not when M24 pinned it -- see the trace_format anchor above for what that cost -- and test_ct_container_roundtrip_ct_print now asserts both commits are reachable from a refs/remotes ref. THIS ANCHOR DID NOT MOVE WHEN trace_format DID, ON 2026-08-26, AND THE REASON IS THAT baea074 FIXES TWO INDEPENDENT THINGS. Its own message names both: the Rust writer prefixes events.log with the 8-byte CodeTracer file header the Nim writer omits, and its chunks were streaming-encoder frames with no pledged content size. The trace_format move retires the SECOND half -- every frame pledges now -- and does not touch the first, so the control commit still refuses the container and still refuses it for a reason this pin can name. What narrows is the CLAIM, not the pin: the one-commit difference is now the header prefix rather than the frame. Measured rather than reasoned; test_ct_container_roundtrip_ct_print runs both readers over the same bytes on every run and would go red if the parent had started reading it. Moving this anchor to branch_tip_at_pin would still make the difference two commits, which is what the paragraph above declines for."
     }
   },
-
   "npm": {
     "_comment": [
       "Two @aztec/* nightly lines are in the tree at once, deliberately, and they are not",
@@ -69,16 +67,146 @@
       "version": "5.3.0-nightly.20260819",
       "corresponds_to_anchor": "cpp",
       "role": "The pinned @aztec/* nightly. All new work uses this.",
-      "consumers": ["drift"]
+      "consumers": [
+        "drift"
+      ]
     },
     "deletion_era": {
       "version": "5.0.0-nightly.20260626",
       "corresponds_to_anchor": "ts",
       "role": "Frozen evidence. Do not bump; see PINS.md.",
-      "consumers": ["spike", "diffsim", "orchestration"]
+      "consumers": [
+        "spike",
+        "diffsim",
+        "orchestration"
+      ]
     }
   },
-
+  "live_chain": {
+    "_comment": [
+      "THE LIVE CHAIN THE REPLAY CAMPAIGN (Aztec-Live-Chain-Replay.milestones.org) TALKS TO, and",
+      "the protocol version its node client checks a node against. L0's deliverable is 'the node's",
+      "protocol version checked against pins.json and a mismatch reported loudly'; this is the",
+      "declaration that check reads.",
+      "",
+      "THE NETWORK IS NOT PINNED, AND THAT SENTENCE HAS CHANGED ITS REASON. L0's implementation",
+      "probed five candidate endpoints on 2026-08-29 and recorded that every one of them failed;",
+      "the transcript is still in `probed_endpoints` below and every one of those five still fails.",
+      "L0's REVIEW re-took the search on the same day and found TWO THAT ANSWER — dRPC's Aztec",
+      "mainnet and Aztec testnet endpoints, both running nodeVersion 5.2.0, both answering a real",
+      "`aztec_getNodeInfo`, and both advertising `x-aztec-l2circuitsvktreeroot` and",
+      "`x-aztec-l2protocolcontractshash` EQUAL TO THE TWO VALUES PINNED BELOW. So the protocol pin",
+      "is validated against a live chain rather than against the packages alone, and the campaign's",
+      "open question 'Mainnet has not been verified to exist for Aztec' is answered: it exists,",
+      "l1ChainId 1, rollup 0x91ff8bbd8ebb07893010d50a48a1609e5ebd8e34.",
+      "",
+      "WHY `network` IS STILL UNESTABLISHED AND `rpc_url` IS STILL NULL, WHICH IS A SECOND",
+      "MEASUREMENT AND NOT INERTIA. Both reachable endpoints are PROXIES, and a proxy is measured",
+      "here rather than assumed: a single-object JSON-RPC POST comes back WITH the `x-aztec-*`",
+      "headers and a BATCH (array) POST comes back WITHOUT them. Upstream's own",
+      "`createAztecNodeClient` always batches (`sendBatch`, `batchWindowMS = 0`), so through these",
+      "endpoints upstream's versioning handler never sees a header, and `assertProtocolVersion`",
+      "refuses them naming the absence — which is the SAFE direction and the behaviour L0 designed,",
+      "but it means a pinned `rpc_url` pointing at a proxy would be an endpoint this repository's own",
+      "version check cannot verify. Pinning the network needs a DIRECT node endpoint, or a",
+      "deliberately un-batched version probe. That is L1's first task and it is no longer blocked on",
+      "finding a chain — the chain is there, and every read a replay needs was exercised against it.",
+      "",
+      "WHAT IS PINNED IS THE PROTOCOL-LEVEL HALF, AND UPSTREAM PINS EXACTLY THAT HALF THE SAME WAY.",
+      "`yarn-project/aztec/src/cli/versioning.ts` at the `cpp` anchor returns, when it has no chain",
+      "config, `{ l2CircuitsVkTreeRoot: getVKTreeRoot().toString(), l2ProtocolContractsHash:",
+      "protocolContractsHash.toString() }` — a PARTIAL ComponentsVersions with the two fields that",
+      "are a property of the protocol rather than of a deployment. `validatePartialComponentVersions",
+      "Match` and `getVersioningResponseHandler` both ignore undefined fields, so a partial is",
+      "upstream's own supported shape and not a weakening we invented.",
+      "",
+      "Both values are DERIVED, from the packages `npm.current` names, and both are re-derived by",
+      "`verify_client_uses_upstream_schema` on every run rather than trusted here: a figure nobody",
+      "re-derives rots. If a bump moves either, that check goes red before anything ships."
+    ],
+    "network": "UNESTABLISHED",
+    "rpc_url": null,
+    "corresponds_to_anchor": "cpp",
+    "corresponds_to_npm_pin": "current",
+    "protocol_version": {
+      "_comment": "A Partial<ComponentsVersions> in upstream's own vocabulary (@aztec/stdlib/versioning). The three network-level fields — l1ChainId, l1RollupAddress, rollupVersion — are DELIBERATELY ABSENT until an endpoint is established; see probed_endpoints.",
+      "l2ProtocolContractsHash": "0x2c075866eafc88a1f6f9addc7e337c6e64e45d1cb7fd7c0d612ebcec72aab2ca",
+      "l2CircuitsVkTreeRoot": "0x2b3b6ea4412b9c8f6457a37f91a2870306f8641e07e16a49b68bda6f8bc02892"
+    },
+    "protocol_version_derivation": {
+      "l2ProtocolContractsHash": "protocolContractsHash from @aztec/protocol-contracts",
+      "l2CircuitsVkTreeRoot": "getVKTreeRoot() from @aztec/noir-protocol-circuits-types/vk-tree",
+      "upstream_producer": "yarn-project/aztec/src/cli/versioning.ts at anchors.cpp — getVersions(undefined)"
+    },
+    "probed_endpoints": [
+      {
+        "url": "https://aztec-testnet-fullnode.zkv.xyz",
+        "date": "2026-08-29",
+        "result": "HTTP 522 from Cloudflare — origin unreachable"
+      },
+      {
+        "url": "https://aztec-alpha-testnet-fullnode.zkv.xyz",
+        "date": "2026-08-29",
+        "result": "HTTP 522 from Cloudflare — origin unreachable"
+      },
+      {
+        "url": "https://testnet.aztec.network",
+        "date": "2026-08-29",
+        "result": "HTTP 404 — a Netlify marketing site, not a node"
+      },
+      {
+        "url": "https://full-node.alpha-testnet.aztec.network",
+        "date": "2026-08-29",
+        "result": "no response within 20 s — DNS or connect failure"
+      },
+      {
+        "url": "https://rpc.testnet.aztec.network",
+        "date": "2026-08-29",
+        "result": "no response within 20 s — DNS or connect failure"
+      },
+      {
+        "url": "https://aztec.drpc.org",
+        "date": "2026-08-29",
+        "probed_by": "L0 review",
+        "result": "HTTP 200 — ANSWERS. aztec_getNodeInfo -> nodeVersion 5.2.0, l1ChainId 1, rollupVersion 4248422647, rollupAddress 0x91ff8bbd8ebb07893010d50a48a1609e5ebd8e34",
+        "x_aztec_l2circuitsvktreeroot": "0x2b3b6ea4412b9c8f6457a37f91a2870306f8641e07e16a49b68bda6f8bc02892",
+        "x_aztec_l2protocolcontractshash": "0x2c075866eafc88a1f6f9addc7e337c6e64e45d1cb7fd7c0d612ebcec72aab2ca",
+        "matches_protocol_version_pin": true,
+        "caveat": "A PROXY. Version headers are present on a single-object POST and ABSENT on a batch (array) POST, and upstream's client always batches — so assertProtocolVersion refuses it, naming the absence."
+      },
+      {
+        "url": "https://aztec-testnet.drpc.org",
+        "date": "2026-08-29",
+        "probed_by": "L0 review",
+        "result": "HTTP 200 — ANSWERS. aztec_getNodeInfo -> nodeVersion 5.2.0, l1ChainId 11155111 (Sepolia), rollupVersion 1821665230, rollupAddress 0xd73a91bdcf6891c7642f3e460036e1ef2cc23178",
+        "x_aztec_l2circuitsvktreeroot": "0x2b3b6ea4412b9c8f6457a37f91a2870306f8641e07e16a49b68bda6f8bc02892",
+        "x_aztec_l2protocolcontractshash": "0x2c075866eafc88a1f6f9addc7e337c6e64e45d1cb7fd7c0d612ebcec72aab2ca",
+        "matches_protocol_version_pin": true,
+        "caveat": "Same proxy behaviour as the mainnet endpoint above.",
+        "exercised_by_l0_review": "getNodeInfo, getBlockNumber (tip 60594), getBlock(n, {includeTransactions:true}) -> 1 txEffect, fetchSettledTx -> upstream Tx, fetchSettledTxEffect -> l2BlockNumber 60594 / txIndexInBlock 0 / revertCode 0, getBlockData -> real GlobalVariables and StateReference; the guard refused sendTx and 'getBlocks' in client against the same live node."
+      }
+    ],
+    "pin_discrimination_measured": {
+      "_comment": [
+        "THE STATED CONSEQUENCE OF A PARTIAL PIN, TAKEN AS A MEASUREMENT ON 2026-08-29 RATHER THAN",
+        "ARGUED. `pinned_protocol_version.ts` says 'a node on the WRONG L1 CHAIN would not be caught by",
+        "this pin today, and a node running a DIFFERENT PROTOCOL would be'. Aztec mainnet and Aztec",
+        "testnet were both read on the same day: their two PROTOCOL-level headers are IDENTICAL to each",
+        "other and to the pin, and their three NETWORK-level headers all differ. So the first half of",
+        "that sentence is demonstrated — today's pin genuinely cannot tell mainnet from testnet — and",
+        "the second half is the reason the pin is worth having at all."
+      ],
+      "identical_across_both_chains": [
+        "l2CircuitsVkTreeRoot",
+        "l2ProtocolContractsHash"
+      ],
+      "differ_across_both_chains": [
+        "l1ChainId",
+        "l1RollupAddress",
+        "rollupVersion"
+      ]
+    }
+  },
   "npm_exceptions": {
     "_comment": "@aztec-scoped packages that are NOT on the nightly line and must not be moved onto it. Each needs a reason; the check refuses any other exception.",
     "@aztec/viem": {
@@ -90,7 +218,6 @@
       "why": "The deleted TypeScript merkle trees (REUSE-INVENTORY.md RI-28). Upstream removed the package in e264dd4893 (2026-03-16), so this is the LAST nightly that ships it and no later one exists. Consumed only by probe-mt/, the probe that measured the undomained-hash defect. Pinning it forward is impossible, not merely undesirable."
     }
   },
-
   "npm_pin_witnesses": {
     "_comment": "Tracked files that carry an npm version literal as part of what they ARE, rather than as a dependency declaration. Two kinds. A MEASURED ARTEFACT records which pin it was produced against; if the literal drifts, the artefact has silently stopped describing the tree it was measured on. SOURCE THAT PUBLISHES THE PIN states it as behaviour: orchestration/src/disclosure.ts puts it in the runtime's own section-8.4 disclosure line, so a stale literal there is a false statement made to a user rather than a stale comment. Neither kind is a package file, so neither is a consumer. Each entry maps a tracked path to the npm pin its literal must equal. `tools/repin.py` and `verify_pinned_nightly_single_source` both allow these paths AND check the agreement; neither merely exempts them.",
     "fixtures/differential-wasm-divergences.json": "deletion_era",
@@ -102,28 +229,41 @@
     "diffsim": "deletion_era",
     "drift": "current",
     "probe-mt": "deletion_era",
-    "orchestration": "deletion_era"
+    "orchestration": "deletion_era",
+    "replay": "current"
   },
-
   "toolchain": {
     "_comment": "Not upstream-Aztec pins, but pinned all the same; recorded here so there is one place to look. The authoritative declaration for each is the file named.",
-    "wasi-sdk": { "version": "33", "declared_in": "nix/wasi-sdk.nix" },
-    "nixpkgs": { "declared_in": "flake.lock" }
+    "wasi-sdk": {
+      "version": "33",
+      "declared_in": "nix/wasi-sdk.nix"
+    },
+    "nixpkgs": {
+      "declared_in": "flake.lock"
+    }
   },
-
   "history": [
     {
       "date": "2026-08-21",
       "milestone": "M1",
       "change": "Initial pin. cpp=233d8e0993, ts=3a68d68ac2, historical-protocol-specs=9fe19ba7a1, npm.current=5.3.0-nightly.20260819, npm.deletion_era=5.0.0-nightly.20260626.",
       "reason": "M1 records the anchors the campaign had been using informally since the spike. No value changed; this entry establishes the baseline every later bump is measured from.",
-      "drift_entries_opened": ["D1"]
+      "drift_entries_opened": [
+        "D1"
+      ]
     },
     {
       "date": "2026-08-26",
       "milestone": "M24",
       "change": "anchors.trace_format 9cbc127ef8 -> 592fa42cbf. Nothing else moved: cpp, ts, historical-protocol-specs and trace_format_nim are unchanged, and npm.current stays 5.3.0-nightly.20260819 with npm.deletion_era at 5.0.0-nightly.20260626.",
       "reason": "NOT A CADENCE BUMP AND NOT AN EXCEPTION UNDER PINS.md's RULE 2 -- neither of those applies, because this is not an @aztec pin. It is a correctness move on a Metacraft anchor, and the cost of not making it was a silent wrong answer rather than a stale dependency. At 9cbc127ef8 every compressed stream in a Path A container carried a streaming-zstd frame with no pledged content size; the reference reader sizes its buffers from ZSTD_getFrameContentSize and reports zero steps, zero calls and zero events rather than refusing. 592fa42cbf pledges on every stream on both targets, and brings the column-aware writer with it, so dropped_column_awareness() can now answer false. TRACE-ABI.md 7's byte count and sha256 are re-derived from the artefact built at the new anchor in the same change, because verify_ct_writer_wasm_zero_imports compares them against what it built and would otherwise go red.",
+      "drift_entries_opened": []
+    },
+    {
+      "date": "2026-08-29",
+      "milestone": "L0 (Aztec-Live-Chain-Replay)",
+      "change": "NO PIN VALUE MOVED. npm.current stays 5.3.0-nightly.20260819 and npm.deletion_era stays 5.0.0-nightly.20260626; cpp, ts, historical-protocol-specs, trace_format and trace_format_nim are unchanged. What is ADDED is the `live_chain` block and one npm consumer, `replay`, on the `current` line.",
+      "reason": "L0's deliverable is 'the node's protocol version checked against pins.json and a mismatch reported loudly', and there was nowhere in this file for a protocol version to live. The `replay` tree is on `current` rather than `deletion_era` because it talks to a LIVE node: `deletion_era` is frozen evidence of the pre-deletion TypeScript AVM and has nothing to do with which protocol a running chain speaks, while `npm.current` declares `corresponds_to_anchor: cpp`, which is the anchor the whole enumeration is re-derived from. The two protocol_version fields are derived from the packages `current` names and are re-derived by verify_client_uses_upstream_schema on every run; they are not typed in as constants. The network itself is UNESTABLISHED and the five failed endpoint probes are recorded rather than summarised, because the campaign's own reuse discipline says a limitation stated with a false reason closes the search.",
       "drift_entries_opened": []
     }
   ]
