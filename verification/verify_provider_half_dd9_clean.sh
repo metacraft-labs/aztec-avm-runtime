@@ -100,10 +100,19 @@ done
 
 # `cpp_*`: the NAPI AVM's own symbol prefix. This one IS a byte-level needle, and it is paired with
 # a needle that must MATCH, so a scan that silently stopped matching drives both to zero.
-WALLET_BYTES="$(cat "$BROWSER_DIST/wallet.js")"
-assert_false "no cpp_ symbol survives into the wallet entry's own bytes" \
+#
+# OVER THE WHOLE EAGER SET, NOT OVER `wallet.js` ALONE, and the change was forced by M34 rather than
+# chosen. With an eighth entry point sharing the wallet's modules, esbuild hoisted the protocol and
+# the provider into a shared chunk and `wallet.js` became a re-export stub — so the positive-control
+# needle `aztec-wallet-` stopped matching, which is the paired needle doing its job. The set is what
+# a page downloads before it does anything, so this is also the stronger question.
+# The keys are repository-relative paths (`browser/dist/chunks/chunk-*.js`), which is what the
+# metafile carries, so they are read from `$REPO_ROOT`.
+WALLET_BYTES="$(cd "$REPO_ROOT" && for k in $(e EAGER-KEY); do cat "$k"; done)"
+assert_ge "the eager set was read as bytes, and it is a real bundle" 500000 "${#WALLET_BYTES}"
+assert_false "no cpp_ symbol survives into the wallet entry's eager bytes" \
   str_has_sub "$WALLET_BYTES" 'cpp_'
-assert_true "…and the scan CAN match something in that same file" \
+assert_true "…and the scan CAN match something in that same set" \
   str_has_sub "$WALLET_BYTES" 'aztec-wallet-'
 
 echo "== 3. no Node builtin is reachable from the wallet entry"

@@ -120,6 +120,14 @@ def entry_cmd(meta_path, chunks_path, entry_name):
     eager_pkgs = tally(eager_keys)
     all_pkgs = tally(all_keys)
 
+    # THE EAGER FILE NAMES, NOT ONLY THEIR COUNT. M34 needs them because the wallet ENTRY MODULE
+    # stopped being where the wallet's own bytes are: with an eighth entry point sharing them,
+    # esbuild hoisted the protocol and the provider into a shared chunk and `wallet.js` became a
+    # 0.67 KB re-export stub. A byte-level scan of `wallet.js` alone therefore stopped being a scan
+    # of anything — its paired positive-control needle went red, which is exactly what a paired
+    # needle is for. The scan is over the whole eager SET now, which is also the stronger claim.
+    for k in sorted(eager_keys):
+        print("EAGER-KEY\t%s" % k)
     print("EAGER-FILES\t%d" % len(eager_keys))
     print("EAGER-BYTES\t%d" % sum(eager_pkgs.values()))
     print("ALL-FILES\t%d" % len(all_keys))

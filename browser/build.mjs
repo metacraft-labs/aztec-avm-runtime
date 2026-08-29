@@ -189,6 +189,11 @@ const BROWSER_ENTRIES = {
   worker: path.join(HERE, 'src/entry_worker.ts'),
   'worker-demo': path.join(HERE, 'demo/worker_main.ts'),
   wallet: path.join(HERE, 'src/entry_wallet.ts'),
+  // M34. The wallet DEMO, in the same pass for the same reason `worker-demo` is: the page it drives
+  // hosts the runtime AND the wallet at once, and a pass of its own would give it a second copy of
+  // every shared chunk — which would also make "the wallet costs what the wallet entry says it
+  // costs" a comparison between two differently-built artefacts.
+  'wallet-demo': path.join(HERE, 'demo/wallet_main.ts'),
 };
 const NODE_ENTRIES = {
   node: path.join(HERE, 'src/entry_node.ts'),
@@ -258,6 +263,7 @@ try {
 for (const [source, target, script] of [
   ['demo/index.html', 'index.html', './demo.js'],
   ['demo/worker.html', 'worker.html', './worker-demo.js'],
+  ['demo/wallet.html', 'wallet.html', './wallet-demo.js'],
 ]) {
   const page = readFileSync(path.join(HERE, source), 'utf8');
   if (!page.includes(script)) {

@@ -588,6 +588,56 @@ The smallest closing claim is enough — it evaluates, and it exports what it de
 a control that does NOT evaluate, run through the same probe, the same server and the same browser.
 `verify_provider_half_dd9_clean` §10 is the shape to copy; it reuses M27's harness unchanged.
 
+**AND WHEN THE THING SHIPPED IS BEHAVIOUR RATHER THAN A MODULE, LOADING IT IS NOT ENOUGH EITHER.**
+M33 shipped a protocol and its review's remedy — a probe page that `import()`s the bundle — is the
+right size for a protocol. M34 ships a WALLET, so every one of its seven arms runs in Chromium: the
+handshake, the ECDH, the AES-256-GCM session, the deterministic key derivation through `avm.wasm`'s
+own grumpkin, M26's vendored transaction builder, the AVM and the `.ct` writer all execute there,
+and the container the page downloads is read back through the pinned reader. The ladder is
+*asserted browser-shaped* → *observed to evaluate* → *observed to do the thing*, and a milestone
+owes the rung its deliverable is on. **Three defects that only the third rung finds, all from M34's
+first browser run:** a `ZodError` with two union issues at an EMPTY path and no method name, from
+one of nine calls (a failure that cannot name its subject); CDP's `Object couldn't be returned by
+value`, its entire diagnosis, once a return carried a class instance; and a refusals arm measuring
+UPSTREAM'S CODEC rather than the wallet — called across the wire with the wrong arity, a refused
+method never reaches the wallet at all, because `parseWithOptionals` rejects the ARGUMENTS first
+with a `too_small` error naming no method. All six "refusals" in that run were somebody else's.
+
+### THE INSTALLED PIN IS THE AUTHORITY, AND IT DISAGREES WITH THE ANCHOR
+
+**Second instance; the first was M23's `AztecNodeDebug` — five methods at the anchor, three at the
+pin.** M34 read `WalletSchema` at the `cpp` anchor and built against it. Two of upstream's own zod
+schemas differ at the PUBLISHED pin this repository depends on, and both differences are silent
+until something runs:
+
+- `WalletSchema.registerContract`'s output is `z.void()` at the anchor and an **intersection** of
+  the instance preimage with `{address}` at the pin. Returning `undefined` fails.
+- `FunctionCall` carries `returnType?: AbiType` at the anchor, with a transform accepting either
+  spelling, and `returnTypes: z.array(AbiTypeSchema)` — **required** — at the pin.
+
+Measured with `getSchemaReturnType(WalletSchema[k]).parseAsync(undefined)` over all sixteen methods:
+`registerContractClass` is the ONLY one that accepts `undefined` at the pin. So upstream's own
+worked example — `end-to-end/src/test-wallet/worker_wallet.test.ts`, whose whole subject is that
+void-returning methods serialise as `undefined` — is testing a property that holds for one of the
+two methods it names. **Rule:** read the anchor to understand the design; read the INSTALLED PIN to
+know what will parse. They are two different questions and this campaign has now paid for both.
+
+### A SCANNER THAT CANNOT TELL A CALL FROM A SENTENCE, IN THE INSTRUMENT RATHER THAN IN A CHECK
+
+**One instance, caught by its own first run.** `test_wallet_keys_deterministic` asserts that no
+ambient-randomness spelling is reachable from the dev wallet's key path — seven spellings, written
+down, which is the "an absence is only as wide as the spellings you enumerated" rule. It reddened
+immediately, on `dev_keys.ts`'s own HEADER: the paragraph that says the file uses none of those
+names contains all three of `Fr.random()`, `crypto.getRandomValues` and `Math.random`.
+
+That is *"a citation is the opposite of a dependency"* — this file's own rule, which it records for
+a check that counted a mention of a function's name as a call to it — one level up, in the
+instrument. The remedy is the same one: **strip comments before scanning, with a string-aware
+stripper** (`_import_closure.py`'s, whose naive predecessor let a `//` inside a string literal eat
+the rest of a line and made a reached package look unreached), and then assert BOTH that the
+stripper left code behind and that it removed the prose. Three assertions where there was one, and
+the file whose comment caused the failure is the fixture that proves the stripper works.
+
 ### Conjunctions need a negative case per conjunct
 A four-tree conjunction whose only negative case exercised one tree: dropping any
 of the other three passed all twelve cases.
@@ -641,6 +691,15 @@ here nothing crashed, and one step past M30's "a mutation silently undone and pr
 result" — here it was never applied. **Rule: a substitution that does not find its needle must abort
 the run, restore, and say so.** And the arm's PREDICTION agreeing with the arm's RESULT is not
 evidence the arm ran: it is the condition under which nobody re-reads the log.
+
+**AND THE FIRST STATE IS STILL THE COMMONEST: M34's M5 CRASHED THE ARM RUN.** Written to break the
+wallet's report of a registration, it skipped the node call entirely — so the contract class never
+reached the module, the transaction could not execute, the ARM RUN exited 1, and the check died at
+its precondition with **`0 assertion(s), 1 failure(s)`**. That is the die-before-summary path
+working exactly as built, and **not one assertion of the section the arm was written for ever ran**.
+Rewritten so the write still happens and only the RECORD lies, it is 33 / 1 on precisely that
+assertion — which is also the more dangerous of the two defects, because a ledger that reports work
+nobody did is worse than one that reports nothing.
 
 **AND A BACKUP IS ONLY AS GOOD AS THE TREE IT WAS TAKEN FROM.** The residue above is how M32's own
 stale-backup defect (below) ended: the harness's two remedies — wipe and re-take every run, and an
@@ -764,6 +823,47 @@ m28 353  m29 127
                                                        CAMPAIGN TOTAL 10,178
 ```
 
+**M34 TOOK IT TO 11,514, AND MOVED EXACTLY ONE OTHER MILESTONE — M33'S, BY ONE, DECLARED BEFORE THE
+SWEEP RAN.** Measured M0-M34 on 2026-08-29 by M34's implementation, after its last edit,
+`setsid`-detached in this repository's own dev shell (node v24.19.0), one milestone at a time with
+nothing else running, `TMPDIR` and the log under `~/.cache`, **no hole in the log** (70 markers for
+35 milestones), **33 of 35 exit 0**, on the tree rebased onto `origin/dev` `410d76c`:
+
+```
+m0 156  m1 179  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 262  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
+m28 353  m29 127  m30 218  m31 421  m32 234  m33 246  m34 210
+                                                       CAMPAIGN TOTAL 11,514
+```
+
+**Every one of M0-M32 came out at its reference value TO THE ASSERTION**, and 11,303 + 1 + 210 =
+11,514 exactly, `delta +0` against a reference table naming both moves in advance. **M33 245 -> 246**
+is one non-emptiness assertion in `verify_provider_half_dd9_clean`, and the reason is worth the
+sentence: its `cpp_` byte scan was asked of `wallet.js` ALONE, M34's eighth entry point made esbuild
+hoist the wallet's modules into a shared chunk, `wallet.js` became a 0.69 KB re-export stub, and the
+scan's PAIRED positive-control needle went red. **That is what a paired needle is for, and it is the
+only reason anybody noticed.** The scan is over the whole eager SET now, which is also the question
+DD-11 means. **M34's own 210** is 83 / 49 / 33 / 45.
+
+**M9 DID NOT FLAKE** — 807, rc 0, 1,282 s, immediately after m8's run, which is D19's standing
+condition and it did not fire. **The two non-zero exits are M11 at 262 with nine failing assertions**
+(the recorded ninth-upstream-move signature, split 5 / 2 / 2, count unchanged, `carry/` left at HEAD)
+**and M28 at 353 with one failing assertion that is L0's** (`verify_npm_pack_no_optional_native` pins
+the tracked `package.json` list and `replay/package.json` is a fifth tree; recorded, not fixed).
+**L0's and L1's six check names appear ZERO times in the whole sweep log** — they live in
+`just verify-l0` and `just verify-l1`, which no `verify-m<N>` recipe invokes — so none of their
+assertions is in the 11,514. **A sweep is a writer**: `carry/rebase.json` and `carry/exposure.json`
+came out `79f597b2…` / `3836c2b6…` and were restored from HEAD, `sha256sum -c`, all four OK.
+
+**AND M34'S SWEEP WAS ABORTED TWICE ON PURPOSE, WHICH IS THE RULE WORKING TWICE.** The first run went
+red at m0 thirty-seven seconds in, on `verify_workspace_repos_registered`'s "the workspace checkout
+shares history with the fresh clone", because `origin/dev` had moved seven L1 commits while the work
+was written — killed, rebased, restarted. The second was killed twenty-five minutes in because a
+comment in the subject had been improved after it started; the rebuild was confirmed to produce
+identical eager figures for every entry point, so the restart was procedural rather than necessary,
+and it was still the right call. *Run your sweep after your last edit — a comment is an edit.*
+
 **M33'S REVIEW TOOK IT TO 11,303, AND MOVED EXACTLY ONE MILESTONE — M33'S OWN.** Re-measured
 M0-M33 on 2026-08-29 by M33's review, **after the rebase onto `origin/dev` and after its last
 commit**, `setsid`-detached in this repository's own dev shell (node v24.19.0), one milestone at a
@@ -803,6 +903,29 @@ L1 appended RI-88/RI-89 and M33 landed the same two ids first, so L1's were renu
 RI-92/RI-93 on the rebase — the same append-and-renumber the M33 review performed against L0.
 Two campaigns writing one file is the ordinary case here, not the exception, and the id is
 assigned when the work lands rather than when it is written.
+
+**AND IT HAPPENED A THIRD TIME, TO M34, MID-MILESTONE, AND THE RULE IS NOW A PROCEDURE RATHER THAN
+AN INCIDENT.** M34 fetched and rebased at Step 0 (`HEAD == origin/dev == 0902fa9`, nothing to do),
+wrote its work, and started its sweep — and **m0 went red at the first milestone**, on
+`verify_workspace_repos_registered`'s "the workspace checkout shares history with the fresh clone",
+because `origin/dev` had moved seven commits while the work was being written. That check is the
+instrument that catches this, and it caught it thirty-seven seconds in.
+
+*The sweep was killed and restarted rather than finished and explained*, which is what M33 did for
+the same reason one milestone earlier: a run whose first eighteen milestones measure a different
+tree from its last sixteen is not a measurement. The fast-forward produced **exactly one textual
+conflict, `Justfile`, a pure append at EOF**, and both appends were kept with L1's first. L1 had
+taken RI-92 and RI-93, so M34's three entries — written as RI-92..RI-94 — became **RI-94..RI-96**,
+renumbered in the inventory, `DEV-WALLET.md`, `dev_wallet.ts` and the milestone section, and verified
+mechanically rather than read.
+
+**AND THE CONFLICT RESOLUTION HAS A HAZARD WORTH THE SENTENCE, because `origin/dev`'s own head
+commit is `fix: strip two diff3 base markers left by the L1 rebase`.** This checkout's merge
+conflict style is **diff3**, so a conflicted region has FOUR markers and not three:
+`<<<<<<<`, `|||||||`, `=======`, `>>>>>>>`. A resolver that assumes three keeps the `|||||||` line
+and the base region as if they were content — which is what L1 shipped and had to fix, and what
+M34's first resolution did too, caught immediately because `just --list` refuses to parse a `|||||||`
+line. **Grep for all four markers after resolving, not for three.**
 
 **THREE NON-ZERO EXITS AND ONLY ONE OF THEM IS THIS REPOSITORY'S OWN WORK.**
 **M9 is 807 with FOUR failing assertions and the count is the reference split exactly**

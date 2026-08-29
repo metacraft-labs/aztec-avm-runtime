@@ -279,10 +279,21 @@ are supersets — and this build already ships three further entries outside it 
 
 | | derived |
 |---|---|
-| `wallet.js`'s own module | **16.24 KB** gzipped |
-| its eager set | **245.87 KB** gzipped across **8** files |
-| `@aztec/aztec.js` bytes in that eager set | **13,371** |
+| `wallet.js`'s own module | **0.69 KB** gzipped |
+| its eager set | **275.21 KB** gzipped across **9** files |
+| `@aztec/aztec.js` bytes in that eager set | **13,379** |
 | `@aztec/aztec.js` bytes in `browser.js`'s eager set | **0** |
+
+**M34 MOVED THREE OF THOSE FOUR AND THE FOURTH IS THE ONE THAT MATTERS.** M34 fills the seam, so the
+wallet entry now reaches M26's vendored transaction builder (RI-72) and `@aztec/stdlib/testing`'s
+`makeContractClassPublic`: the eager set goes **245.87 KB / 8 files -> 275.21 KB / 9**, recorded as a
+`bumps` entry in `chunk-budgets.json` rather than absorbed. `wallet.js`'s OWN module falls
+**16.24 -> 0.69 KB** for the opposite reason — M34 adds an eighth entry point that shares the
+wallet's modules, so esbuild hoisted the protocol and the provider into a shared chunk and the entry
+became a re-export stub. (That is also what reddened this check's `cpp_` positive-control needle,
+which had been asked of `wallet.js` alone; it is asked of the whole eager SET now, which is both the
+question DD-11 means and a set that cannot become a stub.) **The zero did not move**, and it is the
+one DD-11 rests on: a page that attaches no wallet still pays not one byte of `@aztec/aztec.js`.
 
 The wallet entry costs *less* than the reference entry, because it needs the protocol and its codecs
 and not the runtime. `WalletSchema`'s 31,205-line closure resolves almost entirely into chunks the

@@ -2856,3 +2856,72 @@ verify-l1:
       echo "verify-l1: all checks passed"
     fi
     exit "$rc"
+
+# =================================================================================================
+# M34 — THE CODETRACER DEV WALLET (PUBLIC ENTRYPOINTS)
+# =================================================================================================
+#
+#   just verify-m34-transfer     e2e_wallet_public_transfer
+#   just verify-m34-keys         test_wallet_keys_deterministic
+#   just verify-m34-deployment   test_deployment_through_wallet
+#   just verify-m34-trace        verify_wallet_decisions_appear_in_trace
+#   just verify-m34              all four, in order
+#
+# WHAT THEY NEED: the built browser bundle (which now carries an EIGHTH entry point,
+# `wallet-demo.js`, out of the same esbuild pass), `avm.wasm` with M27's crypto exports,
+# `ct_writer.wasm`, the Token artifact, the PINNED `ct-print`, and CHROMIUM.
+#
+# CHROMIUM IS NOT OPTIONAL HERE, AND THAT IS THE OPPOSITE OF M33'S CHOICE. M33's arms ran in Node
+# because its subject was a `MessagePort` and WebCrypto, which Node 24 implements to the same
+# specifications a browser does — and M33's review then measured what that cannot say, by planting
+# one Node-only free identifier and getting 224 assertions, 4/4, exit 0 over a bundle that died in
+# Chromium. M34 ships a WALLET rather than a protocol, so the wallet is LOADED AND EXERCISED in a
+# browser: the handshake, the ECDH, the AES-256-GCM session, the deterministic key derivation
+# through `avm.wasm`'s own grumpkin, the vendored transaction builder, the AVM and the `.ct` writer
+# all run there, and the container the page downloads is read back by the pinned reader.
+#
+# THE ARMS ARE MEASURED ONCE into $M34_WORK/wallet-transfer.json (default ~/.cache/aztec-m34-wallet)
+# and shared by all four checks, which is M20's convention. Seven arms: `transfer` (the subject),
+# `declined` (a wallet that refuses to authorize), `refusals` (every unserved method, by name),
+# `keys` (the deterministic derivation), `record` (the container), `suppressed` (the ledger's
+# control) and `shortcut` (the direct store write, still working and still labelled).
+verify-m34-transfer:
+    @verification/e2e_wallet_public_transfer.sh
+
+verify-m34-keys:
+    @verification/test_wallet_keys_deterministic.sh
+
+verify-m34-deployment:
+    @verification/test_deployment_through_wallet.sh
+
+verify-m34-trace:
+    @verification/verify_wallet_decisions_appear_in_trace.sh
+
+# Re-measure the M34 wallet arms into $M34_WORK/wallet-transfer.json.
+m34-arms:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    work="${M34_WORK:-$HOME/.cache/aztec-m34-wallet}"
+    mkdir -p "$work"
+    node tools/run_wallet_transfer_arms.mjs "$work" > "$work/wallet-transfer.json"
+    echo "m34-arms: wrote $work/wallet-transfer.json"
+
+verify-m34:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      e2e_wallet_public_transfer \
+      test_wallet_keys_deterministic \
+      test_deployment_through_wallet \
+      verify_wallet_decisions_appear_in_trace
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m34: FAILED" >&2
+    else
+      echo "verify-m34: all checks passed"
+    fi
+    exit "$rc"

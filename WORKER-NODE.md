@@ -192,21 +192,31 @@ about, and a before/after pair with only one after is a pair nobody can check. T
 is what `test_worker_transferable_container_not_copied` §5 re-derives from `chunks.json` on every
 run, so it is the one that cannot rot.
 
+**AND M34 MOVED IT A THIRD TIME, DOWNWARDS, WHICH IS WORTH THE SENTENCE.** M34 adds an EIGHTH entry
+(`wallet-demo.js`, the page that drives the wallet) and every eager total fell by roughly 0.7 KB
+except the Node pass's, which is separate. That direction is the mechanism working rather than an
+anomaly: a further entry sharing the same modules lets esbuild hoist MORE into chunks that several
+entries already carry, and a chunk counted once is smaller than the same code duplicated. Nothing was
+removed from any entry's graph, and the file counts are unchanged.
+
 | entry point | before M32 | M32's measurement | current |
 |---|---|---|---|
-| `browser.js` | 255.79 KB, 7 files | 255.87 KB, 8 files | **263.75 KB, 9 files** |
-| `testing.js` | 279.77 KB, 8 files | 279.93 KB, 10 files | **288.90 KB, 12 files** |
-| `demo.js` | 280.97 KB, 8 files | 281.12 KB, 10 files | **290.12 KB, 12 files** |
-| `node/node.js` | 225.36 KB, 4 files | 225.36 KB, 4 files | **225.36 KB, 4 files** |
-| `worker.js` | — | 282.40 KB, 9 files | **291.40 KB, 11 files** |
-| `worker-demo.js` | — | 283.48 KB, 11 files | **292.48 KB, 13 files** |
+| `browser.js` | 255.79 KB, 7 files | 255.87 KB, 8 files | **263.05 KB, 9 files** |
+| `testing.js` | 279.77 KB, 8 files | 279.93 KB, 10 files | **288.23 KB, 12 files** |
+| `demo.js` | 280.97 KB, 8 files | 281.12 KB, 10 files | **289.44 KB, 12 files** |
+| `node/node.js` | 225.36 KB, 4 files | 225.36 KB, 4 files | **225.42 KB, 4 files** |
+| `worker.js` | — | 282.40 KB, 9 files | **290.72 KB, 11 files** |
+| `worker-demo.js` | — | 283.48 KB, 11 files | **291.79 KB, 13 files** |
+| `wallet-demo.js` | — | — | **309.51 KB, 13 files** |
 
 `node/node.js` is unmoved in both moves, and for the same reason: the Node pass is a separate one.
 
-*(The demo row's `290.12` is the CHECK's value and not the build's. `browser/build.mjs` prints
+*(The demo row was `290.12` when M33 wrote this and is `289.44` now; the point of the parenthesis
+is the RULE and not the number. It is the CHECK's value and not the build's. `browser/build.mjs` prints
 `+(gzip/1024).toFixed(2)` and the checks use Python's `round(gzip/1024, 2)`; the demo entry lands on
 an exact rounding tie, so JavaScript rounds half away from zero and prints **290.13** while Python is
-banker's and gives **290.12**. `CAMPAIGN-BRIEF.md` records this happening to M32 at 281.125 and says
+banker's and gives **290.12**. (That tie was M33's figure; M34's re-split moved the demo entry off it,
+so the two agree again at 289.44 — which is luck rather than a fix.) `CAMPAIGN-BRIEF.md` records this happening to M32 at 281.125 and says
 the document must carry the check's value; M33 wrote the build's here, `test_worker_transferable_container_not_copied`
 went 71 / 2 in the sweep, and this is the correction. The next figure that lands on a tie will do it
 again.)*

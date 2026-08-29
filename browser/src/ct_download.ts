@@ -186,6 +186,16 @@ export interface RecordOptions {
   /** Offer the container as a download. False in a headless probe that reads it another way. */
   readonly download?: boolean;
   readonly filename?: string;
+  /**
+   * M34. Extra `TraceLogEvent`s to write into the container, after the step-producer record.
+   *
+   * DEFAULTS TO NONE, and that default is what keeps M27's and M29's `logEvents` figure at 1: a
+   * caller that does not pass this gets exactly the container it got before. The wallet demo passes
+   * its wallet's decision ledger, which is how "every oracle call and signing decision logged into
+   * the trace" becomes a property OF the recording rather than a claim ABOUT it — the same reason
+   * `declareRung` and the step producer are log events instead of host variables.
+   */
+  readonly extraLogEvents?: readonly { readonly metadata: string; readonly content: string }[];
 }
 
 /** Bytes to `0x`-less lowercase hex, for comparing a step's address with the traced contract's. */
@@ -382,6 +392,13 @@ export async function recordAndDownload(options: RecordOptions): Promise<Browser
       + `crossings=${executed.crossings} batch=${executed.batchRecords} `
       + `distinctOpcodes=${distinctOpcodes} contexts=${contexts}`,
   );
+
+  // M34's records, after the producer's and in the order the caller gives them. The module refuses
+  // an empty metadata key, so a malformed entry is a loud failure here rather than an unfindable
+  // record in the container.
+  for (const extra of options.extraLogEvents ?? []) {
+    writer.logEvent(extra.metadata, extra.content);
+  }
 
   const recording: CtRecording = writer.close();
   const filename = options.filename ?? `aztec-avm-${options.recordingId}.ct`;

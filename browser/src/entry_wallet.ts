@@ -76,6 +76,44 @@ export type {
 export { NO_WALLET_REASON, NULL_WALLET_METHODS, WalletNotAttached, createNullWallet } from './wallet/null_wallet.ts';
 export type { NullWalletHandle, NullWalletOptions, RefusalRecord, ServedMethod } from './wallet/null_wallet.ts';
 
+// ---- M34: THE WALLET THAT FILLS THE SEAM ------------------------------------------------------
+//
+// M33 shipped a null wallet so the boundary was exercised before it was filled. This is the fill,
+// and it is a SUBSTITUTION: `PortConnectionHandler`'s `getWallet` callback returns this instead of
+// the null one and nothing about the transport changes. `DEV-WALLET.md` is the write-up; the
+// design goal it exists to protect is that a DEBUGGING wallet must be the opposite of a production
+// one — deterministic keys, every decision on the record, and everything unserved refusing by name.
+export {
+  CLASS_ARTIFACT_HASH_SEED,
+  DEV_WALLET_METHODS,
+  DEV_WALLET_NAME,
+  DEV_WALLET_REFUSAL_REASONS,
+  DEV_WALLET_REFUSED,
+  DEV_WALLET_SERVED,
+  DEV_WALLET_VERSION,
+  DevWalletAuthorizationDeclined,
+  DevWalletRefused,
+  assertServedMatchesDeclaration,
+  WALLET_DECISION_METADATA,
+  WALLET_SEED_METADATA,
+  createDevWallet,
+  renderWalletDecision,
+} from './wallet/dev_wallet.ts';
+export type { DevWalletHandle, DevWalletHost, DevWalletOptions, WalletDecision } from './wallet/dev_wallet.ts';
+
+export {
+  DEFAULT_DEV_WALLET_SEED,
+  DEV_ACCOUNT_SEPARATOR,
+  DEV_ACCOUNT_SEPARATOR_LABEL,
+  DEV_PARTIAL_ADDRESS_SEPARATOR,
+  DEV_PARTIAL_ADDRESS_SEPARATOR_LABEL,
+  UPSTREAM_SEPARATORS,
+  deriveDevAccounts,
+  parseDevWalletSeed,
+  separatorFromLabel,
+} from './wallet/dev_keys.ts';
+export type { DevAccount } from './wallet/dev_keys.ts';
+
 // The protocol itself, re-exported from the VENDORED copy so a consumer speaks upstream's message
 // types rather than a paraphrase of them. `verify_wallet_protocol_is_upstreams` re-derives the
 // enum's members from the anchor and compares them against what this bundle exports, as a SET.
@@ -129,5 +167,29 @@ export const WALLET_ENTRY_OPS: readonly string[] = Object.freeze(
     'KEY_EXCHANGE_TIMEOUT_MS',
     'DEFAULT_HEARTBEAT_INTERVAL_MS',
     'DEFAULT_HEARTBEAT_DEAD_AFTER_MS',
+    // M34: the wallet that fills the seam, its deterministic keys, and its decision ledger.
+    'createDevWallet',
+    'deriveDevAccounts',
+    'parseDevWalletSeed',
+    'separatorFromLabel',
+    'renderWalletDecision',
+    'DevWalletRefused',
+    'DevWalletAuthorizationDeclined',
+    'assertServedMatchesDeclaration',
+    'DEV_WALLET_METHODS',
+    'DEV_WALLET_SERVED',
+    'DEV_WALLET_REFUSED',
+    'DEV_WALLET_REFUSAL_REASONS',
+    'DEV_WALLET_NAME',
+    'DEV_WALLET_VERSION',
+    'DEFAULT_DEV_WALLET_SEED',
+    'DEV_ACCOUNT_SEPARATOR',
+    'DEV_ACCOUNT_SEPARATOR_LABEL',
+    'DEV_PARTIAL_ADDRESS_SEPARATOR',
+    'DEV_PARTIAL_ADDRESS_SEPARATOR_LABEL',
+    'UPSTREAM_SEPARATORS',
+    'WALLET_DECISION_METADATA',
+    'WALLET_SEED_METADATA',
+    'CLASS_ARTIFACT_HASH_SEED',
   ].sort(),
 );

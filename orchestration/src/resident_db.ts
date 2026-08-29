@@ -85,6 +85,44 @@ export class ResidentMerkleDb implements ResidentPublicDataTree {
   }
 
   /**
+   * Whether a nullifier is in the indexed nullifier tree.
+   *
+   * M34. It is the same two-call shape as {@link readPublicDataLeaf} with the OTHER tree id, and
+   * `is_already_present` is again the field that decides it — the AVM's own answer to "does this
+   * leaf exist", rather than an inference from a predecessor's value. M29 established why this
+   * question matters at all: the AVM decides a contract EXISTS by looking for its address nullifier
+   * here, so "is this contract published" and "is this contract initialized" are both nullifier
+   * lookups and neither is a fact the caller can be trusted to supply.
+   *
+   * The preimage is read back and its `nullifier` field compared against the one asked for, for
+   * `readPublicDataLeaf`'s reason: `is_already_present` alone would make a misspelled msgpack key
+   * read as "absent" for every input, which is the direction that looks like a clean tree.
+   *
+   * @param nullifier - the siloed nullifier
+   * @returns whether the tree holds it
+   */
+  nullifierExists(nullifier: Fr): boolean {
+    const low = this.module.callWithBlob(
+      'avm_merkle_db_get_low_indexed_leaf',
+      this.handle,
+      serializeWithMessagePack([MerkleTreeId.NULLIFIER_TREE, nullifier]),
+    ) as { is_already_present?: boolean; index?: unknown } | null;
+    if (!low || low.is_already_present !== true) {
+      return false;
+    }
+    const preimage = this.module.callWithBlob(
+      'avm_merkle_db_get_leaf_preimage_nullifier_tree',
+      this.handle,
+      serializeWithMessagePack(Number(low.index)),
+    ) as { leaf?: { nullifier?: unknown } } | null;
+    const leaf = preimage?.leaf;
+    if (!leaf) {
+      return false;
+    }
+    return bigintOf(leaf.nullifier) === nullifier.toBigInt();
+  }
+
+  /**
    * Read a public-data leaf back, as a decimal string, or `null` when the slot has no leaf.
    *
    * TWO CALLS, BECAUSE THE INDEXED TREE IS ADDRESSED BY INDEX AND NOT BY SLOT.

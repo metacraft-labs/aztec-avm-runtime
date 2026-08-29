@@ -68,6 +68,12 @@ Each is taken from one of the two metafiles `browser/build.mjs` writes, and each
 §6 from the line that names it — one figure per line, because a table row carrying two numbers can
 have them swapped and still contain both.
 
+**M34 moved one of the figures below, by three.** It adds an EIGHTH entry point to the browser pass
+— `wallet-demo.js`, the page that drives the wallet — and `m28_scan` reads the whole PASS's metafile
+rather than one entry's, so that page's own three modules join the count: **1135 -> 1138 inputs**.
+Nothing else moved: the `util` edge count stays 45 (the wallet demo reaches no new Node shim), the
+declared dependency closure stays 271 (M34 installs nothing), and `optionalDependencies` stays 3.
+
 **M33 moved three of the figures below and each movement is attributable.** The browser pass gained
 a seventh entry point — `wallet.js`, the wallet protocol boundary — and `m28_scan` reads the whole
 PASS's metafile rather than one entry's, so the wallet entry's own graph joins the count:
@@ -77,7 +83,7 @@ the dependency closure: M33 declares `@aztec/aztec.js`, which npm installs toget
 None of the three is a native-addon family and `optionalDependencies` stays at 3, which is the
 figure D22 is about. All three were found by §6 re-deriving them, which is what §6 is for.
 
-- The browser bundle's module graph has 1135 inputs.
+- The browser bundle's module graph has 1138 inputs.
 - The node bundle's module graph has 969 inputs.
 - Node builtins left external in the browser bundle: 0.
 - Node builtins left external in the node bundle: 22.

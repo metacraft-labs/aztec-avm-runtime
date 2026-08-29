@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>aztec-avm-runtime — a transfer through the CodeTracer dev wallet</title>
+    <style>
+      body { font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2rem; max-width: 60rem; }
+      h1 { font-size: 1.1rem; }
+      p.note { color: #666; }
+      button { font: inherit; padding: 0.4rem 0.8rem; margin: 0 0.4rem 0.4rem 0; }
+      #log { background: #f5f5f5; padding: 1rem; white-space: pre-wrap; min-height: 8rem; }
+      .warn { border-left: 3px solid #c00; padding-left: 0.8rem; color: #900; }
+    </style>
+  </head>
+  <body>
+    <h1>aztec-avm-runtime — <code>transfer_in_public</code>, through a wallet</h1>
+
+    <p class="warn">
+      This is a <strong>simulator</strong>. No proofs are produced, there is no L1 and no network.
+      Every receipt carries <code>simulated: true</code> and <code>proving: 'none'</code>. The
+      runtime tells the wallet so, in upstream's own <code>AppCapabilities.metadata</code> field,
+      before it asks it for anything — and the wallet records that it was told.
+    </p>
+
+    <p class="note">
+      The wallet on the other end of the channel is a <strong>debugging</strong> wallet, and it is
+      deliberately the opposite of a production one: its keys are derived from a
+      <strong>recorded seed</strong> so a recording replays identically, and every decision it makes
+      is written into the <code>.ct</code> container as a trace record. Those are properties a real
+      wallet cannot have and this one should. See <code>DEV-WALLET.md</code>.
+    </p>
+
+    <p class="note">
+      The channel is a <code>MessageChannel</code> carrying Aztec's own wallet protocol — discovery,
+      ECDH&nbsp;P-256 key exchange, an AES-256-GCM session — which is M33's boundary, unchanged.
+      Nothing here reaches around it: the contract registration, the transaction and its submission
+      all cross as encrypted <code>SECURE_MESSAGE</code>s.
+    </p>
+
+    <p>
+      <button id="btn-wallet-transfer">1 &mdash; connect a wallet and transfer</button>
+      <button id="btn-wallet-record">2 &mdash; download the .ct container</button>
+      <button id="btn-wallet-decline">control &mdash; a wallet that refuses to authorize</button>
+    </p>
+
+    <pre id="log">loading…</pre>
+
+    <script type="module" src="./wallet-demo.js"></script>
+  </body>
+</html>
