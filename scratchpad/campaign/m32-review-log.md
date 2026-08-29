@@ -584,3 +584,29 @@ restored.
    and on the named refusal.
 
 **Four checks, 234 assertions, 4/4, exit 0. Campaign total 11,054, M0–M32, 33 milestones.**
+
+---
+
+## Step 15 — A FOREIGN COMMIT LANDED DURING THE SWEEP, AND IT WAS MEASURED RATHER THAN REASONED ABOUT
+
+`CAMPAIGN-BRIEF.md`: *"a sweep is a measurement of the tree at the moment it ran … when a milestone
+you did not touch moves, look for a commit that landed between the reference sweep and yours."* Here
+the commit landed and nothing moved, which is the same discipline pointing the other way.
+
+`10bb5eb ci: repin metacraft-github-actions actions from @main to @dev (#1)` was pushed to
+`origin/dev` by the user at **01:47:36**, while my sweep was between m10 and m11. It was not in my
+working tree — I fetched it only when pushing the sweep commit — so **the sweep measured a tree
+without it**, and rebasing put it underneath my two review commits.
+
+Ten checks in `verification/` read `.github/workflows/`, and `grep -rn '@main\|clone-repo\|setup-dev-env'`
+over `verification/` is **empty**, so nothing pins the lines that changed. That is a reason to
+expect no movement and not a measurement of it, so the milestones owning those checks were re-run
+over the rebased tree, plus M0 and M1 because they scan the whole tracked tree:
+
+```
+m0 156  m1 175  m12 691  m15 537  m16 223  m17 297  m19 180  m28 353  m32 234
+```
+
+**Every one at its reference value to the assertion, rc 0, zero failing assertions.** So the
+11,054 stands over the tree at `6c8eae3`, and `carry/` is still at its pre-sweep digests
+(`sha256sum -c`, both OK).
