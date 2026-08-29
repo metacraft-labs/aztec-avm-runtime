@@ -2726,3 +2726,68 @@ verify-l0:
       echo "verify-l0: all checks passed"
     fi
     exit "$rc"
+
+# ==============================================================================================
+# M33 — the wallet protocol boundary.
+#
+#   just verify-m33-protocol     verify_wallet_protocol_is_upstreams
+#   just verify-m33-dd9          verify_provider_half_dd9_clean
+#   just verify-m33-null-wallet  test_null_wallet_refuses_by_name
+#   just verify-m33-handshake    e2e_discovery_keyexchange_session
+#   just verify-m33              all four, in order
+#
+#   just m33-arms                re-measure the seven wallet arms into $M33_WORK/wallet.json
+#
+# WHAT THEY NEED, AND IT IS LESS THAN M32's: the built browser bundle, which now carries a seventh
+# entry point, `wallet.js`, out of the SAME esbuild pass. NO CHROMIUM AND NO avm.wasm. M32's arms
+# had to be in a browser because their subject was a Web Worker, CPU throttling and
+# `Page.setWebLifecycleState`; M33's subject is a `MessagePort` and WebCrypto, both of which Node 24
+# implements to the same specifications, so the arms IMPORT the built bundle and run the real
+# handshake in-process. That is a smaller claim than "it works in Chromium" and it is stated as one
+# in `WALLET-BOUNDARY.md` §5; `verify_provider_half_dd9_clean` is the check that says the artefact
+# is browser-shaped, over the esbuild metafile.
+#
+# THE ARMS ARE MEASURED ONCE into $M33_WORK/wallet.json (default ~/.cache/aztec-m33-wallet) and
+# shared by all four checks, which is M20's convention. Seven arms: `handshake`, `refusalsDirect`,
+# `served` (the CONTROL that a permitted call reaches through), `wrongAppId`, `wrongWalletId`,
+# `noApproval` (the bounded-wait arm) and `verificationHash`. The whole run is a few seconds.
+verify-m33-protocol:
+    @verification/verify_wallet_protocol_is_upstreams.sh
+
+verify-m33-dd9:
+    @verification/verify_provider_half_dd9_clean.sh
+
+verify-m33-null-wallet:
+    @verification/test_null_wallet_refuses_by_name.sh
+
+verify-m33-handshake:
+    @verification/e2e_discovery_keyexchange_session.sh
+
+# Re-measure the M33 wallet arms into $M33_WORK/wallet.json.
+m33-arms:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    work="${M33_WORK:-$HOME/.cache/aztec-m33-wallet}"
+    mkdir -p "$work"
+    node tools/run_wallet_arms.mjs "$work" > "$work/wallet.json"
+    echo "m33-arms: wrote $work/wallet.json"
+
+verify-m33:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_wallet_protocol_is_upstreams \
+      verify_provider_half_dd9_clean \
+      test_null_wallet_refuses_by_name \
+      e2e_discovery_keyexchange_session
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m33: FAILED" >&2
+    else
+      echo "verify-m33: all checks passed"
+    fi
+    exit "$rc"

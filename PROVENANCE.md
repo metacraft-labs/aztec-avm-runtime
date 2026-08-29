@@ -102,6 +102,9 @@ because no prefix rule would produce it.
 | F22 | orchestration/src/vendor/avm_fixtures_utils.ts | yarn-project/simulator/src/public/avm/fixtures/utils.ts | ts | Apache-2.0 | RI-72 |
 | F23 | orchestration/src/vendor/simple_contract_data_source.ts | yarn-project/simulator/src/public/fixtures/simple_contract_data_source.ts | ts | Apache-2.0 | RI-72 |
 | F24 | orchestration/src/vendor/gas_compat.ts | (none — added in this repo) | ts | Apache-2.0 | RI-72 |
+| F25 | browser/src/vendor/wallet_sdk/types.ts | yarn-project/wallet-sdk/src/types.ts | cpp | Apache-2.0 | RI-88 |
+| F26 | browser/src/vendor/wallet_sdk/crypto.ts | yarn-project/wallet-sdk/src/crypto.ts | cpp | Apache-2.0 | RI-88 |
+| F27 | browser/src/vendor/wallet_sdk/emoji_alphabet.ts | yarn-project/wallet-sdk/src/emoji_alphabet.ts | cpp | Apache-2.0 | RI-88 |
 <!-- END:files -->
 
 <!-- BEGIN:exempt -->

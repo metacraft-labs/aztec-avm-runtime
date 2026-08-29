@@ -39,11 +39,29 @@ chunk changed CLASS and nothing lazy became eager, which is the property these b
 which the per-entry rows below are what make visible. `WORKER-NODE.md` §5 carries the before/after
 pair; the second column here is the after:
 
+**AND M33 MOVED THEM A THIRD TIME, FOR THE SAME MECHANISM AND WITH THE ATTRIBUTION MEASURED RATHER
+THAN ASSERTED.** It adds a seventh entry point to the same pass — `wallet.js`, the wallet protocol
+boundary — and the chunk boundaries moved again. Two facts about that, and the second is the one
+worth the paragraph:
+
+* **The npm install moved nothing.** M33 adds `@aztec/aztec.js` (and, transitively,
+  `@aztec/entrypoints` and `@aztec/standard-contracts`) to `orchestration/package.json`. Built with
+  those three installed and the wallet ENTRY removed, every cell of the table below reads
+  **255.87 / 279.93 / 281.13 / 225.36** — its pre-M33 value to the assertion. So the whole of the
+  movement is the seventh entry point's re-splitting and none of it is the dependency.
+* **Not one byte of the wallet protocol is in the reference entry's eager set.** The +7.88 KB on
+  `browser.js` is, per package, out of the esbuild metafile: `@aztec/stdlib` +24,869 raw bytes,
+  `@aztec/foundation` +5,700, `@aztec/blob-lib` +930 — upstream code the reference already reached,
+  hoisted into a chunk it now shares with the wallet entry — and **`@aztec/aztec.js`,
+  `@aztec/entrypoints` and `@aztec/standard-contracts` contribute exactly 0**.
+  `verify_provider_half_dd9_clean` asserts that zero on every run, with the wallet entry's own
+  13,371 bytes of `@aztec/aztec.js` as the control that the measurement can be non-zero.
+
 | entry point | eager, gzipped | files | M27's figure |
 |---|---|---|---|
-| `aztec-avm-runtime/browser` — the DD-5 reference | **255.87 KB** | 8 | 253.94 KB |
-| `aztec-avm-runtime/testing` | 279.93 KB | 10 | 277.43 KB |
-| the demo page | 281.12 KB | 10 | 277.65 KB |
+| `aztec-avm-runtime/browser` — the DD-5 reference | **263.75 KB** | 9 | 253.94 KB |
+| `aztec-avm-runtime/testing` | 288.9 KB | 12 | 277.43 KB |
+| the demo page | 290.12 KB | 12 | 277.65 KB |
 | `aztec-avm-runtime/node` | 225.36 KB | 4 | 223.61 KB |
 
 and, lazily, never in any eager set:
@@ -56,16 +74,18 @@ and, lazily, never in any eager set:
 | `chunks/FeeJuice-*.js` | 185.88 KB | yes, when a fee payer is funded |
 | `chunks/ContractInstanceRegistry-*.js` | 103.25 KB | no |
 
-**8,163.44 KB gzipped across every chunk; 255.87 KB is what the reference entry point costs.** That is
+**8,188.71 KB gzipped across every chunk; 263.75 KB is what the reference entry point costs.** That is
 the whole of DD-11 in two numbers, and the difference between them is exactly the two things DD-11
 names.
 
 `verify_browser_chunk_budget` re-derives every cell of both tables above OUT OF `chunks.json` and
 compares it to this file, row by row, and proves the enforcement can fail — in three directions, of
-which the third is the one this paragraph is about. (Making one contract artifact eager takes the
-reference entry from 255.87 KB to **750.09 KB** and the build refuses; that is the number that makes
-this section's claim falsifiable, and it took M27's review to find that nothing exercised the
-per-entry rule at all.) The
+which the third is the one this paragraph is about. (Making one contract artifact eager took the
+reference entry from **253.94 KB to 750.09 KB** and the build refused; that pair is M27's review's,
+taken at M27's baseline and left at it rather than restated at every later baseline, because nothing
+re-derives it — it is the demonstration that the per-entry rule can refuse, and it took M27's review
+to find that nothing exercised that rule at all. The rule itself is exercised on every run by §4b,
+which sets `browser.js`'s eager budget to 1 KB and requires the build to fail on the eager line.) The
 per-entry EAGER totals are budgeted separately from the per-file sizes, because a per-file budget
 cannot see the regression that matters — a lazily-loaded megabyte moving into the eager set changes
 which chunks a page fetches and not how big any of them is.
@@ -245,13 +265,13 @@ superset over a bundle nobody could import.
 
 ## 6. What a page actually fetches
 
-`verify_public_only_page_never_fetches_barretenberg`, on the browser's own log. Fifteen requests,
-and the enumeration below totals 15 requests, which it did not before M27's review:
+`verify_public_only_page_never_fetches_barretenberg`, on the browser's own log. Seventeen requests,
+and the enumeration below totals 17 requests, which it did not before M27's review:
 
 ```
 1   /index.html                       the demo page
-10  /demo.js + 9 shared chunks        281.12 KB gzipped — the DEMO entry's eager set, which is
-                                      the browser entry's 255.87 KB plus the page itself
+12  /demo.js + 11 shared chunks       290.12 KB gzipped — the DEMO entry's eager set, which is
+                                      the browser entry's 263.75 KB plus the page itself
 1   /favicon.ico                      the browser's, not ours
 1   /assets/avm.wasm                  1,621,354 bytes — the AVM and its world state
 1   /assets/token_contract-Token.json the contract artifact, fetched when a contract is needed
@@ -263,9 +283,12 @@ says thirteen. Both are M27's review's corrections: the chunk count was seven, a
 different entry point's number — `browser.js`, which this page never requests. **M32 took the chunk
 count from seven to nine and the request total from thirteen to fifteen**, by adding two entry
 points to the same esbuild pass and moving the chunk boundaries; the two new ones are 0.06 KB
-each, so the page pays 0.15 KB more and makes two more round trips. Both figures are re-derived from
-the arm run by `_m27_doc_figures.py` on every run, which is how the change was found rather than
-argued about.)
+each, so the page pays 0.15 KB more and makes two more round trips. **M33 took them to eleven and
+seventeen**, by adding the seventh entry point (`wallet.js`) to the same pass — the demo page does
+not import the wallet boundary and does not fetch `wallet.js`, so what it pays is two more round
+trips for chunks the splitter re-partitioned, not any wallet code. All three figures are re-derived
+from the arm run by `_m27_doc_figures.py` on every run, which is how each change was found rather
+than argued about.)
 
 and **`barretenbergRequests: []`**.
 

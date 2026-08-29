@@ -173,12 +173,22 @@ for (const [target, replacement] of Object.entries(REDIRECTS)) {
 // between two differently-built artefacts. In one pass esbuild's splitting puts the runtime in the
 // chunks both entries already share, which is also why adding them moves no existing entry's eager
 // total — measured, and recorded in `WORKER-NODE.md` §5.
+//
+// M33 ADDS ONE MORE, AND IT IS IN THE SAME PASS FOR THE SAME REASON PLUS ONE OF ITS OWN. The
+// wallet entry is where a page opts INTO the wallet protocol boundary, and DD-11 is why it is not
+// folded into `entry_browser.ts`: `WalletSchema` carries a value-reachable closure of 298 files
+// and 31,205 lines through `@aztec/aztec.js`, and a page that attaches no wallet must not download
+// a wallet protocol to be told so. Building it in the SAME pass is what lets
+// `verify_provider_half_dd9_clean` compare its chunk set against the reference bundle's and name
+// what is wallet-only — in a pass of its own the two would share nothing by construction and the
+// comparison would be vacuous.
 const BROWSER_ENTRIES = {
   browser: path.join(HERE, 'src/entry_browser.ts'),
   testing: path.join(HERE, 'src/entry_testing.ts'),
   demo: path.join(HERE, 'demo/main.ts'),
   worker: path.join(HERE, 'src/entry_worker.ts'),
   'worker-demo': path.join(HERE, 'demo/worker_main.ts'),
+  wallet: path.join(HERE, 'src/entry_wallet.ts'),
 };
 const NODE_ENTRIES = {
   node: path.join(HERE, 'src/entry_node.ts'),

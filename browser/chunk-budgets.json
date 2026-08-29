@@ -61,6 +61,13 @@
       "bumps": []
     },
     {
+      "name": "entry-wallet",
+      "pattern": "^wallet\\.js$",
+      "maxGzipKB": 20,
+      "description": "M33: the wallet protocol boundary's own module — the provider, the port connection handler, the null wallet and the vendored protocol types. Upstream's WalletSchema and the crypto it needs are in the shared chunks it imports, which is why this number is kilobytes rather than hundreds.",
+      "bumps": []
+    },
+    {
       "name": "entry-node",
       "pattern": "^node/node\\.js$",
       "maxGzipKB": 230,
@@ -144,6 +151,13 @@
       "entry": "worker-demo.js",
       "maxGzipKB": 320,
       "description": "what the worker demo page costs on first paint. It carries the main-thread CONTROL as well as the client, so it necessarily reaches the runtime too.",
+      "bumps": []
+    },
+    {
+      "name": "wallet",
+      "entry": "wallet.js",
+      "maxGzipKB": 270,
+      "description": "M33, and it is the number that justifies the wallet boundary being an entry point of its own rather than part of the browser reference. It is what a page pays to speak the wallet protocol: upstream's WalletSchema and every zod codec the fifteen methods name, reached through @aztec/aztec.js. DD-11's rule is that a page which attaches no wallet must not pay it, and the browser entry's own eager set is the control that says it does not.",
       "bumps": []
     }
   ]

@@ -7,8 +7,9 @@
 #
 # THIS CHECK DOES NOT READ THE ANSWER OUT OF A DOCUMENT AND AGREE WITH IT. Every figure below is
 # taken from the FORK at the pinned anchor on every run, and `CHAIN-LOOP.md` is then held to what
-# was found. The reason is the campaign's own record: it has been wrong NINE times about whether
-# something needed writing, and every miss was a parallel subdirectory — including this one.
+# was found. The reason is the campaign's own record: the PARALLEL-SUBDIRECTORY family, whose
+# running count `CAMPAIGN-BRIEF.md` states once and this comment deliberately does not repeat —
+# every miss was a directory beside the one being searched, including this one.
 # RI-41 was `build`, with a rejection reason that did not survive checking, because
 # `sequencer-client/` was enumerated and `sequencer-client/src/sequencer/automine/` was not.
 #

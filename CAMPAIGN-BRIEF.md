@@ -738,6 +738,51 @@ m28 353  m29 127
                                                        CAMPAIGN TOTAL 10,178
 ```
 
+**M33 TOOK IT TO 11,282, AND MOVED EXACTLY ONE OTHER MILESTONE — M1's, BY FOUR, DECLARED BEFORE
+THE SWEEP RAN.** Measured M0-M33 on 2026-08-29 by M33's implementation, after its last edit,
+`setsid`-detached in this repository's own dev shell (node v24.19.0), one milestone at a time with
+nothing else running, `TMPDIR` and the log under `~/.cache`, **no hole in the log** (68 markers for
+34 milestones), **32 of 34 exit 0**:
+
+```
+m0 156  m1 179  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 262  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
+m28 353  m29 127  m30 218  m31 421  m32 234  m33 224
+                                                       CAMPAIGN TOTAL 11,282
+```
+
+**Every one of M0-M32 came out at its reference value TO THE ASSERTION**, and 11,054 + 224 + 4 =
+11,282 exactly, with the summariser reporting `delta +0` against a reference table naming both moves
+in advance. **M33's own 224** is 33 / 84 / 40 / 67. **M1 175 -> 179** is
+`verify_provenance_complete` 64 -> 68: three new single-file `PROVENANCE.md` rows (F25..F27, the
+vendored wallet protocol) at one `is tracked` assertion each, plus one for `RI-88`, an inventory id
+no row had cited before — 3 + 1, exact in both parts, and M1's section is updated. Nothing else
+moved: `verify_pinned_nightly_single_source` 28 (M33 declares no pin; `@aztec/aztec.js` goes in at
+the `deletion_era` pin this file already names), `verify_no_pipeline_predicates` 69, `check-drift`
+22, `verify_named_checks_exist` 9, `check-repo-hygiene` 28, `verify_reuse_inventory_complete` 19,
+M27 345 and M28 353.
+
+**M9 DID NOT FLAKE** (807, 7/7, 1,283 s, immediately after M8's build, which is D19's standing
+hypothesis) and neither did M15 (537, 382 s). **M11 is 262 with SIX failing assertions**, the
+recorded ninth-upstream-move signature — the count is the signature and it is unchanged; the failure
+count is not, and it read nine in M32's sweep at the same condition. **M32 read 234 with TWO failing
+assertions and that one was M33's**: `WORKER-NODE.md` §5's demo row carried the BUILD's `290.13`
+where the check computes Python's `290.12` — the exact rounding tie this file records at 281.125,
+whose rule is that the document carries the CHECK's value. Corrected and re-run: 234, 4/4, exit 0.
+**A sweep is a writer**: `carry/rebase.json` and `carry/exposure.json` were `aaeb6877…` /
+`ec959b84…` before, came out `79f597b2…` / `3836c2b6…`, and were restored from HEAD.
+
+**AND M33's FIRST SWEEP WAS ABORTED ON PURPOSE, WHICH IS THE RULE WORKING RATHER THAN FAILING.** It
+reached m18 and found `verify_orchestration_reuse_enumerated` red — that check pins the
+orchestration's dependency list EXACTLY and M33 adds a fifth entry. The fix was made *while the
+sweep was still running*, which makes the remaining milestones a measurement of a different tree
+from the first eighteen, so the run was **killed and restarted** rather than finished and explained.
+The aborted log is kept. Before restarting, the four milestones most likely to be moved by a new
+`@aztec` dependency were run individually (m18 283, m21 325, m27 345, m28 353) — and m28 found three
+more document figures that had moved. *The lesson is the one already written above: run your sweep
+after your last edit. The instrument that caught the violation was the sweep itself.*
+
 **M32'S REVIEW TOOK IT TO 11,054, AND MOVED EXACTLY ONE MILESTONE — M32'S OWN.** Re-measured
 M0-M32 on 2026-08-29 by M32's review, **after its last commit** (`07d3055`, pushed),
 `setsid`-detached in this repository's own dev shell, node v24.19.0, one milestone at a time with
@@ -1360,11 +1405,11 @@ is the right behaviour and it is what this section asked for.
 
 ## The reuse discipline
 
-**The campaign has been wrong NINE times about whether something needed
+**The campaign has been wrong TEN times about whether something needed
 building — or, the ninth time, about whether it EXISTS.** Every miss was a *parallel subdirectory*
 to the one being searched:
 
-Six of the nine, the ones with a location crisp enough to be worth memorising:
+Seven of the ten, the ones with a location crisp enough to be worth memorising:
 
 | believed absent | actually at |
 |---|---|
@@ -1374,6 +1419,7 @@ Six of the nine, the ones with a location crisp enough to be worth memorising:
 | a TypeScript msgpack encoder | `@aztec/stdlib/avm` — upstream calls it on the same type |
 | a telemetry no-op | `telemetry-client/src/noop.ts` + 16 stubs in `txe/esbuild/stubs/` |
 | **`aztec-nr` itself, and real contracts written against it** | **`noir-projects/labs/aztec-nr` (265 files) and `noir-projects/labs/noir-contracts/contracts/`, present at BOTH the anchor and the fork's HEAD** |
+| **a wallet package with a declared BROWSER entry point** | **`yarn-project/wallets/` (17 files) — `@aztec/wallets`, one level up from the `wallet-sdk/` the plan named** |
 
 **The ninth is worth its own sentence because it was written as a REASON in an Outstanding task.**
 M31's fixtures are hand-written Noir rather than aztec-nr contracts, which is a fair limitation —
@@ -1384,6 +1430,16 @@ that is false: `git ls-tree 233d8e0993 noir-projects/labs/aztec-nr/` returns 265
 `noir-projects/fnd/` and at the repository root; `labs/` is the parallel subdirectory. *A
 limitation stated with a false reason is worse than one stated with none, because the false reason
 closes the search.*
+
+**THE TENTH WAS FOUND BY ENUMERATING FIRST, AND IT IS THE FIRST OF THE TEN THAT COST NOTHING.**
+M33's plan named `yarn-project/wallet-sdk/` and nothing else. Before reading it, M33 enumerated
+every path in the fork with `wallet` in it at the `cpp` anchor and found **seven** locations
+totalling 183 files — among them `yarn-project/wallets/` (17 files: `@aztec/wallets`, an EMBEDDED
+wallet with a declared `browser` entry point, an encrypted store and a wallet DB) and
+`docs/examples/webapp-tutorial/` (68 files: a worked dApp with an embedded wallet, a test extension
+and e2e tests). Neither is in the plan. `@aztec/wallets` is recorded as RI-91 with a measured
+rejection rather than discovered by M34 halfway through writing one. *The instrument that found it
+is two `git ls-tree` invocations; the nine before it were found by a reviewer.*
 
 **Enumerate across the whole fork and the published `@aztec/*` packages, by
 subdirectory, before concluding anything is ours to write.** An entry marked

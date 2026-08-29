@@ -400,8 +400,23 @@ assert_eq "our telemetry replacement is disabled, runs a span's body, and answer
 # So the tree and the milestone still cannot drift apart silently; the pin has simply moved to the
 # state the milestone that moved it declared.
 
-assert_eq "the orchestration's dependencies are the four published @aztec packages" \
-  "@aztec/constants @aztec/foundation @aztec/protocol-contracts @aztec/stdlib" \
+# M33 ADDED A FIFTH, AND THE PIN MOVED WITH IT RATHER THAN BEING LOOSENED.
+#
+# `@aztec/aztec.js` is where `WalletSchema` lives — upstream's complete wallet protocol, fifteen
+# methods plus the `batch` `createBatchSchemas` derives from them — and M33's whole method surface is
+# `Object.keys(WalletSchema)` rather than a list somebody typed. Adding it is admissible for exactly
+# the reason this list exists to enforce, and the reason is MEASURED rather than asserted:
+# `@aztec/aztec.js`'s own `@aztec` dependency closure is twelve packages and reaches NONE of
+# `@aztec/pxe`, `@aztec/simulator`, `@aztec/native` or `@aztec/world-state`, which
+# `verify_provider_half_dd9_clean` §6 re-derives offline from the anchor's own manifests on every
+# run, with `@aztec/wallet-sdk` — whose closure reaches all four, which is why it is VENDORED from
+# instead of depended on — as the control that the walker can answer both ways.
+#
+# The comparison stays EXACT. A sixth dependency fails here, which is the property, and the
+# assertion below (`@aztec/simulator` is not among them) is unchanged and is the one that names the
+# rule.
+assert_eq "the orchestration's dependencies are the five published @aztec packages" \
+  "@aztec/aztec.js @aztec/constants @aztec/foundation @aztec/protocol-contracts @aztec/stdlib" \
   "$(python3 -c '
 import json, sys
 print(" ".join(sorted(json.load(open(sys.argv[1]))["dependencies"])))' "$ORCH_DIR/package.json")"

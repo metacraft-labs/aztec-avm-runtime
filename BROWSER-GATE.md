@@ -68,7 +68,16 @@ Each is taken from one of the two metafiles `browser/build.mjs` writes, and each
 §6 from the line that names it — one figure per line, because a table row carrying two numbers can
 have them swapped and still contain both.
 
-- The browser bundle's module graph has 1068 inputs.
+**M33 moved three of the figures below and each movement is attributable.** The browser pass gained
+a seventh entry point — `wallet.js`, the wallet protocol boundary — and `m28_scan` reads the whole
+PASS's metafile rather than one entry's, so the wallet entry's own graph joins the count:
+**1068 -> 1135 inputs**, and the two `util` edges its closure adds take **43 -> 45**. The third is
+the dependency closure: M33 declares `@aztec/aztec.js`, which npm installs together with
+`@aztec/entrypoints` and `@aztec/standard-contracts`, so **268 -> 271 packages** — three, exactly.
+None of the three is a native-addon family and `optionalDependencies` stays at 3, which is the
+figure D22 is about. All three were found by §6 re-deriving them, which is what §6 is for.
+
+- The browser bundle's module graph has 1135 inputs.
 - The node bundle's module graph has 969 inputs.
 - Node builtins left external in the browser bundle: 0.
 - Node builtins left external in the node bundle: 22.
@@ -88,7 +97,7 @@ something an allow-list failed to mention.
 ## 4. What "no Node builtin" means precisely, and what it does not
 
 Four builtins ARE imported by this graph and are aliased to shims the build declares in
-`.build-config.json`. The graph carries 43 `util` import edges, and `assert`, `tty` and `module`
+`.build-config.json`. The graph carries 45 `util` import edges, and `assert`, `tty` and `module`
 account for the rest. A fifth name, `buffer`, resolves to npm's `buffer` package, which is the
 browser implementation rather than Node's. The gate asserts that the set of aliased names is
 EXACTLY the set the build declares, in
@@ -113,7 +122,7 @@ they are on separate lines for the reason §3 gives — a line carrying two of t
 swapped and still contain both, which is precisely how this section passed a review mutation that
 made it state the reverse of the data:
 
-- The declared dependency closure of the shipped package is 268 packages.
+- The declared dependency closure of the shipped package is 271 packages.
 - Manifests in that closure declaring `optionalDependencies`: 3.
 
 All three are native-addon families — `msgpackr`, `msgpackr-extract` and

@@ -184,16 +184,34 @@ differently-built artefacts.
 Adding them re-split the shared chunks slightly. Measured, before and after, in this repository's own
 dev shell:
 
-| entry point | before M32 | with M32 |
-|---|---|---|
-| `browser.js` | 255.79 KB, 7 files | **255.87 KB, 8 files** |
-| `testing.js` | 279.77 KB, 8 files | **279.93 KB, 10 files** |
-| `demo.js` | 280.97 KB, 8 files | **281.12 KB, 10 files** |
-| `node/node.js` | 225.36 KB, 4 files | **225.36 KB, 4 files** |
-| `worker.js` | — | **282.40 KB, 9 files** |
-| `worker-demo.js` | — | **283.48 KB, 11 files** |
+**AND M33 MOVED THE SECOND COLUMN AGAIN, WHICH IS WHY THE COLUMN IS LABELLED `current` RATHER THAN
+`with M32`.** M33 adds a seventh entry point to the same pass (`wallet.js`, the wallet protocol
+boundary) and esbuild re-partitioned once more. The middle column is what M32 measured and is kept,
+because the *mechanism* — one more entry in one pass moves the boundaries — is what this section is
+about, and a before/after pair with only one after is a pair nobody can check. The right-hand column
+is what `test_worker_transferable_container_not_copied` §5 re-derives from `chunks.json` on every
+run, so it is the one that cannot rot.
 
-`BROWSER-PACKAGING.md` §1 and §6 are updated to the second column, because
+| entry point | before M32 | M32's measurement | current |
+|---|---|---|---|
+| `browser.js` | 255.79 KB, 7 files | 255.87 KB, 8 files | **263.75 KB, 9 files** |
+| `testing.js` | 279.77 KB, 8 files | 279.93 KB, 10 files | **288.90 KB, 12 files** |
+| `demo.js` | 280.97 KB, 8 files | 281.12 KB, 10 files | **290.12 KB, 12 files** |
+| `node/node.js` | 225.36 KB, 4 files | 225.36 KB, 4 files | **225.36 KB, 4 files** |
+| `worker.js` | — | 282.40 KB, 9 files | **291.40 KB, 11 files** |
+| `worker-demo.js` | — | 283.48 KB, 11 files | **292.48 KB, 13 files** |
+
+`node/node.js` is unmoved in both moves, and for the same reason: the Node pass is a separate one.
+
+*(The demo row's `290.12` is the CHECK's value and not the build's. `browser/build.mjs` prints
+`+(gzip/1024).toFixed(2)` and the checks use Python's `round(gzip/1024, 2)`; the demo entry lands on
+an exact rounding tie, so JavaScript rounds half away from zero and prints **290.13** while Python is
+banker's and gives **290.12**. `CAMPAIGN-BRIEF.md` records this happening to M32 at 281.125 and says
+the document must carry the check's value; M33 wrote the build's here, `test_worker_transferable_container_not_copied`
+went 71 / 2 in the sweep, and this is the correction. The next figure that lands on a tie will do it
+again.)*
+
+`BROWSER-PACKAGING.md` §1 and §6 are updated to the right-hand column, because
 `verify_browser_chunk_budget` re-derives every one of those cells from `chunks.json` and compares.
 
 **DD-11 travels with the worker, and it is asked of the log that can answer it.** A worker's fetches
