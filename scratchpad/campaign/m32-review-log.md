@@ -401,3 +401,186 @@ freeze plus three seconds after the thaw. Across that post-thaw stretch the work
 attributable to the freeze alone. The independent probe says the same from the other side: it applied
 **only** the freeze, no CPU throttle anywhere, and produced a 4,024 ms gap in a bare worker's own
 clock.
+
+---
+
+## Step 10 — the digest triple, checked against M31's review's finding
+
+The brief asked whether the three readings are the CONSUMER's or the runner's own bookkeeping — the
+shape M31's review caught as "a digest compared against itself". They are not:
+
+| reading | who takes it | over what |
+|---|---|---|
+| `copiedSha256` | the PAGE, `crypto.subtle.digest('SHA-256', …)` | the `Uint8Array` it received from a structured clone |
+| `movedSha256` | the PAGE, same call | the `Uint8Array` it received from the transfer |
+| `downloaded.0.sha256` | the RUNNER, node's `createHash('sha256')` | **the file on disk** that the browser's own download machinery wrote, after `offerDownload(moved.container, …)` built a Blob and clicked an `<a download>` |
+
+So it is two page-side digests of two arrays that arrived by two different mechanisms, plus a
+third taken **in a different process, by a different hasher, over bytes that went through the
+browser's download path and the filesystem**. All three are
+`b6aa579c7e07c0825ce2714ce8cbb0e801c048d0f71919e773e05b636185668f`, 196,608 bytes; the milestone's
+`b6aa579c…` reproduces, and it is stable across the review's source fix (the fix touches the worker's
+bookkeeping, not the container). `assert_ge "…and the digest is a real one" 64 "${#MOVED_SHA}"` is the
+non-emptiness beside the equality.
+
+**And RI-85's "with no edit to it" is true**: `git diff 948623d..HEAD -- tools/browser_cdp.mjs
+verification/lib_m27_browser.sh` is empty; `browser_cdp.mjs` was last touched by M27.
+
+**No scope drift into OUT-OF-SCOPE's territory.** `grep -rn 'CodeTracer\|codetracer'` over every M32
+source, check and document returns nothing: M32 makes no claim about the debugger, only about bytes,
+the reference reader's ancestors, and the browser's own download.
+
+---
+
+## Step 11 — one asymmetry in "the same load", recorded because it points the safe way
+
+The two arms are meant to differ in exactly one thing — where the runtime is. Read side by side they
+differ in two more, and both handicap the WORKER rather than the main thread, so neither threatens
+the conclusion:
+
+| | worker arm | main-thread control |
+|---|---|---|
+| `collectExecutionSteps` | **`true`** (`boot()` always passes it) | not passed, so the default |
+| subscriptions | **three** (`block`, `tx`, `trace`) across a `Comlink.proxy` | one (`block`), in-process |
+| interval / warm / busy | 250 / 4000 / 4000, **asserted equal by the check** | the same, asserted |
+
+Both arms produce only EMPTY blocks in these windows, so step collection has nothing to collect; and
+in both respects the worker is doing strictly more work than the control. The check asserts equality
+of the three parameters that matter and not of these two. Recorded rather than raised: a
+confounder that runs the wrong way for the claim is not a confounder for the claim.
+
+---
+
+## Step 12 — THE IMPLEMENTATION'S OWN TWO SWEEPS, VERIFIED INDEPENDENTLY BEFORE MINE
+
+Both logs are still on disk and both were re-parsed with a summariser written for this step, not with
+`m32-sweep-sum.py`:
+
+| | started | finished | markers | total | m32 | m9 | non-zero exits |
+|---|---|---|---|---|---|---|---|
+| first | 2026-08-28 20:4x | **22:05:42** | **66** | **11,047** | **227** | 807 | `m11` only |
+| second (reported) | **22:10:31** | **23:52:51** | **66** | **11,049** | **229** | 807 | `m11` only |
+
+66 markers for 33 milestones in both: **no hole**. m27 345 and m28 353 in both. The account of the
+difference — two hardenings of M32's own checks, +2 on
+`smoke_worker_chain_survives_main_thread_block` — reproduces exactly.
+
+**"The reported sweep is over the final tree" is TRUE OF THE CODE and qualified in the same log for
+the documents.** Step 8.1 records three documentation edits landing after 23:52 —
+`CAMPAIGN-BRIEF.md`, the milestone section and the impl log — and the re-run for them is in
+`~/.cache/aztec-m32-post.log`, which I re-parsed: **m0 156, m1 175, m11 262 (rc 1), m14 460,
+m16 223, m32 229**, every one at reference. The headline sentence ("there is exactly one sweep to
+read and no post-sweep drift") overstates by one line what the paragraph below it corrects; the
+measurement behind it is sound.
+
+## Step 13 — THE REVIEW'S SWEEP: 11,054, M0–M32, and the two reds are both recorded conditions
+
+`setsid`-detached, `direnv exec <aztec-avm-runtime>` — this repository's own dev shell, node
+v24.19.0 — one milestone at a time with nothing else running, `TMPDIR` and the log under `~/.cache`,
+**taken after my last commit** (`07d3055`, pushed). Started 00:41:31, finished 02:24:30.
+**66 markers for 33 milestones: no hole.**
+
+```
+m0 156  m1 175  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807*
+m10 450  m11 262  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
+m28 353  m29 127  m30 218  m31 421  m32 234
+                                                       CAMPAIGN TOTAL 11,054
+```
+
+**Every one of M0–M31 came out at its reference value TO THE ASSERTION**, and 10,820 + 234 = 11,054
+exactly. In the sweep itself the summariser printed `TOTAL 10771 … delta -283`, and the whole of the
+283 is M9's flake, below; every other row was flagless.
+
+- **M32's own 234** is 82 / 71 / 38 / 43. Declared at 229 (77 / 71 / 38 / 43); the five are the
+  review's, in `smoke_worker_chain_survives_main_thread_block` and nowhere else.
+- **Nothing else moved.** `verify_provenance_complete` **64** (M32 vendors nothing),
+  `verify_pinned_nightly_single_source` **28**, `verify_reuse_inventory_complete` **19** (the
+  entry-count assertion is `>= 20` and M32's four entries plus my edits to RI-83 do not move it),
+  `just check-repo-hygiene` **28**, M27 **345** and M28 **353** with the browser bundle rebuilt four
+  times over the review and three of their document figures corrected.
+- **M11 = 262, rc 1, NINE failing assertions** — the recorded signature of the ninth upstream move
+  (`7471a61f1a`), unchanged, not repaired, `carry/` left at HEAD.
+- **M9 FLAKED, AT A SEVENTH DISTINCT TRUNCATION POINT.** 524, rc 1, twelve failing assertions.
+  `807 − 524 = 283 = 140 + 143`, the two comparers that correctly REFUSE and print no summary while
+  doing it. The truncation is `truncated-after-4051-lines-last-key-steps.burn.3777`; the sightings
+  are now **39,113 / 16,719 / 14,572 / 17,866 / 3,943 / 15,688 / 4,051**. Same input, same module,
+  same host, so a content-dependent defect stays ruled out and the trigger stays unestablished. The
+  twelve red assertions are 11 in `test_observer_fires_on_exceptional_halt` and 1 in
+  `test_existing_event_emitter_path_still_available` — **the two checks `m9_completeness` is still
+  not wired into**, which is `CAMPAIGN-BRIEF.md`'s own outstanding item and not a finding about the
+  interpreter. Re-run alone, which is the settled procedure: see below.
+- **M15 did NOT flake** — 537, 382 s.
+- **A SWEEP IS A WRITER.** `carry/rebase.json` and `carry/exposure.json` were `aaeb6877…` /
+  `ec959b84…` before, came out `79f597b2…` / `3836c2b6…` — the same two post-sweep digests M30's,
+  M31's and M32's implementations all recorded, so the mechanism is unchanged — and were restored,
+  confirmed by `sha256sum -c`.
+- **`noir-wt4-webpage` was untouched throughout.** `f0e7edcd2` on `wasm/webpage`, exactly its one
+  pre-existing edit, `git for-each-ref --contains HEAD refs/remotes` = **0**. No commit, no push.
+
+### M9 re-run alone — 807, 7/7, exit 0
+
+```
+######## m9 start 2026-08-29T02:59:13+03:00
+verify_observation_hook_step_records_identical: 140 assertion(s), 0 failure(s)
+test_observer_does_not_perturb:                 143 assertion(s), 0 failure(s)
+test_observer_fires_on_exceptional_halt:        113 assertion(s), 0 failure(s)
+verify_observation_hook_overhead_budget:         73 assertion(s), 0 failure(s)
+test_observer_disabled_is_free:                 126 assertion(s), 0 failure(s)
+test_existing_event_emitter_path_still_available: 83 assertion(s), 0 failure(s)
+verify_execution_observer_patch_applies_to_upstream: 129 assertion(s), 0 failure(s)
+######## m9 rc=0 secs=1285
+```
+
+140 + 143 + 113 + 73 + 126 + 83 + 129 = **807**, the reference split exactly, no truncation, and
+`test_observer_disabled_is_free`'s timing arm green. Not a regression. `carry/` re-verified against
+the pre-sweep digests with `sha256sum -c` after it.
+
+*(The first attempt at this re-run was killed when its launching shell timed out, despite `setsid`;
+the log had no `rc=` marker and no `SWEEPDONE`, which is exactly the hole the summariser refuses over
+— so it was relaunched rather than read. Worth recording: `setsid` inside a call the harness later
+kills is not always enough; launch so that the launching call returns immediately.)*
+
+## Step 14 — the throttling refusal is capable of failing, demonstrated
+
+The check's strongest sentence is "asserted, so the day Chromium changes it this check says so".
+Demonstrated rather than believed: the arm report's recorded verdict for
+`worker.Emulation.setCPUThrottlingRate` was doctored from `{ok:false, error:"…only supported for
+pages, not workers"}` to `{ok:true, rate:20}` and the check re-run —
+
+```
+  FAIL …and Chromium refused it: it is a page-only operation (…)
+  FAIL …while the worker-target throttle was refused  expected [refused], got [ok]
+smoke_worker_produces_blocks_while_throttled: 38 assertion(s), 2 failure(s)
+```
+
+— two failures, one from the whole-list needle and one from the per-mechanism verdict. Arm report
+restored.
+
+## VERDICT
+
+**The three headline measurements: two hold as stated, one did not.**
+
+1. **The throttling refusal and the freeze — HOLD, and one is stronger than claimed.** The refusal
+   is real, reproduced on a page and worker that share nothing with M32, at three rates, with the
+   same refusal for a second `Emulation` method (so the whole domain is page-only) and the same
+   command accepted on the page over the same connection. The freeze reaches a **dedicated** worker:
+   a bare `setInterval` worker shows a 4,024 ms gap in its own `performance.now()` against a 250 ms
+   median, with no CPU throttle applied anywhere. In M32's own arm the timer is inside the worker,
+   the page's CPU throttle demonstrably does not reach it (ordinary 252 ms cadence for three seconds
+   after the thaw while the page is still throttled 20×), and M6 collapses the gap to 252 ms.
+2. **The main-thread control — HOLDS and discriminates.** 15/16 against 16/0, both spin counters
+   over 28 million, the control's last block at 4,193.5 ms predating its window opening at 4,405.5,
+   and M3 reddening exactly the four assertions written for it. The unawaited-`state()` reasoning is
+   sound: Comlink posts synchronously in the `apply` trap, so both window edges are the worker's own
+   readings and `producedAtMs` is on the same clock. **What the count could not do is tell production
+   from a backlog draining at the window's edge; that is measured now.**
+3. **The transferable — the READINGS ARE THE CONSUMER'S, but `detached` was not what it said it
+   was.** Four readings taken by the worker of its own memory, crossed on the schema channel, with a
+   third digest taken in another process over the file the browser wrote — none of it the runner's
+   own bookkeeping, so M31's "digest compared against itself" shape does not recur. But the
+   `detached` field was `byteLength === 0`, the control was a second copy of the mechanism, and the
+   mutation arm never applied. Fixed, calibrated, and the substantive claim survives on `byteLength`
+   and on the named refusal.
+
+**Four checks, 234 assertions, 4/4, exit 0. Campaign total 11,054, M0–M32, 33 milestones.**

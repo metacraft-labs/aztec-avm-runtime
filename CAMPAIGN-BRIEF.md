@@ -738,6 +738,50 @@ m28 353  m29 127
                                                        CAMPAIGN TOTAL 10,178
 ```
 
+**M32'S REVIEW TOOK IT TO 11,054, AND MOVED EXACTLY ONE MILESTONE — M32'S OWN.** Re-measured
+M0-M32 on 2026-08-29 by M32's review, **after its last commit** (`07d3055`, pushed),
+`setsid`-detached in this repository's own dev shell, node v24.19.0, one milestone at a time with
+nothing else running, `TMPDIR` and the log under `~/.cache`, **no hole in the log** (66 markers for
+33 milestones), **31 of 33 exit 0**:
+
+```
+m0 156  m1 175  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 262  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
+m28 353  m29 127  m30 218  m31 421  m32 234
+                                                       CAMPAIGN TOTAL 11,054
+```
+
+**Every one of M0-M31 came out at its reference value TO THE ASSERTION**, and 10,820 + 234 = 11,054
+exactly. **M32's own 234** is 82 / 71 / 38 / 43 — declared at 229, and the five the review added are
+all in `smoke_worker_chain_survives_main_thread_block`, itemised in M32's Verification section: three
+because §2's operation-list residue was asked of the whole document rather than of the list, and two
+because a COUNT inside the busy window cannot tell production from a backlog draining at its edge.
+Nothing else moved: `verify_provenance_complete` 64, `verify_pinned_nightly_single_source` 28,
+`verify_reuse_inventory_complete` 19, `just check-repo-hygiene` 28, M27 345 and M28 353 with the
+browser bundle rebuilt four times and three of their figures corrected.
+
+**M9 FLAKED, AT A SEVENTH DISTINCT TRUNCATION POINT, AND PASSED ALONE.** In the sweep: 524, rc 1,
+twelve failing assertions — `807 - 524 = 283 = 140 + 143`, the two comparers that correctly refuse
+and print no summary while doing it — at
+`truncated-after-4051-lines-last-key-steps.burn.3777`. The sightings are now
+**39,113 / 16,719 / 14,572 / 17,866 / 3,943 / 15,688 / 4,051**; same input, same module, same host,
+so a content-dependent defect stays ruled out and the trigger stays unestablished. The twelve reds
+are 11 in `test_observer_fires_on_exceptional_halt` and 1 in
+`test_existing_event_emitter_path_still_available` — **the two checks `m9_completeness` is still not
+wired into**, which is this file's own outstanding item. **M15 did NOT flake** (537, 382 s).
+**A sweep is a writer**: `carry/rebase.json` and `carry/exposure.json` were `aaeb6877…` /
+`ec959b84…` before, came out `79f597b2…` / `3836c2b6…` and were restored, confirmed by
+`sha256sum -c`.
+
+**AND THE M32 SWEEP THE PARAGRAPH BELOW REPORTS WAS RE-VERIFIED RATHER THAN INHERITED.** Both of
+M32's sweep logs are still on disk and were re-parsed by the review with an independent summariser:
+the first reads **11,047 / m32 227**, the second **11,049 / m32 229**, 66 markers each, `m11` the
+only non-zero exit in both, m9 807 in both. The `-> **8,163.43**` figure below is the review's
+**8,163.44** after its one-line fix to `containerBufferState`, and the milestone section had said
+**8,163.38** — a third value nothing re-derived, found because `verify_browser_chunk_budget` DOES
+re-derive it and went red.
+
 **M32 TOOK IT TO 11,049, AND MOVED NO OTHER MILESTONE'S COUNT.** Measured M0-M32 on 2026-08-28 by
 M32's implementation, after its last edit, `setsid`-detached in this repository's own dev shell, one
 milestone at a time with nothing else running, `TMPDIR` and the log under `~/.cache`, **no hole in
