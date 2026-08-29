@@ -796,8 +796,13 @@ is not part of the campaign total — and it was RE-TAKEN rather than quoted: af
 **188, 3/3, exit 0, split 74 / 52 / 62**, its declared split to the assertion. Without that install
 the recipe exits 1 on `ERR_MODULE_NOT_FOUND: '@aztec/stdlib'`, which is L0's own documented
 precondition and not a defect. The inventory ids do not collide either —
-`REUSE-INVENTORY.md` carries 91 headings, RI-01..RI-91, all distinct, none missing, none repeated,
-with RI-86/RI-87 L0's and RI-88..RI-91 M33's.
+`REUSE-INVENTORY.md` carries 93 headings, RI-01..RI-93, all distinct, none missing, none repeated,
+with RI-86/RI-87 L0's, RI-88..RI-91 M33's and RI-92/RI-93 L1's.
+
+L1 appended RI-88/RI-89 and M33 landed the same two ids first, so L1's were renumbered to
+RI-92/RI-93 on the rebase — the same append-and-renumber the M33 review performed against L0.
+Two campaigns writing one file is the ordinary case here, not the exception, and the id is
+assigned when the work lands rather than when it is written.
 
 **THREE NON-ZERO EXITS AND ONLY ONE OF THEM IS THIS REPOSITORY'S OWN WORK.**
 **M9 is 807 with FOUR failing assertions and the count is the reference split exactly**
