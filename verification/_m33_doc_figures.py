@@ -114,6 +114,22 @@ def main(doc_path, chunks_path, meta_path, arms_path, closure_path, deps_path):
         compare(needle, files, "closure-files[%s]" % group)
         compare(needle, lines, "closure-lines[%s]" % group)
 
+    # ---- §1: the two pxe counts, ON LINES OF THEIR OWN.
+    #
+    # M33's review found this figure stated as "four" in `browser/src/entry_wallet.ts` and in
+    # RI-88's `why:` while the check asserted three and the write-up said three. Four is
+    # derivation 2's answer — distinct `(file, specifier)` pairs, counting the `import type`
+    # clauses esbuild erases — so the two counts are DIFFERENT MEASUREMENTS and conflating them is
+    # what let one of them rot. Both are derived and both are compared, and the document carries
+    # them on separate lines: on one line a swap would satisfy both needles, which is M24's review's
+    # row-swap finding at field level.
+    if "pxe-edges" in closure:
+        edges, clauses = closure["pxe-edges"]
+        compare("`@aztec/pxe` import clauses exist in the wallet half", clauses, "pxe-clauses")
+        compare("of them are pxe value edges", edges, "pxe-value-edges")
+    else:
+        missing.append("closure[pxe-edges] was not derived")
+
     # ---- §2: the package-closure table, one row per package.
     for pkg, needle in (
         ("@aztec/wallet-sdk", "| `@aztec/wallet-sdk` |"),

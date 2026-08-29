@@ -30,8 +30,13 @@
 //     note discovery, private execution and tagging are wallet responsibilities and M34–M36 own
 //     them. The seam ships exercised and empty rather than filled with plausible defaults.
 //   * NO `@aztec/pxe`, and it is a MEASUREMENT rather than a build flag. The provider half's
-//     value-reachable closure has zero edges to it; the wallet half's has four, all named.
-//     `verify_provider_half_dd9_clean` re-derives that on the BUILT artefact.
+//     value-reachable closure has zero edges to it; the wallet half's has THREE, out of five
+//     import clauses, all named. `verify_provider_half_dd9_clean` re-derives that on every run and
+//     asserts the count. (This comment said "four" until M33's review. Four is derivation 2's
+//     answer — distinct `(file, specifier)` pairs, counting `import type` — and the milestone
+//     corrected it to three VALUE edges in `WALLET-BOUNDARY.md` §1 and in its own log while
+//     leaving it here and in `REUSE-INVENTORY.md`. A figure nobody re-derives rots, and this one
+//     rotted in the same session it was corrected.)
 //   * NO KEY MATERIAL OF OURS. The ECDH keypair is generated per session by upstream's own
 //     `crypto.ts` and never leaves the WebCrypto `CryptoKey` objects — `generateKeyPair` asks for
 //     a non-extractable private key.

@@ -11,7 +11,8 @@
     WS_PKGS      <n>\\t<names>   workspace packages reached by a VALUE edge
     EXT_PKGS     <n>\\t<names>   non-workspace specifiers reached by a VALUE edge
     REACHES      <pkg>          one line per DD-9 package reached
-    PXE_EDGE     <importer>\\t<specifier>
+    PXE_EDGE     <importer>\\t<specifier>             a VALUE edge to @aztec/pxe
+    PXE_CLAUSE   <importer>\\t<specifier>\\t<kind>     EVERY @aztec/pxe clause, value or type
     UNCLASSIFIED <n>            import clauses the classifier could not place (asserted 0)
     UNPLACEABLE  <n>            workspace specifiers that resolved to no file (asserted 0)
     UNRESOLVED   <n>            relative specifiers that resolved to no file (printed, see below)
@@ -198,6 +199,11 @@ def main(root, group):
 
     seen, ext, unplaceable, unresolved, hits, unclassified, pxe_edges = (
         set(), set(), [], [], set(), [], [])
+    # EVERY pxe import CLAUSE, value and type alike, so the two counts the write-up states are both
+    # derived. `PXE_EDGE` is the value subset and is what the separation rests on; `PXE_CLAUSE` is
+    # the whole set, and the difference between them IS the type-erasure argument. M33's review
+    # found the two conflated in two places that ship.
+    pxe_clauses = []
     q = deque(entries)
     while q:
         rel = q.popleft()
@@ -208,6 +214,8 @@ def main(root, group):
         specs = []
         for clause, spec in CLAUSE_RE.findall(text):
             k = classify(clause)
+            if spec.split("/")[0:2] == ["@aztec", "pxe"]:
+                pxe_clauses.append((rel, spec, k))
             if k == "VALUE":
                 specs.append(spec)
             elif k == "UNCLASSIFIED":
@@ -242,6 +250,8 @@ def main(root, group):
             print("REACHES\t%s" % p)
     for imp, spec in sorted(pxe_edges):
         print("PXE_EDGE\t%s\t%s" % (imp, spec))
+    for imp, spec, kind in sorted(pxe_clauses):
+        print("PXE_CLAUSE\t%s\t%s\t%s" % (imp, spec, kind))
     print("UNCLASSIFIED\t%d" % len(unclassified))
     for rel, clause in unclassified[:20]:
         print("UNCLASSIFIED_CLAUSE\t%s\t%s" % (rel, clause))

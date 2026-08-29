@@ -311,6 +311,13 @@ S_FILES="$(field FILES "$SCHEMA")"; S_LINES="$(field LINES "$SCHEMA")"
   printf 'wallet\t%s\t%s\n'   "$W_FILES" "$W_LINES"
   printf 'protocol\t%s\t%s\n' "$T_FILES" "$T_LINES"
   printf 'schema\t%s\t%s\n'   "$S_FILES" "$S_LINES"
+  # THE TWO PXE COUNTS, so §9 compares them against the document too. M33's review found this exact
+  # figure stated as "four" in `entry_wallet.ts` and in RI-88 while the check asserted three and the
+  # write-up said three: four is derivation 2's answer and nothing re-derived it. A figure that has
+  # already rotted once is the one to bind.
+  printf 'pxe-edges\t%s\t%s\n' \
+    "$(printf '%s\n' "$WALLETH" | sed -n 's/^PXE_EDGE\t//p' | grep -c . || true)" \
+    "$(printf '%s\n' "$WALLETH" | sed -n 's/^PXE_CLAUSE\t//p' | grep -c . || true)"
 } > "$WORK/closure.tsv"
 note "provider $P_FILES/$P_LINES, wallet $W_FILES/$W_LINES, protocol $T_FILES/$T_LINES, schema $S_FILES/$S_LINES"
 
@@ -370,7 +377,7 @@ DOCFIG="$(python3 "$VERIFY_DIR/_m33_doc_figures.py" "$M33_DOC" "$BROWSER_DIST/ch
 d() { printf '%s\n' "$DOCFIG" | sed -n "s/^$1\t//p"; }
 note "$(d CHECKED) figure(s) re-derived and compared against $M33_DOC"
 # NON-EMPTINESS FIRST: a comparer that found no rows reports no disagreements either.
-assert_ge "the comparer found the document's rows" 18 "$(d CHECKED)"
+assert_ge "the comparer found the document's rows" 20 "$(d CHECKED)"
 assert_eq "every figure in the write-up equals what the artefacts measure" "" "$(d BAD)"
 assert_eq "…and every row the comparer is about is present in the document" "" "$(d MISSING)"
 

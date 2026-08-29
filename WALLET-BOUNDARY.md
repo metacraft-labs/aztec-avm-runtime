@@ -4,8 +4,12 @@ M33's write-up.
 
 **Every figure in §1's closure table, §2's package table, §3's two counts and §6's packaging table
 is re-derived from the artefacts and compared AGAINST THIS FILE on every run**, by
-`verify_provider_half_dd9_clean` §9 — nineteen figures, each looked for on the line that NAMES ITS
-SUBJECT rather than anywhere in the file. Figures elsewhere (the per-location file counts in §1's
+`verify_provider_half_dd9_clean` §9 — twenty-one figures, each looked for on the line that NAMES ITS
+SUBJECT rather than anywhere in the file, and each matched as a DELIMITED figure on that line rather
+than as a run of characters anywhere in it. (Both halves of that sentence were earned. The row
+anchoring is M24's review's remedy. The field anchoring is M33's review's: two of the original
+nineteen could not fail, because `245.87` supplies an `8` for a file count of 8 and `0` is a
+substring of every number containing a zero digit.) Figures elsewhere (the per-location file counts in §1's
 first table, the per-derivation intermediates, the five named pxe clauses) are named with the check
 that measures the *property* instead, and are marked where it matters. That sentence is here because M27's identical sentence
 was **false** — no check opened `BROWSER-PACKAGING.md` at all, and eleven of its figures had rotted
@@ -70,8 +74,12 @@ one the checks re-run.
 | the protocol declaration alone (`types.ts`, `crypto.ts`) | **3** | **1,124** | **0** | no |
 | `aztec.js/src/wallet/wallet.ts` — `WalletSchema` | **298** | **31,205** | 5 | no |
 
-**The pxe edges, named.** Five `@aztec/pxe` import clauses exist in the wallet half, in two files,
-and **three of them are value edges**:
+**The pxe edges, named**, and the two counts are on lines of their own because they are checked
+separately — a single line carrying both would let a swap pass, which is M24's review's finding at
+field level.
+
+- **5** `@aztec/pxe` import clauses exist in the wallet half, in two files.
+- **3** of them are pxe value edges — the ones that survive esbuild's type erasure:
 
 ```
 wallet-sdk/src/base-wallet/utils.ts:8       import type { ContractNameResolver }   @aztec/pxe/client/lazy   TYPE
