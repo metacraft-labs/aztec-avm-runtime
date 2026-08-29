@@ -2663,3 +2663,66 @@ verify-m32:
       echo "verify-m32: all checks passed"
     fi
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# L0 — the node client, and what it is allowed to reach
+#
+# THE FIRST MILESTONE OF A DIFFERENT CAMPAIGN. `codetracer-specs/Planned-Work/
+# Aztec-Live-Chain-Replay.milestones.org` produces a CodeTracer `.ct` recording from a transaction
+# that has ALREADY SETTLED on a live Aztec chain. It shares this repository, this Justfile and
+# CAMPAIGN-BRIEF.md's discipline with Aztec-AVM-Runtime, and almost nothing else: that campaign
+# executes transactions it produced itself, this one executes transactions someone else produced.
+# The recipes are prefixed `l0`/`l1`/… rather than `m<N>` so the two milestone series cannot be
+# confused with each other.
+#
+#   just verify-l0-surface    verify_node_client_surface_narrow
+#   just verify-l0-refusals   test_node_client_refusals_distinguishable
+#   just verify-l0-schema     verify_client_uses_upstream_schema
+#   just typecheck-replay     tsc over replay/, which is where the seam assertion lives
+#   just verify-l0            all three, in order
+#
+# NOTHING HERE BUILDS AND NOTHING HERE NEEDS A NETWORK. Every arm runs against a fake node built
+# out of upstream's OWN JSON-RPC server and upstream's own versioning middleware, over real HTTP on
+# a loopback port the harness takes and releases itself. The one external requirement is the
+# upstream fork's OBJECT STORE at `../aztec-packages`: the enumerations are re-derived with
+# `git show <anchor>:<path>` on every run, which is the deliverable rather than a convenience, so a
+# missing fork is a refusal and never a skip.
+#
+# `replay/node_modules` must be installed — the replay tree is on `npm.current`, NOT on
+# `npm.deletion_era` like `orchestration/`, and the two are not interchangeable.
+# ---------------------------------------------------------------------------
+
+verify-l0-surface:
+    @verification/verify_node_client_surface_narrow.sh
+
+verify-l0-refusals:
+    @verification/test_node_client_refusals_distinguishable.sh
+
+verify-l0-schema:
+    @verification/verify_client_uses_upstream_schema.sh
+
+# The compiler is a check here: `replay/src/node_client.ts` ends with a type-level assertion that a
+# replay client satisfies `MembershipWitnessSource`, the seam this campaign's L2 and the sibling
+# campaign's M35 both answer. If one of the five witness methods leaves the permitted surface, this
+# fails rather than L2 discovering it.
+typecheck-replay:
+    @cd replay && tsc -p tsconfig.json && echo "typecheck-replay: replay/ type-checks, seam assertion included"
+
+verify-l0:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_node_client_surface_narrow \
+      test_node_client_refusals_distinguishable \
+      verify_client_uses_upstream_schema
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-l0: FAILED" >&2
+    else
+      echo "verify-l0: all checks passed"
+    fi
+    exit "$rc"
