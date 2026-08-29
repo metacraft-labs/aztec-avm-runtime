@@ -790,8 +790,12 @@ else. Nothing else moved: `verify_provenance_complete` 68, `verify_pinned_nightl
 had moved four commits ahead with the L0 live-chain-replay track; M33's work was rebased onto it
 (both textual conflicts — `Justfile`, `REUSE-INVENTORY.md` — are pure appends and both appends were
 kept). L0's three checks live in `just verify-l0`, which no `verify-m<N>` recipe invokes: grepped,
-their names appear **zero** times in the whole sweep log. Its own **188** (74 / 52 / 62) is a
-separate figure and is not part of the campaign total. The inventory ids do not collide either —
+their names appear **zero** times in the whole sweep log. Its own **188** is a separate figure and
+is not part of the campaign total — and it was RE-TAKEN rather than quoted: after `npm ci` in
+`replay/` (whose `node_modules` is gitignored, so the tree stays clean), `just verify-l0` is
+**188, 3/3, exit 0, split 74 / 52 / 62**, its declared split to the assertion. Without that install
+the recipe exits 1 on `ERR_MODULE_NOT_FOUND: '@aztec/stdlib'`, which is L0's own documented
+precondition and not a defect. The inventory ids do not collide either —
 `REUSE-INVENTORY.md` carries 91 headings, RI-01..RI-91, all distinct, none missing, none repeated,
 with RI-86/RI-87 L0's and RI-88..RI-91 M33's.
 
