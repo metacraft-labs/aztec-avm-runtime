@@ -8,6 +8,12 @@
     "here more than usual, because every L0 check drives the client through a probe that Node runs",
     "directly from these sources.",
     "",
+    "`tools/` IS INCLUDED as well as `src/`. `tools/settled_fixture.ts` is the L1 fixture format,",
+    "recorder and player; it is NOT part of the client (it assembles a JSON-RPC envelope by hand,",
+    "which is exactly what verify_client_uses_upstream_schema forbids inside `src/`) and it is",
+    "still type-checked, because a fixture reader that has drifted from the format is the thing",
+    "the committed fixtures rest on.",
+    "",
     "`skipLibCheck` is true for the same reason it is true in orchestration/: the dependencies are",
     "@aztec/* .d.ts files whose own errors are not ours to fix, and turning it off would make this",
     "a check about @aztec/stdlib's typings rather than about the replay client."
@@ -31,5 +37,5 @@
     "forceConsistentCasingInFileNames": true,
     "types": []
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "tools/**/*.ts"]
 }
