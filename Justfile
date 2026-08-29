@@ -2798,3 +2798,62 @@ verify-m33:
       echo "verify-m33: all checks passed"
     fi
     exit "$rc"
+||||||| parent of d3377bf (L1: three checks and their controls — 280 assertions, 125 / 94 / 61, none of them touching a network)
+
+# ---------------------------------------------------------------------------
+# L1 — fetching a settled transaction
+#
+#   just verify-l1-fetch       e2e_fetch_settled_transaction
+#   just verify-l1-artifact    test_missing_contract_artifact_refused
+#   just verify-l1-private     test_private_half_declared_absent
+#   just verify-l1             all three, in order
+#   just capture-replay-fixture  re-capture a fixture — THE ONE THING HERE THAT NEEDS A NETWORK
+#
+# NOTHING IN `verify-l1` TOUCHES THE NETWORK. Every arm runs over
+# `replay/fixtures/*.json` — recordings of a live Aztec testnet taken at the JSON-RPC transport on
+# 2026-08-29 — played back through THE REAL `createAztecNodeClient` over THE REAL
+# `AztecNodeApiSchema`, so upstream's zod validates the committed bytes on every run. A fixture is a
+# recording of a node, not a mock of one.
+#
+# `capture-replay-fixture` is the only recipe here that reaches a chain, and it is not part of
+# `verify-l1` on purpose: a check that needs a live testnet is a check that goes red when somebody
+# else's node is down. Re-capture is a deliberate act, and it must be, because `getTxByHash` on a
+# real node PRUNES — see `replay/src/settled_transaction.ts` — so a fixture cannot be re-taken for
+# an old transaction at all.
+# ---------------------------------------------------------------------------
+
+verify-l1-fetch:
+    @verification/e2e_fetch_settled_transaction.sh
+
+verify-l1-artifact:
+    @verification/test_missing_contract_artifact_refused.sh
+
+verify-l1-private:
+    @verification/test_private_half_declared_absent.sh
+
+# THE ONE RECIPE THAT NEEDS A LIVE CHAIN. `just capture-replay-fixture url=… out=… [tx=…]`
+capture-replay-fixture url='https://aztec-testnet.drpc.org' out='replay/fixtures/testnet_settled_tx.json' tx='':
+    #!/usr/bin/env bash
+    set -uo pipefail
+    args=(--url "{{url}}" --out "{{justfile_directory()}}/{{out}}")
+    [ -n "{{tx}}" ] && args+=(--tx "{{tx}}")
+    cd "{{justfile_directory()}}/replay" && node tools/capture_settled_fixture.mjs "${args[@]}"
+
+verify-l1:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      e2e_fetch_settled_transaction \
+      test_missing_contract_artifact_refused \
+      test_private_half_declared_absent
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-l1: FAILED" >&2
+    else
+      echo "verify-l1: all checks passed"
+    fi
+    exit "$rc"

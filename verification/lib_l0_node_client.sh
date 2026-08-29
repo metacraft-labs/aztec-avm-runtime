@@ -68,7 +68,7 @@ l0_probe() { # <name> <source-text>
 
 l0_probe_err() { printf '%s\n' "$L0_WORK/probes/$1.err"; }
 
-# l0_run_probe <name> <source-text> <outfile>
+# l0_run_probe <name> <source-text> <outfile> [<sentinel>]
 #
 # The whole ritual, in one place, because three checks were about to write it three times: run,
 # assert the exit status, DIE with the probe's own stderr if it is non-zero, and refuse an
@@ -78,8 +78,14 @@ l0_probe_err() { printf '%s\n' "$L0_WORK/probes/$1.err"; }
 # leaves a partial transcript indistinguishable from the V8/WASI truncation, and asking the
 # completeness question first makes the refusal tell the reader about a flake when what happened
 # was an exception with a stack trace sitting in stderr. M21 measured that on its own first run.
-l0_run_probe() { # <name> <source-text> <outfile>
-  local name="$1" src="$2" out="$3" rc
+#
+# THE SENTINEL IS A PARAMETER RATHER THAN A LITERAL, and it defaults to L0's. L1 reuses this runner
+# (`lib_l1_settled_tx.sh` records why) and its probes end `l1.done`, so a milestone's transcript
+# says which milestone wrote it. Adding a second copy of this ritual for the sake of one string is
+# how a transcript check comes to be written without a completeness refusal, which
+# `verify_transcript_truncation_detection_uniform` exists to prevent.
+l0_run_probe() { # <name> <source-text> <outfile> [<sentinel>]
+  local name="$1" src="$2" out="$3" sentinel="${4:-l0.done}" rc
   l0_probe "$name" "$src" >"$out"
   rc=$?
   assert_eq "the $name probe exited 0" "0" "$rc"
@@ -92,9 +98,9 @@ $(head -12 "$(l0_probe_err "$name")")"
     die "the $name probe exited $rc. Its stderr, which is where the reason is:
 $(head -20 "$(l0_probe_err "$name")")"
   fi
-  require_complete_transcript "$out" l0.done "the $name probe's"
+  require_complete_transcript "$out" "$sentinel" "the $name probe's"
   assert_eq "…and the $name transcript is complete rather than truncated" "complete" \
-    "$(transcript_completeness "$out" l0.done)"
+    "$(transcript_completeness "$out" "$sentinel")"
 }
 
 # A key/value line, the transcript vocabulary every driver in this repository uses. The terminal
