@@ -921,6 +921,35 @@ in-progress marker — are both right and neither covers a source left mutated b
 and then backed up. `git status --porcelain` over the mutated file set, before the backup, is the
 guard, with the tracked-ness of each path asserted rather than inferred from empty output.
 
+### A CHAIN OF `success: true` IS NOT A RESULT — ASSERT WHAT THE THING PRODUCED
+
+**L4 drove a Debug Adapter Protocol server with the wrong launch argument and every single request
+answered `success: true`.** `initialize`, `launch`, `configurationDone`, `threads` — all successful,
+over a session in which **no trace had been opened at all**. Only `next` failed, and only then did
+the engine say so: *"no trace is open: next arrived before the launch handshake completed (received
+launch=true, configurationDone=true). Send `launch` with a `traceFolder` …"*. The argument was
+`program`, and `launch` takes `traceFolder`.
+
+A check that walked the handshake and asserted each response's `success` would have been **green
+over a debugger that had opened nothing**. What caught it was asserting the OUTPUT: steps taken, and
+the positions those steps reached. **The rule generalises past DAP: when a protocol has a
+success/failure flag per message, the flag is the weakest thing in the response.** Assert the
+artefact — records written, steps taken, positions reached, bytes compared — and let the flags be
+context in the transcript.
+
+### A PROTOCOL WITH TWO HALVES MAY SPEAK TWO SHAPES, AND THE SECOND ONE IS THE ONE YOU DID NOT READ
+
+The same engine's worker posts **objects** before `start` (`wasm-loaded`, `trace-loaded`) and **JSON
+strings** after `wasm_start()` hands the port to its WASM dispatcher. A handler that read only
+`m.type` matched nothing after the handover and reported **"DAP timeout: initialize"** — over an
+engine that had in fact answered `success: true` and gone on to emit `initialized`.
+
+**A timeout is a symptom, not a diagnosis, and the difference was one line of transcript.** The
+driver logged every message in both directions; the answer was visible immediately. **Log both
+directions of any boundary you did not write**, and reduce a thrown value to a *kind* rather than a
+message — a driver that reports "timed out" over a peer that replied is the most expensive kind of
+wrong, because the natural next step is to raise the timeout.
+
 ### Exit status *and* the specific failure mode
 Counts alone miss a binary printing `132 ran / 132 PASSED` while exiting 7.
 Exit status alone misses a discriminator failing for the wrong reason.
@@ -1036,6 +1065,13 @@ two arms then measure the same thing and the harness reports coverage of a state
 L1's review recorded this exact finding — *"the hang arm's first form exited 13 on node's 'unsettled
 top-level await' — M24's exact finding, a die-before-summary wearing a hang's label"* — and **L2's
 harness walked into it anyway**, which is why it is here and not only in a milestone log.
+
+**AND A THIRD WAY TO WRITE A HANG ARM THAT IS NOT ONE: AN `await` INSIDE A SYNCHRONOUS FUNCTION.**
+L3's arm put the timer inside `buildSettledRecording`, which is `sync` — so the probe died at PARSE
+with **rc 1**, a syntax error wearing a hang's label. Three distinct wrong shapes now: rc 13 (no
+pending handle), rc 1 (await in a sync function), and a bound that never fires. **Assert the rc is
+124.** Both other states are also "missing a summary line", so reading the absence of a summary
+cannot distinguish them.
 
 **Rule for a hang arm: block on a live handle, not on an unsettled promise.**
 `await new Promise((r) => setTimeout(r, 1e9))` keeps a timer registered, so the loop does not drain,

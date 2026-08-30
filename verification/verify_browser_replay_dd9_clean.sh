@@ -55,12 +55,16 @@ TEST_NAME="verify_browser_replay_dd9_clean"
 echo "== $TEST_NAME"
 l2_prepare
 
-BUNDLE="$REPO_ROOT/replay/dist-browser/replay.js"
+BUNDLE="$REPO_ROOT/replay/dist-browser/index.js"
 META="$REPO_ROOT/replay/dist-browser/meta.json"
 BUILDER="$REPO_ROOT/replay/tools/build_browser_bundle.mjs"
+BUDGETS="$REPO_ROOT/replay/browser-budgets.json"
+DIST="$REPO_ROOT/replay/dist-browser"
 
 assert_file "the bundle builder is committed" "$BUILDER"
 assert_true "…and TRACKED" git -C "$REPO_ROOT" ls-files --error-unmatch "replay/tools/build_browser_bundle.mjs"
+assert_file "…and the budgets it enforces are DATA, not a literal in the builder" "$BUDGETS"
+assert_true "…also TRACKED" git -C "$REPO_ROOT" ls-files --error-unmatch "replay/browser-budgets.json"
 
 # ---------------------------------------------------------------------------
 echo "== 1. the artifact is BUILT here, not assumed"
@@ -75,9 +79,11 @@ if ! timeout "${L4_BUILD_TIMEOUT:-600}" node "$BUILDER" >"$BUILD_LOG" 2>&1; then
   die "the browser bundle failed to build; esbuild's own output is in $BUILD_LOG:
 $(tail -20 "$BUILD_LOG")"
 fi
-assert_file "the bundle was emitted" "$BUNDLE"
+assert_file "the entry chunk was emitted" "$BUNDLE"
 assert_file "…with esbuild's metafile beside it" "$META"
-assert_ge "…and it is a real bundle rather than a stub" 5000000 "$(wc -c <"$BUNDLE" | tr -d ' ')"
+assert_ge "…and it is a real bundle rather than a stub" 500000 "$(wc -c <"$BUNDLE" | tr -d ' ')"
+assert_ge "the build produced SEVERAL outputs, so splitting really happened" 5 \
+  "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["outputs"]))' "$META")"
 
 INPUTS="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["inputs"]))' "$META")"
 assert_ge "the shipped graph has a substantial number of inputs" 500 "$INPUTS"
@@ -121,6 +127,101 @@ assert_not_contains "…NOT orchestration's, which is the deletion_era line" "or
   "$ROOTS"
 
 # ---------------------------------------------------------------------------
+echo "== 2b. SPLITTING MUST NOT MAKE THE BOUNDARY UNPROVABLE"
+#
+# THE HAZARD THIS SECTION EXISTS FOR, NAMED: once the graph has more than one output, a check that
+# counted inputs in ONE output would call the bundle DD-9 clean while a forbidden module sat in a
+# lazy chunk. §2 counts the metafile's GLOBAL `inputs` map, which esbuild populates for the whole
+# graph regardless of splitting — but "regardless of splitting" is an assumption about a bundler,
+# and this section turns it into an assertion:
+#
+# AND THE FIRST VERSION OF THIS SECTION ASSERTED SOMETHING FALSE ABOUT esbuild, which is recorded
+# rather than quietly corrected. It required the union of the outputs' inputs to EQUAL the global
+# `inputs` map. Measured: global 947, union 572, **375 inputs in the global map appear in no output
+# at all**. The global map is the RESOLVED graph — every module esbuild parsed — and the per-output
+# maps are the SHIPPED graph, after tree-shaking. They are a superset and a subset, not two spellings
+# of one thing.
+#
+# That makes §2's count CONSERVATIVE IN THE SAFE DIRECTION: a forbidden module that was resolved and
+# then tree-shaken away would still fail §2. Good. What this section adds is the other end — the
+# forbidden set is absent from the SHIPPED graph too, PER OUTPUT, eager and lazy alike — so the
+# answer does not depend on which map was read, which is the property that becomes unprovable the
+# moment the graph has more than one output.
+# ---------------------------------------------------------------------------
+UNION_VS_GLOBAL="$(python3 -c '
+import json, sys
+m = json.load(open(sys.argv[1]))
+glob = set(m["inputs"])
+union = set()
+for o in m["outputs"].values():
+    union |= set(o.get("inputs", {}))
+print(len(glob), len(union), len(glob - union), len(union - glob))
+' "$META")"
+read -r N_GLOBAL N_UNION ONLY_GLOBAL ONLY_UNION <<<"$UNION_VS_GLOBAL"
+assert_eq "every input an OUTPUT carries is in the global map, so no output smuggles one in" "0" \
+  "$ONLY_UNION"
+assert_ge "the SHIPPED graph is a non-trivial subset of the resolved one" 500 "$N_UNION"
+assert_ge "…and the RESOLVED graph is larger, which is tree-shaking working" 1 "$ONLY_GLOBAL"
+assert_true "…so §2's global count is the CONSERVATIVE reading, not the loose one" \
+  test "$N_GLOBAL" -gt "$N_UNION"
+
+PER_OUTPUT_BAD="$(python3 -c '
+import json, sys
+m = json.load(open(sys.argv[1]))
+forbidden = ("@aztec/native", "@aztec/world-state/", "@aztec/simulator", "cpp_")
+bad = []
+for name, o in m["outputs"].items():
+    for k in o.get("inputs", {}):
+        for f in forbidden:
+            if f in k:
+                bad.append(f"{name}: {k}")
+print(len(bad))
+print("\n".join(bad[:5]))
+' "$META")"
+assert_eq "the forbidden set is absent from EVERY output, eager and lazy alike" "0" \
+  "$(printf '%s\n' "$PER_OUTPUT_BAD" | head -1)"
+
+# THE BUDGET, RE-READ FROM THE SAME FILE THE BUILDER ENFORCES. The builder fails the build; this
+# asserts the shape it enforced, so a builder that stopped enforcing is visible here too.
+EAGER="$(python3 -c '
+import json, sys
+m = json.load(open(sys.argv[1]))
+outs = m["outputs"]
+entry = next(k for k, v in outs.items() if (v.get("entryPoint") or "").endswith("src/index.ts"))
+eager = {entry}; stack = [entry]
+while stack:
+    cur = stack.pop()
+    for imp in outs[cur].get("imports", []):
+        if imp.get("kind") == "import-statement" and imp["path"] in outs and imp["path"] not in eager:
+            eager.add(imp["path"]); stack.append(imp["path"])
+lazy = set(outs) - eager
+print(sum(outs[k]["bytes"] for k in eager))
+print(len(eager))
+print(sum(outs[k]["bytes"] for k in lazy))
+print(" ".join(sorted(k.split("/")[-1] for k in lazy)))
+' "$META")"
+EAGER_BYTES="$(printf '%s\n' "$EAGER" | sed -n 1p)"
+EAGER_FILES="$(printf '%s\n' "$EAGER" | sed -n 2p)"
+LAZY_BYTES="$(printf '%s\n' "$EAGER" | sed -n 3p)"
+LAZY_NAMES="$(printf '%s\n' "$EAGER" | sed -n 4p)"
+MAX_BYTES="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["maxEagerBytes"])' "$BUDGETS")"
+
+assert_true "the EAGER total is within the declared budget" \
+  test "$EAGER_BYTES" -le "$MAX_BYTES"
+assert_ge "…and the budget is a real ceiling rather than an open one" 1 \
+  "$(( MAX_BYTES < 2000000 ? 1 : 0 ))"
+assert_true "the eager chunk count is within budget" \
+  test "$EAGER_FILES" -le "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["maxEagerFiles"])' "$BUDGETS")"
+
+# DD-11's OWN PROPERTY, STRUCTURALLY: the two barretenberg blobs are LAZY. A byte budget catches
+# this only incidentally, by being smaller than 4 MB; this names them.
+assert_contains "barretenberg is a LAZY chunk, not an eager one" "barretenberg-" "$LAZY_NAMES"
+assert_contains "…and so is barretenberg-threads" "barretenberg-threads-" "$LAZY_NAMES"
+assert_ge "…and together they are the bulk that a replay never fetches" 8000000 "$LAZY_BYTES"
+assert_true "the EAGER total is a small fraction of the whole graph" \
+  test "$EAGER_BYTES" -lt "$LAZY_BYTES"
+
+# ---------------------------------------------------------------------------
 echo "== 3. THE CONTROL: the scanner FINDS a reach that is really there"
 #
 # Without this, the four zeros above are satisfied by a scanner that returns zero for everything.
@@ -146,7 +247,8 @@ target = {k for k in d if "@aztec/bb.js" in k}
 # absolute path. The first version matched on `replay/src/index.ts`, found nothing, and printed
 # "NO PATH" — which reads as "bb.js is unreachable" over a graph with 32 bb.js inputs in it. It is
 # taken from the metafile'"'"'s own outputs[].entryPoint now rather than guessed.
-entry = [v["entryPoint"] for v in meta["outputs"].values() if v.get("entryPoint")]
+entry = [v["entryPoint"] for v in meta["outputs"].values()
+         if (v.get("entryPoint") or "").endswith("src/index.ts")]
 seen = set(entry); q = deque((e, [e]) for e in entry)
 while q:
     cur, pathv = q.popleft()

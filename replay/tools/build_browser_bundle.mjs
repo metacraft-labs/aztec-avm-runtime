@@ -49,7 +49,7 @@
 // and needing neither is a small confirmation that the pin is the one intended.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -86,12 +86,30 @@ for (const [name, file] of Object.entries(SHIMS)) {
   if (!existsSync(file)) fail(`the shim for '${name}' does not exist: ${file}`);
 }
 
+// ================================================================================================
+// SPLITTING IS THE WHOLE DIFFERENCE BETWEEN 9.28 MB AND 1.08 MB, AND IT IS NOT AN OPTIMISATION.
+// ================================================================================================
+//
+// `@aztec/bb.js` ships the barretenberg wasm as two base64-embedded JavaScript modules —
+// `fetch_code/browser/barretenberg.js` (4,139 KB) and `barretenberg-threads.js` (4,095 KB) — and
+// imports them with `await import()`. The metafile records those edges as `kind: dynamic-import`.
+//
+// **WITH `--outfile` AND NO SPLITTING, esbuild INLINES A DYNAMIC IMPORT INTO THE SINGLE OUTPUT.**
+// The first version of this builder did exactly that, and the result was a 9.28 MB eager bundle of
+// which 8.23 MB was a proving stack a replay never runs. `BROWSER-PACKAGING.md` opens on this same
+// mechanism — "code splitting is what keeps that dynamic import a separate chunk instead of
+// inlining 7.9 MB" — so this is the reference bundle's own lesson, met independently.
+//
+// So: `--splitting` and `--outdir`. The two blobs become their own outputs, reached only when
+// something actually initialises barretenberg, which a replay does not.
 const DIST = path.join(REPLAY, 'dist-browser');
 rmSync(DIST, { recursive: true, force: true });
 mkdirSync(DIST, { recursive: true });
 
-const OUT = path.join(DIST, 'replay.js');
 const META = path.join(DIST, 'meta.json');
+const BUDGETS_FILE = path.join(REPLAY, 'browser-budgets.json');
+if (!existsSync(BUDGETS_FILE)) fail(`the budgets file is missing: ${BUDGETS_FILE}`);
+const budgets = JSON.parse(readFileSync(BUDGETS_FILE, 'utf8'));
 
 const args = [
   path.join(REPLAY, 'src/index.ts'),
@@ -99,7 +117,8 @@ const args = [
   '--format=esm',
   '--platform=browser',
   '--minify',
-  `--outfile=${OUT}`,
+  '--splitting',
+  `--outdir=${DIST}`,
   `--metafile=${META}`,
   ...Object.entries(SHIMS).map(([n, f]) => `--alias:${n}=${f}`),
 ];
@@ -110,5 +129,71 @@ try {
   fail('esbuild failed — its output is above');
 }
 
-if (!existsSync(OUT)) fail(`esbuild reported success and ${OUT} is not there`);
-console.log(`build-replay-browser-bundle: ${OUT} — ${statSync(OUT).size} bytes, metafile at ${META}`);
+const ENTRY = path.join(DIST, 'index.js');
+if (!existsSync(ENTRY)) fail(`esbuild reported success and ${ENTRY} is not there`);
+if (!existsSync(META)) fail(`esbuild reported success and ${META} is not there`);
+
+// ================================================================================================
+// THE BUDGET, ENFORCED. A number in a comment is not a budget.
+// ================================================================================================
+//
+// `eager` is the entry output plus the transitive closure of its STATIC edges. `entryPoint` is NOT
+// the discriminator: esbuild marks split targets with it too, so using it would count both
+// barretenberg blobs as eager and make the budget meaningless.
+export function eagerClosure(meta, entrySuffix = 'src/index.ts') {
+  const outs = meta.outputs;
+  const entry = Object.keys(outs).find((k) => (outs[k].entryPoint ?? '').endsWith(entrySuffix));
+  if (!entry) throw new Error(`no output declares an entryPoint ending in ${entrySuffix}`);
+  const eager = new Set([entry]);
+  const stack = [entry];
+  while (stack.length) {
+    const cur = stack.pop();
+    for (const imp of outs[cur].imports ?? []) {
+      if (imp.kind === 'import-statement' && outs[imp.path] && !eager.has(imp.path)) {
+        eager.add(imp.path);
+        stack.push(imp.path);
+      }
+    }
+  }
+  return { entry, eager, lazy: new Set(Object.keys(outs).filter((k) => !eager.has(k))) };
+}
+
+const meta = JSON.parse(readFileSync(META, 'utf8'));
+const { eager, lazy } = eagerClosure(meta);
+const bytesOf = (set) => [...set].reduce((a, k) => a + meta.outputs[k].bytes, 0);
+const eagerBytes = bytesOf(eager);
+const lazyBytes = bytesOf(lazy);
+
+const problems = [];
+if (eagerBytes > budgets.maxEagerBytes) {
+  problems.push(`eager total ${eagerBytes} exceeds the budget ${budgets.maxEagerBytes} `
+    + `(by ${eagerBytes - budgets.maxEagerBytes} bytes)`);
+}
+if (eager.size > budgets.maxEagerFiles) {
+  problems.push(`${eager.size} eager chunks exceeds the budget of ${budgets.maxEagerFiles}`);
+}
+// THE STRUCTURAL GUARD, which is the one that matters. A named module that must be LAZY.
+for (const name of budgets.lazyRequired) {
+  const inEager = [...eager].find((k) => path.basename(k).startsWith(`${name}-`)
+    || path.basename(k) === `${name}.js`);
+  if (inEager) {
+    problems.push(`${name} is EAGER (${path.basename(inEager)}) and the budget requires it lazy — `
+      + `DD-11: a page that only replays a public transaction must never fetch the barretenberg wasm`);
+  }
+  const present = [...lazy].some((k) => path.basename(k).startsWith(`${name}-`)
+    || path.basename(k) === `${name}.js`);
+  if (!present) {
+    // ABSENT IS NOT THE SAME AS LAZY, and treating it as such is how this guard would quietly stop
+    // guarding: if bb.js were dropped from the graph the "must be lazy" test would pass vacuously.
+    problems.push(`${name} is in NEITHER the eager nor the lazy set — the guard would be vacuous. `
+      + `Either the graph changed or the chunk naming did.`);
+  }
+}
+if (problems.length > 0) {
+  for (const p of problems) console.error(`build-replay-browser-bundle: BUDGET FAILURE — ${p}`);
+  process.exit(1);
+}
+
+console.log(`build-replay-browser-bundle: EAGER ${eagerBytes} bytes in ${eager.size} chunk(s) `
+  + `(budget ${budgets.maxEagerBytes}); LAZY ${lazyBytes} bytes in ${lazy.size} chunk(s). `
+  + `entry ${statSync(ENTRY).size} bytes, metafile at ${META}`);

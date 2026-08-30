@@ -3062,10 +3062,11 @@ verify-l4:
 verify-l4-net url='https://aztec-testnet.drpc.org' module=avm_wasm_default:
     #!/usr/bin/env bash
     set -uo pipefail
-    echo "=== verify-l4-net: THIS CHECK NEEDS A LIVE AZTEC NODE ($url)."
+    echo "=== verify-l4-net: THIS CHECK NEEDS A LIVE AZTEC NODE ({{url}})."
     echo "    It is NOT part of the offline floor. A run that finds no transactions in the"
-    echo "    replayable window is a fact about the chain, not a failure of this code."
-    just replay-window "{{url}}" "{{module}}"
+    echo "    replayable window DIES naming that, because every assertion would be vacuous over"
+    echo "    an empty table — it is a fact about the chain, not a failure of this code."
+    L4_RANGE_URL="{{url}}" AVM_WASM_PATH="{{module}}" verification/e2e_replay_block_range.sh
 
 verify-browser-opens-and-steps:
     @verification/smoke_browser_opens_and_steps_l3_container.sh

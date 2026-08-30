@@ -1,0 +1,38 @@
+{
+  "//": [
+    "THE BUDGET IS ENFORCED BY `replay/tools/build_browser_bundle.mjs`, WHICH FAILS THE BUILD.",
+    "A number in a comment is not a budget. This file is data the builder reads and the check",
+    "re-reads, so the two cannot come to disagree about what was promised.",
+    "",
+    "WHAT `eager` MEANS HERE, precisely, because it is the whole point: the entry output plus the",
+    "transitive closure of its STATIC (`import-statement`) edges. An output reached only by a",
+    "`dynamic-import` edge is LAZY — the browser fetches it when the code path runs and not before.",
+    "esbuild marks split targets with `entryPoint` too, so `entryPoint` is NOT the discriminator and",
+    "using it would count 8.2 MB of lazily-fetched barretenberg as eager.",
+    "",
+    "WHY 1,200,000. Measured eager on 2026-08-30 is 1,107,050 bytes across four files, so this is",
+    "~8% headroom: enough that ordinary churn in `replay/src` does not fail a build, tight enough",
+    "that the regressions worth catching are caught. It is a CEILING and not a target.",
+    "",
+    "AND THE BYTE BUDGET IS THE WEAKER OF THE TWO GUARDS, DELIBERATELY. The regression that matters",
+    "is STRUCTURAL — one of the two 4 MB barretenberg blobs becoming eagerly imported — and a byte",
+    "budget catches that only incidentally, by being smaller than 4 MB. `lazyRequired` names those",
+    "two directly, so the property is asserted rather than inferred from a size. DD-11's demand is",
+    "'a page which only executes a public transaction never fetches the barretenberg wasm at all',",
+    "which is a statement about WHICH chunk a module is in, not about how many bytes there are.",
+    "",
+    "`maxEagerFiles` exists so a NEW eager chunk is visible even when it is small. Four chunks",
+    "totalling 1.1 MB and five totalling 1.1 MB are different facts about the graph."
+  ],
+  "maxEagerBytes": 1200000,
+  "maxEagerFiles": 5,
+  "lazyRequired": ["barretenberg", "barretenberg-threads"],
+  "measured": {
+    "date": "2026-08-30",
+    "eagerBytes": 1107050,
+    "eagerFiles": 4,
+    "lazyBytes": 8272529,
+    "barretenbergLazyBytes": 8233876,
+    "unsplitEagerBytes": 9279574
+  }
+}
