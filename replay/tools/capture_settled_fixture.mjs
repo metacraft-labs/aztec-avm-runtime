@@ -107,7 +107,16 @@ console.error(`capture: transaction ${txHash} in block ${blockNumber}`);
 
 // THE DELIVERABLE ITSELF, recorded by running it. Every call the fixture carries for the happy
 // path is a call `fetchSettledTransaction` made, in the order it made it.
-const settled = await fetchSettledTransaction(client, TxHash.fromString(txHash));
+// `--pin-reference-block` puts the SETTLING BLOCK on the `getContract` wire call. L2's fixtures are
+// captured with it and L1's were not, and that is not a preference: L1's entry in the milestone file
+// says adding the argument to an EXISTING recording invalidates it, and L1's recordings cannot be
+// re-taken. So the flag exists, it defaults OFF, and every fixture records which way it was taken in
+// `provenance.contractReferenceBlock` — an unlabelled fixture being the failure this repository is
+// shaped to avoid.
+const pinReferenceBlock = argv.includes('--pin-reference-block');
+const settled = await fetchSettledTransaction(client, TxHash.fromString(txHash), {
+  pinToSettlingBlock: pinReferenceBlock,
+});
 
 // ---- 3. the block, both ways -----------------------------------------------------------------
 // With the option, so the fixture supports "find a recent block and read its transactions"; and
@@ -131,6 +140,14 @@ const probe = async (label, thunk) => {
 await probe('getTxByHash(fabricated)', () => client.getTxByHash(fabricatedTxHash));
 await probe('getTxEffect(fabricated)', () => client.getTxEffect(fabricatedTxHash));
 await probe('getContract(fabricated)', () => client.getContract(fabricatedAddress));
+if (pinReferenceBlock) {
+  // BOTH SHAPES, because the deliverable's own call is now the pinned one. A refblock fixture whose
+  // only recorded "unknown contract" answer is the UNPINNED call would make a check's control a
+  // `FixtureMiss` — a fact about the recording read as a fact about the chain, which is the exact
+  // collapse `settled_fixture.ts` throws `FixtureMiss` to prevent, one layer up.
+  await probe('getContract(fabricated, settlingBlock)', () =>
+    client.getContract(fabricatedAddress, settled.txEffect.l2BlockNumber));
+}
 await probe('getContractClass(fabricated)', () => client.getContractClass(fabricatedClassId));
 
 // ---- 5. the un-batched header probe ----------------------------------------------------------
@@ -170,6 +187,12 @@ const fixture = {
     l2BlockNumber: settled.l2BlockNumber,
     txIndexInBlock: settled.txIndexInBlock,
     chainTipAtCapture: tip,
+    // WHICH BLOCK EVERY CONTRACT IN THIS RECORDING WAS RESOLVED AS OF, and it is read off the
+    // resolutions rather than off the flag — the flag is what was asked for, this is what happened.
+    contractReferenceBlock: settled.contracts.length > 0
+      ? settled.contracts[0].resolvedAsOf
+      : (pinReferenceBlock ? settled.l2BlockNumber : 'latest'),
+    contractReferenceBlockRequested: pinReferenceBlock ? 'settling-block' : 'latest',
     nodeReported: {
       revertCode: settled.revertCode,
       l2BlockHash: settled.l2BlockHash,

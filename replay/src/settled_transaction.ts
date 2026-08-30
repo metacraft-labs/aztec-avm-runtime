@@ -79,6 +79,7 @@
 // refresh cadence of well under an hour, or a demo that silently degrades from debuggable to
 // merely visible.
 
+import type { BlockNumber } from '@aztec/foundation/branded-types';
 import type { AztecAddress } from '@aztec/stdlib/aztec-address';
 import type { BlockData } from '@aztec/stdlib/block';
 import type { ContractClassPublic, ContractInstanceWithAddress } from '@aztec/stdlib/contract';
@@ -206,11 +207,38 @@ export class SettlingBlockUnavailable extends Error {
  */
 export const CONTRACT_RESOLUTION_REFERENCE_BLOCK = 'latest' as const;
 
+/**
+ * L2 TOOK THE FIX, AND TOOK IT AS AN OPTION RATHER THAN AS AN EDIT, WHICH IS THE WHOLE POINT.
+ *
+ * L1's entry above says the fix is one argument and that adding it to an existing recording
+ * INVALIDATES the recording — `aztec_getContract(["0x…"])` and `aztec_getContract(["0x…", 62617])`
+ * are different wire calls, so every committed L1 fixture would become a `FixtureMiss`, and L1's
+ * fixtures cannot be re-captured because their transactions fell out of `getTxByHash` an hour after
+ * they settled.
+ *
+ * So the argument is a PARAMETER with `latest` as its default. L1's two fixtures keep playing back
+ * against a call shape that has not changed and its 280 assertions keep their meaning; L2 captures
+ * its own fixture with `pinToSettlingBlock`, and the wire call in THAT recording carries the block.
+ * The alternative — flipping the default and re-capturing — would have destroyed evidence that
+ * cannot be re-made, to fix a hazard that is not live over the subject it would have destroyed
+ * (L1 measured `originalContractClassId === currentContractClassId` for its contract: never
+ * upgraded).
+ *
+ * `resolvedAsOf` is therefore `'latest' | number` and a caller reads which it got. It is NEVER
+ * absent and never a boolean: "which block this bytecode is the bytecode of" is the question a
+ * confident wrong trace answers wrongly, so the answer travels with the resolution.
+ */
+export type ContractReferenceBlock = typeof CONTRACT_RESOLUTION_REFERENCE_BLOCK | BlockNumber;
+
 /** One contract the public half calls, and what the node had for it. */
 export type ContractResolution = {
   readonly address: string;
-  /** Always `latest` today. See `CONTRACT_RESOLUTION_REFERENCE_BLOCK`. */
-  readonly resolvedAsOf: typeof CONTRACT_RESOLUTION_REFERENCE_BLOCK;
+  /**
+   * `latest` unless the caller pinned it. See `ContractReferenceBlock`: when it is a number, that
+   * number is the block the node was asked to resolve the instance's class id as of, and it went
+   * out ON THE WIRE — a check can read it out of the recorded request rather than trust this field.
+   */
+  readonly resolvedAsOf: ContractReferenceBlock;
   readonly resolved: boolean;
   /** Absent when `resolved` is false, and `missing` says at which stage. */
   readonly missing: MissingArtifactStage | undefined;
@@ -234,7 +262,12 @@ export const CONTRACT_RESOLUTION_METHODS = ['getContract', 'getContractClass'] a
 export async function resolvePublicContracts(
   client: ReplayNodeClient,
   addresses: readonly AztecAddress[],
-  options: { refuseUnknown: boolean; txHash: string },
+  options: {
+    refuseUnknown: boolean;
+    txHash: string;
+    /** Omitted is `latest`, which is L1's shape and what L1's fixtures recorded. */
+    referenceBlock?: ContractReferenceBlock;
+  },
 ): Promise<ContractResolution[]> {
   const out: ContractResolution[] = [];
   for (const address of addresses) {
@@ -263,9 +296,14 @@ export function resolvePublicContractsUnguardedForControls(
 async function resolveOne(
   client: ReplayNodeClient,
   address: AztecAddress,
-  options: { refuseUnknown: boolean; txHash: string },
+  options: {
+    refuseUnknown: boolean;
+    txHash: string;
+    referenceBlock?: ContractReferenceBlock;
+  },
 ): Promise<ContractResolution> {
   const addressText = address.toString();
+  const referenceBlock = options.referenceBlock ?? CONTRACT_RESOLUTION_REFERENCE_BLOCK;
   const refuse = (stage: MissingArtifactStage, contractClassId?: string): ContractResolution => {
     if (options.refuseUnknown) {
       throw new MissingContractArtifact({
@@ -278,7 +316,7 @@ async function resolveOne(
     }
     return {
       address: addressText,
-      resolvedAsOf: CONTRACT_RESOLUTION_REFERENCE_BLOCK,
+      resolvedAsOf: referenceBlock,
       resolved: false,
       missing: stage,
       contractClassId,
@@ -289,7 +327,13 @@ async function resolveOne(
     };
   };
 
-  const instance = await client.getContract(address);
+  // THE ARGUMENT IS OMITTED WHEN IT IS `latest`, RATHER THAN PASSED AS THE STRING `'latest'`.
+  // Both mean the same thing to the node, and they are DIFFERENT WIRE CALLS: `["0x…"]` versus
+  // `["0x…","latest"]`. L1's fixtures recorded the first. Passing the string would invalidate them
+  // just as passing a number would, which is the trap this whole parameter exists to route around.
+  const instance = referenceBlock === CONTRACT_RESOLUTION_REFERENCE_BLOCK
+    ? await client.getContract(address)
+    : await client.getContract(address, referenceBlock);
   if (instance === undefined || instance === null) {
     return refuse('instance');
   }
@@ -304,7 +348,7 @@ async function resolveOne(
   }
   return {
     address: addressText,
-    resolvedAsOf: CONTRACT_RESOLUTION_REFERENCE_BLOCK,
+    resolvedAsOf: referenceBlock,
     resolved: true,
     missing: undefined,
     contractClassId: classId,
@@ -378,6 +422,17 @@ export function declarePublicHalf(tx: Tx): PublicHalfDeclaration {
 // The fetch
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * How to fetch. One option, and it is deliberately a BOOLEAN rather than a block number.
+ *
+ * See `ContractReferenceBlock`. `pinToSettlingBlock: true` resolves every contract as of the block
+ * the transaction's own `TxEffect` said it settled in — L2's requirement — and omitting it keeps
+ * L1's shape, which is what L1's committed recordings contain.
+ */
+export type FetchSettledTransactionOptions = {
+  readonly pinToSettlingBlock?: boolean;
+};
+
 /** Everything L2 needs to re-execute a settled transaction, and everything L3 needs to say what it is. */
 export type SettledTransaction = {
   readonly txHash: string;
@@ -416,6 +471,7 @@ export type SettledTransaction = {
 export async function fetchSettledTransaction(
   client: ReplayNodeClient,
   txHash: TxHash,
+  options: FetchSettledTransactionOptions = {},
 ): Promise<SettledTransaction> {
   const hashText = txHash.toString();
 
@@ -431,10 +487,24 @@ export async function fetchSettledTransaction(
     throw new SettlingBlockUnavailable(blockNumber, hashText, client.url);
   }
 
+  // THE REFERENCE BLOCK IS THE SETTLING BLOCK THE EFFECT NAMED, not a number recomputed here and
+  // not the tip. `pinToSettlingBlock` is the only way to ask for it, so a caller cannot half-pin:
+  // there is no argument that takes an arbitrary block, because a contract resolved as of any block
+  // other than the one the transaction settled in is a confident wrong trace with extra steps.
+  // `txEffect.l2BlockNumber` is upstream's BRANDED `BlockNumber` and it is passed through
+  // untouched, exactly as `getBlockData` above takes it. The plain `blockNumber` beside it is a
+  // `Number(...)` for the record; re-branding that would be this module re-making a value the chain
+  // already gave it, which is the shape L1 refused for `getBlockData` and refuses here for the same
+  // reason.
+  const referenceBlock: ContractReferenceBlock = options.pinToSettlingBlock === true
+    ? txEffect.l2BlockNumber
+    : CONTRACT_RESOLUTION_REFERENCE_BLOCK;
+
   const targets = publicCallTargets(tx);
   const contracts = await resolvePublicContracts(client, targets, {
     refuseUnknown: true,
     txHash: hashText,
+    referenceBlock,
   });
 
   return {
