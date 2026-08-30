@@ -72,7 +72,7 @@ echo "== PublicProcessorLimits is a published type and every field is honoured b
 # The type is upstream's, in the published stdlib, and the deliverable names five fields. Read out
 # of the fork rather than out of our own source, so "we honour upstream's limits" is a claim about
 # upstream's declaration.
-LIMITS_DECL="$(m22_anchor_file yarn-project/stdlib/src/interfaces/block-builder.ts)"
+LIMITS_DECL="$(m22_vendor_anchor_file yarn-project/stdlib/src/interfaces/block-builder.ts)"
 LIMITS_BODY="$(printf '%s\n' "$LIMITS_DECL" | awk '/^export type PublicProcessorLimits = \{/{p=1} p{print} p&&/^\};$/{exit}')"
 assert_ge "the PublicProcessorLimits declaration was found and is not empty" 5 \
   "$(printf '%s\n' "$LIMITS_BODY" | grep -c . || true)"
@@ -88,7 +88,7 @@ assert_false "…while a field that does not exist is not found by the same need
 
 # And upstream's loop READS each of them, as a whole line in the vendored copy AND in the anchor.
 PP_BODY="$(m22_strip_header "$M22_VENDOR/public_processor/public_processor.ts")"
-PP_ANCHOR="$(m22_anchor_file yarn-project/simulator/src/public/public_processor/public_processor.ts)"
+PP_ANCHOR="$(m22_vendor_anchor_file yarn-project/simulator/src/public/public_processor/public_processor.ts)"
 DESTRUCTURE="    const { maxTransactions, deadline, maxBlockGas, maxBlobFields, isBuildingProposal, signal } = limits;"
 assert_true "the vendored loop destructures all six limit fields, in upstream's own line" \
   str_has_line "$PP_BODY" "$DESTRUCTURE"

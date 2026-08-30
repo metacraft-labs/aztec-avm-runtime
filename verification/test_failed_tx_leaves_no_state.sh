@@ -236,7 +236,7 @@ assert_true "…and that method throws rather than logging when it is not" \
   str_has_line "$PP_BODY" "      throw new Error(\`Fork state reference changed by tx \${txHash} after error in public processor\`, { cause });"
 
 # All four of those lines are upstream's, at the anchor, unchanged.
-PP_ANCHOR="$(m22_anchor_file yarn-project/simulator/src/public/public_processor/public_processor.ts)"
+PP_ANCHOR="$(m22_vendor_anchor_file yarn-project/simulator/src/public/public_processor/public_processor.ts)"
 for line in "        await checkpoint.revertToCheckpoint();" \
             "        this.contractsDB.revertCheckpoint();" \
             "        await this.checkWorldStateUnchanged(startStateReference, txHash, err);"; do

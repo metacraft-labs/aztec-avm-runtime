@@ -64,7 +64,13 @@ assert_eq "the fork HEAD is a resolved commit" "commit" \
   "$(git -C "$FORK_ROOT" cat-file -t "$FORK_HEAD" 2>/dev/null || echo missing)"
 
 consumers_at() { # <rev> -> the packages whose non-test sources import the processor from @aztec/simulator
-  git -C "$FORK_ROOT" grep -l -E "PublicProcessorFactory|PublicProcessor\b" "$1" -- 'yarn-project/**/*.ts' 2>/dev/null \
+  # `\b` IS NOT PORTABLE AND IT FAILED SILENTLY-ISH. git's regex engine is the platform's: on GNU
+  # systems `\b` is a word boundary, and on this campaign's macOS hosts it matches NOTHING, so this
+  # enumeration answered TWO packages instead of four — the two whose files also contain the string
+  # `PublicProcessorFactory`, which the first alternative catches. It failed loudly here, which is
+  # the only reason it was not a silent undercount, and `([^[:alnum:]_]|$)` is the POSIX ERE that
+  # means exactly what `\b` meant.
+  git -C "$FORK_ROOT" grep -l -E "PublicProcessorFactory|PublicProcessor([^[:alnum:]_]|\$)" "$1" -- 'yarn-project/**/*.ts' 2>/dev/null \
     | sed "s|^$1:||" \
     | grep -v '^yarn-project/simulator/' \
     | grep -v '\.test\.ts$' \
@@ -144,34 +150,42 @@ assert_true "the same comparison DOES report a difference for a file that has on
 # RI-65's own last sentence says ("must be vendored from `233d8e0993` specifically"). The rule is
 # "a worktree at ANOTHER anchor is not this anchor", not "a worktree is not the anchor".
 #
-# So this block asserts the PRECONDITION under which the instruction is unnecessary: that the
-# worktree and this milestone's anchor are the same source. While that holds, vendoring from either
-# is identical and the trap cannot bite. The day somebody checks `upstream/tsavm` out somewhere
-# else — which is exactly RI-65's scenario — this goes RED and says so, instead of a sentence in a
-# document asking the next agent to remember.
+# AND M37 TURNED THAT TRAP THE RIGHT WAY UP. Until this milestone the ten files were vendored from
+# `ts`, `upstream/tsavm` was checked out AT `ts`, and the two routes were the same bytes — which is
+# why nothing could be measured. The ten now come from `cpp` and the worktree is still at `ts`, so
+# the routes have COME APART: vendoring any of these from the worktree would now produce a
+# different file, and for four of the ten it demonstrably does. That is an observable property, so
+# this block asserts it rather than asking the next agent to remember.
 TSAVM="$REPO_ROOT/upstream/tsavm"
 assert_true "the tsavm worktree exists, so this block is asking a question of something" \
   test -d "$TSAVM"
-assert_eq "the tsavm worktree is checked out AT this milestone's ts anchor" \
+assert_eq "…and it is still checked out at the ts anchor, which is now the frozen TS AVM's alone" \
   "$M22_TS_ANCHOR" "$(git -C "$TSAVM" rev-parse HEAD 2>/dev/null || echo NO-WORKTREE)"
 # The control for that equality: the same lookup does NOT answer the cpp anchor, so it is a
 # comparison that can come out false rather than a constant.
 assert_false "…and the same lookup does not answer the cpp anchor, so the equality discriminates" \
   test "$(git -C "$TSAVM" rev-parse HEAD 2>/dev/null || echo NO-WORKTREE)" = "$M22_CPP_ANCHOR"
-# And the substance: for the ten paths actually taken, the worktree's bytes ARE the anchor's. The
-# scanner PRINTS ITS RESIDUE rather than counting matches, so a path that is missing from the
-# worktree reads as a named line and not as a smaller number.
-TSAVM_RESIDUE=""
+
+# THE SUBSTANCE. For each of the ten paths, compare the WORKTREE's bytes against the anchor the row
+# actually names. The scanner PRINTS ITS RESIDUE rather than counting matches, so a path missing
+# from the worktree reads as a named line and not as a smaller number — and the residue is now
+# expected to be NON-EMPTY, which is the whole point: the worktree is no longer a substitute for
+# the object store, and the check says which files prove it.
+TSAVM_DIVERGED=""
+TSAVM_SAME=""
 n_tsavm=0
 while IFS= read -r up; do
   [ -n "$up" ] || continue
   n_tsavm=$((n_tsavm + 1))
   if [ ! -f "$TSAVM/$up" ]; then
-    TSAVM_RESIDUE="$TSAVM_RESIDUE
+    TSAVM_DIVERGED="$TSAVM_DIVERGED
 absent-from-worktree $up"
-  elif ! cmp -s "$TSAVM/$up" <(m22_anchor_file "$up"); then
-    TSAVM_RESIDUE="$TSAVM_RESIDUE
-differs-from-anchor $up"
+  elif ! cmp -s "$TSAVM/$up" <(m22_vendor_anchor_file "$up"); then
+    TSAVM_DIVERGED="$TSAVM_DIVERGED
+differs-from-vendoring-anchor $up"
+  else
+    TSAVM_SAME="$TSAVM_SAME
+$up"
   fi
 done <<'TSAVM_PATHS'
 yarn-project/simulator/src/public/public_processor/public_processor.ts
@@ -185,15 +199,26 @@ yarn-project/simulator/src/public/public_errors.ts
 yarn-project/simulator/src/public/public_tx_simulator/public_tx_simulator_interface.ts
 yarn-project/txe/src/utils/block_creation.ts
 TSAVM_PATHS
+printf '%s\n' "$TSAVM_DIVERGED" | sed 's/^/      /'
 assert_eq "ten upstream paths were compared, which is the number vendored" "10" "$n_tsavm"
-if [ -z "$TSAVM_RESIDUE" ]; then
-  pass "the worktree's copy of all ten is byte-identical to the anchor, so the two vendoring routes are ONE route"
-else
-  printf '%s\n' "$TSAVM_RESIDUE" | sed 's/^/      /'
-  fail "the worktree has DIVERGED from the anchor: $(printf '%s\n' "$TSAVM_RESIDUE" | grep -c . || true) path(s) — vendor from the object store and re-read RI-65"
-fi
-# The comparison's own control: a path that exists at the CPP anchor and not at the ts anchor is
-# reported as absent by the same lookup — RI-65's actual instance, run rather than cited.
+# FOUR of the ten changed between the two anchors, which is what makes the routes distinguishable.
+assert_eq "…and the ts-anchor worktree DIVERGES from the vendoring anchor on exactly four of them" \
+  "4" "$(printf '%s\n' "$TSAVM_DIVERGED" | grep -c . || true)"
+# The other six are the control: if ALL ten diverged the comparison would be reading two unrelated
+# trees, and if none did the trap would still be unmeasurable.
+assert_eq "…and agrees on the other six, so this is a difference and not two unrelated trees" \
+  "6" "$(printf '%s\n' "$TSAVM_SAME" | grep -c . || true)"
+# Named, not counted: the four are the ones M37's sizing found changed, and naming them is what
+# stops this assertion drifting into "some number of files differ".
+for changed in public_processor/public_processor.ts public_db_sources.ts \
+               public_tx_simulator/public_tx_simulator_interface.ts; do
+  assert_true "…including yarn-project/simulator/src/public/$changed" \
+    str_has_sub "$TSAVM_DIVERGED" "yarn-project/simulator/src/public/$changed"
+done
+assert_true "…and TXE's block-creation helper, the fourth" \
+  str_has_sub "$TSAVM_DIVERGED" "yarn-project/txe/src/utils/block_creation.ts"
+# RI-65's own instance, still run rather than cited: a path that exists at the CPP anchor and not at
+# the ts anchor is reported as absent by the same lookup.
 assert_false "RI-65's own instance: a file the cpp anchor has is NOT in this ts-anchor worktree" \
   test -f "$TSAVM/yarn-project/pxe/src/contract_function_simulator/oracle/acir_callback.ts"
 assert_true "…and it really does exist at the cpp anchor, so that absence is a difference and not a typo" \
@@ -264,17 +289,24 @@ import { L1ToL2MessageIndexOutOfRangeError, NoteHashIndexOutOfRangeError } from 
   "$(printf '%s\n' "$PDS_DIFF" | sed -n 's/^> //p')"
 
 # `public_processor.ts` — the big one. Pinned by exact counts AND by classifying every added
-# non-comment line, because a 184-line changed set written out in full would be unreadable and an
+# non-comment line, because a 201-line changed set written out in full would be unreadable and an
 # unreadable pin is one nobody re-derives.
+#
+# M37 RE-DERIVED BOTH COUNTS AT THE `cpp` ANCHOR: 112/72 became 119/82. Neither number moved because
+# this repository edited anything. The removals grew by seven because upstream's factory grew — it
+# now takes an injected `AvmSimulator` and reads `merkleTree.getRevision().forkId` — and the whole
+# factory is what edit (3) drops; the additions grew by ten because the comment that replaces it had
+# to be rewritten, upstream having retired half of the reason M22 gave for dropping it.
 PP_DIFF="$(m22_vendor_diff public_processor/public_processor.ts "$PP_UP")"
 PP_REMOVED="$(printf '%s\n' "$PP_DIFF" | sed -n 's/^< //p')"
 PP_ADDED="$(printf '%s\n' "$PP_DIFF" | sed -n 's/^> //p')"
 # Counted off the DIFF and not off the extracted text, so a removed or added BLANK line counts.
 # Extracting with `sed -n 's/^< //p'` and then `grep -c .` drops them, which reported 106/69 for a
-# diff that is 112/72 — six lines a later edit could have moved without the pin noticing.
-assert_eq "public_processor.ts: the removed line count is pinned" "112" \
+# diff that was 112/72 at the old anchor — six lines a later edit could have moved without the pin
+# noticing.
+assert_eq "public_processor.ts: the removed line count is pinned" "119" \
   "$(printf '%s\n' "$PP_DIFF" | grep -c '^<' || true)"
-assert_eq "public_processor.ts: the added line count is pinned" "72" \
+assert_eq "public_processor.ts: the added line count is pinned" "82" \
   "$(printf '%s\n' "$PP_DIFF" | grep -c '^>' || true)"
 
 # Every added line is a comment, blank, or one of the four declared shapes. Anything else is an

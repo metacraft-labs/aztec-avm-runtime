@@ -2,7 +2,7 @@
 // VENDORED — not our code. Re-vendor rather than editing here.
 //   upstream-repo:   AztecProtocol/aztec-packages
 //   upstream-path:   yarn-project/simulator/src/public/public_db_sources.ts
-//   upstream-commit: 3a68d68ac29aaf04fc6251c80a8eb874043cb260
+//   upstream-commit: 233d8e099336c1773b89e939100af047ed9c4f71
 //   licence:         Apache-2.0
 //   local-edits:     node-strip-types
 //   inventory:       REUSE-INVENTORY.md RI-23
@@ -64,7 +64,7 @@ export class PublicContractsDB implements PublicContractsDBInterface {
     this.log = createLogger('simulator:contracts-data-source', bindings);
   }
 
-  /** Parses raw log data from the C++/NAPI bridge and inserts the resulting contracts into the current checkpoint. */
+  /** Parses raw contract deployment data and inserts the resulting contracts into the current checkpoint. */
   public addContractsFromLogs(contractDeploymentData: ContractDeploymentData): void {
     const currentState = this.getCurrentState();
 

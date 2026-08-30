@@ -2,7 +2,7 @@
 // VENDORED — not our code. Re-vendor rather than editing here.
 //   upstream-repo:   AztecProtocol/aztec-packages
 //   upstream-path:   yarn-project/simulator/src/public/public_processor/public_processor.ts
-//   upstream-commit: 3a68d68ac29aaf04fc6251c80a8eb874043cb260
+//   upstream-commit: 233d8e099336c1773b89e939100af047ed9c4f71
 //   licence:         Apache-2.0
 //   local-edits:     processor-block-assembly
 //   inventory:       REUSE-INVENTORY.md RI-21
@@ -58,12 +58,22 @@ import { GuardedMerkleTreeOperations } from './guarded_merkle_tree.ts';
 import { PublicProcessorMetrics } from './public_processor_metrics.ts';
 
 // THE FACTORY IS REMOVED HERE, AND THAT IS DD-9 RATHER THAN TIDYING.
-// Upstream's `PublicProcessorFactory.create` constructs the processor's simulator itself, through
-// a `protected createPublicTxSimulator` that hard-defaults to `TelemetryCppPublicTxSimulator` —
-// the NAPI AVM — with no flag to turn it off. Keeping the factory would put `@aztec/simulator`'s
-// C++ path in this package's import graph, which `verify_differential_containment` asserts against
-// in three places. `PublicProcessor`'s own constructor takes the simulator as its FOURTH
-// positional argument, so injection replaces inheritance and nothing else about the class moves.
+//
+// RE-DERIVED AT THE NEW ANCHOR IN M37, AND HALF OF THE ORIGINAL REASON IS GONE. At the `ts` anchor
+// the factory's `protected createPublicTxSimulator` hard-defaulted to
+// `TelemetryCppPublicTxSimulator` — the NAPI AVM — with no flag to turn it off, and "injection
+// replaces inheritance" was an argument against a default nobody could override. Upstream now
+// INJECTS: `PublicProcessorFactory`'s constructor takes an `AvmSimulator` and hands it to
+// `TelemetryPublicTxSimulator`, whose AVM is reached over `bb-avm-sim` IPC rather than in-process.
+// That half of the reason no longer holds and is not restated as if it did.
+//
+// WHAT SURVIVES IS THE IMPORT GRAPH, which is what DD-9 is actually about. Keeping the factory
+// keeps the VALUE import `TelemetryPublicTxSimulator` from `../public_tx_simulator/index.js` and
+// `PublicContractsDB` from `../public_db_sources.js` — `@aztec/simulator`'s own simulator path,
+// which `verify_differential_containment` asserts against in three places — and it would put this
+// package back on a simulator this runtime does not use. `PublicProcessor`'s own constructor still
+// takes the simulator as its FOURTH positional argument, so injection still replaces inheritance
+// and nothing else about the class moves.
 // See `orchestration/src/index.ts` for the full re-derivation of that seam.
 
 class PublicProcessorTimeoutError extends Error {
@@ -78,10 +88,6 @@ class PublicProcessorAbortError extends Error {
     super(message);
     this.name = 'PublicProcessorAbortError';
   }
-}
-
-function isPublicProcessorInterruptError(err: any) {
-  return err?.name === 'PublicProcessorTimeoutError' || err?.name === 'PublicProcessorAbortError';
 }
 
 /**
@@ -305,11 +311,15 @@ export class PublicProcessor implements Traceable {
         // Commit the tx-level contracts checkpoint on success
         this.contractsDB.commitCheckpoint();
       } catch (err: any) {
-        if (isPublicProcessorInterruptError(err)) {
-          const interruptReason = err.name === 'PublicProcessorTimeoutError' ? 'timeout' : 'abort signal';
-          this.log.warn(`Stopping tx processing due to ${interruptReason}.`);
-          // The tx may still be executing on a worker thread (C++ via NAPI).
-          // Signal cancellation AND WAIT for the simulation to actually stop before touching fork checkpoints.
+        if (err?.name === 'PublicProcessorTimeoutError' || err?.name === 'PublicProcessorAbortError') {
+          this.log.warn(
+            `Stopping tx processing due to ${err.name === 'PublicProcessorTimeoutError' ? 'timeout' : 'abort'}.`,
+          );
+          // We hit the transaction execution deadline or an external abort signal.
+          // There may still be a simulation in progress.
+          // Signal cancellation AND WAIT for the simulation to actually stop. Cancellation is
+          // cooperative: the simulator may be mid slow-operation and won't observe the flag until it
+          // completes, and without waiting we'd revert checkpoints while it's still writing to state.
           await this.publicTxSimulator.cancel?.();
 
           // Now stop the guarded fork to prevent any further TS-side access to the world state.

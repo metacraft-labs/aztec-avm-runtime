@@ -1116,6 +1116,92 @@ were absorbed silently.
   `orchestration/node_modules/@crate-crypto/node-eth-kzg/package.json`.
 
 
+## D23 — upstream's TXE block helper stopped padding `l2ToL1Msgs` into the **L1→L2** message tree, and this repository never called the function that does it
+
+- id: D23
+- status: accepted
+- opened: 2026-08-30
+- milestone: M37 (the re-take of `PROVENANCE.md` F19)
+- design-question: —
+- sides: `yarn-project/txe/src/utils/block_creation.ts` at anchor `ts` versus the same path at
+  anchor `cpp`, and both versus what `orchestration/` actually calls
+- what: This is the **only** semantic difference in the whole M37 re-take. Everything else that
+  changed between the two anchors in the thirteen re-taken files is comment text, or is inside the
+  half the vendoring severs, or is two gas constants that are equal (D24). This one is real:
+
+  At the `ts` anchor `insertTxEffectIntoWorldTrees(txEffect, worldTrees)` appended
+
+  ```
+  padArrayEnd(txEffect.l2ToL1Msgs, Fr.ZERO, NUMBER_OF_L1_L2_MESSAGES_PER_ROLLUP)
+  ```
+
+  to `MerkleTreeId.L1_TO_L2_MESSAGE_TREE` — the tree of messages going **L1 to L2**, filled with
+  the transaction's messages going **L2 to L1**, zero-padded to the per-rollup width. At the `cpp`
+  anchor it takes a third parameter, `l1ToL2Messages: Fr[] = []`, appends **that** unpadded, and
+  drops the `NUMBER_OF_L1_L2_MESSAGES_PER_ROLLUP` import entirely. The comment upstream left is
+  *"Append the block's real message leaves unpadded at compact indices."*
+- why it matters: it moves a tree root. A caller that passes two arguments now appends **nothing**
+  where it used to append a fixed number of zero leaves per transaction, so the L1→L2 tree's size
+  and root differ, and with them the block's state reference and everything chained off it. That is
+  precisely the shape this campaign calls dangerous — a different answer that still produces a
+  well-formed block rather than a named failure.
+- decision: **Accepted, because the function is unreachable here, and that is measured rather than
+  assumed.** `grep -rn 'insertTxEffectIntoWorldTrees'` across the whole repository returns exactly
+  one line: the definition, inside the vendored file. `orchestration/src/block_assembly.ts` imports
+  `makeTXEBlockHeader` from this file and nothing else. So no root in this runtime moves, and the
+  re-take carries upstream's version verbatim (`local-edits: none`) rather than pinning the old
+  behaviour behind an edit nobody could later justify.
+
+  **And this runtime already did what upstream has now done.** `orchestration/src/chain.ts:374`
+  appends the block's real `messages` to `MerkleTreeId.L1_TO_L2_MESSAGE_TREE`, unpadded — the
+  behaviour upstream moved to. The divergence closes by upstream arriving where this repository
+  already was, which is the second time in this reconciliation that upstream moved toward this
+  runtime rather than away (the other is `PublicProcessorFactory` taking an injected simulator).
+- evidence: `git -C ../aztec-packages diff 3a68d68ac2 233d8e0993 -- yarn-project/txe/src/utils/block_creation.ts`;
+  `orchestration/src/vendor/txe_block_creation.ts` (`local-edits: none`, header at `233d8e0993`);
+  `orchestration/src/block_assembly.ts:79`; `orchestration/src/chain.ts:374`;
+  `verification/test_guarded_merkle_tree_blocks_post_seal_access.sh` §TXE, which diffs the vendored
+  copy against the vendoring anchor and requires byte equality.
+
+## D24 — the fallback teardown gas limits stopped being imported and started being literals, and the two numbers agree
+
+- id: D24
+- status: closed
+- opened: 2026-08-30
+- milestone: M37 (the retirement of `PROVENANCE.md` F24)
+- design-question: —
+- sides: `FALLBACK_TEARDOWN_{DA,L2}_GAS_LIMIT` as `@aztec/stdlib/gas` exported them at anchor `ts`,
+  versus the literals upstream inlines at anchor `cpp`, versus what `@aztec/constants` at
+  `npm.deletion_era` derives
+- what: `orchestration/src/vendor/gas_compat.ts` existed because the `ts` anchor's `fixtures/utils.ts`
+  imported two names from `@aztec/stdlib/gas` that the published nightly does not export — node's
+  ESM loader refuses the module by name, measured in M26. At the `cpp` anchor upstream imports
+  neither: it writes `const TEARDOWN_DA_GAS_LIMIT = 98_304;` and `const TEARDOWN_L2_GAS_LIMIT =
+  817_500;` in each of the two files that used them.
+- why it matters: taking upstream's literals means the numbers stop tracking the pin. If
+  `@aztec/constants` ever moves `MAX_PROCESSABLE_L2_GAS` or
+  `MAX_PROCESSABLE_DA_GAS_PER_CHECKPOINT`, upstream's hard-coded values become wrong here and every
+  transaction the builder makes would meter the wrong teardown gas — silently, because a wrong gas
+  limit produces a valid-looking transaction.
+- decision: **Closed, and the shim retired, because the numbers are EQUAL and the equality is now a
+  check rather than a copy.** Asked of this tree's own installed packages:
+  `Math.floor(MAX_PROCESSABLE_L2_GAS / 8)` is **817500** and
+  `Math.floor(Math.floor(MAX_PROCESSABLE_DA_GAS_PER_CHECKPOINT / 4) / 2)` is **98304** — upstream's
+  two literals exactly. So the retirement moves no gas number, and `verify_tx_builder_vendored_not_reimplemented`
+  §4 now asserts that equality, with a wrong-divisor control beside it, instead of asserting that
+  the shim exists. The property the shim bought is kept and the local edit is not: the day
+  `@aztec/constants` moves under upstream's literals, that assertion goes red.
+
+  `spike/src/public/fixtures/gas_compat.ts` and `diffsim/`'s copy STAY. Those trees are frozen at
+  the `ts` anchor, where the import is still there and the shim is still forced; `spike-gas-compat`
+  remains a live edit class for exactly that reason.
+- evidence: `verification/verify_tx_builder_vendored_not_reimplemented.sh` §4 (four halves: the
+  names present at `ts`, absent at `cpp`, absent from the installed package, and the equality with
+  its control); `git -C ../aztec-packages diff 3a68d68ac2 233d8e0993 -- yarn-project/simulator/src/public/fixtures/utils.ts`;
+  `orchestration/node_modules/@aztec/constants/dest/constants.gen.js:411-412`.
+
+
+
 <!-- END:drift -->
 
 ---

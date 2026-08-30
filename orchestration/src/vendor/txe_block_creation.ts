@@ -2,18 +2,13 @@
 // VENDORED — not our code. Re-vendor rather than editing here.
 //   upstream-repo:   AztecProtocol/aztec-packages
 //   upstream-path:   yarn-project/txe/src/utils/block_creation.ts
-//   upstream-commit: 3a68d68ac29aaf04fc6251c80a8eb874043cb260
+//   upstream-commit: 233d8e099336c1773b89e939100af047ed9c4f71
 //   licence:         Apache-2.0
 //   local-edits:     none
 //   inventory:       REUSE-INVENTORY.md RI-66
 // END VENDORED-PROVENANCE
 
-import {
-  MAX_NOTE_HASHES_PER_TX,
-  MAX_NULLIFIERS_PER_TX,
-  NULLIFIER_SUBTREE_HEIGHT,
-  NUMBER_OF_L1_L2_MESSAGES_PER_ROLLUP,
-} from '@aztec/constants';
+import { MAX_NOTE_HASHES_PER_TX, MAX_NULLIFIERS_PER_TX, NULLIFIER_SUBTREE_HEIGHT } from '@aztec/constants';
 import { BlockNumber, CheckpointNumber, IndexWithinCheckpoint } from '@aztec/foundation/branded-types';
 import { padArrayEnd } from '@aztec/foundation/collection';
 import { Fr } from '@aztec/foundation/curves/bn254';
@@ -33,6 +28,7 @@ export function getSingleTxBlockRequestHash(blockNumber: BlockNumber): Fr {
 export async function insertTxEffectIntoWorldTrees(
   txEffect: TxEffect,
   worldTrees: MerkleTreeWriteOperations,
+  l1ToL2Messages: Fr[] = [],
 ): Promise<void> {
   await worldTrees.appendLeaves(
     MerkleTreeId.NOTE_HASH_TREE,
@@ -45,10 +41,8 @@ export async function insertTxEffectIntoWorldTrees(
     NULLIFIER_SUBTREE_HEIGHT,
   );
 
-  await worldTrees.appendLeaves(
-    MerkleTreeId.L1_TO_L2_MESSAGE_TREE,
-    padArrayEnd<Fr, number>(txEffect.l2ToL1Msgs, Fr.ZERO, NUMBER_OF_L1_L2_MESSAGES_PER_ROLLUP),
-  );
+  // Append the block's real message leaves unpadded at compact indices.
+  await worldTrees.appendLeaves(MerkleTreeId.L1_TO_L2_MESSAGE_TREE, l1ToL2Messages);
 
   // We do not need to add public data writes because we apply them as we go.
 }

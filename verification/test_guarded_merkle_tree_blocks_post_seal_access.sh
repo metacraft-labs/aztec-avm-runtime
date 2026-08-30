@@ -67,7 +67,7 @@ assert_eq "THE UNGUARDED CONTROL: the resident database answers the same call af
 
 # The message is upstream's, at the anchor, in the class itself — so a rename upstream fails this
 # check rather than silently leaving a refusal that nothing recognises.
-GMT_ANCHOR="$(m22_anchor_file yarn-project/simulator/src/public/public_processor/guarded_merkle_tree.ts)"
+GMT_ANCHOR="$(m22_vendor_anchor_file yarn-project/simulator/src/public/public_processor/guarded_merkle_tree.ts)"
 assert_true "the refusal message is the anchor's own string" \
   str_has_line "$GMT_ANCHOR" "      throw new Error('Merkle tree access has been stopped');"
 
@@ -261,7 +261,7 @@ assert_eq "…while a tree the module DOES have reaches the module instead" "REA
 echo "== makeTXEBlockHeader is upstream's, unmodified"
 
 TXE_LOCAL="$(m22_strip_header "$M22_VENDOR/txe_block_creation.ts")"
-TXE_ANCHOR="$(m22_anchor_file yarn-project/txe/src/utils/block_creation.ts)"
+TXE_ANCHOR="$(m22_vendor_anchor_file yarn-project/txe/src/utils/block_creation.ts)"
 assert_eq "the vendored block-creation helper is byte-identical to the anchor" "" \
   "$(diff <(printf '%s\n' "$TXE_ANCHOR") <(printf '%s\n' "$TXE_LOCAL") || true)"
 for line in "  const archiveInfo = await worldTrees.getTreeInfo(MerkleTreeId.ARCHIVE);" \

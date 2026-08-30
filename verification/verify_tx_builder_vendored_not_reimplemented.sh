@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
-# M26 verification: RI-72's reduced closure is VENDORED from the `ts` anchor, not reimplemented —
-# and the transaction it builds calls a registered contract.
+# M26 verification: RI-72's reduced closure is VENDORED, not reimplemented — and the transaction it
+# builds calls a registered contract.
 #
 #   verification/verify_tx_builder_vendored_not_reimplemented.sh   (or: just verify-tx-builder)
 #
 # ---------------------------------------------------------------------------
+# M37 RE-TOOK THE FOUR FILES AT THE `cpp` ANCHOR, and this check moved with them. Read
+# PROVENANCE.md's "Why two anchors" section first: `anchors.ts` now anchors the deleted TypeScript
+# AVM and nothing else, and every single-file row — these four included — sits at `anchors.cpp`.
+# Three things that were M26's numbers are now different numbers, and each is a re-measurement
+# rather than a relaxation: the price is 822 lines and not 880, `avm/fixtures/utils.ts` is
+# `avm/testing/utils.ts` (a rename at 73% similarity, not a deletion), and FIVE of the six
+# declarations M26 dropped by hand are dropped by upstream itself.
+#
 # THIS IS A DELIVERABLE IN ITS OWN RIGHT AND IS CHECKED AS ONE. Eight milestones deferred "a
 # transaction that calls a registered contract"; M25 priced it at four files and 880 lines and
 # recorded the decision as RI-72 `vendor`. What that decision buys is only real if the copy IS
@@ -23,10 +31,18 @@
 #                contract's own ABI derives, and which never touches its `merkleTree`.
 #
 # THE MERKLE TRIPWIRE IS THE ENTRY'S OWN LOAD-BEARING SENTENCE, EXECUTED. RI-72 rests on
-# `grep -c 'merkleTree\.'` being 0 against 7 mentions at the anchor — a claim about TEXT. The
+# `grep -c 'merkleTree\.'` being 0 against 8 mentions at the anchor — a claim about TEXT. The
 # driver passes a `Proxy` that throws on every read, every `in` and every enumeration, so the same
 # claim is run. Its own control is that the builder DID run and DID produce a transaction; a
 # tripwire that never fires because nothing executed is an absence of nothing.
+#
+# AND M37 NARROWED THAT SENTENCE RATHER THAN LETTING IT DRIFT. Upstream's new `close()` calls
+# `this.merkleTrees?.close()` — the FIRST method call on that field the file has ever carried, so
+# `grep -c 'merkleTrees\.'` is 1 where it was 0. It is inside the simulator half, which the
+# reduction drops, so the vendored copy still never touches a merkle tree and the tripwire still
+# reports zero. What changed is the SCOPE of the claim: true of the kept half, no longer true of
+# the whole upstream file. Both halves of that are asserted below, because a claim that quietly
+# becomes narrower is the shape this campaign keeps meeting.
 # ---------------------------------------------------------------------------
 
 set -uo pipefail
@@ -43,18 +59,33 @@ require_work_dir "$WORK" 1
 rm -rf "${WORK:?}/up" "${WORK:?}/declared"
 mkdir -p "$WORK/up" "$WORK/declared" || die "could not create $WORK"
 
-ANCHOR="$(m24_pin ts commit)"
-assert_ge "pins.json declares a ts anchor" 40 "${#ANCHOR}"
+ANCHOR="$(m24_pin cpp commit)"
+assert_ge "pins.json declares a cpp anchor" 40 "${#ANCHOR}"
 assert_dir "the fork's object store is present" "$FORK_ROOT/.git"
+
+# THE OLD ANCHOR IS KEPT AS A CONTROL, not as a fallback. M37 moved these four rows from `ts` to
+# `cpp`; asserting only the new value would pass over a mapping that had never moved at all, since
+# `ts` and `cpp` are both 40-character shas out of the same object store. The two must DIFFER, and
+# the file the rename renamed must be resolvable at one anchor and not the other.
+ANCHOR_TS="$(m24_pin ts commit)"
+assert_ge "pins.json still declares the ts anchor, which is now the frozen TS AVM's alone" 40 "${#ANCHOR_TS}"
+assert_false "…and the two anchors are different commits, so 'moved' is a measurement" \
+  test "$ANCHOR" = "$ANCHOR_TS"
 
 VENDOR="$REPO_ROOT/orchestration/src/vendor"
 UP_PREFIX="yarn-project/simulator/src/public"
 
 # local-basename : upstream-path : declared upstream line count
+#
+# THE THIRD ROW'S PATH IS THE SPLIT, IN ONE LINE. M37's sizing called `avm/fixtures/utils.ts` one of
+# two paths "gone at tip"; `git diff -M --summary` calls it `avm/{fixtures => testing}/utils.ts` at
+# 73% similarity. It is a RENAME, and the 27% is exactly the five TS-AVM-dependent declarations —
+# which is why this row could move to `cpp` while `avm/avm_simulator.ts`, genuinely deleted, keeps
+# `spike/src`, `diffsim/src` and `drift/src` at `ts` forever.
 FILES="\
-public_tx_simulation_tester.ts:$UP_PREFIX/fixtures/public_tx_simulation_tester.ts:329
-public_fixtures_utils.ts:$UP_PREFIX/fixtures/utils.ts:275
-avm_fixtures_utils.ts:$UP_PREFIX/avm/fixtures/utils.ts:154
+public_tx_simulation_tester.ts:$UP_PREFIX/fixtures/public_tx_simulation_tester.ts:315
+public_fixtures_utils.ts:$UP_PREFIX/fixtures/utils.ts:270
+avm_fixtures_utils.ts:$UP_PREFIX/avm/testing/utils.ts:115
 simple_contract_data_source.ts:$UP_PREFIX/fixtures/simple_contract_data_source.ts:122"
 
 # ===========================================================================
@@ -68,7 +99,8 @@ while IFS=: read -r base up want; do
   row="$(printf '%s\n' "$MAP" | awk -F'\t' -v p="orchestration/src/vendor/$base" '$1==p {print; exit}')"
   assert_ge "PROVENANCE.md maps $base" 1 "$(printf '%s\n' "$row" | grep -c . || true)"
   assert_eq "…to $up" "$up" "$(printf '%s\n' "$row" | cut -f2)"
-  assert_eq "…at the ts anchor" "$ANCHOR" "$(printf '%s\n' "$row" | cut -f3)"
+  assert_eq "…at the cpp anchor, which is where M37 re-took it" "$ANCHOR" \
+    "$(printf '%s\n' "$row" | cut -f3)"
   assert_eq "…citing RI-72" "RI-72" "$(printf '%s\n' "$row" | cut -f6)"
   assert_eq "…with the edit class M26 declared" "tx-builder-calldata-half" "$(printf '%s\n' "$row" | cut -f8)"
   assert_true "…and the file is tracked" \
@@ -82,15 +114,33 @@ while IFS=: read -r base up want; do
 done <<EOF
 $FILES
 EOF
-assert_eq "the four together are RI-72's 880 lines" "880" "$TOTAL_UP"
+assert_eq "the four together are 822 lines at this anchor, not the 880 RI-72 priced" "822" "$TOTAL_UP"
+# THE CONTROL FOR THAT NUMBER: 880 was true, at the OTHER anchor, and re-deriving both is what makes
+# "58 lines smaller" upstream's trimming rather than a needle that stopped matching.
+TOTAL_TS=0
+for up in "$UP_PREFIX/fixtures/public_tx_simulation_tester.ts" "$UP_PREFIX/fixtures/utils.ts" \
+          "$UP_PREFIX/avm/fixtures/utils.ts" "$UP_PREFIX/fixtures/simple_contract_data_source.ts"; do
+  n="$(git -C "$FORK_ROOT" show "$ANCHOR_TS:$up" 2>/dev/null | wc -l | tr -d '[:space:]')"
+  case "$n" in ''|*[!0-9]*) n=0 ;; esac
+  TOTAL_TS=$((TOTAL_TS + n))
+done
+assert_eq "…and the SAME four at the ts anchor are the 880 RI-72 did price" "880" "$TOTAL_TS"
+assert_eq "…so the reduction got 58 lines cheaper without this repository editing anything" "58" \
+  "$((TOTAL_TS - TOTAL_UP))"
 
-# The added shim is declared as ADDED, which is a different row shape from the four above.
+# THE RETIRED ROW. `orchestration/src/vendor/gas_compat.ts` was F24 until M37; asserting its ABSENCE
+# from the mapping AND from the tree is what stops a re-introduction going unnoticed. Part 4 carries
+# the measurement that made retiring it safe.
 SHIM_ROW="$(printf '%s\n' "$MAP" | awk -F'\t' '$1=="orchestration/src/vendor/gas_compat.ts" {print; exit}')"
-assert_ge "PROVENANCE.md maps the gas-compat shim too" 1 "$(printf '%s\n' "$SHIM_ROW" | grep -c . || true)"
-assert_eq "…as having NO upstream counterpart" "(none — added in this repo)" \
-  "$(printf '%s\n' "$SHIM_ROW" | cut -f2)"
-assert_true "…and its header says so rather than naming a path that does not exist" \
-  str_has_sub "$(cat "$VENDOR/gas_compat.ts")" 'ADDED HERE — this file has NO upstream counterpart'
+assert_eq "the gas-compat shim is no longer a PROVENANCE.md row" "0" \
+  "$(printf '%s\n' "$SHIM_ROW" | grep -c . || true)"
+assert_false "…nor a file in the tree" test -e "$VENDOR/gas_compat.ts"
+assert_eq "…and neither vendored file imports it any more" "0" \
+  "$(grep -l "gas_compat" "$VENDOR"/*.ts 2>/dev/null | wc -l | tr -d '[:space:]')"
+# …while the trees that are still FROZEN at the ts anchor keep theirs, which is the control that
+# this is a re-take and not a deletion spree: `spike-gas-compat` is still a live edit class.
+assert_file "spike/ keeps its own copy, because spike/ is still at the ts anchor" \
+  "$REPO_ROOT/spike/src/public/fixtures/gas_compat.ts"
 
 # ===========================================================================
 # PART 2 — THE DIFF, PINNED LINE FOR LINE.
@@ -102,10 +152,7 @@ assert_true "…and its header says so rather than naming a path that does not e
 # ===========================================================================
 cat > "$WORK/declared/public_tx_simulation_tester.ts" <<'DECLARED'
 import { createLogger } from '@aztec/foundation/log';
-import { Gas, GasFees } from '@aztec/stdlib/gas';
 } from './avm_fixtures_utils.ts';
-// The two names the anchor imports from '@aztec/stdlib/gas' and the pinned nightly does not export.
-import { FALLBACK_TEARDOWN_DA_GAS_LIMIT, FALLBACK_TEARDOWN_L2_GAS_LIMIT } from './gas_compat.ts';
 import { type TestPrivateInsertions, createTxForPublicCalls } from './public_fixtures_utils.ts';
 import { SimpleContractDataSource } from './simple_contract_data_source.ts';
 export class PublicTxSimulationTester {
@@ -116,12 +163,15 @@ export class PublicTxSimulationTester {
     this.merkleTree = merkleTree;
     this.contractDataSource = contractDataSource;
 DECLARED
+# ONE LINE, in each of two files, and it is the `deletion_era` spelling of one constructor:
+# upstream calls `AztecAddress.fromNumberUnsafe` at this anchor and `@aztec/stdlib` at the nightly
+# `orchestration/` pins answers `undefined` for that name. Part 4 measures both halves.
 cat > "$WORK/declared/public_fixtures_utils.ts" <<'DECLARED'
-import { Gas, GasFees, GasSettings } from '@aztec/stdlib/gas';
-// The two names the anchor imports from '@aztec/stdlib/gas' and the pinned nightly does not export.
-import { FALLBACK_TEARDOWN_DA_GAS_LIMIT, FALLBACK_TEARDOWN_L2_GAS_LIMIT } from './gas_compat.ts';
+    AztecAddress.fromNumber(CONTRACT_INSTANCE_REGISTRY_CONTRACT_ADDRESS),
 DECLARED
-: > "$WORK/declared/avm_fixtures_utils.ts"
+cat > "$WORK/declared/avm_fixtures_utils.ts" <<'DECLARED'
+    AztecAddress.fromNumber(CONTRACT_INSTANCE_REGISTRY_CONTRACT_ADDRESS),
+DECLARED
 cat > "$WORK/declared/simple_contract_data_source.ts" <<'DECLARED'
 import { getFunctionSelector } from './avm_fixtures_utils.ts';
 DECLARED
@@ -134,10 +184,18 @@ DECLARED
 # lines SWAPPED, each passed every assertion in this loop — the second with counts byte-identical to
 # the uncorrupted file. `VENDORED_LINES` was computed and printed on every run and compared with
 # nothing. Duplication now has a number to fail against, and reordering has an in-order walk.
+#
+# M37 RE-DERIVED ALL SIXTEEN NUMBERS AT THE NEW ANCHOR. The two that say the most:
+#   * `avm_fixtures_utils.ts` drops 5, not 28. Twenty-three of the twenty-eight lines M26 removed by
+#     hand went with the TypeScript AVM in upstream's own rename; what is left is `allSameExcept`,
+#     its doc comment and the `lodash.merge` import — the one edge RI-72's "no new @aztec/*
+#     dependency" sentence never covered.
+#   * `public_fixtures_utils.ts` adds 1 and drops 1, where it added 3 and dropped 6. The gas-compat
+#     shim is retired (Part 4) and what remains is the one-line constructor rename.
 EXPECT="\
-public_tx_simulation_tester.ts:14:150:123
-public_fixtures_utils.ts:3:6:246
-avm_fixtures_utils.ts:0:28:98
+public_tx_simulation_tester.ts:11:144:120
+public_fixtures_utils.ts:1:1:244
+avm_fixtures_utils.ts:1:5:98
 simple_contract_data_source.ts:1:1:106"
 while IFS=: read -r base wadd wdrop wlines; do
   [ -n "$base" ] || continue
@@ -259,15 +317,45 @@ assert_ge "the four vendored files read back" 500 "$(printf '%s\n' "$ALL_VENDORE
 assert_ge "…and the four upstream originals do too" 700 "$(printf '%s\n' "$ALL_UPSTREAM" | grep -c . || true)"
 
 for needle in '@aztec/world-state' 'NativeWorldStateService' 'lodash.merge' \
-              '../avm/fixtures/base_avm_simulation_tester.js' '../public_db_sources.js' \
-              '../public_tx_simulator/cpp_public_tx_simulator.js' \
-              '../public_tx_simulator/cpp_vs_ts_public_tx_simulator.js' \
-              '../test'"_executor_metrics.js" '../../../common/index.js' \
-              '../avm_memory_types.js' '../errors.js'; do
+              '../avm/testing/base_avm_simulation_tester.js' '../public_db_sources.js' \
+              '../public_tx_simulator/public_tx_simulator.js' \
+              '../avm_simulator_pool.js' \
+              '../test'"_executor_metrics.js"; do
   assert_true "the reduction's target [$needle] IS present in the upstream originals" \
     str_has_sub "$ALL_UPSTREAM" "$needle"
   assert_false "…and is GONE from the vendored copies" str_has_sub "$ALL_VENDORED" "$needle"
 done
+
+# THE THREE EDGES THAT ARE NO LONGER OURS TO SEVER, asserted in three directions each so that
+# "upstream did it" is a measurement and not a shrug. M26 severed eleven edges; at this anchor three
+# of them do not exist to sever, because they went with the TypeScript AVM. A check that merely
+# dropped them from the loop above would have gone quietly six assertions smaller and recorded
+# nothing — which is the shape `CAMPAIGN-BRIEF.md` calls a milestone's silent death.
+ALL_UPSTREAM_TS="$(for up in "$UP_PREFIX/fixtures/public_tx_simulation_tester.ts" \
+                             "$UP_PREFIX/fixtures/utils.ts" "$UP_PREFIX/avm/fixtures/utils.ts" \
+                             "$UP_PREFIX/fixtures/simple_contract_data_source.ts"; do
+                    git -C "$FORK_ROOT" show "$ANCHOR_TS:$up" 2>/dev/null
+                  done)"
+assert_ge "the four originals read back at the OLD anchor too, which is the control's control" 700 \
+  "$(printf '%s\n' "$ALL_UPSTREAM_TS" | grep -c . || true)"
+for gone in '../../../common/index.js' '../avm_memory_types.js' '../errors.js'; do
+  assert_true "[$gone] WAS an edge this reduction severed, at the ts anchor" \
+    str_has_sub "$ALL_UPSTREAM_TS" "$gone"
+  assert_false "…and UPSTREAM removed it: it is not in the originals at the cpp anchor" \
+    str_has_sub "$ALL_UPSTREAM" "$gone"
+  assert_false "…so its absence here is upstream's shape rather than our edit" \
+    str_has_sub "$ALL_VENDORED" "$gone"
+done
+# And the two spellings that were RENAMED rather than removed, so the loop above is reading the
+# live name rather than a needle that stopped matching.
+assert_true "the simulator import was cpp_public_tx_simulator.js at the old anchor" \
+  str_has_sub "$ALL_UPSTREAM_TS" '../public_tx_simulator/cpp_public_tx_simulator.js'
+assert_false "…and that spelling is gone at the new one" \
+  str_has_sub "$ALL_UPSTREAM" '../public_tx_simulator/cpp_public_tx_simulator.js'
+assert_true "the base tester lived under avm/fixtures/ at the old anchor" \
+  str_has_sub "$ALL_UPSTREAM_TS" '../avm/fixtures/base_avm_simulation_tester.js'
+assert_false "…and lives under avm/testing/ at the new one" \
+  str_has_sub "$ALL_UPSTREAM" '../avm/fixtures/base_avm_simulation_tester.js'
 # THE CONTROL FOR THE ELEVEN ABSENCES: something upstream that is NOT trimmed is still here.
 for kept in 'createTxForPublicCalls' 'PublicCallRequest.fromCalldata' 'createContractClassAndInstance' \
             'getDebugFunctionName' 'MerkleTreeWriteOperations'; do
@@ -282,21 +370,55 @@ assert_eq "…and never CONSTRUCTS one" "0" \
   "$(grep -c 'new NativeWorldStateService' "$WORK/up/public_tx_simulation_tester.ts" || true)"
 assert_eq "…and never CALLS a method on its merkleTree" "0" \
   "$(grep -c 'merkleTree\.' "$WORK/up/public_tx_simulation_tester.ts" || true)"
-assert_ge "…against seven mentions of it, which is the control for that zero" 7 \
+assert_ge "…against eight mentions of it, which is the control for that zero" 8 \
   "$(grep -c 'merkleTree' "$WORK/up/public_tx_simulation_tester.ts" || true)"
+# THE ONE THING THAT MOVED, RECORDED RATHER THAN ABSORBED. Upstream's new `close()` calls
+# `this.merkleTrees?.close()` — plural, the base class's field — which is the first method call on a
+# merkle tree this file has ever carried. It is inside the half the reduction drops, so RI-72's
+# sentence survives; but it survives about the KEPT half, and a narrower claim asserted as if it
+# were the old one is how a measurement rots.
+assert_eq "upstream's builder DOES now call a method on merkleTrees, exactly once" "1" \
+  "$(grep -c 'merkleTrees\.' "$WORK/up/public_tx_simulation_tester.ts" || true)"
+assert_eq "…and it did NOT at the ts anchor, so this is a move and not a constant" "0" \
+  "$(git -C "$FORK_ROOT" show "$ANCHOR_TS:$UP_PREFIX/fixtures/public_tx_simulation_tester.ts" 2>/dev/null \
+     | grep -c 'merkleTrees\.' || true)"
+assert_eq "…and the vendored copy carries neither spelling, which is why the tripwire still reads 0" "0" \
+  "$(grep -c 'merkleTrees\?\.' "$VENDOR/public_tx_simulation_tester.ts" || true)"
 
 # ===========================================================================
-# PART 4 — THE GAS-COMPAT SHIM, and the measurement that justifies it.
+# PART 4 — THE GAS-COMPAT SHIM'S RETIREMENT, and the measurement that made it safe.
 #
-# BOTH HALVES, because either alone rots. The names ARE at the anchor and are NOT in the installed
-# package; the day the nightly starts exporting them, the second assertion reddens rather than the
-# shim quietly becoming dead code.
+# UNTIL M37 THIS PART ASSERTED THE SHIM'S EXISTENCE. It existed because the `ts` anchor's
+# `fixtures/utils.ts` imported `FALLBACK_TEARDOWN_{DA,L2}_GAS_LIMIT` from `@aztec/stdlib/gas` and
+# the pinned nightly does not export them, so `orchestration/src/vendor/gas_compat.ts` recomputed
+# them from `@aztec/constants`. At the `cpp` anchor UPSTREAM ITSELF inlines the two numbers, so the
+# forced edit is not forced any more and the shim is gone.
+#
+# WHAT THE SHIM BOUGHT IS KEPT — AS A CHECK RATHER THAN AS A LOCAL EDIT. Its real value was that the
+# numbers were DERIVED from the pin instead of typed in, so a constants change could not silently
+# leave the builder metering the wrong gas. Upstream's literals give that up; this section asserts
+# the equality instead, in both directions, so the day `@aztec/constants` moves under upstream's
+# hard-coded 98_304 / 817_500 this goes red rather than the transactions going quietly wrong.
+#
+# ALL FOUR HALVES, because any one alone rots: the names WERE at the old anchor, are NOT at the new
+# one, are NOT in the installed package, and the numbers upstream wrote EQUAL the ones the pin
+# derives.
 # ===========================================================================
-GAS_UP="$(git -C "$FORK_ROOT" show "$ANCHOR:yarn-project/stdlib/src/gas/gas_settings.ts" 2>/dev/null)"
-assert_ge "upstream's gas_settings.ts reads back at the anchor" 20 \
-  "$(printf '%s\n' "$GAS_UP" | grep -c . || true)"
+GAS_UP_TS="$(git -C "$FORK_ROOT" show "$ANCHOR_TS:yarn-project/stdlib/src/gas/gas_settings.ts" 2>/dev/null)"
+assert_ge "upstream's gas_settings.ts reads back at the ts anchor" 20 \
+  "$(printf '%s\n' "$GAS_UP_TS" | grep -c . || true)"
 for c in FALLBACK_TEARDOWN_DA_GAS_LIMIT FALLBACK_TEARDOWN_L2_GAS_LIMIT; do
-  assert_true "$c IS exported at the ts anchor" str_has_sub "$GAS_UP" "export const $c"
+  assert_true "$c WAS exported at the ts anchor, which is why the shim ever existed" \
+    str_has_sub "$GAS_UP_TS" "export const $c"
+  assert_false "…and the fixtures file no longer imports it at the cpp anchor" \
+    str_has_sub "$(cat "$WORK/up/public_fixtures_utils.ts")" "$c"
+done
+# Upstream's replacement, read out of the object store rather than restated.
+for lit in 'const TEARDOWN_DA_GAS_LIMIT = 98_304;' 'const TEARDOWN_L2_GAS_LIMIT = 817_500;'; do
+  assert_true "upstream inlines [$lit] at the cpp anchor" \
+    str_has_sub "$(cat "$WORK/up/public_fixtures_utils.ts")" "$lit"
+  assert_true "…and the vendored copy carries it verbatim rather than a shim import" \
+    str_has_sub "$(cat "$VENDOR/public_fixtures_utils.ts")" "$lit"
 done
 # THE CWD IS LOAD-BEARING. Node's ESM resolution walks up from the importing file, and an `-e`
 # script's notional file is the CWD — so `@aztec/*` resolves only from inside the package that
@@ -309,20 +431,29 @@ INSTALLED="$(cd "$REPO_ROOT/orchestration" && node -e '
   }).catch(e => console.log("LOADFAIL:" + e.message));
 ' 2>/dev/null)"
 [ -n "$INSTALLED" ] || die "could not ask the installed @aztec/stdlib what it exports"
-assert_eq "…and is NOT exported by the pinned nightly, which is why the shim exists" "ABSENT" \
-  "$INSTALLED"
-# The shim's VALUES are derived from @aztec/constants rather than typed in.
-SHIM_VALUES="$(cd "$REPO_ROOT/orchestration" && node -e '
+assert_eq "…and the pinned nightly still does not export them, so nothing regressed by removing it" \
+  "ABSENT" "$INSTALLED"
+# THE ASSERTION THE SHIM USED TO BE. Upstream's two literals against the two numbers this tree's own
+# pin derives, plus a non-degeneracy arm so `0 === 0` cannot satisfy it.
+GAS_EQ="$(cd "$REPO_ROOT/orchestration" && node -e '
   Promise.all([import("@aztec/constants"),
-               import("'"$VENDOR"'/gas_compat.ts")]).then(([c, g]) => {
-    console.log([Math.floor(c.MAX_PROCESSABLE_L2_GAS / 8) === g.FALLBACK_TEARDOWN_L2_GAS_LIMIT,
-                 Math.floor(Math.floor(c.MAX_PROCESSABLE_DA_GAS_PER_CHECKPOINT / 4) / 2)
-                   === g.FALLBACK_TEARDOWN_DA_GAS_LIMIT,
-                 g.FALLBACK_TEARDOWN_L2_GAS_LIMIT > 0].join(","));
+               import("'"$VENDOR"'/public_fixtures_utils.ts")]).then(([c]) => {
+    const derivedL2 = Math.floor(c.MAX_PROCESSABLE_L2_GAS / 8);
+    const derivedDa = Math.floor(Math.floor(c.MAX_PROCESSABLE_DA_GAS_PER_CHECKPOINT / 4) / 2);
+    console.log([derivedL2 === 817500, derivedDa === 98304, derivedL2 > 0, derivedDa > 0].join(","));
   }).catch(e => console.log("LOADFAIL:" + e.message));
 ' 2>/dev/null)"
-assert_eq "the shim reproduces the anchor's arithmetic over @aztec/constants, non-degenerately" \
-  "true,true,true" "$SHIM_VALUES"
+assert_eq "upstream's inlined gas limits EQUAL the ones @aztec/constants derives at this pin" \
+  "true,true,true,true" "$GAS_EQ"
+# THE CONTROL FOR THAT EQUALITY: the same arithmetic on a different divisor does NOT agree, so the
+# comparison is reading the constants rather than comparing two literals somebody typed twice.
+GAS_CTRL="$(cd "$REPO_ROOT/orchestration" && node -e '
+  import("@aztec/constants").then(c => {
+    console.log(String(Math.floor(c.MAX_PROCESSABLE_L2_GAS / 7) === 817500));
+  }).catch(e => console.log("LOADFAIL:" + e.message));
+' 2>/dev/null)"
+assert_eq "…and the same derivation with the wrong divisor does not, which is that arm's control" \
+  "false" "$GAS_CTRL"
 
 # ===========================================================================
 # PART 5 — THE PAYOFF, RUN. A transaction that calls a registered contract.
@@ -393,12 +524,23 @@ INV="$(cat "$REPO_ROOT/REUSE-INVENTORY.md" 2>/dev/null)"
 assert_ge "the reuse inventory reads back" 500 "$(printf '%s\n' "$INV" | grep -c . || true)"
 assert_true "RI-72 records the decision as vendor" \
   str_has_sub "$INV" '### RI-72 — Upstream'"'"'s transaction builder, and the closure it drags'
-assert_true "…and the figure the four files reproduce" \
+assert_true "…and the figure the four files reproduced AT THE ts ANCHOR" \
   str_has_sub "$INV" '**The calldata-and-call-request half is 4 files and 880 lines**'
 assert_true "…and M26 records that the vendoring landed, with the row ids" \
   str_has_sub "$INV" 'VENDORED BY M26 as `PROVENANCE.md` F20..F23'
 # The lodash finding RI-72 did not have, recorded rather than left in a commit message.
 assert_true "…and records the non-@aztec package the original sentence did not cover" \
   str_has_sub "$INV" 'lodash.merge'
+# M37'S RE-MEASUREMENT IS IN THE ENTRY, not only in this file. The number a check re-derives and the
+# number the inventory states have to be the same number, or one of them is quietly wrong — which is
+# the failure this whole family exists to catch.
+assert_true "RI-72 records that M37 re-took the set at the cpp anchor" \
+  str_has_sub "$INV" '**RE-TAKEN BY M37 AT THE `cpp` ANCHOR'
+assert_true "…with the new price, which is the number this check re-derives above" \
+  str_has_sub "$INV" '**The reduced set is 822 lines, not 880**'
+assert_true "…and the rename, at the similarity git reports for it" \
+  str_has_sub "$INV" '**73% similarity**'
+assert_true "…and that the gas-compat shim was retired rather than merely deleted" \
+  str_has_sub "$INV" 'The added row F24 (`gas_compat.ts`) is retired with its file.'
 
 m24_finish

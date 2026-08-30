@@ -4,9 +4,15 @@
 # Not to be executed directly: sourced after lib.sh by verification/*.sh.
 #
 # M22 runs upstream's own `PublicProcessor.process` over a block of transactions against a built
-# `avm.wasm`. Its checks read three things: the FORK at the pinned `ts` anchor (where
-# `PublicProcessor` and `GuardedMerkleTreeOperations` actually live, and where the vendored copies
-# are diffed against), `orchestration/src` (what we ship), and ONE RUN of the block arms.
+# `avm.wasm`. Its checks read three things: the FORK at the pinned `cpp` anchor (where
+# `PublicProcessor` and `GuardedMerkleTreeOperations` now live, and where the vendored copies are
+# diffed against — M37 moved PROVENANCE.md F10..F23 there), `orchestration/src` (what we ship), and
+# ONE RUN of the block arms.
+#
+# BOTH ANCHORS ARE READ, AND THE DISTINCTION IS LOAD-BEARING. `m22_vendor_anchor_file` is `cpp` and
+# is the only lookup a vendored file may be compared against; `m22_anchor_file` is `ts` and survives
+# for the questions that are genuinely about the pre-deletion tree, including one path that exists
+# at `ts` and not at `cpp` at all.
 #
 # THE ARMS ARE MEASURED ONCE AND SHARED, for M20's reason: three checks each instantiating the
 # module and each deriving "the gas the block used" would eventually disagree about a number
@@ -41,9 +47,9 @@ import json, sys
 print(json.load(open(sys.argv[1]))["anchors"]["ts"]["commit"])' "$REPO_ROOT/pins.json" 2>/dev/null)"
 export M22_TS_ANCHOR
 
-# The C++ anchor, read the same way. M22 vendors nothing from it; it is here as the CONTROL for the
-# `upstream/tsavm` precondition — RI-65's trap is a ts-versus-cpp difference, so the check that
-# closes that trap needs both ends of it.
+# The C++ anchor, read the same way. SINCE M37 THIS IS THE ANCHOR M22'S TEN VENDORED FILES COME
+# FROM, and it is also still the CONTROL for the `upstream/tsavm` precondition — RI-65's trap is a
+# ts-versus-cpp difference, so the check that closes that trap needs both ends of it.
 M22_CPP_ANCHOR="$(python3 -c '
 import json, sys
 print(json.load(open(sys.argv[1]))["anchors"]["cpp"]["commit"])' "$REPO_ROOT/pins.json" 2>/dev/null)"
@@ -93,9 +99,23 @@ m22_require_anchor() {
 
 # A file out of the fork at the ts anchor. Fails LOUDLY rather than yielding empty: an empty
 # haystack turns every `grep -c` beneath it into an assertion about nothing.
+#
+# THIS IS NO LONGER THE ANCHOR M22'S OWN FILES ARE VENDORED FROM — use `m22_vendor_anchor_file` for
+# those. M37 moved PROVENANCE.md F10..F23 to `cpp` and left `ts` anchoring the deleted TypeScript
+# AVM alone, so the two lookups answer different trees and asking the wrong one is a check that
+# compares a vendored copy against a commit it was not taken from. This one survives for the
+# genuinely historical questions — paths that exist at `ts` and NOT at `cpp`, of which
+# `public_processor/apps_tests/timeout_race.test.ts` is one.
 m22_anchor_file() { # <path-in-fork>
   git -C "$FORK_ROOT" show "$M22_TS_ANCHOR:$1" 2>/dev/null \
     || die "the ts anchor has no $1 (the layout moved; this check's premise is stale)"
+}
+
+# A file out of the fork AT THE ANCHOR THE VENDORED COPIES NAME. Every comparison of a file under
+# `orchestration/src/vendor/` against upstream must go through this one.
+m22_vendor_anchor_file() { # <path-in-fork>
+  git -C "$FORK_ROOT" show "$M22_CPP_ANCHOR:$1" 2>/dev/null \
+    || die "the vendoring anchor has no $1 (the layout moved; this check's premise is stale)"
 }
 
 m22_require_packages() {
@@ -289,5 +309,5 @@ STRIP
 m22_vendor_diff() { # <local-path-under-orchestration/src/vendor> <upstream-path-in-fork>
   local local_file="$M22_VENDOR/$1" upstream="$2"
   [ -f "$local_file" ] || die "no vendored file at $local_file"
-  diff <(m22_anchor_file "$upstream") <(m22_strip_header "$local_file") || true
+  diff <(m22_vendor_anchor_file "$upstream") <(m22_strip_header "$local_file") || true
 }

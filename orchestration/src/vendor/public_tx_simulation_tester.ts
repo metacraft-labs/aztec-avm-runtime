@@ -2,7 +2,7 @@
 // VENDORED — not our code. Re-vendor rather than editing here.
 //   upstream-repo:   AztecProtocol/aztec-packages
 //   upstream-path:   yarn-project/simulator/src/public/fixtures/public_tx_simulation_tester.ts
-//   upstream-commit: 3a68d68ac29aaf04fc6251c80a8eb874043cb260
+//   upstream-commit: 233d8e099336c1773b89e939100af047ed9c4f71
 //   licence:         Apache-2.0
 //   local-edits:     tx-builder-calldata-half
 //   inventory:       REUSE-INVENTORY.md RI-72
@@ -26,12 +26,12 @@ import {
   getContractFunctionAbi,
   getFunctionSelector,
 } from './avm_fixtures_utils.ts';
-// The two names the anchor imports from '@aztec/stdlib/gas' and the pinned nightly does not export.
-import { FALLBACK_TEARDOWN_DA_GAS_LIMIT, FALLBACK_TEARDOWN_L2_GAS_LIMIT } from './gas_compat.ts';
 import { type TestPrivateInsertions, createTxForPublicCalls } from './public_fixtures_utils.ts';
 import { SimpleContractDataSource } from './simple_contract_data_source.ts';
 
 const DEFAULT_GAS_FEES = new GasFees(2, 3);
+const TEARDOWN_DA_GAS_LIMIT = 98_304;
+const TEARDOWN_L2_GAS_LIMIT = 817_500;
 
 export type TestEnqueuedCall = {
   sender?: AztecAddress;
@@ -90,10 +90,7 @@ export class PublicTxSimulationTester {
       teardownCallRequest,
       feePayer,
       /*gasUsedByPrivate*/ teardownCall
-        ? new Gas(
-            FALLBACK_TEARDOWN_DA_GAS_LIMIT + TX_DA_GAS_OVERHEAD,
-            FALLBACK_TEARDOWN_L2_GAS_LIMIT + PUBLIC_TX_L2_GAS_OVERHEAD,
-          )
+        ? new Gas(TEARDOWN_DA_GAS_LIMIT + TX_DA_GAS_OVERHEAD, TEARDOWN_L2_GAS_LIMIT + PUBLIC_TX_L2_GAS_OVERHEAD)
         : new Gas(TX_DA_GAS_OVERHEAD, PUBLIC_TX_L2_GAS_OVERHEAD),
       defaultGlobals(),
       gasLimits,

@@ -2,7 +2,7 @@
 // VENDORED — not our code. Re-vendor rather than editing here.
 //   upstream-repo:   AztecProtocol/aztec-packages
 //   upstream-path:   yarn-project/simulator/src/public/fixtures/utils.ts
-//   upstream-commit: 3a68d68ac29aaf04fc6251c80a8eb874043cb260
+//   upstream-commit: 233d8e099336c1773b89e939100af047ed9c4f71
 //   licence:         Apache-2.0
 //   local-edits:     tx-builder-calldata-half
 //   inventory:       REUSE-INVENTORY.md RI-72
@@ -23,9 +23,6 @@ import { bufferAsFields } from '@aztec/stdlib/abi';
 import { AztecAddress } from '@aztec/stdlib/aztec-address';
 import type { ContractClassPublic, ContractInstanceWithAddress } from '@aztec/stdlib/contract';
 import { Gas, GasFees, GasSettings } from '@aztec/stdlib/gas';
-
-// The two names the anchor imports from '@aztec/stdlib/gas' and the pinned nightly does not export.
-import { FALLBACK_TEARDOWN_DA_GAS_LIMIT, FALLBACK_TEARDOWN_L2_GAS_LIMIT } from './gas_compat.ts';
 import { siloNullifier } from '@aztec/stdlib/hash';
 import {
   LogHash,
@@ -48,6 +45,9 @@ import {
 } from '@aztec/stdlib/tx';
 
 import { strict as assert } from 'assert';
+
+const TEARDOWN_DA_GAS_LIMIT = 98_304;
+const TEARDOWN_L2_GAS_LIMIT = 817_500;
 
 export type TestPrivateInsertions = {
   revertible?: {
@@ -139,9 +139,7 @@ export async function createTxForPublicCalls(
   }
 
   const maxFeesPerGas = feePayer.isZero() ? GasFees.empty() : new GasFees(10, 10);
-  const teardownGasLimits = teardownCallRequest
-    ? new Gas(FALLBACK_TEARDOWN_DA_GAS_LIMIT, FALLBACK_TEARDOWN_L2_GAS_LIMIT)
-    : Gas.empty();
+  const teardownGasLimits = teardownCallRequest ? new Gas(TEARDOWN_DA_GAS_LIMIT, TEARDOWN_L2_GAS_LIMIT) : Gas.empty();
   const gasSettings = new GasSettings(gasLimits, teardownGasLimits, maxFeesPerGas, GasFees.empty());
   const txContext = new TxContext(Fr.zero(), Fr.zero(), gasSettings);
   const header = BlockHeader.empty({ globalVariables: globals });
