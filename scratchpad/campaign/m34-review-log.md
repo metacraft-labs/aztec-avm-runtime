@@ -278,3 +278,157 @@ recomputed by §3; it is §5. Both corrected.
 
 `e2e_wallet_public_transfer` is 83 and the table says 79 in three rows. Not a defect in the work;
 recorded because the next reader would compare the wrong numbers.
+
+---
+
+## Step 6 — the two declarations the brief singled out
+
+**M5's rewrite.** The first version skipped the host call, the class never reached the module, the
+arm run exited 1 and the check died at `m34_require_arms` with `0 assertion(s), 1 failure(s)` — not
+one assertion of §1 ran. The rewrite lies only in the RECORD (`registered=${registered}` becomes the
+literal `registered=0`) and re-taken by me it is **33 / 1**, the single failure being
+`…and the node's resident store accepted exactly one new class`, which is §1's `registered=1` — the
+assertion the arm was written for and nothing else. The rewrite is the right shape, and it is the
+more dangerous of the two defects: a ledger that reports work nobody did.
+
+**`still_there` exits 5.** Extracted verbatim into a sandbox and run both ways:
+
+```
+present case:  continued, rc=0
+absent case:   !! MX DID NOT HOLD: the mutation is no longer in subject.txt.
+               An arm whose mutation was undone must FAIL, not print a result beside a diagnosis.
+               restore_all called / verify_restored called
+EXIT=5
+```
+
+It restores and verifies **before** exiting, and the harness runs `set -uo pipefail` without `-e`,
+so the `exit` leaves the whole run rather than the function. Strictly stronger than M33's, which
+diagnosed and continued — which is the fifth appearance of that family and the one
+`CAMPAIGN-BRIEF.md` asks to be a failure.
+
+**M1's fourth failure.** Declared as the mutation's own byte cost moving two packaging figures and
+declared NOT coverage. Re-taken, M1 is **83 / 3** and §8 is entirely green — so the fourth failure
+does not even reproduce. The declaration was honest and is, if anything, conservative; the impl
+log's `79` in that table is the pre-Step-9 assertion count.
+
+---
+
+## Step 7 — corroboration the milestone did not claim, and one observation left standing
+
+**The bytes DD-11 scans are the bytes the page ran.** `verify_provider_half_dd9_clean` §2 now scans
+the WALLET entry's eager set — nine files. Eight of them are shared chunks, and **all eight appear
+in the transfer arm's own network log**; the ninth is `wallet.js` itself, the 0.69 KB re-export stub,
+which the demo page does not fetch because it imports `entry_wallet.ts` directly and esbuild resolves
+that to the same chunks. So the artefact the DD-9/DD-11 absence is measured over and the artefact
+Chromium executed are the same bytes, which is a link neither check states and which is the strongest
+answer to "did the page really run the reviewed code".
+
+**Corroboration that the wire is a wire.** The over-the-wire refusal comes back with
+`name: 'Error'` while the direct one is `name: 'DevWalletRefused'`, with the message preserved —
+an error class does not survive serialisation, and a same-process call would have kept it. That is
+the encrypted round trip leaving a fingerprint, measured rather than asserted.
+
+**One observation left standing, with its mitigation.** §5's `assert_eq "…the chain has no outcome
+for it" "MISSING" "$D_OUTCOME"` cannot distinguish "the field is null" from "the path is misspelled"
+— `m34_arm` prints `MISSING` for both, and `m34_absent` cannot guard a field whose expected value
+IS `MISSING`. It is not exploitable here because §3 asserts `transfer.report.outcome == processed`
+over the same field name in the same report format, so a rename goes red there. Recorded rather than
+fixed; a third assertion for a path a neighbouring section already pins is not worth the count.
+
+---
+
+## Step 8 — the decisive probe, queued for after the sweep
+
+M33's review earned its keep with `const _nodeOnlyProbe = setImmediate;` — a Node global read at
+module-evaluation time, invisible to a metafile and to a free-identifier scan. The equivalent probe
+for M34 is to plant it in `dev_wallet.ts` and confirm the ARM RUN dies in Chromium rather than
+reporting seven green arms. Queued rather than run now, because a sweep is a measurement of the tree
+at the moment it ran and the tree is under one.
+
+The mutation matrix already answers a weaker form of the same question three times over: M3 changes
+`dev_keys.ts`'s derivation and only the Chromium-versus-Node comparison can see it (49/5, structural
+half green); M7 removes `handler.start()` and the PAGE times out at the provider's own 15,000 ms
+bound; M1 changes `dev_wallet.ts` and the failure arrives as a `ZodError` from upstream's codec on
+the far side of the session. All three are browser-observed consequences of editing the reviewed
+sources, which is not something a Node-resolved stage could produce.
+
+---
+
+## Step 9 — the counts after the review
+
+| check | delivered | after the review |
+|---|---|---|
+| `e2e_wallet_public_transfer` | 83 | **83** |
+| `test_wallet_keys_deterministic` | 49 | **50** |
+| `test_deployment_through_wallet` | 33 | **39** |
+| `verify_wallet_decisions_appear_in_trace` | 45 | **45** |
+| **M34** | **210** | **217** |
+
+And one other milestone, declared before the sweep ran:
+`test_worker_transferable_container_not_copied` 71 → **74**, so **M32 234 → 237**. That is finding
+5.4 and nothing else; the other three M32 checks are untouched.
+
+`verify_provider_half_dd9_clean` re-measured at **106** (M33 246), `verify_browser_chunk_budget` at
+**33**, `verify_named_checks_exist` **9**, `verify_no_pipeline_predicates` **69**,
+`verify_reuse_inventory_complete` **19**, `just check-repo-hygiene` **28**, m16 **223** after the
+milestone-file edits.
+
+Expected campaign total: 11,514 + 3 + 7 = **11,524**, and the summariser's reference table names
+both moves in advance.
+
+---
+
+## Step 10 — THE SWEEP: M0–M34 at 11,524, delta +0, no hole
+
+Measured 2026-08-30 **after my last commit**, `setsid`-detached in this repository's own dev shell
+(node v24.19.0), one milestone at a time with nothing else running, `TMPDIR` and the log under
+`~/.cache`, **70 markers for 35 milestones — no hole**, **33 of 35 exit 0**:
+
+```
+m0 156  m1 179  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 262  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
+m28 353  m29 127  m30 218  m31 421  m32 237  m33 246  m34 217
+                                                   CAMPAIGN TOTAL 11,524
+```
+
+11,514 + 3 + 7 = **11,524**, `delta +0` against a reference table naming both moves in advance.
+**M9 did NOT flake** — 807, rc 0, 1,283 s, immediately after m8's 174 s run.
+
+**The two reds are both known-not-mine.** M11 262 / rc 1 / nine failing assertions, split
+5 / 2 / 2 across `verify_carry_set_applies_to_upstream_head`, `verify_carry_ledger_complete` and
+`verify_carry_exposure_measured` — the recorded ninth-upstream-move signature, count unchanged,
+`carry/` left at HEAD. M28 353 / rc 1 / one failing assertion, and it is L0's:
+`the tracked package.json files are the three shipped plus the four harness trees — got
+[… probe-mt replay spike]`.
+
+**L0/L1 contribute zero, grepped one name at a time:** `verify_node_client_surface_narrow` 0,
+`test_node_client_refusals_distinguishable` 0, `verify_client_uses_upstream_schema` 0,
+`e2e_fetch_settled_transaction` 0, `test_missing_contract_artifact_refused` 0,
+`test_private_half_declared_absent` 0.
+
+**A sweep is a writer.** `carry/rebase.json` / `carry/exposure.json` checksummed before
+(`aaeb6877…` / `ec959b84…`), came out `79f597b2…` / `3836c2b6…`, restored, `sha256sum -c` both OK,
+`git status carry/` clean.
+
+---
+
+## Step 11 — THE DECISIVE PROBE, run after the sweep
+
+`const _nodeOnlyProbe = setImmediate;` planted at the top of `browser/src/wallet/dev_wallet.ts`,
+bundle rebuilt. **The exact plant that left M33 at 224 assertions, 4/4, exit 0.**
+
+```
+NODE:      import('./wallet.js') -> NODE OK, DEV_WALLET_NAME=CodeTracer dev wallet
+CHROMIUM:  the wallet demo page did not become ready; page errors:
+           ["ReferenceError: setImmediate is not defined
+             at http://127.0.0.1:45367/chunks/chunk-PRFCFIS3.js:1:59429"]
+           arm run exits 1
+           e2e_wallet_public_transfer: 0 assertion(s), 1 failure(s)  (with a summary line)
+```
+
+Restored, rebuilt, `git status` clean, and `just verify-m34` re-run: **83 / 50 / 39 / 45 = 217,
+4/4, exit 0.**
+
+**VERDICT: the wallet genuinely runs in the browser.** Not "asserted browser-shaped" and not merely
+"observed to evaluate" — observed to do the thing, by an instrument shown to notice when it stops.

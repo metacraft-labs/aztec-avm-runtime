@@ -863,6 +863,49 @@ m28 353  m29 127
                                                        CAMPAIGN TOTAL 10,178
 ```
 
+**M34'S REVIEW TOOK IT TO 11,524, AND MOVED EXACTLY TWO MILESTONES — M34'S OWN AND M32'S, BOTH
+DECLARED IN THE REFERENCE TABLE BEFORE THE SWEEP RAN.** Re-measured M0-M34 on 2026-08-30 by M34's
+review, **after its last commit**, `setsid`-detached in this repository's own dev shell (node
+v24.19.0), one milestone at a time with nothing else running, `TMPDIR` and the log under `~/.cache`,
+**no hole in the log** (70 markers for 35 milestones), **33 of 35 exit 0**:
+
+```
+m0 156  m1 179  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 262  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
+m28 353  m29 127  m30 218  m31 421  m32 237  m33 246  m34 217
+                                                       CAMPAIGN TOTAL 11,524
+```
+
+**Every one of M0-M31 and M33 came out at its reference value TO THE ASSERTION**, and
+11,514 + 3 + 7 = 11,524 exactly, `delta +0`. **M34's own 217** is 83 / 50 / 39 / 45, declared at
+210; the seven are in two checks — `test_wallet_keys_deterministic` +1 for a collision control that
+runs through the detector instead of beside it, and `test_deployment_through_wallet` +6 for the
+step-count identity §5b, which is the milestone's headline sentence turned from prose into a
+comparison. **M32 234 -> 237** is `test_worker_transferable_container_not_copied` 71 -> 74, three
+assertions for the one row of `WORKER-NODE.md` §5's table that was outside the check's typed entry
+list and had already rotted.
+
+**M9 DID NOT FLAKE** — 807, rc 0, 1,283 s, immediately after m8's 174 s run, which is D19's standing
+condition and it did not fire. **The two non-zero exits are both already on this file's list.**
+M11 is **262 with nine failing assertions**, split 5 / 2 / 2, the recorded ninth-upstream-move
+signature with the count unchanged; not repaired, `carry/` left at HEAD. M28 is **353 with ONE
+failing assertion and it is L0's** — `verify_npm_pack_no_optional_native` got
+`… probe-mt replay spike` where it pins seven trees; recorded, not fixed, for the third milestone
+running. **L0's and L1's six check names appear ZERO times in the whole sweep log**, grepped one at
+a time. **A sweep is a writer**: `carry/rebase.json` and `carry/exposure.json` were `aaeb6877…` /
+`ec959b84…` before, came out `79f597b2…` / `3836c2b6…` — the same two post-sweep digests every run
+since M30 — and were restored, `sha256sum -c`, both OK.
+
+**AND THE PROBE THAT CLOSED M33 WAS RUN AGAINST M34, WHICH IS THE POINT OF THE THIRD RUNG.**
+`const _nodeOnlyProbe = setImmediate;` planted at the top of `dev_wallet.ts` and the bundle rebuilt:
+it **imports cleanly in Node** (`DEV_WALLET_NAME=CodeTracer dev wallet`) and the ARM RUN dies with
+`ReferenceError: setImmediate is not defined` out of the PAGE's own error list, the run exits 1, and
+`e2e_wallet_public_transfer` reports `0 assertion(s), 1 failure(s)` with a summary line. The identical
+plant left M33 at 224 assertions, 4/4, exit 0. *Asserted browser-shaped* → *observed to evaluate* →
+*observed to do the thing*: the third rung is occupied, and it is occupied by an instrument that was
+shown to notice.
+
 **M34 TOOK IT TO 11,514, AND MOVED EXACTLY ONE OTHER MILESTONE — M33'S, BY ONE, DECLARED BEFORE THE
 SWEEP RAN.** Measured M0-M34 on 2026-08-29 by M34's implementation, after its last edit,
 `setsid`-detached in this repository's own dev shell (node v24.19.0), one milestone at a time with
