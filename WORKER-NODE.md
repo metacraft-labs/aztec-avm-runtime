@@ -205,15 +205,22 @@ nothing re-derived — and it had already rotted, stating `309.51 KB` against a 
 `309.91`. M34's review put the entry in the loop; every row here is re-derived from `chunks.json`
 now, three assertions each.)*
 
-| entry point | before M32 | M32's measurement | current |
-|---|---|---|---|
-| `browser.js` | 255.79 KB, 7 files | 255.87 KB, 8 files | **263.10 KB, 9 files** |
-| `testing.js` | 279.77 KB, 8 files | 279.93 KB, 10 files | **288.28 KB, 12 files** |
-| `demo.js` | 280.97 KB, 8 files | 281.12 KB, 10 files | **289.50 KB, 12 files** |
-| `node/node.js` | 225.36 KB, 4 files | 225.36 KB, 4 files | **225.49 KB, 4 files** |
-| `worker.js` | — | 282.40 KB, 9 files | **290.78 KB, 11 files** |
-| `worker-demo.js` | — | 283.48 KB, 11 files | **291.85 KB, 13 files** |
-| `wallet-demo.js` | — | — | **309.99 KB, 13 files** |
+| entry point | before M32 | M32's measurement | after M34 | current |
+|---|---|---|---|---|
+| `browser.js` | 255.79 KB, 7 files | 255.87 KB, 8 files | 263.10 KB, 9 files | **265.37 KB, 9 files** |
+| `testing.js` | 279.77 KB, 8 files | 279.93 KB, 10 files | 288.28 KB, 12 files | **290.65 KB, 12 files** |
+| `demo.js` | 280.97 KB, 8 files | 281.12 KB, 10 files | 289.50 KB, 12 files | **291.87 KB, 12 files** |
+| `node/node.js` | 225.36 KB, 4 files | 225.36 KB, 4 files | 225.49 KB, 4 files | **225.49 KB, 4 files** |
+| `worker.js` | — | 282.40 KB, 9 files | 290.78 KB, 11 files | **293.15 KB, 11 files** |
+| `worker-demo.js` | — | 283.48 KB, 11 files | 291.85 KB, 13 files | **294.23 KB, 13 files** |
+| `wallet-demo.js` | — | — | 309.99 KB, 13 files | **332.68 KB, 13 files** |
+
+*(M35 moved every row, and only one of them by much. The wallet demo carries the private-execution
+surface and pays 22 KB for it; the other six moved by 0.13 to 2.37 KB because an entry point that
+gains exports changes what `splitting: true` hoists into shared chunks, and every entry sharing those
+chunks moves with it — the same mechanism M34 recorded in the other direction, when an eighth entry
+made the eager sets FALL. `node/node.js` is unmoved for the third time running, and for the same
+reason: the Node pass is a separate one.)*
 
 `node/node.js` is unmoved in both moves, and for the same reason: the Node pass is a separate one.
 

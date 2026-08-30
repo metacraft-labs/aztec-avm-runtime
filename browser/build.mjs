@@ -99,13 +99,95 @@ if (!existsSync(path.join(ORCH, 'node_modules/@aztec/stdlib'))) {
 // THREE ARE REUSED and ONE IS M27'S. `util`, `assert` and `tty` were written for the spike's
 // browser probe and are eleven lines between them; `module` is new, because `@aztec/blob-lib`'s
 // KZG context reaches for `createRequire` and nothing in the spike's narrower graph did.
+//
+// AND ONE IS NOT A SHIM AT ALL — IT IS A SEVERED PACKAGE EDGE, AND IT IS HERE RATHER THAN IN A
+// VENDORED FILE ON PURPOSE.
+//
+// M35 vendors upstream's private-execution oracle WIRE layer (RI-97, PROVENANCE.md V11) — the
+// 68-entry registry, its type mappings and `buildACIRCallback`. One of its files opens
+// `import { toACVMField } from '@aztec/simulator/client'`, a VALUE edge, and `@aztec/simulator`'s
+// own hard dependencies are `@aztec/native` and `@aztec/world-state`: the two packages DD-9 forbids
+// and `verify_differential_containment` asserts against in three places. The package is deliberately
+// not installed, so esbuild would fail to resolve the specifier at all.
+//
+// The alternative was to EDIT the vendored file's import to a relative path, which is a `local-edits`
+// class and takes those bytes out of `check-drift`'s byte-identity arm forever. Aliasing the
+// SPECIFIER instead leaves every one of the 50 vendored files `local-edits: none`, and the target is
+// that same package's own entry point vendored from the same anchor (V10, RI-64) — 13 files, 923
+// lines, `client.ts` included. So the edge is severed by pointing it at upstream's own code rather
+// than at a replacement for it.
+//
+// AND TWO MORE ARE THE ANCHOR-VERSUS-PIN GAP, WHICH IS A BUILD FAILURE RATHER THAN A PREFERENCE.
+//
+// The vendored oracle wire layer is the `cpp` anchor's (2026-08-19). `browser/` builds against
+// `orchestration/package.json`'s `@aztec/*`, which is `pins.json`'s `deletion_era` line
+// (5.0.0-nightly.20260626). Exactly two symbols the anchor's code imports are absent there and
+// present on the `current` line — `allToCompletion` and `computeFeeJuiceMessageNullifier` — so
+// esbuild refuses the build with `No matching export`. Each shim RE-EXPORTS the installed module and
+// adds the one missing symbol from upstream's own source at the anchor. See
+// `browser/src/shims/foundation_promise.ts` for the whole account.
 const SHIMS = {
   util: path.join(REPO, 'browser-probe/shims/util.js'),
   assert: path.join(REPO, 'browser-probe/shims/assert.js'),
   tty: path.join(REPO, 'browser-probe/shims/tty.js'),
   module: path.join(HERE, 'src/shims/module.js'),
 };
-for (const [name, file] of Object.entries(SHIMS)) {
+
+// SEPARATE FROM `SHIMS`, AND THE SEPARATION IS THE POINT RATHER THAN TIDINESS. `SHIMS` is the set of
+// NODE BUILTINS this graph needs stand-ins for, and `verify_browser_bundle_no_node_builtins` pins it
+// EXACTLY — a fifth entry there is a claim that this graph reaches a fifth builtin, which is a thing
+// that check exists to notice. `@aztec/simulator/client` is not a builtin and is not a stand-in: it
+// is upstream's own module, vendored from the same anchor as the file that imports it, put back
+// where the specifier points. Mixing the two would make the builtin census say something false, and
+// it did for one build: the check reported five where M27 measured four.
+const PACKAGE_ALIASES = {
+  '@aztec/simulator/client': path.join(HERE, 'src/vendor/simulator/client.ts'),
+};
+
+// THE ANCHOR-VERSUS-PIN GAP, SCOPED TO THE IMPORTERS THAT HAVE IT.
+//
+// Two symbols the `cpp` anchor's oracle wire layer imports do not exist at the `deletion_era` pin
+// this bundle installs, and both exist on the `current` line: `allToCompletion` and
+// `computeFeeJuiceMessageNullifier`. Each shim re-exports the installed module and adds the one
+// missing symbol from upstream's own source; `browser/src/shims/foundation_promise.ts` carries the
+// whole account.
+//
+// **The redirect is conditioned on the IMPORTER, and the reason is narrower than it first looked.**
+// The first version aliased the two package subpaths globally, which would give every importer in
+// the build a re-export barrel in place of the module it asked for. That was then MEASURED both ways
+// rather than argued: `browser.js`'s eager set is **265.37 KB either way**, and so is every other
+// entry point's — esbuild tree-shakes through the barrel exactly as well. So the global alias did
+// NOT cost two kilobytes, and the +2.27 KB `browser.js` moved by in this milestone is the chunk
+// re-partitioning M34 recorded in the other direction: an entry point that gains exports changes what
+// `splitting: true` hoists into shared chunks, and every entry sharing those chunks moves with it.
+//
+// The scoping stays, for the reason that survives the measurement: a shim is a stand-in for a version
+// gap that one directory has, and applying it to importers that do not have it makes the shim's own
+// "every entry must fire" assertion weaker (it would fire on anybody) and puts a file of ours between
+// a caller and the module it named. It costs nothing and it is the smaller claim.
+const ANCHOR_PIN_GAP = {
+  '@aztec/foundation/promise': {
+    target: path.join(HERE, 'src/shims/foundation_promise.ts'),
+    importerPrefix: path.join(HERE, 'src/vendor/pxe') + path.sep,
+    missing: 'allToCompletion',
+  },
+  '@aztec/stdlib/messaging': {
+    target: path.join(HERE, 'src/shims/stdlib_messaging.ts'),
+    importerPrefix: path.join(HERE, 'src/vendor/pxe') + path.sep,
+    missing: 'computeFeeJuiceMessageNullifier',
+  },
+  // The third, and the only one esbuild could not have caught: a missing STATIC is not a missing
+  // export, so this one built cleanly and failed inside the ACVM. See the shim's own header.
+  '@aztec/stdlib/aztec-address': {
+    target: path.join(HERE, 'src/shims/stdlib_aztec_address.ts'),
+    importerPrefix: path.join(HERE, 'src/vendor/pxe') + path.sep,
+    missing: 'AztecAddress.fromFieldUnsafe',
+  },
+};
+for (const [spec, entry] of Object.entries(ANCHOR_PIN_GAP)) {
+  if (!existsSync(entry.target)) fail(`the ${spec} compatibility shim is missing: ${entry.target}`);
+}
+for (const [name, file] of Object.entries({ ...SHIMS, ...PACKAGE_ALIASES })) {
   if (!existsSync(file)) fail(`the ${name} shim is missing: ${file}`);
 }
 
@@ -227,6 +309,8 @@ writeFileSync(
       dist: DIST,
       nodeDist: NODE_DIST,
       shims: SHIMS,
+      packageAliases: PACKAGE_ALIASES,
+      anchorPinGap: ANCHOR_PIN_GAP,
       globals: GLOBALS,
       redirects: REDIRECTS,
       browserEntries: Object.entries(BROWSER_ENTRIES).map(([name, file]) => ({ in: file, out: name })),

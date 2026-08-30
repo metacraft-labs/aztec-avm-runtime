@@ -163,14 +163,21 @@
     {
       "name": "wallet-demo",
       "entry": "wallet-demo.js",
-      "maxGzipKB": 340,
+      "maxGzipKB": 380,
       "description": "M34: what the wallet demo page costs on first paint. It is necessarily the largest of the demo entries, because it reaches the runtime (to host the chain), the vendored transaction builder (which the wallet uses) and the wallet protocol (which both halves speak) — the union of what three other entries reach.",
-      "bumps": []
+      "bumps": [
+        {
+          "milestone": "M35",
+          "from": 340,
+          "to": 380,
+          "why": "The wallet demo page hosts the runtime, the wallet and now the private-execution arms at once, so it carries the union. Measured: 309.99 KB across 13 files to 331.99 across 13. Same mechanism as the wallet entry's bump above and the same reason it is data rather than a ratchet."
+        }
+      ]
     },
     {
       "name": "wallet",
       "entry": "wallet.js",
-      "maxGzipKB": 300,
+      "maxGzipKB": 340,
       "description": "M33, and it is the number that justifies the wallet boundary being an entry point of its own rather than part of the browser reference. It is what a page pays to speak the wallet protocol: upstream's WalletSchema and every zod codec the fifteen methods name, reached through @aztec/aztec.js. DD-11's rule is that a page which attaches no wallet must not pay it, and the browser entry's own eager set is the control that says it does not.",
       "bumps": [
         {
@@ -178,6 +185,12 @@
           "from": 270,
           "to": 300,
           "why": "The wallet now BUILDS transactions, so M26's vendored transaction builder (PublicTxSimulationTester, SimpleContractDataSource, RI-72) and @aztec/stdlib/testing's makeContractClassPublic are reachable from the wallet entry where before nothing was. Measured: the eager set went 245.87 KB across 8 files to 275.21 KB across 9. That cost is the deliverable rather than a regression — a wallet that did not construct the transaction would be a wallet the runtime reached around — and it is recorded here rather than absorbed silently, which is what this array is for. The DD-11 property the original number protects is unchanged and is still measured: browser.js's own eager set contains zero bytes of @aztec/aztec.js, so a page that attaches no wallet still pays none of this."
+        },
+        {
+          "milestone": "M35",
+          "from": 300,
+          "to": 340,
+          "why": "The wallet entry now carries PRIVATE EXECUTION: upstream's WASMSimulator (RI-64, PROVENANCE.md V10, 13 files) and the whole private-execution oracle WIRE layer (RI-97, V11, 37 files) — the 68-entry registry, its type mappings, buildACIRCallback and the Noir struct codecs. Measured: the eager set went 275.26 KB across 9 files to 296.39 KB across 9. That is the deliverable rather than a regression: a wallet that could not execute a private function would be a wallet the runtime had to reach around, which is the shape M33's null wallet exists to refuse. THE TWO WASM MODULES ARE NOT IN THIS NUMBER AND THAT IS THE POINT — acvm_js_bg.wasm (3,601,516 bytes) and noirc_abi_wasm_bg.wasm (789,053) are fetched BY URL at the moment a page asks for a private execution and never before, which the arm run's own control measures on a network log rather than asserting from this file. The DD-11 property the original number protects is unchanged: browser.js's eager set still contains zero bytes of @aztec/aztec.js."
         }
       ]
     }

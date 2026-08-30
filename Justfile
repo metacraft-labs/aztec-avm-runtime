@@ -2925,3 +2925,62 @@ verify-m34:
       echo "verify-m34: all checks passed"
     fi
     exit "$rc"
+
+# ---------------------------------------------------------------------------------------------
+# M35 — Private Execution Inside the Wallet.
+#
+# Three checks, all reading ONE browser arm run:
+#
+#   verify_oracle_coverage_is_measured          the 68-entry registry re-derived from the anchor's
+#                                               object store, the vendored copy and the built
+#                                               bundle, with the 53-entry `upstream/tsavm` worktree
+#                                               as the control that the derivation can tell two
+#                                               registries apart; the implemented and refusing sets
+#                                               disjoint, summing, and every implemented one
+#                                               EXERCISED
+#   test_unimplemented_oracle_refuses_by_name   every refused oracle names itself, three ways, the
+#                                               third being a real 76,875-byte private circuit that
+#                                               stops at the first oracle M35 does not serve
+#   e2e_private_function_executes_in_browser    a real private function solving in Chromium, with
+#                                               the ACVM's 4.4 MB fetched only when asked for
+#
+# NEEDS: a built browser bundle (`just browser-build`), `avm.wasm` (`just avm-wasm-build-m27`),
+# `ct_writer.wasm`, chromium on PATH, and `@aztec/noir-acvm_js` installed
+# (`cd orchestration && npm ci`).
+#
+# `M35_ARMS_REFRESH=1` forces the arm run even when nothing is newer than the report.
+verify-m35-coverage:
+    @verification/verify_oracle_coverage_is_measured.sh
+
+verify-m35-refusals:
+    @verification/test_unimplemented_oracle_refuses_by_name.sh
+
+verify-m35-executes:
+    @verification/e2e_private_function_executes_in_browser.sh
+
+m35-arms:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    work="${M35_WORK:-$HOME/.cache/aztec-m35-private}"
+    mkdir -p "$work"
+    node tools/run_private_execution_arms.mjs "$work" > "$work/private-execution.json"
+    echo "m35-arms: wrote $work/private-execution.json"
+
+verify-m35:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_oracle_coverage_is_measured \
+      test_unimplemented_oracle_refuses_by_name \
+      e2e_private_function_executes_in_browser
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m35: FAILED" >&2
+    else
+      echo "verify-m35: all checks passed"
+    fi
+    exit "$rc"

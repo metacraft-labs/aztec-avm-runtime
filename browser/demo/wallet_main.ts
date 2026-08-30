@@ -60,16 +60,36 @@ import {
   PortWalletProvider,
   WALLET_DECISION_METADATA,
   WALLET_SEED_METADATA,
+  EPHEMERAL_RETURN_ORACLES,
+  ORACLE_EPHEMERAL_RETURN_LABELS,
+  ORACLE_ENVIRONMENT_VERSION,
+  ORACLE_IMPLEMENTED,
+  ORACLE_NAMES,
+  ORACLE_REFUSAL_REASONS,
+  ORACLE_REFUSING,
+  assertOracleSurfaceMatchesDeclaration,
   createDevWallet,
+  createPrivateOracleHandler,
   deriveDevAccounts,
+  executePrivateFunction,
+  initPrivateExecution,
+  oracleMethodName,
+  privateExecutionAssets,
   renderWalletDecision,
+  toAddressValue,
+  toFieldValue,
   type DevWalletHandle,
   type DevWalletHost,
 } from '../src/entry_wallet.ts';
 
+import { buildACIRCallback } from '../src/vendor/pxe/contract_function_simulator/oracle/acir_callback.ts';
 import { Fr } from '@aztec/foundation/curves/bn254';
 import { poseidon2HashWithSeparator } from '@aztec/foundation/crypto/poseidon';
-import { CONTRACT_INSTANCE_REGISTRY_CONTRACT_ADDRESS, DomainSeparator } from '@aztec/constants';
+import {
+  CONTRACT_INSTANCE_REGISTRY_CONTRACT_ADDRESS,
+  DomainSeparator,
+  MAX_FR_CALLDATA_TO_ALL_ENQUEUED_CALLS,
+} from '@aztec/constants';
 import { AztecAddress } from '@aztec/stdlib/aztec-address';
 // STATIC, NOT DYNAMIC, and the reason is a build failure rather than a preference: the first draft
 // reached these two through `await import(…)` inside a helper, esbuild split each one into a chunk
@@ -86,6 +106,18 @@ import { ExecutionPayload } from '@aztec/stdlib/tx';
 const MODULE_URL = './assets/avm.wasm';
 const CT_WRITER_URL = './assets/ct_writer.wasm';
 const ARTIFACT_URL = './assets/token_contract-Token.json';
+
+// M35: private execution. Four assets, and none of them is fetched by a page that never asks for a
+// private execution — which is DD-11's own rule and is asserted on the browser's network log.
+const ACVM_WASM_URL = './assets/acvm_js_bg.wasm';
+const NOIRC_ABI_WASM_URL = './assets/noirc_abi_wasm_bg.wasm';
+const ORACLE_CHECK_ARTIFACT_URL = './assets/oracle_version_check_contract-OracleVersionCheck.json';
+
+/** The dev chain's own ids, so a private frame is this chain's rather than a fabricated one. */
+const PRIVATE_CHAIN_ID = 1n;
+const PRIVATE_CHAIN_VERSION = 1n;
+/** The entropy seed for a private frame. An ARGUMENT, never generated. */
+const PRIVATE_ENTROPY_SEED = 0x35n;
 
 /** A UUID. `ct-print` refuses a `recording_id` that is not exactly 36 characters. */
 const RECORDING_ID = '01949fcc-7d92-7e9c-8000-000000003401';
@@ -650,12 +682,373 @@ async function callOf(
   );
 }
 
+
+// =============================================================================================
+// M35 — PRIVATE EXECUTION. Two arms, and they answer two different questions.
+// =============================================================================================
+//
+// `armPrivateExecution` runs REAL ACIR: upstream's `WASMSimulator` over the ACVM, upstream's oracle
+// wire, our handler. One contract executes to completion on the oracles this milestone serves, and a
+// second — Token's private `transfer` — is REFUSED BY NAME at the first oracle it needs that this
+// milestone does not. Both outcomes are the deliverable; the second is the one the campaign's oldest
+// rule is about, and it is measured on a real 76,875-byte circuit rather than asserted.
+//
+// `armOracleSurface` exercises the served set DIRECTLY, because "implemented" has to mean "observed
+// to answer" rather than "a method exists". A contract that reaches four of thirty-three oracles
+// cannot say anything about the other twenty-nine, and a handler whose unexercised methods returned
+// plausible defaults would pass every assertion about the four.
+
+let privateAssetsFetched = false;
+
+async function requirePrivateAssets(): Promise<void> {
+  if (privateAssetsFetched) return;
+  say('fetching the ACVM and the ABI decoder (4.4 MB, and only now)');
+  await initPrivateExecution({ acvmWasmUrl: ACVM_WASM_URL, noircAbiWasmUrl: NOIRC_ABI_WASM_URL });
+  privateAssetsFetched = true;
+}
+
+async function fetchJson(url: string): Promise<unknown> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${url}: ${response.status}`);
+  return response.json();
+}
+
+/** ARM: two real private circuits — one that completes, one that refuses by name. */
+async function armPrivateExecution(): Promise<Record<string, unknown>> {
+  // THE RUNTIME FIRST, AND IT IS NOT INCIDENTAL. Under this build's DD-11 redirect table every
+  // poseidon2 and grumpkin operation is `avm.wasm`'s, installed by `openAvmRuntime`; there is no
+  // fallback to bb.js by design. A private frame's function SELECTOR is a poseidon hash of the ABI
+  // signature, so a page that has not opened the module cannot even name the function it is about to
+  // execute — measured, as `Poseidon2NotInstalled` out of Chromium's own error list on this arm's
+  // first run. Opening it here also means the arm's network log carries `avm.wasm`, which is what
+  // makes the ACVM's ABSENCE from the control arm's log a measurement rather than an empty set.
+  await open();
+  await requirePrivateAssets();
+  const contract = toAddressValue(0x777n, 'demo contract');
+  const sender = toAddressValue(0x333n, 'demo sender');
+  const common = {
+    contractAddress: contract,
+    msgSender: sender,
+    chainId: PRIVATE_CHAIN_ID,
+    version: PRIVATE_CHAIN_VERSION,
+    entropySeed: PRIVATE_ENTROPY_SEED,
+    writeLine: (line: string) => say(line),
+  };
+
+  const oracleCheckArtifact = await fetchJson(ORACLE_CHECK_ARTIFACT_URL);
+  const executes = await executePrivateFunction({
+    ...common,
+    artifact: oracleCheckArtifact,
+    functionName: 'private_function',
+    args: [],
+  });
+  say(`private_function: ${executes.outcome}, ${executes.oracleCalls.length} oracle call(s)`);
+
+  const tokenArtifact = await loadArtifact();
+  const refuses = await executePrivateFunction({
+    ...common,
+    artifact: tokenArtifact,
+    functionName: 'transfer',
+    // `to` and `amount`, two fields, read as the ABI declares them. The values do not matter: the
+    // frame stops before the circuit reads either.
+    args: [0x444n, 5n],
+  });
+  say(`Token.transfer: ${refuses.outcome} at ${refuses.stoppedAtOracle ?? '(nothing)'}`);
+
+  // THE SAME SEED TWICE, IN TWO SEPARATE HANDLERS. `getRandomField` is the one served oracle that
+  // WOULD read ambient entropy in any other wallet, and a recording whose fields differ per run is a
+  // recording that does not replay. Two handlers, same seed, four draws each, compared.
+  const draw = async (seed: bigint) => {
+    const h = createPrivateOracleHandler({ contractAddress: contract, entropySeed: toFieldValue(seed, 'seed') });
+    const out: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      out.push(String(await (h.handler as Record<string, () => Promise<unknown>>).getRandomField()));
+    }
+    return out;
+  };
+  const entropyA = await draw(PRIVATE_ENTROPY_SEED);
+  const entropyB = await draw(PRIVATE_ENTROPY_SEED);
+  const entropyOther = await draw(PRIVATE_ENTROPY_SEED + 1n);
+
+  const report = {
+    executes: jsonSafe(executes),
+    refuses: jsonSafe(refuses),
+    entropy: { a: entropyA, b: entropyB, other: entropyOther },
+    assets: privateExecutionAssets(),
+  };
+  lastRun = report;
+  return report;
+}
+
+/**
+ * ARM: every served oracle, exercised through the handler, and every refused one required to refuse.
+ *
+ * The exercises are behavioural rather than smoke: a push is followed by a length, a set by a get, a
+ * delete by a miss, a created nullifier by the question that has to answer `true` and by the same
+ * question from another contract that has to answer `false`. `exercised` is the SET of oracle names
+ * this arm actually reached, so a check can assert it equals the declared implemented set instead of
+ * counting its own intentions.
+ */
+async function armOracleSurface(): Promise<Record<string, unknown>> {
+  // `siloNullifier` is a poseidon2 hash and `isNullifierPending` is one of the oracles exercised
+  // below, so this arm needs the module for the same reason the one above it does.
+  await open();
+  const contract = toAddressValue(0x777n, 'demo contract');
+  const other = toAddressValue(0x778n, 'another contract');
+  const scope = toAddressValue(0x999n, 'scope');
+  const handle = createPrivateOracleHandler({
+    contractAddress: contract,
+    entropySeed: toFieldValue(PRIVATE_ENTROPY_SEED, 'seed'),
+    writeLine: (line: string) => say(line),
+  });
+  const h = handle.handler as Record<string, (...args: unknown[]) => unknown>;
+  const F = (n: bigint) => toFieldValue(n, 'field');
+  const fieldDecimal = (v: unknown) => String((v as { toBigInt?: () => bigint })?.toBigInt?.() ?? v);
+  const observations: Record<string, string> = {};
+
+  // misc
+  await h.assertCompatibleOracleVersion(ORACLE_ENVIRONMENT_VERSION.major, 0);
+  observations.assertCompatibleOracleVersion = 'accepted a matching major';
+  h.log(1, 'hello from the surface arm', 1, [F(7n)]);
+  observations.log = 'wrote one line';
+  const r0 = String(await h.getRandomField());
+  const r1 = String(await h.getRandomField());
+  observations.getRandomField = `${r0 === r1 ? 'REPEATED' : 'advanced'}`;
+
+  // capsules
+  h.setCapsule(contract, F(1n), [F(11n), F(12n)], scope);
+  const cap = h.getCapsule(contract, F(1n), 2, scope) as { value?: unknown[] };
+  observations.setCapsule = 'stored two fields';
+  observations.getCapsule = cap.value ? `read ${String((cap.value as unknown[]).length)} field(s)` : 'MISS';
+  h.setCapsule(contract, F(2n), [F(21n)], scope);
+  h.copyCapsule(contract, F(2n), F(3n), 1, scope);
+  observations.copyCapsule = (h.getCapsule(contract, F(3n), 1, scope) as { value?: unknown }).value
+    ? 'copied one slot'
+    : 'MISS';
+  // THE OVERLAPPING COPY, WHICH IS THE ONE A FORWARD-ONLY LOOP GETS WRONG. Slots 10..12 hold
+  // 1, 2, 3; copying three entries from 10 to 11 must leave 11..13 holding 1, 2, 3, and a forward
+  // walk leaves 1, 1, 1 because it overwrites 11 before reading it. Upstream reverses the order when
+  // the destination is ahead of the source; the observation is the DESTINATION READ BACK, so a copy
+  // that ran in the wrong direction reports its own wrong answer rather than 'copied'.
+  for (const [slot, value] of [[10n, 1n], [11n, 2n], [12n, 3n]] as const) {
+    h.setCapsule(contract, F(slot), [F(value)], scope);
+  }
+  h.copyCapsule(contract, F(10n), F(11n), 3, scope);
+  observations.copyCapsuleOverlapping = [11n, 12n, 13n]
+    .map(slot => {
+      const got = (h.getCapsule(contract, F(slot), 1, scope) as { value?: unknown[] }).value;
+      return got ? fieldDecimal(got[0]) : 'MISS';
+    })
+    .join(',');
+  h.deleteCapsule(contract, F(1n), scope);
+  observations.deleteCapsule = (h.getCapsule(contract, F(1n), 2, scope) as { value?: unknown }).value
+    ? 'STILL THERE'
+    : 'gone';
+
+  // ephemeral and transient arrays, the same seven operations over two different keyings
+  for (const family of ['Ephemeral', 'Transient'] as const) {
+    const slot = F(family === 'Ephemeral' ? 100n : 200n);
+    h[`push${family}`](slot, [F(1n)]);
+    h[`push${family}`](slot, [F(2n)]);
+    observations[`push${family}`] = `len ${String(h[`get${family}Len`](slot))}`;
+    observations[`get${family}Len`] = `len ${String(h[`get${family}Len`](slot))}`;
+    h[`set${family}`](slot, 0, [F(9n)]);
+    observations[`set${family}`] = 'wrote index 0';
+    // Rendered as a DECIMAL rather than as an `Fr`'s 66-character hex, so the assertion that reads
+    // it is legible. The value is the field's own `toBigInt()`, not a re-encoding.
+    observations[`get${family}`] = `index 0 is ${fieldDecimal((h[`get${family}`](slot, 0) as unknown[])[0])}`;
+    observations[`pop${family}`] = `popped ${fieldDecimal((h[`pop${family}`](slot) as unknown[])[0])}`;
+    h[`remove${family}`](slot, 0);
+    observations[`remove${family}`] = `len ${String(h[`get${family}Len`](slot))}`;
+    h[`push${family}`](slot, [F(5n)]);
+    h[`clear${family}`](slot);
+    observations[`clear${family}`] = `len ${String(h[`get${family}Len`](slot))}`;
+  }
+
+  // sinks
+  h.setContractSyncCacheInvalid(contract, { data: [scope] });
+  observations.setContractSyncCacheInvalid = 'accepted one scope';
+  h.emitOffchainEffect([F(1n), F(2n)]);
+  observations.emitOffchainEffect = 'accepted two fields';
+
+  // the execution cache
+  h.setHashPreimage([F(41n), F(42n)], F(4142n));
+  observations.setHashPreimage = 'stored a two-field preimage';
+  observations.getHashPreimage = `read ${String((h.getHashPreimage(F(4142n)) as unknown[]).length)} field(s)`;
+  h.assertValidPublicCalldata(F(4142n));
+  observations.assertValidPublicCalldata = 'accepted a hash that is in the cache';
+  // THE CAP, EXERCISED. One preimage larger than the whole-transaction limit must be refused, and
+  // the limit is upstream's constant rather than a number typed here.
+  let calldataCapRefused = 'NOT REFUSED';
+  try {
+    const huge = new Array(MAX_FR_CALLDATA_TO_ALL_ENQUEUED_CALLS + 1).fill(F(1n));
+    h.setHashPreimage(huge, F(777777n));
+    h.assertValidPublicCalldata(F(777777n));
+  } catch (e) {
+    calldataCapRefused = String((e as Error).message).slice(0, 200);
+  }
+  let calldataMissRefused = 'NOT REFUSED';
+  try {
+    h.assertValidPublicCalldata(F(999999n));
+  } catch (e) {
+    calldataMissRefused = String((e as Error).message).slice(0, 200);
+  }
+
+  // the notify* family and the two questions answered from it
+  h.notifyCreatedNote(contract, F(5n), F(6n), F(7n), [F(8n)], F(9n), 1);
+  observations.notifyCreatedNote = 'recorded one note';
+  await h.notifyNullifiedNote(F(10n), F(9n), 2);
+  observations.notifyNullifiedNote = 'recorded one nullified note';
+  // THE OTHER DIRECTION: a note nobody created cannot be consumed. Upstream refuses it and so does
+  // this, and without the negative case "recorded one nullified note" is satisfied by a handler that
+  // records anything it is handed.
+  let unknownNoteRefused = 'NOT REFUSED';
+  try {
+    await h.notifyNullifiedNote(F(12n), F(0xdeadn), 3);
+  } catch (e) {
+    unknownNoteRefused = String((e as Error).message).slice(0, 200);
+  }
+  await h.notifyCreatedNullifier(F(11n));
+  observations.notifyCreatedNullifier = 'recorded one nullifier';
+  // AND THE DUPLICATE. A `Set.add` of an existing member is a no-op, so a permissive handler is not
+  // visibly wrong afterwards — the refusal is the only thing that distinguishes them.
+  let duplicateNullifierRefused = 'NOT REFUSED';
+  try {
+    await h.notifyCreatedNullifier(F(11n));
+  } catch (e) {
+    duplicateNullifierRefused = String((e as Error).message).slice(0, 200);
+  }
+  observations.isNullifierPending =
+    `own=${String(await h.isNullifierPending(F(11n), contract))} ` +
+    `other=${String(await h.isNullifierPending(F(11n), other))}`;
+  h.notifyCreatedContractClassLog(contract, [F(1n)], 1, 3);
+  observations.notifyCreatedContractClassLog = 'recorded one class log';
+  const beforePhase = String(h.isExecutionInRevertiblePhase(5));
+  h.notifyRevertiblePhaseStart(5);
+  observations.notifyRevertiblePhaseStart = 'entered at counter 5';
+  observations.isExecutionInRevertiblePhase =
+    `before=${beforePhase} after5=${String(h.isExecutionInRevertiblePhase(5))} ` +
+    `after4=${String(h.isExecutionInRevertiblePhase(4))}`;
+
+  // AN ORACLE NAME THE REGISTRY DOES NOT DECLARE — the OTHER half of "a bytecode/oracle mismatch is
+  // loud", and the half the version assertion cannot cover. `buildACIRCallback` wraps its table in a
+  // Proxy whose trap fires for exactly this, and the diagnostic it picks depends on whether the
+  // handler carries `nonOracleFunctionGetContractOracleVersion`. Driven through the REAL callback
+  // rather than the handler, because the trap is the callback's and not the handler's.
+  const callback = buildACIRCallback(handle.handler as never) as unknown as Record<string, () => Promise<unknown>>;
+  let unknownOracle = 'NOT REFUSED';
+  try {
+    await callback['aztec_utl_thisOracleDoesNotExist']();
+  } catch (e) {
+    unknownOracle = String((e as Error).message).slice(0, 400);
+  }
+  // ...and a DECLARED one reaches the HANDLER through the same callback, so the trap is shown to
+  // discriminate rather than to refuse everything.
+  //
+  // THE ORACLE IS CHOSEN FOR ITS ARITY AND THAT IS M34'S FINDING IN A SECOND PLACE. A first version
+  // called `aztec_utl_getNotes` with no inputs and got a `TypeError` from
+  // `entry.deserializeParams` — upstream's codec rejects the SLOT COUNT before the handler is
+  // reached, so the control measured somebody else's refusal rather than this one. That is exactly
+  // M34's refusals arm, where all six "refusals" turned out to be `parseWithOptionals`.
+  // `aztec_prv_getSenderForTags` is `makeEntry({ returnType: … })` with NO params, so no-argument is
+  // its real wire and the call reaches the handler.
+  let knownOracleThroughCallback = 'NOT REACHED';
+  try {
+    await callback['aztec_prv_getSenderForTags']();
+  } catch (e) {
+    knownOracleThroughCallback = String((e as Error).name);
+  }
+
+  // EVERY REFUSED ORACLE, CALLED DIRECTLY, AND REQUIRED TO NAME ITSELF.
+  const refusals: Record<string, { name: string; namesItself: boolean; message: string }> = {};
+  for (const oracle of ORACLE_REFUSING) {
+    const method = oracleMethodName(oracle);
+    try {
+      await (h[method] as () => Promise<unknown>)();
+      refusals[oracle] = { name: 'RESOLVED', namesItself: false, message: 'the oracle returned a value' };
+    } catch (e) {
+      const err = e as { name?: string; message?: string; oracle?: string; reason?: string };
+      refusals[oracle] = {
+        name: String(err.name),
+        namesItself: err.oracle === oracle && String(err.message).includes(oracle),
+        message: String(err.message).slice(0, 200),
+      };
+    }
+  }
+
+  // The construction-time guard, exercised in both directions over the BUILT bundle.
+  const guard = { correct: 'NOT RUN', missing: 'NOT RUN', extra: 'NOT RUN' };
+  const allMethods = ORACLE_NAMES.map(oracleMethodName);
+  try {
+    assertOracleSurfaceMatchesDeclaration(allMethods);
+    guard.correct = 'accepted';
+  } catch (e) {
+    guard.correct = `REFUSED: ${String((e as Error).message)}`;
+  }
+  try {
+    assertOracleSurfaceMatchesDeclaration(allMethods.slice(1));
+    guard.missing = 'ACCEPTED A LIST WITH ONE NAME DROPPED';
+  } catch (e) {
+    guard.missing = String((e as Error).message).slice(0, 160);
+  }
+  try {
+    assertOracleSurfaceMatchesDeclaration([...allMethods, 'aFabricatedOracleName']);
+    guard.extra = 'ACCEPTED A LIST WITH A FABRICATED NAME';
+  } catch (e) {
+    guard.extra = String((e as Error).message).slice(0, 160);
+  }
+
+  const ledger = handle.calls();
+  const exercised = [...new Set(ledger.filter(c => c.outcome === 'served').map(c => c.oracle))].sort();
+  const report = {
+    registry: {
+      total: ORACLE_NAMES.length,
+      implemented: [...ORACLE_IMPLEMENTED],
+      refusing: [...ORACLE_REFUSING],
+      reasons: { ...ORACLE_REFUSAL_REASONS },
+      environmentVersion: { ...ORACLE_ENVIRONMENT_VERSION },
+      ephemeralReturnOracles: [...EPHEMERAL_RETURN_ORACLES],
+      ephemeralReturnLabels: { ...ORACLE_EPHEMERAL_RETURN_LABELS },
+      // THE THREE SCOPE MARKERS, EXCLUDED BY NAME AND NOT BY PREFIX. A first draft dropped every
+      // key starting with `is`, which also dropped `isNullifierPending` and
+      // `isExecutionInRevertiblePhase` — two real oracles — and reported 66 for a handler carrying
+      // 68 methods plus 3 markers. The count is the thing a check compares against the registry, so
+      // a needle that is too wide reads as a handler two methods short.
+      handlerMethods: Object.keys(h).filter(
+        k => !['isMisc', 'isUtility', 'isPrivate', 'nonOracleFunctionGetContractOracleVersion'].includes(k),
+      ).length,
+      handlerMarkers: ['isMisc', 'isUtility', 'isPrivate'].filter(k => k in h).length,
+      // The NON-ORACLE methods, counted separately rather than folded into either number. Upstream
+      // prefixes this one `nonOracleFunction` precisely because `buildACIRCallback` never dispatches
+      // to it; counting it as a 69th oracle would say the handler serves one the registry has never
+      // heard of, and excluding it silently would leave the unknown-oracle trap's own input unstated.
+      handlerNonOracle: ['nonOracleFunctionGetContractOracleVersion'].filter(k => k in h).length,
+    },
+    exercised,
+    observations,
+    calldataMissRefused,
+    unknownNoteRefused,
+    duplicateNullifierRefused,
+    calldataCapRefused,
+    maxCalldata: MAX_FR_CALLDATA_TO_ALL_ENQUEUED_CALLS,
+    unknownOracle,
+    knownOracleThroughCallback,
+    refusals,
+    guard,
+    ledger: ledger.map(c => ({ seq: c.seq, oracle: c.oracle, outcome: c.outcome })),
+  };
+  lastRun = report;
+  return jsonSafe(report);
+}
+
 const api = {
   armWalletTransfer,
   armRefusals,
   armDeterministicKeys,
   armRecord,
   armDirectShortcut,
+  armPrivateExecution,
+  armOracleSurface,
   status: () => ({
     opened: opened !== null,
     seed: lastWallet?.seed ?? null,
@@ -679,6 +1072,8 @@ for (const [id, fn] of Object.entries({
   'btn-wallet-transfer': () => armWalletTransfer(),
   'btn-wallet-record': () => armRecord(),
   'btn-wallet-decline': () => armWalletTransfer({ decline: 'the operator declined this transaction' }),
+  'btn-private-execution': () => armPrivateExecution(),
+  'btn-oracle-surface': () => armOracleSurface(),
 })) {
   document.getElementById(id)?.addEventListener('click', () => {
     (fn as () => Promise<unknown>)().catch((e: unknown) => say(`ERROR ${String(e)}`));

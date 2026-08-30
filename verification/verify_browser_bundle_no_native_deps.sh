@@ -168,11 +168,22 @@ echo "== 7. there is no third state: an unresolvable import is a BUILD failure, 
 # What makes sections 4 and 6 sufficient. If the browser pass could quietly externalise an import
 # it could not resolve, a forbidden package would be neither in the graph nor in the failure — and
 # the two controls above would say nothing about it. It cannot: `platform: 'browser'` has no
-# implicit externals, and the ONLY external edges in this bundle are the two the builtin check
-# classifies by name.
+# implicit externals, and every external edge in this bundle is one the builtin check classifies by
+# name — the injected globals file, plus TYPE-ONLY imports esbuild's loader elides.
+#
+# THE SET GREW FROM TWO TO EIGHT IN M35 and every addition is an elided `import type` in the vendored
+# oracle wire layer. It is compared as a SET rather than as a size, so a ninth that is not type-only
+# fails here, which is the property this section is for.
 EXT="$( { m28_rows "$BROWSER" EXTERNAL-OTHER; m28_rows "$BROWSER" EXTERNAL-INJECT; } | cut -f1 | LC_ALL=C sort | tr '\n' ' ')"
-assert_eq "the browser bundle's ENTIRE external set is the injected globals and one elided type import" \
-  "../../node-host/src/reactor.ts browser/src/globals.js " "$EXT"
+assert_eq "the browser bundle's ENTIRE external set is the injected globals and the elided type imports" \
+  "../../node-host/src/reactor.ts ./oracle_registry.js @aztec/foundation/curves/bn254 @aztec/foundation/trees @aztec/stdlib/avm @aztec/stdlib/aztec-address @aztec/stdlib/kernel browser/src/globals.js " \
+  "$EXT"
+# ...and not one of the @aztec specifiers in that set is a package this bundle may not reach, which
+# is the question section 4 asks of the graph and this asks of the residue.
+assert_eq "and no DD-9 package is among them" "" \
+  "$(for f in '@aztec/pxe' '@aztec/simulator' '@aztec/native' '@aztec/world-state'; do
+       case " $EXT " in *" $f"*) printf '%s ' "$f" ;; esac
+     done)"
 assert_eq "no Node builtin is external either, which would be the other way to leave one unresolved" \
   "" "$(m28_rows "$BROWSER" BUILTIN-EXTERNAL)"
 # And the node pass DOES have implicit externals, which is what says the property above is a

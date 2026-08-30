@@ -163,7 +163,7 @@ d = json.load(open(sys.argv[1]))
 # feross/buffer package, whose whole purpose is to BE the browser implementation.
 print(0 if d.get("name") == "buffer" else 1)' "$REPO_ROOT/orchestration/node_modules/buffer/package.json")"
 
-echo "== 4. the two external edges in the browser bundle, both classified"
+echo "== 4. the external edges in the browser bundle, every one classified"
 
 # `esbuild --inject` records the injected file as an external import on every input it touches.
 # That is an artefact of the mechanism, not a shipped edge, and it is 1,057 of the 1,059 externals.
@@ -173,15 +173,38 @@ assert_eq "the injected globals file is the one external the injection mechanism
 assert_ge "…on essentially every input, which is what --inject does" 900 \
   "$(printf '%s' "$INJECT" | cut -f2)"
 
-# The other one. A TYPE-ONLY TypeScript import: `browser/src/{poseidon,grumpkin}.ts` import the
-# `Reactor` TYPE from the node host, esbuild's TS loader elides it, and the metafile still records
-# the edge. It is not a shipped edge and the EMITTED BYTES are what says so — which is the second
-# arm of this check earning its place.
+# The others. EVERY ONE IS A TYPE-ONLY TypeScript import that esbuild's loader elides while the
+# metafile still records the edge — it is not a shipped edge, and the EMITTED BYTES are what says so.
+#
+# THE COUNT WAS ONE UNTIL M35 AND IS SEVEN NOW, and the six it added are the reason this assertion is
+# a NAMED SET rather than a number. M35 vendors upstream's oracle wire layer, whose files carry
+# `import type` clauses for `Fr`, `AztecAddress`, the kernel and AVM types and one relative
+# `./oracle_registry.js` — all erased before a byte is emitted. A count would have to be bumped and
+# would say nothing; the set says which edges exist and fails on a seventh that is not type-only.
 EXT_OTHER="$(m28_rows "$BROWSER" EXTERNAL-OTHER)"
-assert_eq "exactly one non-inject external edge is recorded" "1" \
+EXT_NAMES="$(printf '%s\n' "$EXT_OTHER" | cut -f1 | LC_ALL=C sort | tr '\n' ' ')"
+assert_ge "some non-inject external edges are recorded" 1 \
   "$(printf '%s\n' "$EXT_OTHER" | grep -c . || true)"
-assert_eq "…and it is the node host's Reactor TYPE, imported by grumpkin.ts and poseidon.ts" \
-  "../../node-host/src/reactor.ts" "$(printf '%s' "$EXT_OTHER" | cut -f1)"
+assert_eq "…and they are exactly these, every one of them an elided TYPE import" \
+  "../../node-host/src/reactor.ts ./oracle_registry.js @aztec/foundation/curves/bn254 @aztec/foundation/trees @aztec/stdlib/avm @aztec/stdlib/aztec-address @aztec/stdlib/kernel " \
+  "$EXT_NAMES"
+assert_true "…including the node host's Reactor TYPE, imported by grumpkin.ts and poseidon.ts" \
+  str_has_word "$EXT_NAMES" "../../node-host/src/reactor.ts"
+# NOT ONE OF THEM SURVIVES INTO THE EMITTED BYTES, which is the property rather than the count. The
+# needle for each is its own specifier, and the control below is a specifier that IS shipped.
+# NOT `grep … | grep -q`: `verify_no_pipeline_predicates` pins the surviving count of that spelling
+# at five BY NAME, and a sixth fails there. The hits are read into a variable and tested with
+# `lib.sh`'s builtin predicate, which is the remedy that check exists to enforce.
+ELIDED_SURVIVING=""
+EMITTED_JS="$(cat "$BROWSER_DIST"/*.js "$BROWSER_DIST"/chunks/*.js 2>/dev/null)"
+assert_ge "the emitted bytes were read, so the absence below is measured over a real bundle" \
+  100000 "${#EMITTED_JS}"
+for spec in $EXT_NAMES; do
+  if str_has_sub "$EMITTED_JS" "$spec"; then
+    ELIDED_SURVIVING="$ELIDED_SURVIVING $spec"
+  fi
+done
+assert_eq "not one elided type specifier survives into the emitted bytes" "" "$ELIDED_SURVIVING"
 EMITTED_REACTOR="$(grep -rlo 'node-host/src/reactor' "$BROWSER_DIST"/*.js "$BROWSER_DIST"/chunks/*.js 2>/dev/null | grep -c . || true)"
 assert_eq "…and it does NOT survive into the emitted bytes, so nothing a page loads asks for it" \
   "0" "$EMITTED_REACTOR"

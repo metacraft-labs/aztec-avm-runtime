@@ -863,6 +863,86 @@ m28 353  m29 127
                                                        CAMPAIGN TOTAL 10,178
 ```
 
+**M35 TOOK IT TO 11,730, AND MOVED EXACTLY THREE OTHER MILESTONES — ALL THREE DECLARED IN THE
+REFERENCE TABLE BEFORE THE SWEEP RAN.** Measured M0-M35 on 2026-08-30 by M35's implementation, after
+its last edit, `setsid`-detached in this repository's own dev shell (node v24.19.0), one milestone at
+a time with nothing else running, `TMPDIR` and the log under `~/.cache`, **no hole in the log** (72
+markers for 36 milestones), **34 of 36 exit 0**:
+
+```
+m0 156  m1 181  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 262  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
+m28 357  m29 127  m30 218  m31 421  m32 237  m33 248  m34 217  m35 198
+                                                       CAMPAIGN TOTAL 11,730
+```
+
+**Every one of M0-M34 came out at its reference value TO THE ASSERTION**, and
+11,524 + 198 + 4 + 2 + 2 = 11,730 exactly, `delta +0`. **M35's own 198** is 64 / 83 / 51.
+**M28 353 -> 357** is `verify_browser_bundle_no_node_builtins` 64 -> 67 and
+`verify_browser_bundle_no_native_deps` 44 -> 45: its §4 asserted *"exactly ONE non-inject external
+edge is recorded"*, and M35's fifty vendored files add SIX elided `import type` edges. **A count
+would have had to be bumped and would say nothing**; it is a named SET now, in both checks, with a
+non-emptiness assertion on the bytes it scans and a DD-9 membership test over the set.
+**M33 246 -> 248** is the orchestration's dependency pin moving to six, with the reason re-derived
+OFFLINE from `orchestration/package-lock.json` — `@aztec/noir-acvm_js`'s declared dependency list is
+EMPTY, with `@aztec/aztec.js`'s non-empty one as the control that the reader can answer both ways.
+**M1 179 -> 181** is `verify_provenance_complete` 68 -> 70: two vendored TREE rows add no per-file
+assertion, and the +2 is one per inventory id no row had cited before (RI-64 and RI-97), exact in
+both parts. `check-drift` 22 -> 24, two tree rows at one assertion each.
+
+**M9 DID NOT FLAKE** — 807, rc 0, 1,282 s, immediately after m8's 175 s run, which is D19's standing
+condition and it did not fire; M15 did not flake either (537, 382 s). **The two non-zero exits are
+both already on this file's list.** M11 is **262 with nine failing assertions**, split 5 / 2 / 2, the
+recorded ninth-upstream-move signature with the count unchanged; not repaired, `carry/` left at HEAD.
+M28 is **357 with ONE failing assertion and it is L0's** — `verify_npm_pack_no_optional_native` pins
+the tracked `package.json` list and `replay/package.json` is a fifth tree; recorded, not fixed, for
+the third milestone running. **L0's and L1's six check names appear ZERO times in the whole sweep
+log**, grepped one at a time. **A sweep is a writer**: `carry/rebase.json` and `carry/exposure.json`
+were `aaeb6877…` / `ec959b84…` before, came out `79f597b2…` / `3836c2b6…` — the same two post-sweep
+digests every run since M30 — and were restored, `sha256sum -c`, both OK.
+
+**AND M35'S SWEEP WAS ABORTED THREE TIMES ON PURPOSE, WHICH IS THE RULE WORKING THREE TIMES.**
+Twenty-five, fifteen and five minutes in. None of the three was a finding about the sweep; all three
+were *"run your sweep after your last edit"*, and **each abort bought a defect that a green sweep
+would have shipped**:
+
+  1. **A figure nobody re-derived, in the document written to record this milestone's own vendoring.**
+     `PRIVATE-EXECUTION.md` §2's last row said 50 files / **4,870** lines. The file count was right;
+     4,870 is 923 + 3,947, the 36-file relative CLOSURE, on a row stating that 37 files are vendored.
+     The true figure is 4,961. The comparer compared that row's FILE count and left its LINE count
+     alone — *half a row derived reads exactly like a whole one*. All eight of §2's figures are
+     derived now.
+  2. **Four validations that are upstream's and were not here**, found by reading upstream's own
+     handler bodies against this one. In every case the permissive version is not visibly wrong
+     afterwards: an OVERLAPPING capsule copy done forward leaves `1,1,1` where `1,2,3` belongs and
+     the store reads back cleanly either way; a duplicate siloed nullifier added to a `Set` is a
+     no-op, so accepting a double-spend WITHIN ONE TRANSACTION looks identical to refusing it;
+     consuming a note nobody created is the fabricated-note shape from the other direction; and an
+     oracle named `assertValidPublicCalldata` that asserts nothing is a validator that validates
+     nothing. **The coverage check could not have found any of them** — the partition was already
+     disjoint, summing and fully exercised, and all four oracles were already answering.
+  3. **The half of "a bytecode/oracle mismatch is loud" that nothing was feeding.**
+     `buildACIRCallback` wraps its table in a Proxy whose trap fires for an oracle name the registry
+     does not declare, and it picks between three diagnostics on
+     `'nonOracleFunctionGetContractOracleVersion' in handler`. Without that method it takes the first
+     and says the contract's oracle version is unknown and blames the `#[aztec]` macro — over a
+     contract that called the version oracle first, as every `#[aztec]` contract does. **A wrong
+     explanation is worse than none**, because it names a cause the reader will go and check.
+
+*The general form, and it is what made the three aborts cheap: reading upstream's own code against
+yours is the only work available while a sweep runs, and it is the work that finds what a check
+cannot.*
+
+**AND A MINIFIED STACK POINTED AT THE MODULE GRAPH FOR A DEFECT IN FIVE LINES OF LOCAL ORDERING.**
+Feeding that hook produced `ReferenceError: Cannot access 'G' before initialization` in the page,
+inside a minified chunk, with a stack naming one arm and nothing else. Three module-graph hypotheses
+were tried and all three were wrong — re-exporting from the entry point, wrapping in a sibling,
+importing directly in the demo. The cause was that the assignment had been inserted three lines ABOVE
+its own `const handler` declaration. *A temporal dead zone in one function reads exactly like a cycle
+between modules, and the thing that distinguished them was removing the change rather than reasoning
+about it.*
+
 **M34'S REVIEW TOOK IT TO 11,524, AND MOVED EXACTLY TWO MILESTONES — M34'S OWN AND M32'S, BOTH
 DECLARED IN THE REFERENCE TABLE BEFORE THE SWEEP RAN.** Re-measured M0-M34 on 2026-08-30 by M34's
 review, **after its last commit**, `setsid`-detached in this repository's own dev shell (node

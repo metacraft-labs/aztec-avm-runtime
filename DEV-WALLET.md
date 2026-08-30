@@ -254,9 +254,15 @@ a second copy of every shared chunk.
 
 | | derived |
 |---|---|
-| the wallet entry's eager set | **275.26 KB** gzipped across **9** files |
-| the wallet demo page's eager set | **309.99 KB** gzipped across **13** files |
+| the wallet entry's eager set | **296.39 KB** gzipped across **9** files |
+| the wallet demo page's eager set | **332.68 KB** gzipped across **13** files |
 | `@aztec/aztec.js` bytes in `browser.js`'s eager set | **0** |
+
+*(Both figures moved in M35, which fills the private half of the seam: the wallet entry now reaches
+upstream's `WASMSimulator` and the whole 68-oracle wire layer, 275.26 -> 296.39 KB and 309.99 ->
+332.68 KB, with two more `bumps` entries recording it. `PRIVATE-EXECUTION.md` §6 carries that
+accounting; this table is re-derived on every run either way, which is why it moved here rather than
+rotting.)*
 
 **One budget was bumped and it is recorded as data rather than absorbed.** The wallet entry's eager
 budget goes 270 -> 300 KB, with a `bumps` entry in `chunk-budgets.json` naming what grew and why: the

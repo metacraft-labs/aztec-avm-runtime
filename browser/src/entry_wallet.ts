@@ -137,6 +137,41 @@ export type {
   WalletSdkLogger,
 } from './vendor/wallet_sdk/types.ts';
 
+// M35: private execution. The oracle surface, and one ACIR frame driven by upstream's own
+// WASMSimulator over upstream's own oracle wire. `PRIVATE-EXECUTION.md` is the write-up.
+export {
+  ORACLE_NAMES,
+  ORACLE_IMPLEMENTED,
+  ORACLE_REFUSING,
+  ORACLE_REFUSAL_REASONS,
+  ORACLE_ENVIRONMENT_VERSION,
+  EPHEMERAL_RETURN_ORACLES,
+  ORACLE_EPHEMERAL_RETURN_LABELS,
+  OracleUnimplemented,
+  OracleVersionIncompatible,
+  assertOracleSurfaceMatchesDeclaration,
+  createPrivateOracleHandler,
+  oracleMethodName,
+} from './wallet/private_oracles.ts';
+export type { OracleCall, PrivateOracleHandle, PrivateOracleOptions } from './wallet/private_oracles.ts';
+export {
+  PrivateExecutionNotInitialised,
+  executePrivateFunction,
+  functionTypeOf,
+  initPrivateExecution,
+  privateExecutionAssets,
+  toAddressValue,
+  toFieldValue,
+} from './wallet/private_execution.ts';
+export type {
+  AddressLike,
+  FieldLike,
+  PrivateExecutionAsset,
+  PrivateExecutionAssets,
+  PrivateExecutionReport,
+  PrivateExecutionRequest,
+} from './wallet/private_execution.ts';
+
 export { hashToEmoji } from './vendor/wallet_sdk/crypto.ts';
 export type { EncryptedPayload, ExportedPublicKey, SecureKeyPair, SessionKeys } from './vendor/wallet_sdk/crypto.ts';
 
@@ -191,5 +226,25 @@ export const WALLET_ENTRY_OPS: readonly string[] = Object.freeze(
     'WALLET_DECISION_METADATA',
     'WALLET_SEED_METADATA',
     'CLASS_ARTIFACT_HASH_SEED',
+    // M35: the private-execution oracle surface and the one-frame executor.
+    'ORACLE_NAMES',
+    'ORACLE_IMPLEMENTED',
+    'ORACLE_REFUSING',
+    'ORACLE_REFUSAL_REASONS',
+    'ORACLE_ENVIRONMENT_VERSION',
+    'EPHEMERAL_RETURN_ORACLES',
+    'ORACLE_EPHEMERAL_RETURN_LABELS',
+    'OracleUnimplemented',
+    'OracleVersionIncompatible',
+    'assertOracleSurfaceMatchesDeclaration',
+    'createPrivateOracleHandler',
+    'oracleMethodName',
+    'executePrivateFunction',
+    'functionTypeOf',
+    'toFieldValue',
+    'toAddressValue',
+    'initPrivateExecution',
+    'privateExecutionAssets',
+    'PrivateExecutionNotInitialised',
   ].sort(),
 );

@@ -71,6 +71,9 @@ have them swapped and still contain both.
 **M34 moved one of the figures below, by three.** It adds an EIGHTH entry point to the browser pass
 — `wallet-demo.js`, the page that drives the wallet — and `m28_scan` reads the whole PASS's metafile
 rather than one entry's, so that page's own three modules join the count: **1135 -> 1138 inputs**.
+*(M35 takes it to **1188**: fifty vendored files — upstream's `WASMSimulator` and the private-execution
+oracle wire layer — plus the three anchor-versus-pin shims and the two new modules of ours. The number
+is re-derived from the metafile on every run, which is why it moved here rather than rotting.)*
 Nothing else moved: the `util` edge count stays 45 (the wallet demo reaches no new Node shim), the
 declared dependency closure stays 271 (M34 installs nothing), and `optionalDependencies` stays 3.
 
@@ -80,10 +83,12 @@ PASS's metafile rather than one entry's, so the wallet entry's own graph joins t
 **1068 -> 1135 inputs**, and the two `util` edges its closure adds take **43 -> 45**. The third is
 the dependency closure: M33 declares `@aztec/aztec.js`, which npm installs together with
 `@aztec/entrypoints` and `@aztec/standard-contracts`, so **268 -> 271 packages** — three, exactly.
+*(M35 takes it to **272**: `@aztec/noir-acvm_js`, whose own declared dependency list is EMPTY — one
+package, exactly, and RI-64 priced it at one four milestones before it was spent.)*
 None of the three is a native-addon family and `optionalDependencies` stays at 3, which is the
 figure D22 is about. All three were found by §6 re-deriving them, which is what §6 is for.
 
-- The browser bundle's module graph has 1138 inputs.
+- The browser bundle's module graph has 1188 inputs.
 - The node bundle's module graph has 969 inputs.
 - Node builtins left external in the browser bundle: 0.
 - Node builtins left external in the node bundle: 22.
@@ -128,7 +133,7 @@ they are on separate lines for the reason §3 gives — a line carrying two of t
 swapped and still contain both, which is precisely how this section passed a review mutation that
 made it state the reverse of the data:
 
-- The declared dependency closure of the shipped package is 271 packages.
+- The declared dependency closure of the shipped package is 272 packages.
 - Manifests in that closure declaring `optionalDependencies`: 3.
 
 All three are native-addon families — `msgpackr`, `msgpackr-extract` and

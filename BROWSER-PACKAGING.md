@@ -59,9 +59,9 @@ worth the paragraph:
 
 | entry point | eager, gzipped | files | M27's figure |
 |---|---|---|---|
-| `aztec-avm-runtime/browser` — the DD-5 reference | **263.1 KB** | 9 | 253.94 KB |
-| `aztec-avm-runtime/testing` | 288.28 KB | 12 | 277.43 KB |
-| the demo page | 289.5 KB | 12 | 277.65 KB |
+| `aztec-avm-runtime/browser` — the DD-5 reference | **265.37 KB** | 9 | 253.94 KB |
+| `aztec-avm-runtime/testing` | 290.65 KB | 12 | 277.43 KB |
+| the demo page | 291.87 KB | 12 | 277.65 KB |
 | `aztec-avm-runtime/node` | 225.49 KB | 4 | 223.61 KB |
 
 and, lazily, never in any eager set:
@@ -74,9 +74,18 @@ and, lazily, never in any eager set:
 | `chunks/FeeJuice-*.js` | 185.88 KB | yes, when a fee payer is funded |
 | `chunks/ContractInstanceRegistry-*.js` | 103.25 KB | no |
 
-**8,196.12 KB gzipped across every chunk; 263.1 KB is what the reference entry point costs.** That is
+**8,219.06 KB gzipped across every chunk; 265.37 KB is what the reference entry point costs.** That is
 the whole of DD-11 in two numbers, and the difference between them is exactly the two things DD-11
 names.
+
+*(Both numbers moved in M35, which adds private execution to the WALLET entry — fifty vendored files
+between upstream's `WASMSimulator` and the oracle wire layer. The reference entry moved 263.1 ->
+265.37 KB and it does not reach any of them: an entry point that gains exports changes how
+`splitting: true` partitions the common modules, so every entry that shares one moves with it. And
+the 4.4 MB of ACVM wasm the private path needs is in NEITHER number, because it is fetched by URL at
+the moment a page asks for a private execution — measured on a network log by
+`e2e_private_function_executes_in_browser` §5, with a control page that asks for none and fetches
+neither.)*
 
 `verify_browser_chunk_budget` re-derives every cell of both tables above OUT OF `chunks.json` and
 compares it to this file, row by row, and proves the enforcement can fail — in three directions, of

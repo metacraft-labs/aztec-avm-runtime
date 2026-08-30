@@ -68,6 +68,8 @@ asserted, so a vendored file cannot be deleted without the check noticing.
 | V7 | spike/src | yarn-project/simulator/src | ts | Apache-2.0 | RI-24 | 153 |
 | V8 | diffsim/src | yarn-project/simulator/src | ts | Apache-2.0 | RI-25 | 163 |
 | V9 | drift/src | yarn-project/simulator/src | ts | Apache-2.0 | RI-24 | 153 |
+| V10 | browser/src/vendor/simulator | yarn-project/simulator/src | cpp | Apache-2.0 | RI-64 | 13 |
+| V11 | browser/src/vendor/pxe | yarn-project/pxe/src | cpp | Apache-2.0 | RI-97 | 37 |
 <!-- END:trees -->
 
 <!-- BEGIN:files -->

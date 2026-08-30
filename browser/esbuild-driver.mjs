@@ -81,6 +81,52 @@ function redirectPlugin(table, hitsOut) {
   };
 }
 
+// ---------------------------------------------------------------------------------------------
+// THE ANCHOR-VERSUS-PIN GAP, and why it is a SEPARATE plugin from the DD-11 redirects.
+//
+// The DD-11 table is keyed by RESOLVED ABSOLUTE PATH and applies to whoever imports it, because a
+// megabyte fetched by anybody is the thing it exists to stop. This one is keyed by SPECIFIER and is
+// conditioned on the IMPORTER: only `browser/src/vendor/pxe/`'s files — the oracle wire layer
+// vendored from the `cpp` anchor — get the compatibility shim, and every other importer of the same
+// subpath keeps the installed module untouched. `build.mjs`'s `ANCHOR_PIN_GAP` block records what
+// the unscoped version cost.
+//
+// EVERY ENTRY MUST FIRE, the same discipline the redirect table carries: a shim that stops matching
+// means the vendored file is resolving to a module without the symbol, which is a build error today
+// and would be a silent `undefined` the day esbuild stops checking named exports.
+// ---------------------------------------------------------------------------------------------
+function anchorPinGapPlugin(table, hitsOut) {
+  const entries = Object.entries(table ?? {});
+  const hits = Object.fromEntries(entries.map(([spec]) => [spec, 0]));
+  hitsOut.push(hits);
+  return {
+    name: 'anchor-pin-gap',
+    setup(build) {
+      for (const [spec, entry] of entries) {
+        build.onResolve({ filter: new RegExp('^' + spec.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$') }, (args) => {
+          if (args.importer && args.importer.startsWith(entry.importerPrefix)) {
+            hits[spec] += 1;
+            return { path: entry.target };
+          }
+          return null;
+        });
+      }
+      build.onEnd((result) => {
+        for (const [spec, n] of Object.entries(hits)) {
+          if (n === 0) {
+            result.errors.push({
+              text:
+                `the anchor-versus-pin shim for ${spec} matched nothing. Either the vendored file that ` +
+                'needs it has gone, or the specifier moved — and the symbol the shim supplies is one the ' +
+                'installed pin does not export.',
+            });
+          }
+        }
+      });
+    },
+  };
+}
+
 const common = {
   bundle: true,
   splitting: true,
@@ -112,7 +158,7 @@ const browserResult = await esbuild.build({
   //
   // Both are the same mistake: a shim is a stand-in for a platform that is ABSENT, and in Node the
   // platform is present. Neither would have been noticed by a check that read the source.
-  alias: config.shims,
+  alias: { ...config.shims, ...(config.packageAliases ?? {}) },
   // THE GLOBALS ARE INJECTED INTO THE BROWSER PASS ONLY. Node HAS `Buffer` and `process`; giving it
   // ours replaces the real `process` with a stand-in, and the Node bundle then dies at import time
   // in bundled pino with `Cannot read properties of undefined (reading 'bigint')` — `process.hrtime`
@@ -120,7 +166,7 @@ const browserResult = await esbuild.build({
   // built artefact.
   inject: [config.globals],
   define: { 'process.env.NODE_ENV': '"production"', global: 'globalThis' },
-  plugins: [redirectPlugin(config.redirects, hitsPerPass)],
+  plugins: [redirectPlugin(config.redirects, hitsPerPass), anchorPinGapPlugin(config.anchorPinGap, [])],
 });
 writeFileSync(`${config.dist}/meta.json`, JSON.stringify(browserResult.metafile, null, 2) + '\n');
 

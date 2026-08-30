@@ -415,8 +415,23 @@ assert_eq "our telemetry replacement is disabled, runs a span's body, and answer
 # The comparison stays EXACT. A sixth dependency fails here, which is the property, and the
 # assertion below (`@aztec/simulator` is not among them) is unchanged and is the one that names the
 # rule.
-assert_eq "the orchestration's dependencies are the five published @aztec packages" \
-  "@aztec/aztec.js @aztec/constants @aztec/foundation @aztec/protocol-contracts @aztec/stdlib" \
+#
+# M35 ADDED THE SIXTH, AND IT FAILED HERE FIRST, WHICH IS THE PIN WORKING RATHER THAN THE PIN BEING
+# WRONG.
+#
+# `@aztec/noir-acvm_js` is the ACVM — the executor upstream's own `WASMSimulator` drives — and it is
+# the single install RI-64 priced four milestones before M35 spent it. It is admissible for a
+# STRONGER reason than `@aztec/aztec.js`'s twelve-package closure: `npm view
+# @aztec/noir-acvm_js@5.0.0-nightly.20260626 dependencies` is EMPTY, so there is no closure to walk
+# and no path by which it could reach `@aztec/pxe`, `@aztec/simulator`, `@aztec/native` or
+# `@aztec/world-state`. That emptiness is re-derived from `orchestration/package-lock.json` — a file
+# in this repository, so the derivation is offline — by `verify_oracle_coverage_is_measured` §2,
+# with `@aztec/aztec.js`'s non-empty dependency list beside it as the control that the reader can
+# answer both ways.
+#
+# The comparison stays EXACT. A seventh dependency fails here.
+assert_eq "the orchestration's dependencies are the six published @aztec packages" \
+  "@aztec/aztec.js @aztec/constants @aztec/foundation @aztec/noir-acvm_js @aztec/protocol-contracts @aztec/stdlib" \
   "$(python3 -c '
 import json, sys
 print(" ".join(sorted(json.load(open(sys.argv[1]))["dependencies"])))' "$ORCH_DIR/package.json")"

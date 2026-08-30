@@ -196,6 +196,16 @@ assert_ge "the subject's raw reading covers the whole build" 20 \
 assert_eq "…and it reports no DD-9 package" "" \
   "$(printf '%s\n' "$SUBJ_RAW" | sed -n 's/^RAW-FORBIDDEN\t//p' | tr '\n' ' ' | sed 's/ $//')"
 
+# THE CONTROL BUILD MUST RESOLVE WHAT THE SUBJECT RESOLVES, and M35 added four resolutions it did
+# not have. Three are the anchor-versus-pin shims and one is the severed `@aztec/simulator` edge;
+# `browser/build.mjs` supplies them through its `shims` alias table and an importer-scoped plugin,
+# and this CLI invocation has neither. Without them the control build fails outright, which reads as
+# "the scanner found no planted package" — a control that cannot run is worse than one that cannot
+# fail, because its silence looks like a green.
+#
+# They are passed UNSCOPED here on purpose: the scoping in the real build is about not putting a file
+# of ours between other importers and the module they named, and the control has no other importers.
+# What the control has to reproduce is the subject's RESOLUTION, and it does.
 CTRL_META="$CTRL/meta.json"
 m33_bounded 600 "the control bundle build" \
   "$M27_ESBUILD" "$CTRL/control_entry.ts" --bundle --format=esm --platform=browser \
@@ -204,6 +214,10 @@ m33_bounded 600 "the control bundle build" \
   "--alias:assert=$REPO_ROOT/browser-probe/shims/assert.js" \
   "--alias:tty=$REPO_ROOT/browser-probe/shims/tty.js" \
   "--alias:module=$BROWSER_SRC/shims/module.js" \
+  "--alias:@aztec/simulator/client=$BROWSER_SRC/vendor/simulator/client.ts" \
+  "--alias:@aztec/foundation/promise=$BROWSER_SRC/shims/foundation_promise.ts" \
+  "--alias:@aztec/stdlib/messaging=$BROWSER_SRC/shims/stdlib_messaging.ts" \
+  "--alias:@aztec/stdlib/aztec-address=$BROWSER_SRC/shims/stdlib_aztec_address.ts" \
   "--inject:$BROWSER_SRC/globals.js"
 CTRL_RC=$?
 assert_eq "the control bundle builds" "0" "$CTRL_RC"
@@ -271,15 +285,39 @@ assert_eq "@aztec/wallets — the embedded wallet package — reaches all four t
 assert_true "…because it depends on both @aztec/pxe and @aztec/wallet-sdk" \
   str_has_sub "$(d_direct '@aztec/wallets')" '@aztec/wallet-sdk'
 
-echo "== 7. and orchestration's declared dependencies are the four plus aztec.js, and nothing else"
+echo "== 7. and orchestration's declared dependencies are the five plus noir-acvm_js, and nothing else"
 
 ORCH_DEPS="$(python3 -c '
 import json, sys
 print(" ".join(sorted(json.load(open(sys.argv[1]))["dependencies"])))' "$REPO_ROOT/orchestration/package.json")"
 note "orchestration depends on: $ORCH_DEPS"
-assert_eq "the orchestration's dependency list is exactly what M33 leaves it" \
-  "@aztec/aztec.js @aztec/constants @aztec/foundation @aztec/protocol-contracts @aztec/stdlib" \
+# M35 ADDED THE SIXTH AND THIS PIN CAUGHT IT, which is what an exact list is for. `@aztec/noir-acvm_js`
+# is the ACVM — RI-64's single priced install — and it is admissible here for a stronger reason than
+# `@aztec/aztec.js`'s twelve-package closure: `npm view @aztec/noir-acvm_js@<pin> dependencies` is
+# EMPTY, so there is no closure to walk and no path to any of the six forbidden packages below. The
+# comparison stays EXACT; a seventh fails.
+assert_eq "the orchestration's dependency list is exactly what M33 and M35 leave it" \
+  "@aztec/aztec.js @aztec/constants @aztec/foundation @aztec/noir-acvm_js @aztec/protocol-contracts @aztec/stdlib" \
   "$ORCH_DEPS"
+# ...and the reason the addition is admissible is RE-DERIVED from a file in this repository rather
+# than quoted from a registry query, so the check is offline: the lockfile records the resolved
+# dependency set of every package, and the ACVM's is empty while `@aztec/aztec.js`'s is not. That
+# pair is the control: a reader that reported "empty" for everything would fail on the second.
+ACVM_DEPS="$(python3 -c '
+import json, sys
+lock = json.load(open(sys.argv[1]))
+def deps(name):
+    node = lock.get("packages", {}).get("node_modules/" + name)
+    if node is None:
+        return "ABSENT"
+    return " ".join(sorted(node.get("dependencies", {})))
+print("acvm=[%s]" % deps("@aztec/noir-acvm_js"))
+print("aztecjs_empty=%s" % ("yes" if deps("@aztec/aztec.js") == "" else "no"))' \
+  "$REPO_ROOT/orchestration/package-lock.json")"
+assert_eq "the ACVM declares no dependencies at all, read from this repository's own lockfile" \
+  "acvm=[]" "$(printf '%s\n' "$ACVM_DEPS" | sed -n '1p')"
+assert_eq "…and the same reader says @aztec/aztec.js's is NOT empty, so 'empty' is a reading" \
+  "aztecjs_empty=no" "$(printf '%s\n' "$ACVM_DEPS" | sed -n '2p')"
 for forbidden in '@aztec/pxe' '@aztec/wallet-sdk' '@aztec/wallets' '@aztec/simulator' '@aztec/native' '@aztec/world-state'; do
   assert_false "…and it does not declare '$forbidden'" str_has_word "$ORCH_DEPS" "$forbidden"
 done
