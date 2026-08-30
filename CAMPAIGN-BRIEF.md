@@ -35,7 +35,19 @@ load).
 Each of these is a defect that shipped, not a precaution.
 
 ### An assertion must be capable of failing
-**Thirty-seven instances.** (M29's review added the 31st, 32nd and 33rd — a needle with a space in
+**Thirty-eight instances.** (**M34's review added the 38th, and it is M32's shape inside the very
+control written to answer it.** `test_wallet_keys_deterministic` §5 asserts that neither dev domain
+separator collides with a member of upstream's `DomainSeparator`, and pairs it with a control whose
+comment says *"THE COLLISION DETECTOR IS SHOWN TO FIRE. Without this, 'no collision' is satisfied by
+a comparator that never compares — the second form on this list, wearing a set intersection instead
+of a grep."* The control was a **second, three-line script** computing `ups[0] in set(ups)` — a
+tautology over a list the `assert_ge 30` two lines above has already asserted non-empty — so it
+printed `COLLIDES` whatever the real detector did, and a detector that had stopped detecting passed
+both assertions. *"A control has to run through the instrument, not beside it."* There is one
+function now, called with the real separators and again with an upstream member substituted for one
+of them, and it must name the substituted value back. The substantive claim survives — the real
+detector, exercised, reports `COLLIDES: 116501019` on a planted member and `NO_COLLISION` on the two
+real separators.) (M29's review added the 31st, 32nd and 33rd — a needle with a space in
 it asked of a minified bundle, an assertion over the number of arguments the check itself passed,
 and a run-time key-set check over keys the function had just built from that very set; all three
 are below, all three were in M29's own work, and all three were found by asking of each green
@@ -724,6 +736,34 @@ measured regression.
 It has happened to an implementation agent, a review agent, **and a reviewer
 reviewing that very defect**. A corrected `PR.md` shipped beside a stale commit
 message three times. Bind claims to data, or expect them to rot.
+
+**A CORRECTION FILED IN A NEIGHBOURING FILE IS NOT A CORRECTION, AND THE ORIGINAL WAS ALSO IN A
+THROWN MESSAGE.** M34 measured that `browser/src/foundation_grumpkin.ts`'s header sentence —
+`reduce512BufferToFr` *"has exactly one caller in this graph: `deriveKeys`"* — is **false**
+(`git grep` at the anchor and over the installed `@aztec/foundation` trees finds two DECLARATIONS
+and no call site at either revision), said so in as many words, gave the right reason for why it
+matters (*"it is the sentence that would stop somebody trying this route"*), and then wrote the
+correction into `dev_keys.ts` and `REUSE-INVENTORY.md` while **leaving the false sentence standing
+in `foundation_grumpkin.ts`**, `git status` clean, in **three** places: the file header, the
+method's doc comment, and — worst — the string the `Promise.reject` carries, which is what a
+developer who reaches it actually reads. A reader of the file gets the false claim; only a reader of
+the *other* file gets the correction, and nobody arrives at the correction first. Corrected at the
+source by M34's review, all three. **Rule: fix a false sentence where it is written. A note about it
+somewhere else is a second document to keep in step, not a repair** — and check whether the sentence
+is also in a message the program emits, because that copy is the one with a user.
+
+**AND A ROW ADDED TO A TABLE WHOSE CHECK ENUMERATES A FIXED LIST IS A ROW NOTHING RE-DERIVES.**
+`test_worker_transferable_container_not_copied` §10 re-derives `WORKER-NODE.md` §5's packaging table
+from `chunks.json`, `for entry in browser.js testing.js demo.js node/node.js worker.js
+worker-demo.js`. M34 added an eighth entry point, added a `wallet-demo.js` ROW to that table, and did
+not add `wallet-demo.js` to the loop — so that one row was outside every instrument, and it had
+already rotted by the time the milestone closed: it stated **309.51 KB** where the build's own report
+said **309.91**, because a later step in the same milestone moved the figure and only the rows a
+check names went red. Every other row in the table was correct, which is exactly why nobody looked.
+**Rule: when you add a row to a table a check re-derives, add its subject to the check's list in the
+same edit — and prefer a list DERIVED from the artefact over one typed in the check.** This is
+"an absence is only as wide as the spellings you enumerated" with the sign flipped: a *presence*
+is only as wide as the subjects the loop enumerates.
 
 **AND A NUMBER RE-DERIVED WITHOUT ITS ATTRIBUTION IS NOT RE-DERIVED.** M24's OQ-6 check re-computes
 every figure `TRACE-ABI.md` §2 quotes from `arms.tsv` on every run — and matched each one as
