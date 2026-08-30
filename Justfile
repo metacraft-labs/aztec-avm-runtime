@@ -2982,6 +2982,36 @@ verify-l3:
     fi
     exit "$rc"
 
+# =================================================================================================
+# L4 — RANGE REPLAY (Aztec-Live-Chain-Replay.milestones.org)
+#
+#   just replay-window                   every replayable transaction, with the outcome table
+#   just replay-window url out below=40  …reaching BELOW the finalized tip, which is the CONTROL
+#                                        that demonstrates isolation
+#
+# THE RANGE IS THE REPLAYABLE WINDOW AND IS NOT A PARAMETER. `replay/src/range.ts` says why: the
+# window's two ends are `getBlockNumber('finalized') + 1` and `getBlockNumber()`, both already on
+# L0's permitted fourteen, and anything older is unreplayable by construction. Measured on
+# 2026-08-30: testnet's window was 32 blocks holding 3 transactions, mainnet's 41 holding 1 — so a
+# demo-shaped range is tens of blocks and a handful of transactions, which is what the chain
+# contains rather than a limitation of this code.
+#
+# THIS IS THE ONE L4 RECIPE AND IT NEEDS A LIVE CHAIN. The window is a property of the chain at the
+# moment it is read; a fixture of it would be a fixture of a moment.
+# ---------------------------------------------------------------------------
+
+replay-window url='https://aztec-testnet.drpc.org' module=avm_wasm_default below='' max='':
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if [ ! -s "{{module}}" ]; then
+      echo "replay-window: no AVM module at {{module}}. Remedy: just ci-browser-gate" >&2
+      exit 2
+    fi
+    args=(--url "{{url}}" --module "{{module}}")
+    [ -n "{{below}}" ] && args+=(--reach-below-finalized "{{below}}")
+    [ -n "{{max}}" ] && args+=(--max "{{max}}")
+    cd "{{justfile_directory()}}/replay" && node tools/replay_window.mjs "${args[@]}"
+
 # THE MEASUREMENT THAT KEEPS test_reverted_transaction_recorded_as_reverted HONESTLY PENDING.
 # It needs a settled transaction that REVERTED, and none exists to be found. Committed so the claim
 # is re-runnable rather than quoted: a scan is a measurement of a chain at the moment it ran.

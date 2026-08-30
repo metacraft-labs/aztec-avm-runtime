@@ -126,6 +126,20 @@ export {
   type TreeRootDeclaration,
 } from './replay_execution.ts';
 
+// ---- L4 ------------------------------------------------------------------------------------
+
+export {
+  OUTCOME_KINDS,
+  WINDOW_METHODS,
+  readReplayableWindow,
+  replayReplayableWindow,
+  type OutcomeKind,
+  type RangeOptions,
+  type RangeReport,
+  type ReplayableWindow,
+  type TransactionOutcome,
+} from './range.ts';
+
 // ---- L3 ------------------------------------------------------------------------------------
 
 export {
