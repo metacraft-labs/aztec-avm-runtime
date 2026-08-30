@@ -129,7 +129,7 @@ The four renames are a rename and not new behaviour, measured on both sides: `fr
 
 ---
 
-## 3. THE SURFACE: 68 ORACLES, 33 SERVED, 35 REFUSED BY NAME
+## 3. THE SURFACE: 68 ORACLES, 34 SERVED, 34 REFUSED BY NAME
 
 **Owned by `verify_oracle_coverage_is_measured` §4–§5 and
 `test_unimplemented_oracle_refuses_by_name`.**
@@ -137,10 +137,10 @@ The four renames are a rename and not new behaviour, measured on both sides: `fr
 | | derived |
 |---|---|
 | oracles in the registry | **68** |
-| implemented | **33** |
-| refusing | **35** |
-| refusals carrying a declared reason | **35** |
-| implemented oracles EXERCISED in the browser | **33** |
+| implemented | **34** |
+| refusing | **34** |
+| refusals carrying a declared reason | **34** |
+| implemented oracles EXERCISED in the browser | **34** |
 
 The partition is never typed against a list of names: `ORACLE_NAMES` is
 `Object.keys(ORACLE_REGISTRY)` — the vendored registry's own keys — and `ORACLE_REFUSING` is that set
@@ -198,9 +198,9 @@ against this one, and all four are exercised with their negative case:
 Every refusal names the oracle, the TIER it belongs to and the milestone that owns it. Four of the
 reasons are **measurements** rather than plans:
 
-- **`aztec_utl_getContractInstance` is the gate.** It is the first oracle every real private function
-  reaches after the version check — measured on `Token.transfer`, `Token.mint_to_private` and
-  `PrivateVoting.cast_vote`, all three of which stop there. It is tier 2's first rung.
+- **`aztec_utl_getContractInstance` WAS the gate and is now served** — tier 2's first rung, built
+  rather than argued away. See §3a; the three programs that all stopped there now stop at three
+  different oracles, and two of the three are M36's.
 - **`aztec_utl_getNoteHashMembershipWitness` needs a value-to-index lookup**, and
   `ResidentMerkleWriteOperations.findLeafIndices` REFUSES by name (RI-67). A sibling path can be
   taken by INDEX here and not by value; that is a gap in the runtime, not a gap in the handler.
@@ -208,6 +208,89 @@ reasons are **measurements** rather than plans:
   at all, so `decryptAes128` needs either a barretenberg overlay in M27's patch (the poseidon2 and
   grumpkin pattern) or WebCrypto's own AES-CBC.
 - **The fact store is refused for a reason that is upstream's code rather than ours.** See §5.
+
+---
+
+## 3a. TIER 2, RUNG 1: THE CONTRACT INSTANCE DIRECTORY, AND WHAT SERVING IT MOVED
+
+**Owned by `test_unimplemented_oracle_refuses_by_name` §5, §5b and §5c.**
+
+M35 shipped with `aztec_utl_getContractInstance` refused, and recorded the consequence as its
+strongest claim: `Token.transfer`, `Token.mint_to_private` and `PrivateVoting.cast_vote` all stop
+there, so tier 2's first rung was where every real private function ended. That claim was true and
+it is now spent — the rung is built.
+
+### The ladder, re-measured after the rung
+
+| program | stops at | tier | oracles served |
+|---|---|---|---|
+| `Token.transfer` | `aztec_utl_getNotes` | **M36** | 4 |
+| `Token.mint_to_private` | `aztec_prv_getSenderForTags` | **M36** | 17 |
+| `PrivateVoting.cast_vote` | `aztec_utl_getPublicKeysAndPartialAddress` | tier 2 | 4 |
+
+**The stop set was a singleton and is now three distinct oracles, and that is the result rather
+than a regression.** A singleton said "the boundary is one oracle". Three distinct stops say the
+three programs need genuinely different things — and **two of the three are M36's**, which is M36's
+scope re-derived from a measurement instead of from its own plan. `mint_to_private` goes thirteen
+oracle calls further than it could before, through note creation, and stops needing tagging.
+
+`cast_vote` stops at another tier 2 oracle, so **tier 2 is not finished by its first rung** and this
+section does not claim it is.
+
+### The circuit constrains the answer, which is unusual and is the safety property
+
+`aztec-nr`'s own `get_contract_instance` is:
+
+```
+let instance = unsafe { get_contract_instance_internal(address) };
+assert_eq(instance.to_address(), address);
+```
+
+So the **circuit re-derives the address from the preimage it was handed and constrains it**. For
+this one oracle the plausible default a wrong handler would return is caught by the thing under
+test: a fabricated instance does not produce a wrong-but-valid transaction, it produces a failed
+one. That is why every ladder rung's SERVED set is asserted to contain
+`aztec_utl_getContractInstance` — a rung that advanced past that oracle is a rung whose derivation
+agreed with the circuit's, and a count of served oracles would not say so.
+
+Each program therefore runs at **its own contract's own address**, derived by upstream's
+`makeContractInstanceFromClassId` from the preimage the wallet holds. Running PrivateVoting's
+bytecode at Token's address was a fiction the old arm got away with only because it never got far
+enough for anything to look.
+
+### "Served" does not mean "answers anything" — the two controls
+
+The rule this milestone exists to enforce is not weakened by an oracle that started answering, and
+two controls say so on every run:
+
+- **An address the wallet does not hold.** The same circuit, the same directory, a different
+  address: the frame reaches the oracle and **refuses**, having served the ones before it. The
+  refusal is `ContractInstanceNotHeld` and the check asserts it is **not** `OracleUnimplemented` —
+  because those say different things about what to build next ("register the contract" against
+  "build tier 2"), and a handler that conflated them would pass every count in the file while
+  sending a reader to the wrong milestone.
+- **A directory that lies about itself.** An entry filed under an address its own preimage does not
+  derive to would fail the circuit's `assert_eq` deep inside the ACVM, as an unsatisfied constraint
+  the reader has to work backwards from — M35's own header records what that costs. The guard
+  re-derives the relation with **upstream's own `computeContractAddressFromInstance`**, before a
+  single opcode runs, and names both sides.
+
+### The ledger grew a third outcome, and collapsing it was tried first
+
+`served` / `refused` was not enough. `refused` is a fact about the **partition** — this wallet does
+not serve that oracle, true for every argument, and the set of them must equal `ORACLE_REFUSING`.
+"Held no instance at that address" is a fact about the wallet's **data**. Recording it as `refused`
+made one oracle appear in both the served and the refused sets of a single run, and the invariant
+"the two sets are disjoint" started failing because of a directory lookup. The sets were never the
+same kind of thing; one outcome value was hiding it. The third is `unavailable`, and a frame halts
+on either kind — `stoppedAtOracle` reads both, because one that only read `refused` would report
+`null` for a frame that plainly stopped.
+
+### The boundary, stated
+
+This directory serves **instances the wallet was given** — a chain it produced, registered into, or
+derived. It is not an archiver and it is not a view of a chain it synced. An empty directory is the
+default, and with it every address refuses.
 
 ---
 
@@ -223,7 +306,7 @@ reasons are **measurements** rather than plans:
 | its solved witness | **897** entries |
 | oracle calls it made, all served | **4** |
 | `Token.transfer` bytecode | **76,875** bytes |
-| oracles it served before stopping | **2** |
+| oracles it served before stopping | **4** |
 | oracles it refused | **1** |
 | programs measured to stop at that oracle | **3** |
 
@@ -291,8 +374,8 @@ the count.)*
 
 | | derived |
 |---|---|
-| the wallet entry's eager set | **296.39 KB** gzipped across **9** files |
-| the wallet demo page's eager set | **332.94 KB** gzipped across **13** files |
+| the wallet entry's eager set | **296.97 KB** gzipped across **9** files |
+| the wallet demo page's eager set | **334.07 KB** gzipped across **13** files |
 | `acvm_js_bg.wasm` | **3,601,516** bytes |
 | `noirc_abi_wasm_bg.wasm` | **789,053** bytes |
 | `@aztec/aztec.js` bytes in `browser.js`'s eager set | **0** |

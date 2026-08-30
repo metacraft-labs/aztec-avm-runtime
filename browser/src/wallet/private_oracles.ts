@@ -45,6 +45,13 @@ import { AztecAddress } from '@aztec/stdlib/aztec-address';
 import { MAX_FR_CALLDATA_TO_ALL_ENQUEUED_CALLS } from '@aztec/constants';
 import { siloNullifier } from '@aztec/stdlib/hash';
 import { poseidon2HashWithSeparator } from '@aztec/foundation/crypto/poseidon';
+// The address derivation is UPSTREAM'S OWN, not a re-implementation. `computeContractAddressFromInstance`
+// is the TypeScript side of the same computation `ContractInstance::to_address()` performs inside the
+// circuit, so the guard below and `aztec-nr`'s `assert_eq` are two evaluations of one function rather
+// than two functions that ought to agree. Re-implementing it here would have produced a guard that
+// passes exactly when it is wrong in the same way the handler is.
+import { computeContractAddressFromInstance } from '@aztec/stdlib/contract';
+import type { PublicKeys } from '@aztec/stdlib/keys';
 
 import { ORACLE_REGISTRY } from '../vendor/pxe/contract_function_simulator/oracle/oracle_registry.ts';
 import { ORACLE_VERSION_MAJOR, ORACLE_VERSION_MINOR } from '../vendor/pxe/oracle_version.ts';
@@ -76,6 +83,9 @@ export const ORACLE_IMPLEMENTED: readonly string[] = Object.freeze(
     'aztec_misc_assertCompatibleOracleVersion',
     'aztec_misc_getRandomField',
     'aztec_misc_log',
+    // tier 2's first rung — the contract instance directory. Served from what the wallet HOLDS,
+    // and refused by name for an address it does not. See `ContractInstanceNotHeld`.
+    'aztec_utl_getContractInstance',
     // capsules — a per-(contract, slot) field store, scoped
     'aztec_utl_setCapsule',
     'aztec_utl_getCapsule',
@@ -130,11 +140,10 @@ export const ORACLE_REFUSING: readonly string[] = Object.freeze(
  */
 export const ORACLE_REFUSAL_REASONS: Readonly<Record<string, string>> = Object.freeze({
   // ---- tier 2, the adapters over exports this runtime already has -----------------------------
-  aztec_utl_getContractInstance:
-    'tier 2 (adapters): the contract instance is in the node\'s own store, and this handler has no ' +
-    'route to it yet. This is the FIRST oracle every real private function reaches after the ' +
-    'version check — measured on Token.transfer, Token.mint_to_private and PrivateVoting.cast_vote, ' +
-    'all three of which stop here',
+  // `aztec_utl_getContractInstance` WAS HERE and is now served — tier 2's first rung. It is the
+  // one refusal this campaign removed by building the thing rather than by lowering the bar, and
+  // what replaced it is not "always answer": an address the wallet does not hold still refuses, by
+  // name, through `ContractInstanceNotHeld`. See section 3a of PRIVATE-EXECUTION.md.
   aztec_utl_getNoteHashMembershipWitness:
     'tier 2 (adapters): needs a value-to-index lookup in the note-hash tree, and ' +
     'ResidentMerkleWriteOperations.findLeafIndices REFUSES by name (RI-67). A sibling path can only ' +
@@ -252,6 +261,33 @@ export class OracleUnimplemented extends Error {
   }
 }
 
+/**
+ * Raised when a contract asks for an instance this wallet does not hold.
+ *
+ * **THIS IS NOT `OracleUnimplemented`, AND CONFLATING THEM WOULD MAKE THE LEDGER LIE.** The oracle
+ * IS served; the wallet simply has no instance at that address. Those are different facts about
+ * the runtime — the first says "build tier 2", the second says "register the contract first" — and
+ * a reader who cannot tell them apart will go and build the wrong thing. So the error names the
+ * oracle, the address that missed, and HOW MANY the directory holds, because "not held" over an
+ * empty directory and "not held" over a directory of four are different situations.
+ */
+export class ContractInstanceNotHeld extends Error {
+  constructor(
+    readonly oracle: string,
+    readonly address: string,
+    readonly heldCount: number,
+  ) {
+    super(
+      `ContractInstanceNotHeld: '${oracle}' is served, but this wallet holds no contract instance ` +
+        `at ${address} (the directory holds ${heldCount}). The wallet answers this oracle from the ` +
+        `instances it was GIVEN — a chain it produced or registered into — and never from a ` +
+        `zero-filled preimage, because a fabricated instance produces a transaction that looks ` +
+        `valid. Register the contract with the wallet before executing against it.`,
+    );
+    this.name = 'ContractInstanceNotHeld';
+  }
+}
+
 /** Raised when the executing bytecode's oracle version is not compatible with this environment. */
 export class OracleVersionIncompatible extends Error {
   constructor(
@@ -273,7 +309,23 @@ export class OracleVersionIncompatible extends Error {
 export interface OracleCall {
   readonly seq: number;
   readonly oracle: string;
-  readonly outcome: 'served' | 'refused';
+  /**
+   * THREE OUTCOMES, AND THE THIRD IS NOT A SHADE OF THE SECOND.
+   *
+   *   `served`       the oracle answered.
+   *   `refused`      this wallet does not serve this oracle at all — `OracleUnimplemented`. A fact
+   *                  about the PARTITION, true for every argument, and the thing whose set must
+   *                  equal `ORACLE_REFUSING`.
+   *   `unavailable`  the oracle IS served and had no answer for THIS argument —
+   *                  `ContractInstanceNotHeld`. A fact about the wallet's DATA, not its surface.
+   *
+   * The third was added when tier 2's first rung landed, and collapsing it into `refused` was tried
+   * first: it makes one oracle appear in both the served and the refused sets of a single run, so
+   * "the served and refusing sets are disjoint" — an invariant about the partition — starts failing
+   * because of a directory lookup. The sets were never the same kind of thing; one outcome value
+   * was hiding that.
+   */
+  readonly outcome: 'served' | 'refused' | 'unavailable';
   readonly detail: string;
 }
 
@@ -291,6 +343,53 @@ export interface PrivateOracleOptions {
   readonly entropySeed: Fr;
   /** Optional sink for `aztec_misc_log`, so a contract's debug_log is visible rather than dropped. */
   readonly writeLine?: (line: string) => void;
+  /**
+   * The contract instances this wallet HOLDS, for `aztec_utl_getContractInstance` — tier 2's first
+   * rung, and the oracle every real private function reaches after the version check.
+   *
+   * **THE BOUNDARY, STATED HERE BECAUSE IT IS THE WHOLE MEANING OF THE ORACLE.** This is a
+   * directory of instances the wallet was GIVEN — a chain we produced, registered into, or
+   * derived. It is not an archiver and it is not a view of a chain we synced. An address that is
+   * not in it is refused by name (`ContractInstanceNotHeld`), never answered with a zero-filled
+   * preimage, because a zero-filled instance is exactly the plausible default that makes a
+   * transaction look valid and be wrong.
+   *
+   * Omitting it entirely is legal and means the wallet holds NOTHING: every address then refuses.
+   * That is the honest default — an empty directory is a directory, and it is not the same object
+   * as an oracle that does not exist.
+   */
+  readonly contractInstances?: readonly HeldContractInstance[];
+}
+
+/**
+ * One instance the wallet holds: an address, and the six fields the vendored `CONTRACT_INSTANCE`
+ * mapping serialises.
+ *
+ * **THE ADDRESS IS NOT A SEVENTH INDEPENDENT FIELD, AND THE CIRCUIT IS WHAT SAYS SO.**
+ * `aztec-nr`'s own `get_contract_instance` is:
+ *
+ * ```
+ * let instance = unsafe { get_contract_instance_internal(address) };
+ * assert_eq(instance.to_address(), address);
+ * ```
+ *
+ * — so the CIRCUIT re-derives the address from the preimage it was handed and constrains it. That
+ * is unusual and it is worth saying plainly: for this one oracle the "plausible default" a wrong
+ * handler would return is caught by the thing under test rather than by us. A directory whose
+ * address and preimage disagree does not silently produce a wrong transaction; it fails the
+ * circuit's own assertion. `assertHeldInstancesAreSelfConsistent` re-derives the same relation on
+ * OUR side too, at construction, so the disagreement is named here before the ACVM names it four
+ * layers down.
+ */
+export interface HeldContractInstance {
+  /** The deployment address, which must equal what the preimage below derives to. */
+  readonly address: AztecAddress;
+  readonly salt: Fr;
+  readonly deployer: AztecAddress;
+  readonly originalContractClassId: Fr;
+  readonly initializationHash: Fr;
+  readonly immutablesHash: Fr;
+  readonly publicKeys: PublicKeys;
 }
 
 export interface PrivateOracleHandle {
@@ -343,6 +442,57 @@ export function assertOracleSurfaceMatchesDeclaration(methodNames: readonly stri
   }
 }
 
+/**
+ * Re-derives every held instance's address from its own preimage and throws naming any that
+ * disagrees.
+ *
+ * **WHY THIS EXISTS WHEN THE CIRCUIT ALREADY CHECKS IT.** `aztec-nr`'s `get_contract_instance`
+ * asserts `instance.to_address() == address`, so an inconsistent directory cannot produce a wrong
+ * transaction — it produces a FAILED one. But it fails inside the ACVM, as a solver error about a
+ * constraint, four layers from the directory that caused it; M35's own header records what that
+ * costs (`Error awaiting foreign_call_handler`, eleven words naming nothing). This names the
+ * address, both derivations and the entry, at the point the directory is handed over.
+ *
+ * It is deliberately NOT a re-implementation: it calls upstream's own
+ * `computeContractAddressFromInstance`, the TypeScript half of the circuit's `to_address()`.
+ *
+ * Async because that derivation is — it is a poseidon2 chain plus a grumpkin scalar multiplication,
+ * and under this build both go through `avm.wasm`.
+ */
+export async function assertHeldInstancesAreSelfConsistent(
+  instances: readonly HeldContractInstance[],
+): Promise<void> {
+  const seen = new Set<string>();
+  for (const [i, held] of instances.entries()) {
+    const key = held.address.toString();
+    if (seen.has(key)) {
+      throw new Error(
+        `the contract instance directory holds two entries for ${key}; an address is a key and a ` +
+          `second entry for it would silently shadow the first`,
+      );
+    }
+    seen.add(key);
+    const derived = await computeContractAddressFromInstance({
+      salt: held.salt,
+      deployer: held.deployer,
+      currentContractClassId: held.originalContractClassId,
+      originalContractClassId: held.originalContractClassId,
+      initializationHash: held.initializationHash,
+      immutablesHash: held.immutablesHash,
+      publicKeys: held.publicKeys,
+      version: 2,
+    } as Parameters<typeof computeContractAddressFromInstance>[0]);
+    if (!derived.equals(held.address)) {
+      throw new Error(
+        `contract instance directory entry ${i} is not self-consistent: it is filed under ` +
+          `${key} but its own preimage derives to ${derived.toString()}. The circuit's ` +
+          `get_contract_instance asserts exactly this equality, so this entry would fail the ACVM ` +
+          `as an unsatisfied constraint rather than as a directory problem.`,
+      );
+    }
+  }
+}
+
 /** `aztec_{scope}_{method}` -> `method`, by upstream's own regex rather than by a `split`. */
 export function oracleMethodName(oracleKey: string): string {
   const m = oracleKey.match(/^aztec_(\w+?)_(.+)$/);
@@ -365,6 +515,12 @@ const CAPSULE_KEY = (contract: AztecAddress, slot: Fr, scope: AztecAddress) =>
  */
 export function createPrivateOracleHandler(options: PrivateOracleOptions): PrivateOracleHandle {
   const contract = options.contractAddress;
+  // The instance directory, keyed by address string. Built from the option rather than mutated, so
+  // a handler's directory is fixed for the life of the frame — a contract that could ADD to it
+  // mid-execution could answer its own question.
+  const instanceDirectory = new Map<string, HeldContractInstance>(
+    (options.contractInstances ?? []).map(h => [h.address.toString(), h]),
+  );
   const capsules = new Map<string, Fr[]>();
   const ephemeral = new EphemeralArrayService();
   const transient = new TransientArrayService();
@@ -384,7 +540,7 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
   let minRevertibleSideEffectCounter = 0;
   let randomCounter = 0;
 
-  const record = (oracle: string, outcome: 'served' | 'refused', detail: string) => {
+  const record = (oracle: string, outcome: 'served' | 'refused' | 'unavailable', detail: string) => {
     calls.push({ seq: seq++, oracle, outcome, detail });
   };
 
@@ -449,6 +605,56 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
         .join(' ');
       record('aztec_misc_log', 'served', `level=${level} fields=${fieldsSize}`);
       options.writeLine?.(`[contract] ${message}${rendered ? ' ' + rendered : ''}`);
+    },
+
+    // ---- tier 2, rung 1: the contract instance directory ----------------------------------------
+    //
+    // THE ORACLE EVERY REAL PRIVATE FUNCTION REACHES AFTER THE VERSION CHECK. Until this method
+    // existed, `Token.transfer`, `Token.mint_to_private` and `PrivateVoting.cast_vote` all stopped
+    // here — three programs, two contracts, three bytecodes, one rung.
+    //
+    // WHAT "SERVED" MEANS HERE, AND WHAT IT DOES NOT. It means: answered FROM THE DIRECTORY THIS
+    // WALLET WAS GIVEN. An address the wallet does not hold throws `ContractInstanceNotHeld` — a
+    // refusal, recorded as one, distinct from `OracleUnimplemented` because the two say different
+    // things about what to build next. There is no fallback, no zero-filled preimage and no
+    // `Option::none()` shape to hide behind: the oracle's declared return is a bare
+    // `CONTRACT_INSTANCE`, so "I do not know" has nowhere to go in the type and must be a throw.
+    getContractInstance(address: AztecAddress): {
+      salt: Fr;
+      deployer: AztecAddress;
+      originalContractClassId: Fr;
+      initializationHash: Fr;
+      immutablesHash: Fr;
+      publicKeys: PublicKeys;
+    } {
+      const held = instanceDirectory.get(address.toString());
+      if (!held) {
+        record(
+          'aztec_utl_getContractInstance',
+          'unavailable',
+          `no instance held at ${address.toString()}; the directory holds ${instanceDirectory.size}`,
+        );
+        throw new ContractInstanceNotHeld(
+          'aztec_utl_getContractInstance',
+          address.toString(),
+          instanceDirectory.size,
+        );
+      }
+      record(
+        'aztec_utl_getContractInstance',
+        'served',
+        `address=${address.toString()} classId=${held.originalContractClassId.toString()}`,
+      );
+      // The SIX fields the vendored CONTRACT_INSTANCE mapping declares, and only those. `address`
+      // is not among them — the nr-side struct does not carry it, because the circuit derives it.
+      return {
+        salt: held.salt,
+        deployer: held.deployer,
+        originalContractClassId: held.originalContractClassId,
+        initializationHash: held.initializationHash,
+        immutablesHash: held.immutablesHash,
+        publicKeys: held.publicKeys,
+      };
     },
 
     // ---- capsules -----------------------------------------------------------------------------

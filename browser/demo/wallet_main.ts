@@ -749,15 +749,6 @@ async function armPrivateExecution(): Promise<Record<string, unknown>> {
   say(`private_function: ${executes.outcome}, ${executes.oracleCalls.length} oracle call(s)`);
 
   const tokenArtifact = await loadArtifact();
-  const refuses = await executePrivateFunction({
-    ...common,
-    artifact: tokenArtifact,
-    functionName: 'transfer',
-    // `to` and `amount`, two fields, read as the ABI declares them. The values do not matter: the
-    // frame stops before the circuit reads either.
-    args: [0x444n, 5n],
-  });
-  say(`Token.transfer: ${refuses.outcome} at ${refuses.stoppedAtOracle ?? '(nothing)'}`);
 
   // THE LADDER, MEASURED ON EVERY RUN RATHER THAN ONCE IN A SPIKE.
   //
@@ -775,24 +766,103 @@ async function armPrivateExecution(): Promise<Record<string, unknown>> {
   // is the campaign's own rule for a number a check needs that also exists in the subject. Nothing
   // here is a width typed into a demo.
   const votingArtifact = await fetchJson(VOTING_ARTIFACT_URL);
+
+  // TIER 2, RUNG 1: EACH PROGRAM NOW RUNS AT ITS OWN CONTRACT'S OWN ADDRESS.
+  //
+  // Until `aztec_utl_getContractInstance` was served, every rung could share one made-up address
+  // (`0x777`) because every rung stopped before anything looked at it. It cannot now, and the
+  // reason is the circuit rather than a convention: `aztec-nr`'s `get_contract_instance` does
+  // `assert_eq(instance.to_address(), address)`, so the address a frame runs at must be the address
+  // the instance handed back DERIVES to. Running PrivateVoting's bytecode at Token's address was a
+  // fiction the old arm got away with only because it never got that far.
+  //
+  // So each contract gets a REAL instance — upstream's own `makeContractInstanceFromClassId`, over
+  // the class id derived from that artifact's own `public_dispatch` — and the frame runs at
+  // `instance.address`, which that function derived rather than anybody typed. Nothing here is a
+  // fabricated preimage: the address is a function OF the preimage, computed by upstream's code.
+  const deployerForPrivate = await AztecAddress.fromNumber(4242);
+  const instanceFor = async (doc: unknown, salt: number) => {
+    const parsedDoc = doc as { name: string; functions: { name: string; bytecode: string }[] };
+    const classId = await classIdOf(parsedDoc);
+    // THE INITIALIZATION HASH IS UPSTREAM'S OWN ENCODING OF "NO INITIALIZER", DELIBERATELY, AND
+    // THE TWO REJECTED ALTERNATIVES ARE WORTH RECORDING BECAUSE BOTH FAILED IN THE PAGE.
+    //
+    // What this rung measures is that the address a frame runs at is DERIVED from the preimage the
+    // wallet hands back — the relation `aztec-nr`'s `get_contract_instance` asserts. That relation
+    // holds for ANY consistent initialization hash, so the honest choice is the one that invents
+    // nothing.
+    //
+    //   * Reading the constructor ABI off the RAW artifact json gives a function record with no
+    //     `.parameters`, and the failure lands four frames away inside
+    //     `FunctionSelector.fromNameAndParameters` as `Cannot read properties of undefined
+    //     (reading 'map')` — measured, on PrivateVoting.
+    //   * Reading it off the LOADED artifact works, and then Token's four constructor arguments are
+    //     handed to PrivateVoting's one-argument constructor: `Function 'constructor' expects 1
+    //     argument(s) but received 4`. Also measured.
+    //
+    // Both were attempts to make the hash "real", and a real hash of arguments nobody passed is not
+    // more true than zero — it is a fiction with more steps.
+    const initializationHash = await computeInitializationHash(undefined, []);
+    return makeContractInstanceFromClassId(classId, salt, {
+      deployer: deployerForPrivate,
+      initializationHash,
+      immutablesHash: new Fr(28),
+      publicKeys: PublicKeys.default(),
+    });
+  };
+  const tokenInstance = await instanceFor(tokenArtifact, 27);
+  const votingInstance = await instanceFor(votingArtifact, 29);
+  const heldInstances = [tokenInstance, votingInstance].map(i => ({
+    address: i.address,
+    salt: i.salt,
+    deployer: i.deployer,
+    originalContractClassId: i.originalContractClassId,
+    initializationHash: i.initializationHash,
+    immutablesHash: i.immutablesHash,
+    publicKeys: i.publicKeys,
+  }));
+  say(
+    `[wallet] holding ${heldInstances.length} contract instance(s): ` +
+      heldInstances.map(i => i.address.toString()).join(', '),
+  );
+
+  // THE MILESTONE'S HEADLINE REFUSAL, RE-TAKEN ONE RUNG HIGHER. This is the same 76,875-byte
+  // `Token.transfer` M35 shipped, and it is still refused by name on a real circuit — but the
+  // oracle it now stops at is the first one it needs that is genuinely UNIMPLEMENTED, rather than
+  // tier 2's first rung. Serving `getContractInstance` did not weaken the rule; it moved the
+  // boundary and left the rule measuring the same thing at the new one.
+  const refuses = await executePrivateFunction({
+    ...common,
+    contractAddress: tokenInstance.address,
+    contractInstances: heldInstances,
+    artifact: tokenArtifact,
+    functionName: 'transfer',
+    // `to` and `amount`, two fields, read as the ABI declares them. The values do not matter: the
+    // frame stops before the circuit reads either.
+    args: [0x444n, 5n],
+  });
+  say(`Token.transfer: ${refuses.outcome} at ${refuses.stoppedAtOracle ?? '(nothing)'}`);
+
   const ladder: Record<string, unknown>[] = [];
-  for (const [doc, fnName] of [
-    [tokenArtifact, 'transfer'],
-    [tokenArtifact, 'mint_to_private'],
-    [votingArtifact, 'cast_vote'],
+  for (const [doc, fnName, inst] of [
+    [tokenArtifact, 'transfer', tokenInstance],
+    [tokenArtifact, 'mint_to_private', tokenInstance],
+    [votingArtifact, 'cast_vote', votingInstance],
   ] as const) {
+    const at = {
+      ...common,
+      contractAddress: inst.address,
+      contractInstances: heldInstances,
+      artifact: doc,
+      functionName: fnName,
+    };
     let rung;
     try {
-      rung = await executePrivateFunction({ ...common, artifact: doc, functionName: fnName, args: [] });
+      rung = await executePrivateFunction({ ...at, args: [] });
     } catch (e) {
       const declared = /declares (\d+) argument field\(s\)/.exec(String((e as Error).message));
       if (!declared) throw e;
-      rung = await executePrivateFunction({
-        ...common,
-        artifact: doc,
-        functionName: fnName,
-        args: new Array(Number(declared[1])).fill(0n),
-      });
+      rung = await executePrivateFunction({ ...at, args: new Array(Number(declared[1])).fill(0n) });
     }
     ladder.push({
       contractName: rung.contractName,
@@ -804,9 +874,50 @@ async function armPrivateExecution(): Promise<Record<string, unknown>> {
       stoppedAtOracle: rung.stoppedAtOracle,
       oraclesServed: rung.oraclesServed,
       oraclesRefused: rung.oraclesRefused,
+      ranAt: inst.address.toString(),
+      // THE SET, NOT JUST THE COUNT, AND IT IS WHAT MAKES THE CIRCUIT'S OWN ASSERTION READABLE
+      // FROM OUTSIDE. `aztec_utl_getContractInstance` appearing here as SERVED means the frame
+      // asked for the instance, got the preimage, and CARRIED ON — and carrying on is only
+      // possible if `assert_eq(instance.to_address(), address)` held inside the circuit. A count
+      // of four would be satisfied by four other oracles.
+      servedOracles: rung.oracleCalls.filter(c => c.outcome === 'served').map(c => c.oracle),
     });
     say(`${rung.contractName}.${fnName}: ${rung.outcome} at ${rung.stoppedAtOracle ?? '(nothing)'}`);
   }
+
+  // THE CONTROL THE SERVED ORACLE NEEDS, AND IT IS THE HALF THAT KEEPS THE RULE. "Served" must not
+  // mean "answers anything". The same program, the same directory, at an address the wallet does
+  // NOT hold: the oracle is reached and REFUSES, by name, as `ContractInstanceNotHeld` — a
+  // different refusal from `OracleUnimplemented` and recorded as one.
+  const unheldAddress = await AztecAddress.fromNumber(0x5150);
+  const unheld = await executePrivateFunction({
+    ...common,
+    contractAddress: unheldAddress,
+    contractInstances: heldInstances,
+    artifact: tokenArtifact,
+    functionName: 'transfer',
+    args: [0x444n, 5n],
+  });
+  say(`Token.transfer at an unheld address: ${unheld.outcome} at ${unheld.stoppedAtOracle ?? '(nothing)'}`);
+
+  // AND THE CONTROL FOR THE GUARD. A directory entry whose preimage does not derive to the address
+  // it is filed under is refused BEFORE the frame starts, naming both derivations — rather than
+  // reaching the ACVM and failing as an unsatisfied constraint the reader has to work backwards
+  // from. Recorded as the message, so the check reads what a caller would see.
+  let inconsistentDirectoryError = '';
+  try {
+    await executePrivateFunction({
+      ...common,
+      contractAddress: tokenInstance.address,
+      contractInstances: [{ ...heldInstances[0]!, salt: new Fr(0x1234) }],
+      artifact: tokenArtifact,
+      functionName: 'transfer',
+      args: [0x444n, 5n],
+    });
+  } catch (e) {
+    inconsistentDirectoryError = String((e as Error).message);
+  }
+  say(`inconsistent directory: ${inconsistentDirectoryError.slice(0, 80)}`);
 
   // THE SAME SEED TWICE, IN TWO SEPARATE HANDLERS. `getRandomField` is the one served oracle that
   // WOULD read ambient entropy in any other wallet, and a recording whose fields differ per run is a
@@ -833,6 +944,20 @@ async function armPrivateExecution(): Promise<Record<string, unknown>> {
     // two producers out of one run is what the neighbouring `returnsHash` assertion already does, and
     // this is the same shape for the address.
     requestedContractAddress: contract.toString(),
+    // TIER 2 RUNG 1'S OWN EVIDENCE. The directory the wallet held, the control at an address it did
+    // not, and the guard's message — each reported rather than summarised, so the check reads what
+    // the run produced instead of a boolean somebody computed in the page.
+    heldInstances: heldInstances.map(i => ({
+      address: i.address.toString(),
+      salt: i.salt.toString(),
+      deployer: i.deployer.toString(),
+      originalContractClassId: i.originalContractClassId.toString(),
+      initializationHash: i.initializationHash.toString(),
+      immutablesHash: i.immutablesHash.toString(),
+    })),
+    unheld: jsonSafe(unheld),
+    unheldAddress: unheldAddress.toString(),
+    inconsistentDirectoryError,
     entropy: { a: entropyA, b: entropyB, other: entropyOther },
     assets: privateExecutionAssets(),
   };
@@ -856,10 +981,32 @@ async function armOracleSurface(): Promise<Record<string, unknown>> {
   const contract = toAddressValue(0x777n, 'demo contract');
   const other = toAddressValue(0x778n, 'another contract');
   const scope = toAddressValue(0x999n, 'scope');
+  // TIER 2 RUNG 1 IS EXERCISED HERE TOO, and it has to be: `verify_oracle_coverage_is_measured`
+  // asserts the set of oracles this arm REACHED equals the declared implemented set in BOTH
+  // directions, so an oracle that moved into the served list and was not exercised here is caught
+  // as an unexercised method rather than quietly trusted. The instance is a real one — its address
+  // is what upstream's own derivation produced from the preimage below, not a number typed here.
+  const surfaceInstance = await makeContractInstanceFromClassId(new Fr(0x515n), 31, {
+    deployer: await AztecAddress.fromNumber(4242),
+    initializationHash: await computeInitializationHash(undefined, []),
+    immutablesHash: new Fr(28),
+    publicKeys: PublicKeys.default(),
+  });
   const handle = createPrivateOracleHandler({
     contractAddress: contract,
     entropySeed: toFieldValue(PRIVATE_ENTROPY_SEED, 'seed'),
     writeLine: (line: string) => say(line),
+    contractInstances: [
+      {
+        address: surfaceInstance.address,
+        salt: surfaceInstance.salt,
+        deployer: surfaceInstance.deployer,
+        originalContractClassId: surfaceInstance.originalContractClassId,
+        initializationHash: surfaceInstance.initializationHash,
+        immutablesHash: surfaceInstance.immutablesHash,
+        publicKeys: surfaceInstance.publicKeys,
+      },
+    ],
   });
   const h = handle.handler as Record<string, (...args: unknown[]) => unknown>;
   const F = (n: bigint) => toFieldValue(n, 'field');
@@ -874,6 +1021,23 @@ async function armOracleSurface(): Promise<Record<string, unknown>> {
   const r0 = String(await h.getRandomField());
   const r1 = String(await h.getRandomField());
   observations.getRandomField = `${r0 === r1 ? 'REPEATED' : 'advanced'}`;
+
+  // tier 2 rung 1 — BOTH DIRECTIONS, because an oracle that answers everything and an oracle that
+  // answers what it holds look identical from a single hit. The held address must come back with
+  // the preimage that derives to it; an address the directory does not carry must THROW.
+  const gotInstance = (await h.getContractInstance(surfaceInstance.address)) as {
+    originalContractClassId: { toString(): string };
+  };
+  observations.getContractInstance =
+    gotInstance.originalContractClassId.toString() === surfaceInstance.originalContractClassId.toString()
+      ? 'answered with the class id it was filed under'
+      : 'ANSWERED WITH THE WRONG CLASS ID';
+  try {
+    await h.getContractInstance(await AztecAddress.fromNumber(0x6161));
+    observations.getContractInstanceMiss = 'ANSWERED FOR AN ADDRESS IT DOES NOT HOLD';
+  } catch (e) {
+    observations.getContractInstanceMiss = `refused as ${(e as Error).name}`;
+  }
 
   // capsules
   h.setCapsule(contract, F(1n), [F(11n), F(12n)], scope);

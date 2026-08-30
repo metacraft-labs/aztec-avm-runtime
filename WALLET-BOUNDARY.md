@@ -280,19 +280,19 @@ are supersets — and this build already ships three further entries outside it 
 | | derived |
 |---|---|
 | `wallet.js`'s own module | **0.96 KB** gzipped |
-| its eager set | **296.39 KB** gzipped across **9** files |
+| its eager set | **296.97 KB** gzipped across **9** files |
 | `@aztec/aztec.js` bytes in that eager set | **13,398** |
 | `@aztec/aztec.js` bytes in `browser.js`'s eager set | **0** |
 
 **M35 MOVED THREE OF THOSE FOUR AGAIN, AND THE FOURTH IS STILL THE ONE THAT MATTERS.** M35 fills
 the seam's private half, so the wallet entry now reaches upstream's `WASMSimulator` (RI-64,
 `PROVENANCE.md` V10) and the whole private-execution oracle wire layer (RI-97, V11) — fifty vendored
-files between them. The eager set goes **275.26 -> 296.39 KB** across the same **9** files, recorded
+files between them. The eager set goes **275.26 -> 296.97 KB** across the same **9** files, recorded
 as a `bumps` entry in `chunk-budgets.json` (300 -> 340 KB) rather than absorbed. `wallet.js`'s own
 module goes **0.69 -> 0.94 KB**, still a re-export stub, and the `@aztec/aztec.js` bytes in the eager
 set move **13,379 -> 13,398** because the splitter re-partitioned around the new modules.
 **The zero did not move.** *(And the 4.4 MB of ACVM wasm private execution needs is NOT in the
-296.39: `acvm_js_bg.wasm` and `noirc_abi_wasm_bg.wasm` are fetched by URL at the moment a page asks
+296.97: `acvm_js_bg.wasm` and `noirc_abi_wasm_bg.wasm` are fetched by URL at the moment a page asks
 for a private execution, and `e2e_private_function_executes_in_browser` §5 measures their absence
 from a page that does not — on a network log that carries `avm.wasm`, so the absence is asked of a
 log that could have answered otherwise.)*

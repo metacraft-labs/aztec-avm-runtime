@@ -32,8 +32,10 @@ import { WASMSimulator } from '../vendor/simulator/private/acvm_wasm.ts';
 import { toACVMWitness } from '../vendor/simulator/private/acvm/serialize.ts';
 import { buildACIRCallback } from '../vendor/pxe/contract_function_simulator/oracle/acir_callback.ts';
 import {
+  type HeldContractInstance,
   type OracleCall,
   ORACLE_ENVIRONMENT_VERSION,
+  assertHeldInstancesAreSelfConsistent,
   createPrivateOracleHandler,
 } from './private_oracles.ts';
 
@@ -174,6 +176,13 @@ export interface PrivateExecutionRequest {
   readonly startSideEffectCounter?: number;
   readonly isStaticCall?: boolean;
   readonly writeLine?: (line: string) => void;
+  /**
+   * The contract instances the wallet holds, for tier 2's first rung. Omitted means the wallet
+   * holds none and every `getContractInstance` refuses — which is what M35 shipped and is still
+   * the default, so a caller that supplies nothing gets the old behaviour by construction rather
+   * than by remembering to.
+   */
+  readonly contractInstances?: readonly HeldContractInstance[];
 }
 
 export interface PrivateExecutionReport {
@@ -195,7 +204,10 @@ export interface PrivateExecutionReport {
   /** Every oracle the bytecode asked for, in order, served and refused alike. */
   readonly oracleCalls: readonly OracleCall[];
   readonly oraclesServed: number;
+  /** Calls to oracles this wallet does not serve at all — `OracleUnimplemented`. */
   readonly oraclesRefused: number;
+  /** Calls to a SERVED oracle that had no answer for that argument — `ContractInstanceNotHeld`. */
+  readonly oraclesUnavailable?: number;
   /** The oracle that stopped the execution, if one did. */
   readonly stoppedAtOracle: string | null;
   readonly error?: string;
@@ -324,10 +336,18 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
     );
   }
 
+  // THE DIRECTORY IS CHECKED BEFORE THE FRAME STARTS, not when the oracle is reached. An entry
+  // whose preimage does not derive to its own key fails the circuit's `assert_eq` as an
+  // unsatisfied constraint deep inside the ACVM; this says so as a directory problem, naming both
+  // derivations, before a single opcode runs.
+  const contractInstances = request.contractInstances ?? [];
+  await assertHeldInstancesAreSelfConsistent(contractInstances);
+
   const oracles = createPrivateOracleHandler({
     contractAddress,
     entropySeed: toFieldValue(request.entropySeed, 'entropySeed'),
     writeLine: request.writeLine,
+    contractInstances,
   });
 
   const fields = [...contextFields, ...args];
@@ -362,6 +382,7 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
       oracleCalls: ledger,
       oraclesServed: ledger.filter(c => c.outcome === 'served').length,
       oraclesRefused: ledger.filter(c => c.outcome === 'refused').length,
+      oraclesUnavailable: ledger.filter(c => c.outcome === 'unavailable').length,
       // EXPLICITLY NULL RATHER THAN ABSENT. An optional field that is simply not written makes the
       // reader print `MISSING`, and a check asserting `MISSING` cannot tell "the frame stopped at
       // nothing" from "the path is misspelled" — the residue M34's review left standing one
@@ -391,6 +412,13 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
     }
     const ledger = oracles.calls();
     const refused = ledger.filter(c => c.outcome === 'refused');
+    const unavailable = ledger.filter(c => c.outcome === 'unavailable');
+    // A FRAME HALTS ON EITHER KIND, AND `stoppedAtOracle` MUST SEE BOTH. `refused` is "this wallet
+    // does not serve that oracle"; `unavailable` is "it does, and had no answer for that argument".
+    // Both abort the ACVM at the instruction that needed the value, so both are stops — and a
+    // `stoppedAtOracle` that only looked at `refused` would report `null` for a frame that plainly
+    // stopped, which is the silent-success shape this campaign refuses.
+    const halted = ledger.filter(c => c.outcome !== 'served');
     const e = err as { message?: string; name?: string };
     return {
       ...base,
@@ -398,11 +426,12 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
       oracleCalls: ledger,
       oraclesServed: ledger.filter(c => c.outcome === 'served').length,
       oraclesRefused: refused.length,
-      stoppedAtOracle: refused.length > 0 ? refused[refused.length - 1].oracle : null,
+      oraclesUnavailable: unavailable.length,
+      stoppedAtOracle: halted.length > 0 ? halted[halted.length - 1].oracle : null,
       error: String(e?.message ?? err),
       errorName: String(e?.name ?? 'Error'),
       errorChain: chain,
-      outcome: refused.length > 0 ? 'refused' : 'failed',
+      outcome: halted.length > 0 ? 'refused' : 'failed',
       effects: oracles.effects(),
     };
   }

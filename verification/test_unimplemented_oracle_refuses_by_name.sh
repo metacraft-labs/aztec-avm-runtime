@@ -266,7 +266,12 @@ m35_absent "private.report.refuses.outcome=$R_OUTCOME" "private.report.refuses.s
 assert_eq "the subject is Token's PRIVATE transfer" "Token transfer abi_private" "$R_CONTRACT $R_FN $R_TYPE"
 assert_ge "and it is real compiled Noir rather than a stub" 50000 "$R_BYTES"
 assert_eq "the frame refused" "refused" "$R_OUTCOME"
-assert_eq "at an oracle it NAMES" "aztec_utl_getContractInstance" "$R_STOPPED"
+# THE ORACLE IT STOPS AT MOVED WHEN TIER 2'S FIRST RUNG WAS BUILT, AND THAT IS THE POINT.
+# M35 shipped this frame stopping at `aztec_utl_getContractInstance`. That oracle is served now —
+# from the directory this wallet holds — so the frame walks past it and stops at the first oracle it
+# needs that is genuinely UNIMPLEMENTED. The assertion is deliberately NOT loosened to "stopped
+# somewhere": it names the oracle, and the name is read from the artefact's own refusing set below.
+assert_eq "at an oracle it NAMES" "aztec_utl_getNotes" "$R_STOPPED"
 assert_true "which is a declared refusing oracle" str_has_sub "$REFUSING" "$R_STOPPED"
 # THE NON-DEGENERACY: it got there by serving some first. A frame that refused at its FIRST oracle
 # would satisfy every assertion above and would say nothing about the wire.
@@ -314,6 +319,15 @@ print('STOPS_NOT_REFUSING\t%s' % ' '.join(sorted(
     {str(r['stoppedAtOracle']) for r in rungs} - refusing)))
 print('MIN_SERVED\t%d' % min(r['oraclesServed'] for r in rungs))
 print('REFUSED_COUNTS\t%s' % ' '.join(sorted({str(r['oraclesRefused']) for r in rungs})))
+# TIER 2 RUNG 1'S OWN EVIDENCE, READ OUT OF EVERY RUNG'S SERVED SET.
+# `aztec_utl_getContractInstance` appearing as SERVED in a rung that then continued is the only
+# outside-readable proof that the circuit's own `assert_eq(instance.to_address(), address)` HELD:
+# a preimage that did not derive to the address the frame ran at would have failed the ACVM as an
+# unsatisfied constraint instead of advancing to a later oracle.
+print('RUNGS_SERVING_INSTANCE\t%d' % sum(
+    1 for r in rungs if 'aztec_utl_getContractInstance' in r['servedOracles']))
+print('RUNS_AT_DISTINCT_ADDRESSES\t%d' % len({r['ranAt'] for r in rungs}))
+print('RANAT_ZERO\t%d' % sum(1 for r in rungs if int(str(r['ranAt']), 16) == 0))
 PY
 )"
 l() { printf '%s\n' "$LAD" | awk -F'\t' -v k="$1" '$1==k{print $2}'; }
@@ -326,14 +340,85 @@ assert_eq "with three different bytecodes, so it is not one program three times"
 assert_ge "and the smallest of them is real compiled Noir rather than a stub" 5000 "$(l SMALLEST_BYTECODE)"
 assert_eq "every one of them is a private function" "abi_private" "$(l TYPES)"
 assert_eq "every one of them REFUSED" "refused" "$(l OUTCOMES)"
-# THE CLAIM ITSELF: the set of oracles the three stopped at is a SINGLETON, and it is the named one.
-assert_eq "and all three stopped at ONE oracle, which is what makes the boundary the oracle's" \
-  "aztec_utl_getContractInstance" "$(l STOPS)"
-assert_eq "…which is a declared refusing oracle rather than an incidental failure" "" "$(l STOPS_NOT_REFUSING)"
+# THE CLAIM ITSELF, AND IT IS NO LONGER A SINGLETON — WHICH IS THE RESULT, NOT A REGRESSION.
+#
+# M35 measured this set as the singleton `{aztec_utl_getContractInstance}` and that was true: tier 2's
+# first rung was where every real private function stopped. Building that rung moved all three, and
+# they did NOT move together — they now stop at three different oracles, which is a stronger
+# statement than the singleton was. The singleton said "the boundary is one oracle". Three distinct
+# stops say the three programs need genuinely different things, and TWO OF THE THREE are M36's:
+# `aztec_utl_getNotes` and `aztec_prv_getSenderForTags`. That is M36's scope re-derived from a
+# measurement rather than from its own plan.
+#
+# The set is asserted EXACTLY rather than by size, so a rung that regressed back to
+# `getContractInstance` — the shape a broken directory produces — fails here by name.
+assert_eq "the three now stop at three DIFFERENT oracles, and these are they" \
+  "aztec_prv_getSenderForTags aztec_utl_getNotes aztec_utl_getPublicKeysAndPartialAddress" \
+  "$(l STOPS)"
+assert_eq "…each of which is a declared refusing oracle rather than an incidental failure" "" "$(l STOPS_NOT_REFUSING)"
+# AND THE RUNG THEY ALL WALKED PAST. Without this the assertions above are satisfied by three
+# programs that failed for three unrelated reasons.
+assert_eq "every one of them SERVED the contract-instance oracle and carried on" "3" "$(l RUNGS_SERVING_INSTANCE)"
+# WHICH MEANS THE CIRCUIT'S OWN assert_eq HELD, THREE TIMES, AT THREE DIFFERENT ADDRESSES.
+# `aztec-nr`'s get_contract_instance re-derives the address from the preimage it is handed and
+# constrains it; a frame that advanced past that oracle is a frame whose derivation agreed.
+assert_eq "at addresses DERIVED from the preimages, two distinct ones for two contracts" "2" \
+  "$(l RUNS_AT_DISTINCT_ADDRESSES)"
+assert_eq "none of which is the zero address, so the derivation produced something" "0" "$(l RANAT_ZERO)"
 # THE NON-DEGENERACY, the same one section 5 makes for `transfer` alone: a frame that refused at its
 # FIRST oracle would satisfy everything above and say nothing about the wire having run.
 assert_ge "each of them served oracles on the way to the rung" 2 "$(l MIN_SERVED)"
 assert_eq "and each refused exactly one" "1" "$(l REFUSED_COUNTS)"
+
+echo "== 5c. TIER 2 RUNG 1'S TWO CONTROLS: 'served' must not mean 'answers anything'"
+
+# THE HALF THAT KEEPS THE RULE WHEN A REFUSAL BECOMES AN ANSWER.
+#
+# Section 5b shows the oracle answering. On its own that is exactly the shape this campaign's oldest
+# rule exists to catch: an oracle that returns a plausible value for whatever it is asked. So the
+# same program, with the same directory, is run at an address the wallet does NOT hold, and it must
+# refuse — by name, at that oracle, having served the ones before it.
+#
+# And the refusal must be `ContractInstanceNotHeld` rather than `OracleUnimplemented`. Those are
+# different facts about the runtime: the first says "register the contract", the second says "build
+# tier 2". A handler that conflated them would make the ledger say the wrong thing about what to do
+# next, while passing every count in this file.
+U_OUTCOME="$(m35_arm private.report.unheld.outcome)"
+U_STOPPED="$(m35_arm private.report.unheld.stoppedAtOracle)"
+U_SERVED="$(m35_arm private.report.unheld.oraclesServed)"
+U_CHAIN="$(m35_arm private.report.unheld.errorChain)"
+U_ADDR="$(m35_arm private.report.unheldAddress)"
+HELD="$(m35_arm private.report.heldInstances)"
+GUARD="$(m35_arm private.report.inconsistentDirectoryError)"
+m35_absent "private.report.unheld.outcome=$U_OUTCOME" "private.report.unheld.stoppedAtOracle=$U_STOPPED" \
+  "private.report.unheld.oraclesServed=$U_SERVED" "private.report.unheld.errorChain=$U_CHAIN" \
+  "private.report.unheldAddress=$U_ADDR" "private.report.heldInstances=$HELD" \
+  "private.report.inconsistentDirectoryError=$GUARD"
+
+assert_eq "the same circuit at an address the wallet does not hold REFUSES" "refused" "$U_OUTCOME"
+assert_eq "…at the contract-instance oracle itself" "aztec_utl_getContractInstance" "$U_STOPPED"
+assert_ge "…having served the oracles before it, so it reached the rung rather than falling over" 2 "$U_SERVED"
+assert_true "…and the refusal names ContractInstanceNotHeld" str_has_sub "$U_CHAIN" "ContractInstanceNotHeld"
+# NOT the other refusal. The oracle IS served; conflating the two would send a reader to build the
+# wrong milestone.
+assert_false "…and NOT OracleUnimplemented, because the oracle is served" \
+  str_has_sub "$U_CHAIN" "does not serve the oracle"
+assert_true "…and it says how many the directory holds, so 'not held' is readable against a size" \
+  str_has_sub "$U_CHAIN" "the directory holds 2"
+# THE ADDRESS IT MISSED ON IS NOT ONE OF THE HELD ONES — otherwise this control is asking the same
+# question section 5b already answered yes to.
+assert_false "the missed address is genuinely absent from the directory" str_has_sub "$HELD" "$U_ADDR"
+
+# THE SECOND CONTROL: A DIRECTORY THAT LIES ABOUT ITSELF IS CAUGHT BEFORE THE FRAME STARTS.
+# An entry filed under an address its own preimage does not derive to would fail the circuit's
+# assert_eq deep inside the ACVM, as an unsatisfied constraint the reader has to work backwards
+# from. The guard re-derives the same relation with upstream's own function and names both sides.
+assert_true "an inconsistent directory entry is refused before a single opcode runs" \
+  str_has_sub "$GUARD" "not self-consistent"
+assert_true "…naming the address it is filed under and the one it derives to" \
+  str_has_sub "$GUARD" "derives to"
+assert_true "…and saying which of the circuit's assertions it would otherwise have hit" \
+  str_has_sub "$GUARD" "get_contract_instance"
 
 echo "== 6. THE CONTROL FOR SECTION 5: a frame that needs only served oracles COMPLETES"
 
