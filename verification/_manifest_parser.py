@@ -77,7 +77,21 @@ WEASEL = [
     "no upstream equivalent exists",
 ]
 
-ENTRY_RE = re.compile(r"^### (FX-\d{2}) — (.+)$")
+# `\d{2,}` FOR THE SAME REASON `RI-` NEEDED IT, AND FOUND BY THE RULE RATHER THAN BY AN INCIDENT.
+#
+# M36 fixed `RI-\d{2}` in this file — twice — because the inventory reached RI-99 and `RI-100` read
+# as `RI-10`. It left `FX-\d{2}` standing, HERE and at the residue scan below, in the same file, in
+# the same pass. That is `CAMPAIGN-BRIEF.md`'s own *"when you fix an instance of a form, grep for the
+# form in the file you are fixing before you leave it"*, unheeded in the file being fixed.
+#
+# The FX namespace is at FX-29 and grows about one per milestone, so this is latent rather than live
+# — but it fails WORSE than the RI case did, and silently in three places at once. `### FX-100 — …`
+# does not match `FX-\d{2}` followed by ` — ` (after `FX-10` comes `0`, not a space), so: `parse()`
+# never creates the entry and none of the ~20 per-entry rules runs against it; the "written outside
+# the BEGIN/END block" guard below uses the same truncating pattern and cannot see it either; and the
+# contiguity check sees 1..99 over 99 ids and calls that contiguous. Every scope guard reports green
+# over an entry nothing validated.
+ENTRY_RE = re.compile(r"^### (FX-\d{2,}) — (.+)$")
 FIELD_RE = re.compile(r"^- ([a-z-]+): (.*)$")
 
 
@@ -142,7 +156,10 @@ def check(manifest: Path, repo: Path) -> tuple[int, int, list[str]]:
     # went unvalidated for a whole milestone. Measured here too during M5's review —
     # an `### FX-99` planted one line after END:manifest passed 37/37. So the
     # parser's reach is compared against the document rather than assumed.
-    headings = re.findall(r"^### (FX-\d{2}) — ", text, re.M)
+    # `\d{2,}`, the second of the two FX sites — see ENTRY_RE. If this scan truncates too, then the
+    # guard written to catch an entry the parser cannot reach becomes an entry THIS scan cannot reach
+    # either, and the two blindnesses cancel into a green report.
+    headings = re.findall(r"^### (FX-\d{2,}) — ", text, re.M)
     outside = [h for h in headings if h not in {e["id"] for e in entries}]
     assert_(
         not outside,
@@ -150,8 +167,18 @@ def check(manifest: Path, repo: Path) -> tuple[int, int, list[str]]:
         "block, so nothing validates them",
     )
 
+    # `\d{2,}` AND NOT `\d{2}`, AND THE DIGIT COUNT IS A LIVE DEFECT RATHER THAN A TIDY-UP.
+    #
+    # This file matched an inventory id as exactly two digits. The inventory passed RI-99 in M36, so
+    # `RI-100` is read by `re.findall(r"RI-\d{2}", ...)` as **`RI-10`** — an id that exists — and a
+    # manifest citing a three-digit id that does NOT exist validates cleanly. Found by
+    # `verify_fixture_corpus_manifest_complete`'s own negative control going green: it planted
+    # `RI-99` as "an id that does not exist", M36 created RI-99, the control was re-pointed at a
+    # DERIVED absent id (one past the highest), and the derived id was `RI-100` — which this pattern
+    # could not see. **Two defects in one control: a typed needle that the inventory overtook, and a
+    # pattern that truncates.** This campaign's `avm2`/`LAST_OPCODE` family, in a digit count.
     inventory_text = (repo / "REUSE-INVENTORY.md").read_text()
-    known_ri = set(re.findall(r"^### (RI-\d{2}) ", inventory_text, re.M))
+    known_ri = set(re.findall(r"^### (RI-\d{2,}) ", inventory_text, re.M))
     assert_(len(known_ri) >= 40, f"manifest: only {len(known_ri)} inventory ids found to check against")
 
     seen_ids: set[str] = set()
@@ -214,7 +241,8 @@ def check(manifest: Path, repo: Path) -> tuple[int, int, list[str]]:
             assert_(phrase not in blob, f"{eid}: asserts an absence without evidence: `{phrase}`")
 
         # Inventory ids resolve.
-        cited = re.findall(r"RI-\d{2}", e.get("inventory", ""))
+        # ANCHORED ON THE RIGHT, so `RI-100` is one id and not `RI-10` followed by a stray `0`.
+        cited = re.findall(r"RI-\d{2,}(?!\d)", e.get("inventory", ""))
         assert_(len(cited) >= 1, f"{eid}: `inventory` cites no RI-nn entry")
         for ri in cited:
             assert_(ri in known_ri, f"{eid}: cites {ri}, which is not an entry in REUSE-INVENTORY.md")

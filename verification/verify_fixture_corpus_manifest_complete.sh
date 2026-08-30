@@ -157,7 +157,20 @@ control "FX-01's skeptic-cannot-conclude field deleted" delete FX-01 skeptic-can
 control "FX-01's skeptic-cannot-conclude reduced to a stub" set FX-01 skeptic-cannot-conclude "not much."
 control "FX-03's where: pointed at a path that does not exist" \
   set FX-03 where "fixtures/no-such-file.json, tools/measure_differential.py"
-control "FX-23 citing an inventory id that does not exist" set FX-23 inventory "RI-99"
+# THE ABSENT ID IS DERIVED, NOT TYPED, AND THAT IS A DEFECT THIS CONTROL ALREADY SHIPPED.
+#
+# It planted `RI-99` as "an id that does not exist" — and M36 added RI-98 and RI-99 to
+# `REUSE-INVENTORY.md`, so the id EXISTED and the control silently stopped controlling. Caught by
+# the sweep, in a check M36 does not own and did not touch: **an inventory that grows makes a typed
+# absent id into a present one**, which is this campaign's "an absence is only as wide as the
+# spellings you enumerated" with the inventory moving instead of the needle.
+#
+# It is one past the highest id the file declares now, so it cannot go stale: adding an entry moves
+# the needle with it.
+ABSENT_RI="$(python3 -c 'import re,sys; ids=[int(m) for m in re.findall(r"^### RI-(\d+) ", open(sys.argv[1], encoding="utf-8").read(), re.M)]; print("RI-%02d" % (max(ids)+1) if ids else "RI-99")' "$REPO_ROOT/REUSE-INVENTORY.md")"
+assert_false "the derived absent inventory id really is absent from REUSE-INVENTORY.md" \
+  str_has_sub "$(cat "$REPO_ROOT/REUSE-INVENTORY.md")" "### $ABSENT_RI "
+control "FX-23 citing an inventory id that does not exist ($ABSENT_RI)" set FX-23 inventory "$ABSENT_RI"
 control "FX-20's no-upstream-equivalent reason emptied" set FX-20 no-upstream-equivalent ""
 control "FX-20's reason replaced by a tagged but content-free one" \
   set FX-20 no-upstream-equivalent "does-not-cover: there is no upstream fixture for the timer-driven block loop, and the sequencer and the processor and the node and the txe were all considered and none of them has one, so it has to be written here instead, at sufficient length to clear the floor this checker imposes."

@@ -126,7 +126,7 @@ Each gap is a shim in `browser/src/shims/` that re-exports the installed module 
 missing thing from upstream's own source at the anchor, and each is **scoped to the importers that
 have the gap** — `browser/src/vendor/pxe/` and nothing else — by an esbuild plugin that fails the
 build if any entry matches nothing. The scoping was measured rather than assumed: aliasing the two
-subpaths globally gives **265.37 KB either way** for `browser.js`'s eager set, so it did not cost
+subpaths globally gives **265.79 KB either way** for `browser.js`'s eager set, so it did not cost
 what a first comment claimed it did; it stays because a shim is a stand-in for a gap one directory
 has, and applying it to importers that do not have it makes its own "every entry must fire" assertion
 weaker.
@@ -421,6 +421,20 @@ tier 2's boundary a property of the ORACLE rather than of one contract. It was a
 written into three documents until M35's **review** re-took it and wired it in: the claim was true,
 and nothing re-derived it.
 
+**AND M36 CLOSED THAT RUNG, WHICH MOVES THE SET RATHER THAN CONTRADICTING IT.** The ladder above is
+measured over a handler built with **no note-discovery source**, which is what these three arms do
+and why the singleton still holds here. With one attached — M36's `ORACLE_DISCOVERY` partition, 42
+served rather than 33 — the same three programs stop at **three different oracles**:
+`Token.transfer` at `aztec_utl_getNotes`, `Token.mint_to_private` **executes** (a 1,047-entry
+witness, 22 served oracles), and `PrivateVoting.cast_vote` at
+`aztec_utl_getPublicKeysAndPartialAddress`, tier 2's SECOND rung.
+
+`LOCAL-HISTORY.md` §2 carries that measurement and the fabricated-instance control beside it, which
+is the part worth reading here: a well-formed but WRONG `ContractInstancePreimage` does not carry
+`transfer` one instruction further — the circuit constrains it and answers `Cannot satisfy
+constraint` with no further oracle call. **This section's claim is therefore a fact about the state
+M35 shipped**, and it is still asserted, on the arm that still produces it.
+
 **And that is what a milestone about refusals owes.** The refusal is asserted three ways: directly on
 the handler for all thirty-five, with the implemented ones answering on the same handler in the same
 arm as the control; and through a 76,875-byte compiled Noir circuit, which is the one a well-behaved
@@ -467,8 +481,8 @@ the count.)*
 
 | | derived |
 |---|---|
-| the wallet entry's eager set | **297.12 KB** gzipped across **9** files |
-| the wallet demo page's eager set | **334.51 KB** gzipped across **13** files |
+| the wallet entry's eager set | **304.12 KB** gzipped across **9** files |
+| the wallet demo page's eager set | **343.59 KB** gzipped across **13** files |
 | `acvm_js_bg.wasm` | **3,601,516** bytes |
 | `noirc_abi_wasm_bg.wasm` | **789,053** bytes |
 | `@aztec/aztec.js` bytes in `browser.js`'s eager set | **0** |
@@ -505,7 +519,10 @@ control that the scanner can find them at all. **Zero requests containing `barre
 - **No nested calls.** `aztec_prv_callPrivateFunction` is tier 4 and refuses; this executes ONE frame.
   A contract that makes a nested private call fails at the oracle that would have made it, which is
   the correct failure and not a silent single-frame result.
-- **No note discovery and no tagging.** The eight oracles M36 owns refuse by name.
+- **No note discovery and no tagging** *(M35's state; **M36 serves them** when a discovery source is
+  attached — see `LOCAL-HISTORY.md`)*. The eight oracles M36 owns refuse by name here, and the
+  refusal now says what the handler LACKS rather than naming a milestone, because a reader running
+  M36's own code would go and check a milestone number.
 - **No membership witnesses.** Tier 2 is enumerated, priced and refused; `getNoteHashMembershipWitness`
   additionally needs a runtime primitive that refuses today.
 - **No AES-128 and no ECDH.** Tier 3, with the measurement that decides how: `avm.wasm` has no `aes`
@@ -518,10 +535,15 @@ control that the scanner can find them at all. **Zero requests containing `barre
 ## 8. WHAT M36 INHERITS
 
 - An executor that runs real ACIR in a page, so M36's oracles are a substitution rather than a
-  construction: every one of them currently refuses by name, and the refusal names M36.
+  construction: every one of them currently refuses by name, and the refusal names what is missing.
+  *(Spent. `LOCAL-HISTORY.md` is M36's write-up.)*
 - The ordered oracle ledger, so "every oracle call visible" — `DEV-WALLET.md` §1's first design
   property — already covers the private path, refusals included.
 - The measurement in §5, which M36 must answer before it can serve `getPendingTaggedLogsV2`,
   `getLogsByTagV2` or `getNotes`: three of the eight ephemeral-array returns are its own.
+  *(Answered, by `DeterministicEphemeralArrayService` — upstream's own injection point rather than
+  an edit, so all fifty-two vendored files stay `local-edits: none`. `LOCAL-HISTORY.md` §5.)*
 - `aztec_utl_getContractInstance` as the measured first rung of tier 2, which every real contract
-  reaches before anything M36 owns.
+  reaches before anything M36 owns. *(Closed by M36, and the measurement that decided it is in
+  `LOCAL-HISTORY.md` §2: without that rung not one of M36's eight is reachable by a contract at
+  all.)*

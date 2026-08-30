@@ -74,6 +74,11 @@ rather than one entry's, so that page's own three modules join the count: **1135
 *(M35 takes it to **1188**: fifty vendored files — upstream's `WASMSimulator` and the private-execution
 oracle wire layer — plus the three anchor-versus-pin shims and the two new modules of ours. The number
 is re-derived from the metafile on every run, which is why it moved here rather than rotting.)*
+*(M36 takes it to **1197**: three new modules of ours — the note database, the tagging half and the
+boundary — two more vendored files (`pick_notes.ts` and `execution_tagging_index_cache.ts`, RI-98),
+and four `@aztec/stdlib/logs` and `@aztec/stdlib/note` subpath modules the tagging derivation reaches
+for the first time. **M36 installs nothing**, so the dependency closure stays at 272 and
+`optionalDependencies` stays at 3.)*
 Nothing else moved: the `util` edge count stays 45 (the wallet demo reaches no new Node shim), the
 declared dependency closure stays 271 (M34 installs nothing), and `optionalDependencies` stays 3.
 
@@ -88,7 +93,7 @@ package, exactly, and RI-64 priced it at one four milestones before it was spent
 None of the three is a native-addon family and `optionalDependencies` stays at 3, which is the
 figure D22 is about. All three were found by §6 re-deriving them, which is what §6 is for.
 
-- The browser bundle's module graph has 1188 inputs.
+- The browser bundle's module graph has 1197 inputs.
 - The node bundle's module graph has 969 inputs.
 - Node builtins left external in the browser bundle: 0.
 - Node builtins left external in the node bundle: 22.

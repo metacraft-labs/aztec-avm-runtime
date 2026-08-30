@@ -34,6 +34,7 @@ import { buildACIRCallback } from '../vendor/pxe/contract_function_simulator/ora
 import {
   type HeldAccountKeys,
   type HeldContractInstance,
+  type NoteDiscoverySource,
   type OracleCall,
   ORACLE_ENVIRONMENT_VERSION,
   assertHeldAccountKeysAreSelfConsistent,
@@ -190,6 +191,11 @@ export interface PrivateExecutionRequest {
    * none and every address answers "not registered" — which is what M35 shipped.
    */
   readonly accountKeys?: readonly HeldAccountKeys[];
+  /**
+   * M36's note-discovery source. **Absent by default**, and its absence is nine named refusals
+   * rather than nine empty answers — see `private_oracles.ts`.
+   */
+  readonly discovery?: NoteDiscoverySource;
 }
 
 export interface PrivateExecutionReport {
@@ -215,6 +221,10 @@ export interface PrivateExecutionReport {
   readonly oraclesRefused: number;
   /** Calls to a SERVED oracle that had no answer for that argument — `ContractInstanceNotHeld`. */
   readonly oraclesUnavailable?: number;
+  /** Whether a discovery source was attached — so a report says which partition was in force. */
+  readonly hasDiscovery: boolean;
+  /** How many oracles that partition serves. Read from the handle, never counted at the call site. */
+  readonly servedSetSize: number;
   /** The oracle that stopped the execution, if one did. */
   readonly stoppedAtOracle: string | null;
   readonly error?: string;
@@ -230,6 +240,18 @@ export interface PrivateExecutionReport {
     readonly returnsHash: string;
     readonly startSideEffectCounter: number;
     readonly endSideEffectCounter: number;
+    /**
+     * M36 — THE SIDE EFFECTS THE CIRCUIT ITSELF CLAIMED, so a note the wallet later discovers came
+     * out of an execution rather than out of a handler's bookkeeping.
+     *
+     * `notifyCreatedNote` is the PXE's own record and `effects.createdNotes` carries it; these are
+     * the CIRCUIT's public inputs, which is a different producer — and `mint_to_private` is measured
+     * to emit its note through these and to call `notifyCreatedNote` not at all. A note database fed
+     * from the handler alone would therefore hold nothing for the one contract that creates one.
+     */
+    readonly noteHashes: readonly string[];
+    readonly nullifiers: readonly string[];
+    readonly privateLogs: readonly { readonly fields: readonly string[]; readonly length: number }[];
   };
 }
 
@@ -283,6 +305,39 @@ function extractPublicInputs(parametersSize: number, partialWitness: Map<number,
     returnData.push(Fr.fromString(field));
   }
   return PrivateCircuitPublicInputs.fromFields(returnData);
+}
+
+/**
+ * The entries a `ClaimedLengthArray` says are real.
+ *
+ * A CIRCUIT'S SIDE-EFFECT ARRAYS ARE FIXED-WIDTH AND MOSTLY EMPTY. `MAX_NOTE_HASHES_PER_CALL` is
+ * sixteen and a call that creates one note fills one slot; the other fifteen are zero. Reading the
+ * whole array would put fifteen zero note hashes into the note database, and a zero note hash is a
+ * value that hashes and stores exactly like a real one. The claimed length is upstream's own answer
+ * to that, and it is read rather than inferred from a zero test — a legitimately zero field would be
+ * dropped by the inference and nothing would say so.
+ */
+function claimed(a: unknown): unknown[] {
+  const cla = a as { array?: unknown[]; claimedLength?: number };
+  if (!Array.isArray(cla?.array) || typeof cla?.claimedLength !== 'number') {
+    throw new Error(
+      `expected a ClaimedLengthArray with an \`array\` and a \`claimedLength\`, got ` +
+        `${JSON.stringify(Object.keys((a as object) ?? {}))}`,
+    );
+  }
+  return cla.array.slice(0, cla.claimedLength);
+}
+
+/** The `value` field of a `NoteHash` / `Nullifier`, refusing by name rather than stringifying. */
+function fieldOf(entry: unknown, what: string): string {
+  const value = (entry as { value?: { toString(): string } })?.value;
+  if (value === undefined) {
+    throw new Error(
+      `a ${what} in the circuit's public inputs has no \`value\` field; it carries ` +
+        `${JSON.stringify(Object.keys((entry as object) ?? {}))}`,
+    );
+  }
+  return value.toString();
 }
 
 /**
@@ -361,6 +416,7 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
     writeLine: request.writeLine,
     contractInstances,
     accountKeys,
+    ...(request.discovery ? { discovery: request.discovery } : {}),
   });
 
   const fields = [...contextFields, ...args];
@@ -376,6 +432,8 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
     argFields: args.length,
     initialWitnessSize: initialWitness.size,
     environmentOracleVersion: { ...ORACLE_ENVIRONMENT_VERSION },
+    hasDiscovery: oracles.hasDiscovery(),
+    servedSetSize: oracles.servedSet().length,
   };
 
   const simulator = new WASMSimulator();
@@ -409,6 +467,22 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
         returnsHash: publicInputs.returnsHash.toString(),
         startSideEffectCounter: Number(publicInputs.startSideEffectCounter),
         endSideEffectCounter: Number(publicInputs.endSideEffectCounter),
+        // THE CLAIMED LENGTH IS WHAT IS READ, NOT THE PADDED CAPACITY. `ClaimedLengthArray` is a
+        // fixed-width array plus the number of entries the circuit says are real; taking
+        // `.array` wholesale would put sixteen zero note hashes into a note database.
+        // `.value` AND NOT `String(entry)`, WHICH IS WHAT A FIRST DRAFT DID. Upstream's `NoteHash`
+        // and `Nullifier` are STRUCTS — a field plus a side-effect counter — and their `toString()`
+        // is `value=0x… counter=1`. Rendering the struct produced a string `Fr.fromString` then
+        // refused, four layers away, in a page; reading the field is the only correct thing and a
+        // missing one is a named error rather than a `String(undefined)`.
+        noteHashes: claimed(publicInputs.noteHashes).map(n => fieldOf(n, 'noteHash')),
+        nullifiers: claimed(publicInputs.nullifiers).map(n => fieldOf(n, 'nullifier')),
+        privateLogs: claimed(publicInputs.privateLogs).map(l => {
+          const log = (l as { log?: { fields?: unknown[]; length?: number } })?.log;
+          const fields = (log?.fields ?? []) as { toString(): string }[];
+          const length = typeof log?.length === 'number' ? log.length : fields.length;
+          return { fields: fields.map(f => f.toString()), length };
+        }),
       },
     };
   } catch (err) {

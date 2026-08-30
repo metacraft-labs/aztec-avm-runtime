@@ -3083,6 +3083,47 @@ m35-arms:
     node tools/run_private_execution_arms.mjs "$work" > "$work/private-execution.json"
     echo "m35-arms: wrote $work/private-execution.json"
 
+# M36. Note discovery and tagging, over the dev node's own history.
+#
+# NEEDS: a built browser bundle (`just browser-build`), `avm.wasm` (`just avm-wasm-build-m27`),
+# `ct_writer.wasm`, chromium on PATH, and `@aztec/noir-acvm_js` installed.
+#
+# `M36_ARMS_REFRESH=1` forces the arm run even when nothing is newer than the report.
+m36-arms:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    work="${M36_WORK:-$HOME/.cache/aztec-m36-notes}"
+    mkdir -p "$work"
+    node tools/run_note_discovery_arms.mjs "$work" > "$work/note-discovery.json"
+    echo "m36-arms: wrote $work/note-discovery.json"
+
+verify-m36-discovery:
+    @verification/e2e_note_discovery_across_blocks.sh
+
+verify-m36-tagging:
+    @verification/test_tagging_index_advances.sh
+
+verify-m36-boundary:
+    @verification/verify_local_history_boundary_declared.sh
+
+verify-m36:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      e2e_note_discovery_across_blocks \
+      test_tagging_index_advances \
+      verify_local_history_boundary_declared
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m36: FAILED" >&2
+    else
+      echo "verify-m36: all checks passed"
+    fi
+
 verify-m35:
     #!/usr/bin/env bash
     set -uo pipefail

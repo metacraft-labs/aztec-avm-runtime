@@ -60,6 +60,7 @@ import {
   PortWalletProvider,
   WALLET_DECISION_METADATA,
   WALLET_SEED_METADATA,
+  CLASS_ARTIFACT_HASH_SEED,
   EPHEMERAL_RETURN_ORACLES,
   ORACLE_EPHEMERAL_RETURN_LABELS,
   ORACLE_ENVIRONMENT_VERSION,
@@ -67,6 +68,16 @@ import {
   ORACLE_NAMES,
   ORACLE_REFUSAL_REASONS,
   ORACLE_REFUSING,
+  ORACLE_DISCOVERY,
+  ORACLE_IMPLEMENTED_WITH_DISCOVERY,
+  ORACLE_REFUSING_WITH_DISCOVERY,
+  LOCAL_HISTORY_BOUNDARY,
+  DEFAULT_DEV_WALLET_SEED,
+  DevNoteDatabase,
+  DevTagging,
+  DeterministicEphemeralArrayService,
+  noteNonceFor,
+  sealPrivateFrame,
   assertOracleSurfaceMatchesDeclaration,
   createDevWallet,
   createPrivateOracleHandler,
@@ -82,7 +93,15 @@ import {
   type DevWalletHost,
 } from '../src/entry_wallet.ts';
 
+import {
+  PUBLIC_DISPATCH_FN_NAME,
+  getContractFunctionArtifact,
+} from '../../orchestration/src/vendor/avm_fixtures_utils.ts';
 import { buildACIRCallback } from '../src/vendor/pxe/contract_function_simulator/oracle/acir_callback.ts';
+import { EphemeralArray } from '../src/vendor/pxe/contract_function_simulator/noir-structs/ephemeral_array.ts';
+import { Option } from '../src/vendor/pxe/contract_function_simulator/noir-structs/option.ts';
+import { NoteValidationRequest } from '../src/vendor/pxe/contract_function_simulator/noir-structs/note_validation_request.ts';
+import { Tag } from '@aztec/stdlib/logs';
 import { Fr } from '@aztec/foundation/curves/bn254';
 import { poseidon2HashWithSeparator } from '@aztec/foundation/crypto/poseidon';
 import {
@@ -97,9 +116,11 @@ import { AztecAddress } from '@aztec/stdlib/aztec-address';
 // covers them — which is `chunk-budgets.json`'s no-catch-all rule doing exactly its job. A page's
 // eager set is a decision; a lazily-split chunk nobody declared is not.
 import { FunctionCall, FunctionType, encodeArguments, loadContractArtifact } from '@aztec/stdlib/abi';
-import { computeInitializationHash } from '@aztec/stdlib/contract';
+import { CompleteAddress, computeInitializationHash } from '@aztec/stdlib/contract';
 import { computePublicDataTreeLeafSlot, deriveStorageSlotInMap, siloNullifier } from '@aztec/stdlib/hash';
-import { PublicKeys } from '@aztec/stdlib/keys';
+import { PublicKeys, deriveKeys } from '@aztec/stdlib/keys';
+import { NoteStatus } from '@aztec/stdlib/note';
+import { TxHash } from '@aztec/stdlib/tx';
 import { makeContractClassPublic, makeContractInstanceFromClassId } from '@aztec/stdlib/testing';
 import { ExecutionPayload } from '@aztec/stdlib/tx';
 
@@ -116,6 +137,30 @@ const ORACLE_CHECK_ARTIFACT_URL = './assets/oracle_version_check_contract-Oracle
 // that Token.transfer, Token.mint_to_private and PrivateVoting.cast_vote ALL stop at the same oracle.
 // Two of those three live in the Token artifact already; the third needs its own.
 const VOTING_ARTIFACT_URL = './assets/private_voting_contract-PrivateVoting.json';
+// M36's fixture, and it is chosen by MEASUREMENT rather than by name. Every `abi_private` function
+// in the two contract packages was executed against this handler and its oracle ledger read:
+// `NoteGetter.insert_note` is the ONE that calls `notifyCreatedNote` AND all three tagging oracles
+// AND emits both a note hash and a private log. `Token.mint_to_private` emits a log and a nullifier
+// and NO note hash; `TestLog.emit_raw_private_log` emits a log at a tag the caller chose, which
+// would make the discovery a lookup of something this page placed.
+const NOTE_GETTER_ARTIFACT_URL = './assets/note_getter_contract-NoteGetter.json';
+
+/** The second wallet's seed — control 1. An argument, never generated, exactly like the first. */
+const OTHER_WALLET_SEED = '0x0000000000000000000000000000000000000000000000000000000000c0de36';
+/** The ephemeral-slot stream's seed. Also an argument. */
+const EPHEMERAL_SEED = 0x36n;
+/** How many slots the deterministic service pre-derives. */
+const EPHEMERAL_SLOTS = 64;
+/** How far past the last used index `getPendingTaggedLogsV2` probes. */
+const TAGGING_PROBE_WINDOW = 4;
+/** The note's value. */
+const NOTE_VALUE = 4242n;
+/** `getNotes`' declared BoundedVec capacity, as the Noir call site would declare it. */
+const MAX_NOTES = 16;
+/** The extra fields a packed hinted note carries beyond its content, at this call site. */
+const PACKED_NOTE_OVERHEAD = 8;
+const NOTE_STATUS_ACTIVE = NoteStatus.ACTIVE;
+const NOTE_STATUS_ACTIVE_OR_NULLIFIED = NoteStatus.ACTIVE_OR_NULLIFIED;
 
 /** The dev chain's own ids, so a private frame is this chain's rather than a fabricated one. */
 const PRIVATE_CHAIN_ID = 1n;
@@ -1342,6 +1387,558 @@ async function armOracleSurface(): Promise<Record<string, unknown>> {
   return jsonSafe(report);
 }
 
+/**
+ * A wallet's tagging half, from a seed.
+ *
+ * `deriveKeys` is upstream's and it is called a SECOND time here, on the same account secret
+ * `deriveDevAccounts` used — because `DevAccount` carries the public keys and not the incoming
+ * viewing SECRET key, and the tagging derivation is an ECDH that needs it. Deriving it here rather
+ * than widening `DevAccount` keeps the key that must never leave the wallet out of the object the
+ * wallet hands to a dApp.
+ */
+async function buildTaggingHalf(seed: string) {
+  const accounts = await deriveDevAccounts(seed, 2);
+  const taggingAccounts = [];
+  for (const a of accounts) {
+    const derived = await deriveKeys(a.secret);
+    const complete = await CompleteAddress.fromPublicKeysAndPartialAddress(a.publicKeys, a.partialAddress);
+    taggingAccounts.push({
+      address: a.address,
+      completeAddress: complete,
+      ivsk: derived.masterIncomingViewingSecretKey,
+    });
+  }
+  return { accounts, tagging: new DevTagging(taggingAccounts, accounts[0]!.address) };
+}
+
+/**
+ * Two independent slot streams from the same seed, so "the ephemeral service reads no entropy" is an
+ * identity rather than an assertion about a name.
+ *
+ * This is `test_wallet_keys_deterministic`'s behavioural half, applied to the one place M36 could
+ * have introduced ambient randomness. Upstream's own `allocateSlot` is `Fr.random()`; two services
+ * built from one seed agreeing on their first slots is what says this one is not.
+ */
+async function twoSlotStreams(): Promise<{ a: string[]; b: string[]; other: string[] }> {
+  const draw = async (seed: bigint) => {
+    const svc = new DeterministicEphemeralArrayService(toFieldValue(seed, 'ephemeral seed'));
+    await svc.prime(4);
+    return [0, 1, 2, 3].map(() => svc.allocateSlot().toString());
+  };
+  return { a: await draw(EPHEMERAL_SEED), b: await draw(EPHEMERAL_SEED), other: await draw(EPHEMERAL_SEED + 1n) };
+}
+
+// ===========================================================================================
+// M36 — NOTE DISCOVERY ACROSS BLOCKS, IN CHROMIUM
+// ===========================================================================================
+//
+// THE CLAIM THIS ARM EXISTS TO MAKE, AND THE REASON IT IS NOT A UNIT TEST.
+//
+// *A note created in block N is discovered and spent in N+2.* Every word of that has to be a
+// measurement:
+//
+//   * "created" — by a REAL private circuit. `NoteGetter.insert_note` is 3,588 witness entries of
+//     compiled Noir; it calls `notifyCreatedNote`, and then it calls **all three of M36's tagging
+//     oracles** — `getSenderForTags`, `getAppTaggingSecret`, `getNextTaggingIndex` — and emits its
+//     private log at a tag it derived from what they told it. The wallet never hands it a tag.
+//   * "in block N" — the frame's own claimed side effects are sealed into a block by
+//     `sealPrivateFrame`, which does the KERNEL's siloing with upstream's own hash functions and is
+//     a labelled dev shortcut across one layer (there is no kernel and no proof; §8.4 still holds).
+//   * "discovered" — the wallet computes `SiloedTag.compute({secret, index})` INDEPENDENTLY and
+//     finds the log in the tag index. **Two producers, one value**, which is the shape
+//     `DEV-WALLET.md` §4 already uses for `returnsHash`. The note is then VALIDATED against the
+//     block's own note hashes before it is stored.
+//   * "spent in N+2" — block N+2 carries the note's siloed nullifier, and `getNotes` with
+//     `NoteStatus.ACTIVE` stops returning it while `ACTIVE_OR_NULLIFIED` still does. A test that
+//     only read the ACTIVE side could not tell "nullified" from "never stored".
+//
+// AND THE THREE CONTROLS, EACH FOR A DIFFERENT WAY THIS COULD BE VACUOUS:
+//
+//   1. **Another account's note is not discovered.** A second wallet, with different deterministic
+//      keys, runs the same circuit into the same block. Its log is in the same tag index and the
+//      first wallet does not find it — so "found" is a statement about the tag and not about the
+//      index being non-empty.
+//   2. **A fabricated note is refused BY NAME.** The same validation request with one field of the
+//      note hash changed is refused, naming the unique hash and the transaction — so "stored" is a
+//      statement about the chain and not about what the contract said.
+//   3. **A query past the produced history is `LocalHistoryOnly`.** The boundary is a refusal the
+//      runtime PRODUCES, not a sentence in a document.
+
+async function armNoteDiscovery(): Promise<Record<string, unknown>> {
+  await open();
+  await requirePrivateAssets();
+
+  const artifact = (await fetchJson(NOTE_GETTER_ARTIFACT_URL)) as { name?: string };
+  const loaded = loadContractArtifact(artifact as never);
+
+  // TWO WALLETS, TWO SEEDS, AND THE SECOND ONE IS CONTROL 1. Deterministic both times: the seeds are
+  // arguments, so this whole arm replays.
+  const mine = await buildTaggingHalf(DEFAULT_DEV_WALLET_SEED);
+  const theirs = await buildTaggingHalf(OTHER_WALLET_SEED);
+
+  // The contract instance, DERIVED — its address is a function of the instance, which is why a
+  // fabricated preimage cannot satisfy `get_contract_instance` (LOCAL-HISTORY.md section 2).
+  const dispatch = getContractFunctionArtifact(PUBLIC_DISPATCH_FN_NAME, loaded);
+  if (dispatch === undefined) throw new Error(`${loaded.name} has no ${PUBLIC_DISPATCH_FN_NAME}`);
+  const contractClass = await makeContractClassPublic(CLASS_ARTIFACT_HASH_SEED, dispatch.bytecode);
+  const contractInstance = await makeContractInstanceFromClassId(contractClass.id, CLASS_ARTIFACT_HASH_SEED, {
+    deployer: mine.accounts[0]!.address,
+    initializationHash: Fr.ZERO,
+    immutablesHash: new Fr(28),
+    publicKeys: PublicKeys.default(),
+  });
+  const contract = contractInstance.address;
+
+  const noteDb = new DevNoteDatabase();
+  const ephemeral = new DeterministicEphemeralArrayService(toFieldValue(EPHEMERAL_SEED, 'ephemeral seed'));
+  await ephemeral.prime(EPHEMERAL_SLOTS);
+
+  // TIER 2's RUNG IS SERVED FROM THE DIRECTORY AND NOT FROM THE DISCOVERY SOURCE, which is where
+  // the two independent tier-2 answers met: M36 had put `getContractInstance` in its own second
+  // partition and recorded `refused` for an address the wallet does not hold — a fact about the
+  // DATA written as a fact about the PARTITION. The always-served directory with its `unavailable`
+  // outcome is the better model, so M36's second partition is the eight note and tagging oracles.
+  const heldForDiscovery = [
+    {
+      address: contractInstance.address,
+      salt: contractInstance.salt,
+      deployer: contractInstance.deployer,
+      originalContractClassId: contractInstance.originalContractClassId,
+      initializationHash: contractInstance.initializationHash,
+      immutablesHash: contractInstance.immutablesHash,
+      publicKeys: contractInstance.publicKeys,
+    },
+  ];
+
+  const discovery = {
+    noteDb,
+    tagging: mine.tagging,
+    ephemeral,
+    anchorBlockNumber: 0,
+    // THE EXECUTION'S ACCOUNT SCOPES, and they are the wallet's own accounts. Upstream consults this
+    // list in three places through `assertAllowedScope`; a first version passed `[]` and `getNotes`
+    // returned ZERO notes over a note that WAS stored, because an empty scope set intersects
+    // nothing.
+    scopes: [mine.accounts[0]!.address, mine.accounts[1]!.address] as AztecAddress[],
+    taggingProbeWindow: TAGGING_PROBE_WINDOW,
+  };
+
+  const common = {
+    contractAddress: contract,
+    msgSender: mine.accounts[0]!.address,
+    chainId: PRIVATE_CHAIN_ID,
+    version: PRIVATE_CHAIN_VERSION,
+    entropySeed: PRIVATE_ENTROPY_SEED,
+    contractInstances: heldForDiscovery,
+    writeLine: (line: string) => say(line),
+  };
+
+  // ---- BLOCK 1: two real circuits, one per wallet ------------------------------------------------
+  const mineRun = await executePrivateFunction({
+    ...common,
+    artifact,
+    functionName: 'insert_note',
+    args: [NOTE_VALUE],
+    discovery,
+  });
+  const theirsRun = await executePrivateFunction({
+    ...common,
+    artifact,
+    functionName: 'insert_note',
+    args: [NOTE_VALUE],
+    // THE CONTROL'S OWN TAGGING HALF AND ITS OWN SCOPES. Everything else is identical, so the ONLY
+    // thing that differs between the two logs is which wallet's keys derived the tag.
+    discovery: {
+      ...discovery,
+      tagging: theirs.tagging,
+      scopes: [theirs.accounts[0]!.address, theirs.accounts[1]!.address],
+    },
+  });
+
+  const myTx = await sealPrivateFrame(contract, mineRun.publicInputs!, new Fr(0xa1n), 0);
+  const theirTx = await sealPrivateFrame(contract, theirsRun.publicInputs!, new Fr(0xa2n), 1);
+  noteDb.ingestBlock({ number: 1, timestamp: 1000n, hash: new Fr(0xb1n), txs: [myTx, theirTx] });
+  discovery.anchorBlockNumber = 1;
+
+  // ---- DISCOVERY, THROUGH THE HANDLER ----------------------------------------------------------
+  //
+  // The oracles are called on the HANDLER, which is what a contract reaches, rather than on the
+  // database — so a database that answered while the oracle did not would fail here.
+  const handle = createPrivateOracleHandler({
+    contractAddress: contract,
+    entropySeed: toFieldValue(PRIVATE_ENTROPY_SEED, 'seed'),
+    contractInstances: heldForDiscovery,
+    discovery,
+  });
+  const h = handle.handler as Record<string, (...a: never[]) => unknown>;
+
+  // The secret the CONTRACT was given, re-derived here from the same keys, and the index it used.
+  const secret = (await mine.tagging.appTaggingSecret(
+    mine.accounts[0]!.address,
+    mine.accounts[0]!.address,
+    contract,
+  ))!;
+  // THE CONTROL'S TAG IS RECOMPUTED THE WAY THE CONTRACT ASKED FOR IT, which is the same pair of
+  // parties: `getSenderForTags` gives the second wallet's own account and the recipient is the
+  // `msgSender` both runs share. A first draft passed the second wallet's address as BOTH, produced
+  // a tag no log carries, and the control would have "not found" a log for the wrong reason —
+  // an absence measured over a needle nobody emits.
+  const theirSecret = (await theirs.tagging.appTaggingSecret(
+    theirs.accounts[0]!.address,
+    mine.accounts[0]!.address,
+    contract,
+  ))!;
+  const mySiloedTag = await mine.tagging.siloedTag(secret, 0, contract);
+  const theirSiloedTag = await theirs.tagging.siloedTag(theirSecret, 0, contract);
+
+  const myLogs = noteDb.logsByTag(mySiloedTag);
+  const theirLogsFromMyTag = noteDb.logsByTag(theirSiloedTag);
+
+  // ---- VALIDATE AND STORE, THROUGH THE HANDLER -------------------------------------------------
+  const created = mineRun.effects.createdNotes[0]!;
+  const noteNonce = await noteNonceFor(myTx.nullifiers[0]!, 0);
+  const request = new NoteValidationRequest(
+    contract,
+    AztecAddress.fromString(created.owner),
+    Fr.fromString(created.storageSlot),
+    Fr.fromString(created.randomness),
+    noteNonce,
+    created.content.map(f => Fr.fromString(f)),
+    Fr.fromString(created.noteHash),
+    Fr.fromString(created.noteHash),
+    TxHash.fromString(myTx.txHash),
+  );
+  const noteScope = mine.accounts[0]!.address;
+  await (h.validateAndStoreEnqueuedNotesAndEvents as (...a: unknown[]) => Promise<void>)(
+    EphemeralArray.fromValues(ephemeral, [request]),
+    EphemeralArray.fromValues(ephemeral, []),
+    noteScope,
+  );
+
+  // CONTROL 2: the same request with a note hash the block never carried.
+  let fabricatedRefusal: string | null = null;
+  try {
+    const fabricated = new NoteValidationRequest(
+      contract,
+      AztecAddress.fromString(created.owner),
+      Fr.fromString(created.storageSlot),
+      Fr.fromString(created.randomness),
+      noteNonce,
+      created.content.map(f => Fr.fromString(f)),
+      Fr.fromString(created.noteHash).add(new Fr(1n)),
+      Fr.fromString(created.noteHash),
+      TxHash.fromString(myTx.txHash),
+    );
+    await (h.validateAndStoreEnqueuedNotesAndEvents as (...a: unknown[]) => Promise<void>)(
+      EphemeralArray.fromValues(ephemeral, [fabricated]),
+      EphemeralArray.fromValues(ephemeral, []),
+      noteScope,
+    );
+  } catch (e) {
+    fabricatedRefusal = String((e as Error).message);
+  }
+
+  // CONTROL 3: a query past the produced history.
+  let boundaryRefusal: string | null = null;
+  try {
+    noteDb.logsByTag(mySiloedTag, undefined, 99);
+  } catch (e) {
+    boundaryRefusal = String((e as Error).message);
+  }
+
+  const getNotes = (status: number) =>
+    (h.getNotes as (...a: unknown[]) => { data: unknown[] })(
+      Option.some(AztecAddress.fromString(created.owner)),
+      Fr.fromString(created.storageSlot),
+      0,
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      0,
+      0,
+      status,
+      MAX_NOTES,
+      created.content.length + PACKED_NOTE_OVERHEAD,
+    );
+
+  const activeAfterCreation = getNotes(NOTE_STATUS_ACTIVE).data.length;
+
+  // CONTROL 7: THE SAME NOTE, VALIDATED AGAIN UNDER A SECOND SCOPE. Upstream keys a stored note by
+  // its siloed nullifier and UNIONS the scope into it (`NoteStore.addNotes` -> `StoredNote.addScope`);
+  // a table of rows would hold two, `getNotes` would return two, and a contract would try to spend
+  // one note twice. Nothing about the first validation changes, so only this reading can see it.
+  await (h.validateAndStoreEnqueuedNotesAndEvents as (...a: unknown[]) => Promise<void>)(
+    EphemeralArray.fromValues(ephemeral, [request]),
+    EphemeralArray.fromValues(ephemeral, []),
+    mine.accounts[1]!.address,
+  );
+  const rowsAfterRevalidation = noteDb.storedNotes().length;
+  const scopesOnTheNote = noteDb.storedNotes()[0]!.scopes.size;
+  const activeAfterRevalidation = getNotes(NOTE_STATUS_ACTIVE).data.length;
+
+  // ---- BLOCK 2 (empty) AND BLOCK 3 (the nullifier) ---------------------------------------------
+  noteDb.ingestBlock({ number: 2, timestamp: 2000n, hash: new Fr(0xb2n), txs: [] });
+  const spendTx = {
+    txHash: '0x00000000000000000000000000000000000000000000000000000000000000a3',
+    txIndexInBlock: 0,
+    noteHashes: [] as Fr[],
+    nullifiers: [new Fr(0xa3n), noteDb.storedNotes()[0]!.siloedNullifier],
+    privateLogs: [],
+  };
+  noteDb.ingestBlock({ number: 3, timestamp: 3000n, hash: new Fr(0xb3n), txs: [spendTx] });
+  discovery.anchorBlockNumber = 3;
+
+  const activeAfterSpend = getNotes(NOTE_STATUS_ACTIVE).data.length;
+  const eitherAfterSpend = getNotes(NOTE_STATUS_ACTIVE_OR_NULLIFIED).data.length;
+
+  // ---- THE TWO EPHEMERAL-RETURN ORACLES, THROUGH THE HANDLER -----------------------------------
+  //
+  // "IMPLEMENTED" MEANS "OBSERVED TO ANSWER" — M35's rule, and these two are where it costs
+  // something: both RETURN an `EphemeralArray`, which is the serialisation path
+  // `PRIVATE-EXECUTION.md` §5 measured as reading ambient entropy. Calling them is what puts the
+  // deterministic slot allocator on the record: `allocatedSlots` is zero until one of them
+  // materialises a slot, so a run that skipped them would report a service that had never been used
+  // as a service that never read entropy.
+  // THE SCOPE IS AN ACCOUNT AND NOT THE CONTRACT, and a first version passed the contract: the
+  // wallet holds no keys for it, so no secret could be derived, no tag could be probed, and the
+  // oracle returned an empty array. `pendingCount` read ZERO over an index holding the log — an
+  // absence produced by the argument rather than by the chain.
+  const pending = (await (h.getPendingTaggedLogsV2 as (...a: unknown[]) => Promise<{
+    readAll(s: unknown): unknown[];
+  }>)(mine.accounts[0]!.address, EphemeralArray.fromValues(ephemeral, []))) as {
+    readAll(s: unknown): unknown[];
+  };
+  const pendingCount = pending.readAll(ephemeral).length;
+  // MATERIALISE THE SLOT, WHICH IS WHAT THE WIRE DOES AND IS THE ONLY PATH THAT ALLOCATES ONE.
+  // `EphemeralArray.fromValues` is lazy: `materializeSlot` is called by the EPHEMERAL_ARRAY
+  // combinator during ACVM serialisation, and a handler called directly never reaches it. So
+  // `allocatedSlots` stayed at ZERO across a run that used the service — a service that had never
+  // been used reading as a service that never read entropy. Upstream's own method, called here.
+  const pendingSlot = (pending as unknown as { materializeSlot(f: (v: unknown) => unknown[]): { toString(): string } })
+    .materializeSlot(() => []);
+
+  const byTagRequests = [
+    {
+      contractAddress: contract,
+      tag: new Tag(await mine.tagging.emittedTag(secret, 0)),
+      source: 0,
+      fromBlock: Option.none<number>(),
+      toBlock: Option.none<number>(),
+    },
+    {
+      // THE SAME REQUEST FOR THE CONTROL WALLET'S TAG, so this oracle's answer is seen to
+      // DISCRIMINATE rather than merely to be non-empty.
+      contractAddress: contract,
+      tag: new Tag(await theirs.tagging.emittedTag(theirSecret, 0)),
+      source: 0,
+      fromBlock: Option.none<number>(),
+      toBlock: Option.none<number>(),
+    },
+  ];
+  const byTag = (await (h.getLogsByTagV2 as (...a: unknown[]) => Promise<{
+    readAll(s: unknown): { readAll(s: unknown): unknown[] }[];
+  }>)(EphemeralArray.fromValues(ephemeral, byTagRequests))) as {
+    readAll(s: unknown): { readAll(s: unknown): unknown[] }[];
+  };
+  const byTagInner = byTag.readAll(ephemeral);
+  const byTagCounts = byTagInner.map(inner => inner.readAll(ephemeral).length);
+  const byTagSlots = byTagInner.map(inner =>
+    (inner as unknown as { materializeSlot(f: (v: unknown) => unknown[]): { toString(): string } })
+      .materializeSlot(() => [])
+      .toString(),
+  );
+
+  // ---- THE REMAINING TWO, AND THE ONE REFUSAL THAT IS TIER 2's -----------------------------------
+  const strategy = (await (h.resolveTaggingStrategy as (...a: unknown[]) => Promise<{ type: string }>)(
+    mine.accounts[0]!.address,
+    mine.accounts[1]!.address,
+    'unconstrained',
+  )) as { type: string };
+  const senderOption = (h.getSenderForTags as () => { value?: { toString(): string } })();
+  const appSecretOption = (await (h.getAppTaggingSecret as (...a: unknown[]) => Promise<{
+    value?: { toString(): string };
+  }>)(mine.accounts[0]!.address, mine.accounts[1]!.address)) as { value?: { toString(): string } };
+  // AND THE HONEST `none`: upstream's own doc says the only expected `None` is an INVALID RECIPIENT,
+  // so that is what is asked for here — the zero address, which has no address point. A sender the
+  // wallet does not hold is a different answer and it is a REFUSAL (control 6), which is upstream's
+  // split and was worth getting right: "this wallet will not act for that account" and "that
+  // account has no derivable secret" are two statements and only one is about the recipient.
+  const foreignSecretOption = (await (h.getAppTaggingSecret as (...a: unknown[]) => Promise<{
+    value?: { toString(): string };
+  }>)(mine.accounts[0]!.address, toAddressValue(0n, 'an invalid recipient'))) as {
+    value?: { toString(): string };
+  };
+
+  // CONTROL 5: A CONTRACT MAY NOT READ ANOTHER CONTRACT'S TAGGED LOGS. Upstream's own first line in
+  // `fetchLogsByTag`, which this handler was missing until it was read against upstream's body.
+  let crossContractRefusal: string | null = null;
+  try {
+    await (h.getLogsByTagV2 as (...a: unknown[]) => Promise<unknown>)(
+      EphemeralArray.fromValues(ephemeral, [
+        {
+          contractAddress: toAddressValue(0x778n, 'another contract'),
+          tag: new Tag(await mine.tagging.emittedTag(secret, 0)),
+          source: 0,
+          fromBlock: Option.none<number>(),
+          toBlock: Option.none<number>(),
+        },
+      ]),
+    );
+  } catch (e) {
+    crossContractRefusal = String((e as Error).message);
+  }
+
+  // CONTROL 6: A CONTRACT MAY NOT DERIVE ANOTHER ACCOUNT'S TAGGING SECRET. Upstream's
+  // `assertAllowedScope(sender, this.scopes)`, likewise missing until upstream's body was read.
+  let outOfScopeRefusal: string | null = null;
+  try {
+    await (h.getAppTaggingSecret as (...a: unknown[]) => Promise<unknown>)(
+      theirs.accounts[0]!.address,
+      mine.accounts[0]!.address,
+    );
+  } catch (e) {
+    outOfScopeRefusal = String((e as Error).message);
+  }
+
+  // CONTROL 4: tier 2's rung refuses an address this wallet never registered, BY NAME.
+  let unregisteredRefusal: string | null = null;
+  try {
+    (h.getContractInstance as (a: AztecAddress) => unknown)(toAddressValue(0x999n, 'unregistered'));
+  } catch (e) {
+    unregisteredRefusal = String((e as Error).message);
+  }
+
+  // ---- THE TWO SINKS, HONOURED ------------------------------------------------------------------
+  (h.setContractSyncCacheInvalid as (...a: unknown[]) => void)(contract, { data: [contract] });
+  (h.emitOffchainEffect as (...a: unknown[]) => void)([new Fr(1n), new Fr(2n), new Fr(3n)]);
+
+  // ---- THE TAGGING INDEX ADVANCES ---------------------------------------------------------------
+  const indexes = [
+    (h.getNextTaggingIndex as (...a: unknown[]) => number)(secret.secret, 'unconstrained'),
+    (h.getNextTaggingIndex as (...a: unknown[]) => number)(secret.secret, 'unconstrained'),
+    (h.getNextTaggingIndex as (...a: unknown[]) => number)(secret.secret, 'unconstrained'),
+  ];
+  const tagsForIndexes: string[] = [];
+  for (const i of indexes) {
+    tagsForIndexes.push((await mine.tagging.siloedTag(secret, i, contract)).toString());
+  }
+  // A REPLAYED TAG DOES NOT DOUBLE-COUNT: the same (secret, index) is looked up twice and the index
+  // returns the same single log both times, so a discovery is idempotent rather than accumulating.
+  const replayFirst = noteDb.logsByTag(mySiloedTag).length;
+  const replaySecond = noteDb.logsByTag(mySiloedTag).length;
+
+  // THE EXERCISED SET, TAKEN FROM THE HANDLER'S OWN LEDGER RATHER THAN FROM THIS ARM'S INTENTIONS.
+  // M35's discipline: a check asserts this equals `ORACLE_DISCOVERY` as a SET, in both directions,
+  // so a discovery oracle nothing reached fails rather than passing as a method that exists.
+  const exercised = [
+    ...new Set([
+      ...mineRun.oracleCalls.map(c => c.oracle),
+      ...handle.calls().map(c => c.oracle),
+    ]),
+  ]
+    .filter(name => ORACLE_DISCOVERY.includes(name))
+    .sort();
+
+  const report = {
+    boundary: LOCAL_HISTORY_BOUNDARY,
+    contractAddress: contract.toString(),
+    surface: {
+      discovery: [...ORACLE_DISCOVERY],
+      exercised,
+      servedWithDiscovery: ORACLE_IMPLEMENTED_WITH_DISCOVERY.length,
+      refusingWithDiscovery: ORACLE_REFUSING_WITH_DISCOVERY.length,
+      servedWithout: ORACLE_IMPLEMENTED.length,
+      refusingWithout: ORACLE_REFUSING.length,
+      registry: ORACLE_NAMES.length,
+    },
+    ephemeralOracles: {
+      pendingCount,
+      byTagCounts,
+      pendingSlot: pendingSlot.toString(),
+      byTagSlots,
+      strategyType: strategy.type,
+      senderForTagsIsSome: senderOption.value !== undefined,
+      appSecretIsSome: appSecretOption.value !== undefined,
+      foreignSecretIsSome: foreignSecretOption.value !== undefined,
+    },
+    creation: {
+      contractName: mineRun.contractName,
+      functionName: mineRun.functionName,
+      functionType: mineRun.functionType,
+      bytecodeBytes: mineRun.bytecodeBytes,
+      outcome: mineRun.outcome,
+      solvedWitnessSize: mineRun.solvedWitnessSize ?? null,
+      oracleLedger: mineRun.oracleCalls.map(c => `${c.outcome}:${c.oracle}`),
+      noteHashes: mineRun.publicInputs?.noteHashes ?? [],
+      privateLogLengths: (mineRun.publicInputs?.privateLogs ?? []).map(l => l.length),
+      createdNotes: mineRun.effects.createdNotes.length,
+      hasDiscovery: mineRun.hasDiscovery,
+      servedSetSize: mineRun.servedSetSize,
+    },
+    tags: {
+      mine: mySiloedTag.toString(),
+      theirs: theirSiloedTag.toString(),
+      // WHAT THE BLOCK ACTUALLY CARRIES, so "the wallet found its own tag" is a comparison between
+      // two producers rather than a lookup of a value this arm placed.
+      sealedFirstFields: [myTx.privateLogs[0]!.fields[0]!.toString(), theirTx.privateLogs[0]!.fields[0]!.toString()],
+      myLogs: myLogs.length,
+      theirLogsUnderTheirTag: theirLogsFromMyTag.length,
+      myLogsUnderTheirTag: noteDb.logsByTag(theirSiloedTag).filter(l => l.txHash === myTx.txHash).length,
+      theirLogsUnderMyTag: myLogs.filter(l => l.txHash === theirTx.txHash).length,
+    },
+    notes: {
+      stored: noteDb.storedNotes().length,
+      activeAfterCreation,
+      activeAfterSpend,
+      eitherAfterSpend,
+      rowsAfterRevalidation,
+      scopesOnTheNote,
+      activeAfterRevalidation,
+      creationBlock: noteDb.storedNotes()[0]?.blockNumber ?? null,
+      spendBlock: noteDb.nullifierBlock(noteDb.storedNotes()[0]!.siloedNullifier) ?? null,
+    },
+    controls: {
+      fabricatedRefusal,
+      boundaryRefusal,
+      unregisteredRefusal,
+      crossContractRefusal,
+      outOfScopeRefusal,
+    },
+    sinks: {
+      invalidSyncCacheCount: noteDb.invalidSyncCacheCount,
+      syncCacheInvalidForContract: noteDb.isSyncCacheInvalid(contract, contract),
+      offchainEffects: noteDb.offchainEffects().length,
+      offchainFields: noteDb.offchainEffects()[0]?.fields ?? [],
+    },
+    tagging: {
+      indexes,
+      tagsForIndexes,
+      distinctTags: new Set(tagsForIndexes).size,
+      replayFirst,
+      replaySecond,
+      accountCount: mine.tagging.accountCount,
+      senderForTags: mine.tagging.senderForTags()?.toString() ?? null,
+      usedRanges: mine.tagging.usedIndexRanges().length,
+    },
+    ephemeral: {
+      allocatedSlots: ephemeral.allocatedSlots,
+      // THE SAME SEED TWICE, IN TWO SERVICES: the ephemeral slot stream is the one M36 could have
+      // read entropy through, and this is the identity that says it did not.
+      firstSlots: await twoSlotStreams(),
+    },
+    noteDbEvents: noteDb.events().length,
+    handlerLedger: handle.calls().map(c => `${c.outcome}:${c.oracle}`),
+  };
+  lastRun = report as never;
+  return jsonSafe(report) as Record<string, unknown>;
+}
+
 const api = {
   armWalletTransfer,
   armRefusals,
@@ -1350,6 +1947,7 @@ const api = {
   armDirectShortcut,
   armPrivateExecution,
   armOracleSurface,
+  armNoteDiscovery,
   status: () => ({
     opened: opened !== null,
     seed: lastWallet?.seed ?? null,
@@ -1375,6 +1973,7 @@ for (const [id, fn] of Object.entries({
   'btn-wallet-decline': () => armWalletTransfer({ decline: 'the operator declined this transaction' }),
   'btn-private-execution': () => armPrivateExecution(),
   'btn-oracle-surface': () => armOracleSurface(),
+  'btn-note-discovery': () => armNoteDiscovery(),
 })) {
   document.getElementById(id)?.addEventListener('click', () => {
     (fn as () => Promise<unknown>)().catch((e: unknown) => say(`ERROR ${String(e)}`));

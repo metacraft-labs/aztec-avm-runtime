@@ -35,7 +35,19 @@ load).
 Each of these is a defect that shipped, not a precaution.
 
 ### An assertion must be capable of failing
-**Thirty-eight instances.** (**M34's review added the 38th, and it is M32's shape inside the very
+**Thirty-nine instances.** (**M36 added the 39th and found it in its OWN work, in a CONTROL, before
+the milestone closed** — which is the second time an implementation agent has got there first, and
+the instrument was the same one M30 used: asking of each green assertion what input would make it
+red. M36's e2e claims *"a note belonging to another account is NOT discovered"*, and the control
+recomputed the second wallet's tagging secret for the pair `(theirs[0] -> theirs[0])` while the
+CONTRACT had derived `(theirs[0] -> msgSender)`. The control "did not find" the log, exactly as
+predicted, **for a reason that had nothing to do with the keys**: the needle was a tag nobody emits.
+It is the absence-measured-over-an-excluded-subject family — this file's second-most-repeated defect
+— sitting inside a control rather than a subject, which is the worst place for it, because a control
+is what everything else rests on. The remedy is the one this file already names: the control now
+asserts BOTH halves, so the second wallet is seen to FIND its own log under its own tag and the first
+is seen not to. Two failures where there was one, and neither can pass without a tag some circuit
+actually emitted.) (**M34's review added the 38th, and it is M32's shape inside the very
 control written to answer it.** `test_wallet_keys_deterministic` §5 asserts that neither dev domain
 separator collides with a member of upstream's `DomainSeparator`, and pairs it with a control whose
 comment says *"THE COLLISION DETECTOR IS SHOWN TO FIRE. Without this, 'no collision' is satisfied by
@@ -691,6 +703,142 @@ shape: nobody re-reads a table whose numbers agree with the prediction beside th
 the matrix after the last edit, exactly as you re-take the sweep** — and if you cannot, label it, then
 expect the review to re-take it and report what moved.
 
+### A CHECK THAT CAN ONLY EVER BE RED IS THE MIRROR OF ONE THAT CAN ONLY EVER BE GREEN
+
+**One instance, in M36, caught on the check's own first run.** The document-figure comparer prints
+`BAD` and `MISSING` as newline-separated lists, and the check collected them with `| tr '\n' ' '`
+before comparing against `""`. Over an EMPTY list that produces a single SPACE, so
+`assert_eq "" " "` failed on a document with nothing wrong with it — twice, in the one section whose
+whole job is to notice a rotted figure. It went red for a reason that had nothing to do with the
+subject, which is the cheap direction; the expensive version of the same slip is a check that reddens
+often enough that somebody eventually deletes the assertion. `xargs -r echo` collapses to the empty
+string. *A helper that transforms a value before comparing it is a thing under test, and the case to
+try it on is the empty one.*
+
+### AN ORACLE THAT ANSWERS "NOTHING" FOR A REASON THAT IS NOT ABOUT THE CHAIN
+
+**Three instances, all in M36, all found by running the arm rather than by reading it, and all three
+would have made a green assertion mean nothing.**
+
+  1. **AN EMPTY SCOPE LIST THAT MEANT "NOTHING" WHERE IT SHOULD MEAN "THE DEFAULT".** Upstream's
+     `NoteStore.getNotes` intersects a note's scope with the caller's scope SET and returns `[]`
+     immediately for an empty one — correct for a caller that meant "no scopes", and catastrophic for
+     one that meant "the default". With `scopes: []` the oracle returned **0 notes over a note that
+     WAS stored**, and every count in the report was otherwise right.
+  2. **A RECIPIENT-SIDE SCAN THAT STARTED FROM THE SENDER-SIDE COUNTER.** `getNextTaggingIndex` is
+     what a SENDER reserves; `getPendingTaggedLogsV2` is what a RECIPIENT scans. Probing from the
+     sender's next reservation starts the scan one past the index the sender just used, so it found
+     **zero logs over an index holding one**. Upstream keeps the two in different stores
+     (`SenderTaggingStore` / `RecipientTaggingStore`) and that is why.
+  3. **A LAZY SERVICE THAT WAS CONSTRUCTED AND NEVER USED, READING AS A SERVICE THAT NEVER READ
+     ENTROPY.** `EphemeralArray.fromValues` materialises its slot only when the WIRE serialises it,
+     so a handler called directly never reaches `materializeSlot` and `allocatedSlots` stayed at
+     **zero** across a run that had built the deterministic allocator. Zero is also what a service
+     that read `Fr.random()` for every slot would report if it were never asked.
+
+*The general form, and it is one level past "an absence is only as wide as the spellings you
+enumerated": when a query answers EMPTY, ask whether the emptiness is a fact about the data or about
+the arguments. The three above are three different arguments, and each produced a perfectly
+well-formed zero.*
+
+### A SHARED BRANCH CAN REPLACE THE SUBJECT OF YOUR ARM BETWEEN ONE MATRIX RUN AND THE NEXT
+
+**One instance, in M36, and the harness caught it exactly as designed.** A parallel agent landed
+`aztec_utl_getContractInstance` on `origin/dev` while M36 was being written — the same rung M36 had
+independently measured and closed — so after the rebase M36's arm M6 pointed at a method that no
+longer existed. `sub` printed `MUTATION MISS`, restored the tree, verified its sha256 manifest and
+**exited 3**: it did not rebuild and did not print the result it had predicted. That is M32's
+"a mutation that never applied, printed as the arm's result" prevented, arriving by a route that had
+not happened before — not a needle the author mistyped, but a SUBJECT somebody else replaced.
+
+**And the collision is worth recording for its own sake, because the two measurements agreed to the
+number.** Both agents ran the ladder; both got `Token.transfer` -> `aztec_utl_getNotes` at 4 served,
+`Token.mint_to_private` -> `aztec_prv_getSenderForTags` at **17**, `PrivateVoting.cast_vote` ->
+`aztec_utl_getPublicKeysAndPartialAddress` at 4; and both independently found that a FABRICATED
+contract instance produces `Cannot satisfy constraint` with no further oracle call, because
+`aztec-nr`'s `get_contract_instance` asserts `instance.to_address() == address` — *the circuit is the
+instrument that refuses.* Two independent derivations of a figure that decides a scope is
+corroboration this campaign almost never gets.
+
+**The MODELS differed and the better one won on a stated reason.** M36 had put the oracle in a second
+partition and recorded `refused` for an address the wallet does not hold — a fact about the DATA
+written as a fact about the PARTITION, which is what makes one oracle appear in both the served and
+the refused sets of a single run. The landed version serves it unconditionally from a directory and
+adds a third ledger outcome, `unavailable`, for exactly that case. M36 dropped its own.
+
+**Rule: on a shared branch, a figure typed into a check has a second way of going stale.**
+M36's `e2e_note_discovery_across_blocks` asserted a served-set size of 42; the first commit made it
+42 and the second made it **43**. It asserts four RELATIONS now — a difference, a membership, two
+sums and a two-producer equality — and not one number. *A constant you have just typed into a check
+looks like a measurement to the person typing it, and on a shared branch it also looks like a
+measurement to the person who invalidates it.*
+
+### AN INVENTORY THAT GROWS TURNS A TYPED "ABSENT" ID INTO A PRESENT ONE
+
+**One instance, and the second defect it uncovered is the worse of the two.**
+`verify_fixture_corpus_manifest_complete` has a negative control that plants a fake inventory id in
+a manifest entry and requires the parser to reject it. The id it planted was `RI-99`. **M36 created
+RI-98 and RI-99**, so the id existed, the parser accepted it, and a control that had been catching a
+real defect since M2 silently stopped controlling — in a check M36 does not own and never touched.
+The needle is DERIVED now: one past the highest id `REUSE-INVENTORY.md` declares, so growing the
+inventory moves it. *An absence is only as wide as the spellings you enumerated — and when the
+spelling is a NUMBER, the world can grow into it.*
+
+**And the derived id was `RI-100`, which still passed.** `_manifest_parser.py` matched an inventory
+id as `re.findall(r"RI-\d{2}", …)`, so `RI-100` is read as **`RI-10`** — an id that exists — and a
+manifest citing a non-existent three-digit id validates cleanly. That is a live correctness bug in a
+shipped check, reachable the moment this repository's inventory passes ninety-nine, which is what
+M36 made it do. `avm2` again, and `LAST_OPCODE` again, in a digit count, inside the check whose whole
+subject is negative controls. `\d{2,}` with a right anchor in both places now, and the census is
+closed rather than assumed: `_inventory_parser.py` uses `\bRI-\d+\b` and is right, `tools/provenance.py`
+has no such pattern, and the two-digit form existed in exactly one file.
+
+**Rule: a control whose needle is a value from a growing namespace has an expiry date.** Derive it
+from the namespace, and assert that the derived value really is absent — which is the assertion that
+would have gone red the day the inventory reached it.
+
+**AND THE CENSUS THAT CLOSED IT ENUMERATED THE SPELLING RATHER THAN THE FORM, SO IT MISSED TWO
+INSTANCES IN THE FILE BEING FIXED.** M36 declared the two-digit census closed and every statement in
+it is TRUE — `_inventory_parser.py` really does use `\bRI-\d+\b`, `tools/provenance.py` really has no
+such pattern, and the two-digit `RI-` form really did exist in exactly one file. It was still too
+narrow, because the subject is a FORM (a fixed digit width over a growing id namespace) and the
+census asked for a SPELLING (`RI-`). Found by M36's review: the same file, `_manifest_parser.py`,
+carries `FX-\d{2}` at **both** its entry regex and its outside-the-block residue scan.
+`fixtures/MANIFEST.md` is at FX-29, so it is latent — and it fails **worse** than the `RI-` case and
+silently in three places at once. `### FX-100 — …` does not match `FX-\d{2}` followed by ` — `, so
+the entry never enters `parse()` and none of the ~20 per-entry rules runs against it; the guard that
+exists to catch an entry the parser cannot reach uses the same truncating pattern and cannot reach it
+either; and the contiguity rule sees `1..99` over 99 ids and calls that contiguous. **Every scope
+guard reports green over an entry nothing validated.** Fixed and calibrated both ways: a planted
+`### FX-100` is invisible to the old pattern and reddens the outside-the-block guard under the new
+one, with no assertion count moved. This is *"when you fix an instance of a form, grep for the form in
+the file you are fixing before you leave it"* — this file's own rule, unheeded **in the file being
+fixed**. **Rule: a census over a defect FORM must enumerate the form, not the one spelling that
+happened to fail.** And one live sibling is recorded rather than fixed:
+`verify_tier_e_authored_fixtures_justified.sh`'s `fx = 26 + i` synthesises Tier E entries from a
+hardcoded base the manifest overtook at FX-26, so it injects DUPLICATE ids where it means fresh ones
+— though the tier-size rule it exists for still fires, so it is fragility and not a hole.
+
+### A CONDITIONAL ASSERTION BLOCK IS A SKIPPED TEST WEARING AN `if`
+
+**One instance, in M36's own new check, found by asking what would happen if the helper were
+missing.** `verify_local_history_boundary_declared` §7 computes a comment-stripped copy of the note
+database with `python3 -c '…' 2>/dev/null || true` and guards three assertions behind
+`if [ -n "$CODE_ONLY" ]`, with a `note` in the `else`. Measured by M36's review, by moving
+`verification/_import_closure.py` aside and running the check: it reports **31 assertions, 0
+failures, PASS**. A silent three-assertion shrink with nothing red, and a `note` is indented so no
+summary line mentions it — *"a missing check reads as a smaller milestone, not as a red one"*, which
+is the shape that cost this campaign 283 assertions once, arriving this time through an `if` rather
+than through a `die`. The three lost are the section's strongest: that the refusal is in stripped
+CODE rather than in prose, and that the stripper removed the prose.
+
+The distinction that decides the remedy: **is the guarded thing an ENVIRONMENT condition or a
+REPOSITORY file?** `_import_closure.py` is committed here, so its absence is a defect and the check
+must refuse — a `die` under the abnormal-exit trap, which reads RED and moves no count on the green
+path. A genuinely optional tool would deserve the `note`, and then the milestone owes a second check
+that the tool is present. **Rule: `2>/dev/null || true` followed by `if [ -n "$x" ]` is a skipped
+test. Decide which of the two it is and say so, because the `if` will otherwise decide it silently.**
+
 ### Conjunctions need a negative case per conjunct
 A four-tree conjunction whose only negative case exercised one tree: dropping any
 of the other three passed all twelve cases.
@@ -903,6 +1051,78 @@ m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
 m28 353  m29 127
                                                        CAMPAIGN TOTAL 10,178
 ```
+
+**M36 TOOK IT TO 11,910, AND MOVED EXACTLY THREE OTHER NUMBERS — TWO OF THEM ITS OWN AND ONE OF THEM
+A PARALLEL TRACK'S.** Measured M0-M36 on 2026-08-30 by M36's implementation, after its last edit,
+`setsid`-detached in this repository's own dev shell (node v24.19.0), one milestone at a time with
+nothing else running, `TMPDIR` and the log under `~/.cache`, at `origin/dev` `4b627dc`, **no hole in
+the log** (74 markers for 37 milestones), **34 of 37 exit 0**:
+
+```
+m0 156  m1 182  m2 293  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 262  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
+m28 357  m29 127  m30 218  m31 421  m32 237  m33 248  m34 217  m35 239  m36 137
+                                                       CAMPAIGN TOTAL 11,910
+```
+
+**Every one of M0-M34 came out at its reference value TO THE ASSERTION**, and
+11,744 + 1 + 1 + 27 + 137 = 11,910 exactly, `delta +0` against a reference table naming all four
+moves in advance. **M36's own 137** is 74 / 29 / 34. **M1 181 -> 182** is
+`verify_provenance_complete` 70 -> 71: one inventory id (RI-98) no `PROVENANCE.md` row had cited.
+**M2 292 -> 293** is a DEFECT rather than growth and is the abort that bought it — see the
+inventory-namespace rule above. **M35 212 -> 239 IS NOT M36's**: two parallel `m35:` commits landed
+tier 2's first and second rungs on `origin/dev` while M36 was being written, taking
+`test_unimplemented_oracle_refuses_by_name` 95 -> 109 -> 122; M36 rebased onto both and dropped its
+own duplicate answer to the first.
+
+**M9 DID NOT FLAKE** — 807, rc 0, 1,280 s, immediately after m8's 177 s run, which is D19's standing
+condition and it did not fire; M15 did not flake either (537, 382 s). **THREE non-zero exits and only
+ONE is this campaign's own.** M11 is 262 with nine failing assertions, the ninth-upstream-move
+signature, count unchanged, `carry/` left at HEAD. **M20 is 237 with one failing assertion AND IT IS
+L2's**: `verify_named_checks_exist` reads `verify_hydrated_roots_declared` out of a COMMENT in L2's
+own `verify_hydrated_roots_match_state_reference.sh` — a check name in prose counted as a
+declaration, which is this file's own "a citation is the opposite of a dependency" family — count
+unchanged at 9, recorded and not fixed. **M28 is 357 with one failing assertion AND IT IS L0's**,
+`replay/package.json` as a fifth tree, for the fourth milestone running. **L0's, L1's, L2's and L3's
+nine check names appear ZERO times as a summary line in the whole sweep log**, grepped one at a time.
+**A sweep is a writer**: `carry/rebase.json` and `carry/exposure.json` came out `79f597b2…` /
+`3836c2b6…` — the same two post-sweep digests every run since M30 — and were restored, `sha256sum -c`,
+all four OK.
+
+**M36'S REVIEW RE-DERIVED THAT TOTAL AND MOVED NOTHING.** The sweep log is on disk and was re-parsed
+with an independent summariser written for the review rather than with `m36-sweep-sum.py`:
+**11,910 over 37 milestones, 74 markers, no hole**, every per-milestone number equal, and the three
+non-zero exits exactly M11 (nine failures split 5 / 2 / 2), M20 (**L2's**) and M28 (**L0's**) with no
+fourth. Each attribution was re-derived from the log's own per-check splits —
+`verify_provenance_complete` 70 -> **71** (M1), `verify_fixture_corpus_manifest_complete` 37 -> **38**
+(M2), `test_unimplemented_oracle_refuses_by_name` 95 -> **122** (M35) — and **M35's is confirmed as
+the parallel track's twice over**: `git log` on that check names only the two `m35:` commits, and the
+file is not in M36's working diff at all. The nine L0/L1/L2/L3 check names appear **zero** times as a
+summary line, grepped one at a time. The review's own three edits (a `die` for a conditional
+assertion block, `FX-\d{2,}` in two places, and one corrected sentence in `LOCAL-HISTORY.md` §7) were
+each measured to move no count: **M36 re-run at 137 and M2 at 293 after all three.**
+
+**AND ONE SENTENCE OF M36'S DID NOT SURVIVE THE REVIEW, FOR THE REASON A SHARED BRANCH PRODUCES.**
+`LOCAL-HISTORY.md` §7 said *"`PrivateVoting.cast_vote` needs a SECOND tier-2 rung,
+`getPublicKeysAndPartialAddress` … It refuses by name"* — true when M36 took its ladder, false by the
+time it shipped, because the second parallel `m35:` commit landed that rung mid-milestone.
+Re-measured against the shipped bundle, `cast_vote` **serves** that oracle (five served) and then
+halts inside the circuit on `Assertion failed: 9 output values were provided as a foreign call result
+for 2 destination slots`. `PRIVATE-EXECUTION.md` §3b analyses that gap correctly, so the ANALYSIS
+existed while the neighbouring document went on stating the superseded fact — and nothing re-derived
+it, because `_m36_doc_figures.py` re-derives figures and this was prose. Corrected where it is
+written. *A prose claim about another track's rung is a figure with no comparer behind it.*
+
+**AND M36'S SWEEP WAS ABORTED SIX TIMES, WHICH IS THE RULE WORKING SIX TIMES.** None was a finding
+about the sweep. The first bought **four validations that are upstream's** (a cross-contract log read,
+an unscoped tagging secret, an undeduplicated secret set and an undeduplicated note table — all found
+by reading upstream's own handler bodies while the sweep ran, which is the only work available during
+one). The second and the sixth were **the branch moving under it** — five times in one milestone, two
+of them on M36's own files. The third was **two of M36's own checks**, found by asking of each green
+assertion what input would make it red. The fourth was **a refusal message whose stated cause M36 had
+itself removed**. The fifth was **the inventory-namespace defect above**, and it is the one a green
+sweep would have shipped.
 
 **M35'S REVIEW TOOK IT TO 11,744, AND MOVED EXACTLY THREE OTHER MILESTONES — ALL THREE M35'S OWN
 DECLARED MOVES, RE-CONFIRMED.** Re-measured M0-M35 on 2026-08-30 by M35's review, **after its last
@@ -1331,6 +1551,15 @@ directory is wiped and re-taken at the start of every run, and an **in-progress 
 while mutations are live so a run that died mid-mutation is refused (with an explicit
 `--restore-previous`) rather than having a fresh backup taken *of a mutated tree*, which is the same
 defect with the sign flipped.
+
+**AND THE MARKER WAS WRITTEN ONE STEP TOO LATE, WHICH M36 FOUND BY LAUNCHING THE HARNESS TWICE.**
+The refusal reads the marker at STARTUP and the marker was first written by the ARM LOOP, so two runs
+launched within the same second both passed it — and the second's wipe-and-re-take ran while the
+FIRST still had mutations live. The backup was then a backup *of a mutated tree*, which is precisely
+the defect the marker exists to prevent, reached by a route it did not cover: not a session that died
+mid-mutation, but a **second run of the same harness**. `still_there` behaved correctly throughout
+(`M7 DID NOT HOLD`, restore, exit 5); what it cannot do is undo a backup that was already wrong, and
+`--restore-previous` faithfully restored the hang mutation. **Write the marker BEFORE the backup.**
 
 ### A WORKER'S FETCHES ARE NOT IN ITS PAGE'S NETWORK LOG
 

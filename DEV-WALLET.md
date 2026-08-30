@@ -138,8 +138,11 @@ process) and compares them as sets before anything else.
 - **10 served**: `getAccounts`, `getAddressBook`, `getChainInfo`, `getContractClassMetadata`,
   `getContractMetadata`, `registerContract`, `registerContractClass`, `registerSender`,
   `requestCapabilities`, `sendTx`.
-- **6 refused**, each naming itself and what would have to exist: `getPrivateEvents` (note discovery,
-  M36), `simulateTx`, `profileTx`, `executeUtility` and `createAuthWit` (private execution, M35), and
+- **6 refused**, each naming itself and what would have to exist: `getPrivateEvents` (note discovery;
+  **M36 stores NOTES and still refuses EVENTS by name**, because upstream keeps them in a
+  `PrivateEventStore` — another `AztecAsyncKVStore` consumer — and accepting the request while
+  storing nothing would make this method answer an empty set that looks like "there were no
+  events"), `simulateTx`, `profileTx`, `executeUtility` and `createAuthWit` (private execution, M35), and
   `batch` (M34 crosses one call at a time on purpose, so that every decision has its own trace
   record).
 
@@ -254,8 +257,8 @@ a second copy of every shared chunk.
 
 | | derived |
 |---|---|
-| the wallet entry's eager set | **297.12 KB** gzipped across **9** files |
-| the wallet demo page's eager set | **334.51 KB** gzipped across **13** files |
+| the wallet entry's eager set | **304.12 KB** gzipped across **9** files |
+| the wallet demo page's eager set | **343.59 KB** gzipped across **13** files |
 | `@aztec/aztec.js` bytes in `browser.js`'s eager set | **0** |
 
 *(Both figures moved in M35, which fills the private half of the seam: the wallet entry now reaches
@@ -284,7 +287,9 @@ rounding tie that put a build and a check one hundredth apart.)*
 
 - **No private execution.** `simulateTx`, `profileTx`, `executeUtility` and `createAuthWit` refuse by
   name. M35 owns them.
-- **No note database and no tagging.** `getPrivateEvents` refuses by name. M36 owns them.
+- **No note database and no tagging** *(M34's state; M36 built both — `LOCAL-HISTORY.md`)*.
+  `getPrivateEvents` refuses by name, and it still does after M36: the note half is served and the
+  EVENT half is not, for the reason §3 now gives.
 - **No approval UI.** `autoApproveDiscovery` is a flag with a callback beside it; a wallet with a
   user attaches one. M34 still has no user.
 - **No batching.** Upstream ships request batching over this boundary and `batch` refuses by name —
@@ -301,11 +306,13 @@ rounding tie that put a build and a check one hundredth apart.)*
 
 ---
 
-## 8. WHAT M35 AND M36 INHERIT
+## 8. WHAT M35 AND M36 INHERITED — AND SPENT
 
 - A wallet in the seam, so the next milestone is a substitution rather than a construction: every
   method M35 implements is one that currently refuses by name, and the refusal names the milestone.
 - The decision ledger and its trace records, so "every oracle call visible" is machinery that already
   exists rather than a thing to build. M35's 68 oracles go through the same ledger.
 - Deterministic keys, which is what makes a private-execution recording replayable at all.
+  *(M36 spent them on TAGGING: every app tagging secret is an ECDH over these accounts' own keys, so
+  the tag a contract emits and the tag the wallet looks for are two derivations of one seed.)*
 - The measurement in §2, so nobody re-opens `BaseWallet`.

@@ -142,6 +142,9 @@ export type {
 export {
   ORACLE_NAMES,
   ORACLE_IMPLEMENTED,
+  ORACLE_DISCOVERY,
+  ORACLE_IMPLEMENTED_WITH_DISCOVERY,
+  ORACLE_REFUSING_WITH_DISCOVERY,
   ORACLE_REFUSING,
   ORACLE_REFUSAL_REASONS,
   ORACLE_ENVIRONMENT_VERSION,
@@ -149,11 +152,34 @@ export {
   ORACLE_EPHEMERAL_RETURN_LABELS,
   OracleUnimplemented,
   OracleVersionIncompatible,
+  assertAllowedScope,
   assertOracleSurfaceMatchesDeclaration,
   createPrivateOracleHandler,
   oracleMethodName,
 } from './wallet/private_oracles.ts';
-export type { OracleCall, PrivateOracleHandle, PrivateOracleOptions } from './wallet/private_oracles.ts';
+export type {
+  NoteDiscoverySource,
+  OracleCall,
+  PrivateOracleHandle,
+  PrivateOracleOptions,
+} from './wallet/private_oracles.ts';
+
+// M36: note discovery and tagging, served from the dev node's OWN history. `LOCAL-HISTORY.md` is
+// the write-up and `local_history.ts` carries the boundary sentence the document quotes.
+export {
+  LOCAL_HISTORY_BOUNDARY,
+  LOCAL_HISTORY_BOUNDARY_LABEL,
+  LocalHistoryOnly,
+} from './wallet/local_history.ts';
+export { DevNoteDatabase, noteNonceFor, sealPrivateFrame } from './wallet/note_database.ts';
+export type { NoteDbEvent, RetrievedTaggedLog, StoredNote, SyncedBlock, SyncedTx } from './wallet/note_database.ts';
+export {
+  DEV_EPHEMERAL_SLOT_SEPARATOR,
+  DEV_EPHEMERAL_SLOT_SEPARATOR_LABEL,
+  DeterministicEphemeralArrayService,
+  DevTagging,
+} from './wallet/dev_tagging.ts';
+export type { ResolvedStrategy, TaggingAccount } from './wallet/dev_tagging.ts';
 export {
   PrivateExecutionNotInitialised,
   executePrivateFunction,
@@ -237,6 +263,7 @@ export const WALLET_ENTRY_OPS: readonly string[] = Object.freeze(
     'OracleUnimplemented',
     'OracleVersionIncompatible',
     'assertOracleSurfaceMatchesDeclaration',
+    'assertAllowedScope',
     'createPrivateOracleHandler',
     'oracleMethodName',
     'executePrivateFunction',
@@ -246,5 +273,19 @@ export const WALLET_ENTRY_OPS: readonly string[] = Object.freeze(
     'initPrivateExecution',
     'privateExecutionAssets',
     'PrivateExecutionNotInitialised',
+    // M36: note discovery and tagging, over the dev node's own history.
+    'ORACLE_DISCOVERY',
+    'ORACLE_IMPLEMENTED_WITH_DISCOVERY',
+    'ORACLE_REFUSING_WITH_DISCOVERY',
+    'LOCAL_HISTORY_BOUNDARY',
+    'LOCAL_HISTORY_BOUNDARY_LABEL',
+    'LocalHistoryOnly',
+    'DevNoteDatabase',
+    'sealPrivateFrame',
+    'noteNonceFor',
+    'DevTagging',
+    'DeterministicEphemeralArrayService',
+    'DEV_EPHEMERAL_SLOT_SEPARATOR',
+    'DEV_EPHEMERAL_SLOT_SEPARATOR_LABEL',
   ].sort(),
 );

@@ -42,7 +42,7 @@
 
 import { Fr } from '@aztec/foundation/curves/bn254';
 import { AztecAddress } from '@aztec/stdlib/aztec-address';
-import { MAX_FR_CALLDATA_TO_ALL_ENQUEUED_CALLS } from '@aztec/constants';
+import { MAX_FR_CALLDATA_TO_ALL_ENQUEUED_CALLS, PRIVATE_LOG_CIPHERTEXT_LEN } from '@aztec/constants';
 import { siloNullifier } from '@aztec/stdlib/hash';
 import { poseidon2HashWithSeparator } from '@aztec/foundation/crypto/poseidon';
 // The address derivation is UPSTREAM'S OWN, not a re-implementation. `computeContractAddressFromInstance`
@@ -56,12 +56,24 @@ import { computeContractAddressFromInstance } from '@aztec/stdlib/contract';
 // (RI-96) — so the wallet's derivation, this guard and `aztec-nr`'s assertion are three uses of one
 // computation rather than three that ought to agree.
 import { computeAddress, type PublicKeys } from '@aztec/stdlib/keys';
+import { AppTaggingSecret, type AppTaggingSecretKind, SiloedTag } from '@aztec/stdlib/logs';
+import { TxHash } from '@aztec/stdlib/tx';
 
 import { ORACLE_REGISTRY } from '../vendor/pxe/contract_function_simulator/oracle/oracle_registry.ts';
 import { ORACLE_VERSION_MAJOR, ORACLE_VERSION_MINOR } from '../vendor/pxe/oracle_version.ts';
 import { Option } from '../vendor/pxe/contract_function_simulator/noir-structs/option.ts';
 import { EphemeralArrayService } from '../vendor/pxe/contract_function_simulator/ephemeral_array_service.ts';
+import { EphemeralArray } from '../vendor/pxe/contract_function_simulator/noir-structs/ephemeral_array.ts';
+import { BoundedVec } from '../vendor/pxe/contract_function_simulator/noir-structs/bounded_vec.ts';
 import { TransientArrayService } from '../vendor/pxe/contract_function_simulator/transient_array_service.ts';
+import type { NoteValidationRequest } from '../vendor/pxe/contract_function_simulator/noir-structs/note_validation_request.ts';
+import type { LogRetrievalRequest } from '../vendor/pxe/contract_function_simulator/noir-structs/log_retrieval_request.ts';
+import type { LogRetrievalResponse } from '../vendor/pxe/contract_function_simulator/noir-structs/log_retrieval_response.ts';
+import type { PendingTaggedLog } from '../vendor/pxe/contract_function_simulator/noir-structs/pending_tagged_log.ts';
+import type { ProvidedSecret } from '../vendor/pxe/contract_function_simulator/noir-structs/provided_secret.ts';
+import type { ResolvedTx } from '../vendor/pxe/contract_function_simulator/noir-structs/resolved_tx.ts';
+import type { DevNoteDatabase, RetrievedTaggedLog } from './note_database.ts';
+import type { DevTagging, DeterministicEphemeralArrayService } from './dev_tagging.ts';
 
 /** Upstream's own oracle names, read from the vendored registry rather than typed here. */
 export const ORACLE_NAMES: readonly string[] = Object.freeze(Object.keys(ORACLE_REGISTRY).sort());
@@ -133,9 +145,58 @@ export const ORACLE_IMPLEMENTED: readonly string[] = Object.freeze(
   ].sort(),
 );
 
+/**
+ * M36 — the nine oracles a handler serves ONLY when a note-discovery source is attached.
+ *
+ * ===========================================================================================
+ * WHY THIS IS A SECOND PARTITION AND NOT NINE MORE ENTRIES IN THE FIRST
+ * ===========================================================================================
+ *
+ * M35 established that *"implemented" means "observed to answer"* — the served set and the set the
+ * arm actually reached are asserted equal in both directions. These nine cannot answer without a
+ * note database, a tagging half and a contract-instance source, and a handler built without them
+ * would carry nine methods that are declared served and refuse. **That is exactly the
+ * plausible-default shape wearing a table of contents** — M34's `DEV_WALLET_SERVED` finding.
+ *
+ * So the surface is a FUNCTION of what the handler was given, and both partitions are checked: each
+ * is disjoint from its complement, each sums to the re-derived registry count, and
+ * `assertOracleSurfaceMatchesDeclaration` reconciles the one that applies at construction.
+ *
+ * `aztec_utl_getContractInstance` is NOT in this set, and it was until the two tier-2 answers met.
+ * M36 reached that rung independently and put the oracle here, served only with a discovery source
+ * and recording `refused` for an address the wallet does not hold. The always-served directory above
+ * is the better model — an unheld address is a fact about the DATA and `unavailable` is what says so
+ * — so this set is the EIGHT note and tagging oracles and nothing else. `LOCAL-HISTORY.md` §2 keeps
+ * the measurement that decided the rung, because it is the same measurement either way.
+ */
+export const ORACLE_DISCOVERY: readonly string[] = Object.freeze(
+  [
+    // note discovery
+    'aztec_utl_getNotes',
+    'aztec_utl_getPendingTaggedLogsV2',
+    'aztec_utl_getLogsByTagV2',
+    'aztec_utl_validateAndStoreEnqueuedNotesAndEvents',
+    // tagging
+    'aztec_prv_getAppTaggingSecret',
+    'aztec_prv_getNextTaggingIndex',
+    'aztec_prv_getSenderForTags',
+    'aztec_prv_resolveTaggingStrategy',
+  ].sort(),
+);
+
+/** The served set when a discovery source IS attached. Derived from the two lists above. */
+export const ORACLE_IMPLEMENTED_WITH_DISCOVERY: readonly string[] = Object.freeze(
+  [...ORACLE_IMPLEMENTED, ...ORACLE_DISCOVERY].sort(),
+);
+
 /** Everything else, DERIVED. A new upstream oracle lands here without an edit. */
 export const ORACLE_REFUSING: readonly string[] = Object.freeze(
   ORACLE_NAMES.filter(n => !ORACLE_IMPLEMENTED.includes(n)),
+);
+
+/** Everything else when a discovery source is attached, DERIVED on the same terms. */
+export const ORACLE_REFUSING_WITH_DISCOVERY: readonly string[] = Object.freeze(
+  ORACLE_NAMES.filter(n => !ORACLE_IMPLEMENTED_WITH_DISCOVERY.includes(n)),
 );
 
 /**
@@ -146,12 +207,25 @@ export const ORACLE_REFUSING: readonly string[] = Object.freeze(
  * the milestone that owns it. Four of these reasons are MEASUREMENTS rather than plans — see
  * `EPHEMERAL_RETURN_ORACLES` below.
  */
+const NO_DISCOVERY_SOURCE = (needs: string) =>
+  `M36 serves this oracle, and this handler was built WITHOUT a discovery source, so it has no ` +
+  `${needs}. Pass \`discovery\` to createPrivateOracleHandler — a note database fed by the dev ` +
+  `node's own block stream, the wallet's tagging half, and the wallet's registered contract ` +
+  `instances. See LOCAL-HISTORY.md for what that history is and is not.`;
+
 export const ORACLE_REFUSAL_REASONS: Readonly<Record<string, string>> = Object.freeze({
   // ---- tier 2, the adapters over exports this runtime already has -----------------------------
   // `aztec_utl_getContractInstance` WAS HERE and is now served — tier 2's first rung. It is the
   // one refusal this campaign removed by building the thing rather than by lowering the bar, and
   // what replaced it is not "always answer": an address the wallet does not hold still refuses, by
   // name, through `ContractInstanceNotHeld`. See section 3a of PRIVATE-EXECUTION.md.
+  //
+  // M36 KEEPS THAT MODEL RATHER THAN ITS OWN, and the reason is worth the sentence: M36 reached the
+  // same rung independently and put the oracle in a SECOND partition, served only when a
+  // note-discovery source is attached, recording `refused` for an address the wallet does not hold.
+  // That records a fact about the DATA as a fact about the PARTITION — the very confusion the
+  // `unavailable` outcome below exists to prevent — and the always-served directory is the better
+  // model. M36's second partition is therefore the EIGHT note and tagging oracles and nothing else.
   aztec_utl_getNoteHashMembershipWitness:
     'tier 2 (adapters): needs a value-to-index lookup in the note-hash tree, and ' +
     'ResidentMerkleWriteOperations.findLeafIndices REFUSES by name (RI-67). A sibling path can only ' +
@@ -186,7 +260,11 @@ export const ORACLE_REFUSAL_REASONS: Readonly<Record<string, string>> = Object.f
   aztec_utl_recordFact:
     'the fact store is not served: its collection type is round-tripped through an EphemeralArray, ' +
     'whose slot allocation calls Fr.random() — ambient randomness, which this wallet\'s third design ' +
-    'property forbids. See PRIVATE-EXECUTION.md section 5',
+    'property forbids. See PRIVATE-EXECUTION.md section 5. **M36 ANSWERED THAT MEASUREMENT** with ' +
+    'DeterministicEphemeralArrayService (LOCAL-HISTORY.md section 5), so this is no longer a ' +
+    'blocker and is now simply unbuilt — the fact store itself is what is missing, not a reason it ' +
+    'cannot exist. Recorded rather than rewritten, because a refusal whose stated cause has been ' +
+    'removed is a refusal a reader will act on wrongly',
   aztec_utl_deleteFactCollection: 'the fact store is not served — see aztec_utl_recordFact',
   aztec_utl_getFactCollection: 'the fact store is not served — see aztec_utl_recordFact',
   aztec_utl_getFactCollectionsByType: 'the fact store is not served — see aztec_utl_recordFact',
@@ -205,15 +283,21 @@ export const ORACLE_REFUSAL_REASONS: Readonly<Record<string, string>> = Object.f
     'tier 4 (structural): there is no utility context in a private call frame, and inventing one is ' +
     'exactly the plausible default this milestone refuses',
   aztec_prv_resolveCustomRequest: 'tier 4 (structural): a contract-defined request with no registered resolvers',
-  // ---- M36 -------------------------------------------------------------------------------------
-  aztec_utl_getNotes: 'note discovery — M36',
-  aztec_utl_getPendingTaggedLogsV2: 'note discovery — M36',
-  aztec_utl_getLogsByTagV2: 'note discovery — M36',
-  aztec_utl_validateAndStoreEnqueuedNotesAndEvents: 'note discovery — M36',
-  aztec_prv_getAppTaggingSecret: 'tagging — M36',
-  aztec_prv_getNextTaggingIndex: 'tagging — M36',
-  aztec_prv_getSenderForTags: 'tagging — M36',
-  aztec_prv_resolveTaggingStrategy: 'tagging — M36',
+  // ---- M36, served ONLY when a discovery source is attached -------------------------------------
+  //
+  // These eight are M36's, and the reason each gives when it refuses is the reason it CANNOT answer
+  // rather than a milestone number: a handler built with no note database has nowhere to look, and
+  // saying "M36" to a reader who is running M36's own code would name a cause they would go and
+  // check — `CAMPAIGN-BRIEF.md`'s "a wrong explanation is worse than none".
+  aztec_utl_getNotes: NO_DISCOVERY_SOURCE('note discovery: the note table these are read from'),
+  aztec_utl_getPendingTaggedLogsV2: NO_DISCOVERY_SOURCE('note discovery: the tag index and the wallet\'s own tagging secrets'),
+  aztec_utl_getLogsByTagV2: NO_DISCOVERY_SOURCE('note discovery: the tag index'),
+  aztec_utl_validateAndStoreEnqueuedNotesAndEvents:
+    NO_DISCOVERY_SOURCE('note discovery: the note table a validated note is stored in, and the block history it is validated against'),
+  aztec_prv_getAppTaggingSecret: NO_DISCOVERY_SOURCE('tagging: the wallet\'s own account keys'),
+  aztec_prv_getNextTaggingIndex: NO_DISCOVERY_SOURCE('tagging: the per-secret index counter'),
+  aztec_prv_getSenderForTags: NO_DISCOVERY_SOURCE('tagging: the wallet\'s default sender'),
+  aztec_prv_resolveTaggingStrategy: NO_DISCOVERY_SOURCE('tagging: the wallet\'s own account keys'),
 });
 
 /**
@@ -439,6 +523,59 @@ export interface HeldContractInstance {
   readonly initializationHash: Fr;
   readonly immutablesHash: Fr;
   readonly publicKeys: PublicKeys;
+  /**
+   * M36's note-discovery source. **Absent by default, and its absence is a set of named refusals
+   * rather than a set of empty answers.**
+   */
+  readonly discovery?: NoteDiscoverySource;
+}
+
+/**
+ * Everything the eight discovery oracles need, supplied by the caller.
+ *
+ * The contract-instance directory is NOT here: `aztec_utl_getContractInstance` is served
+ * unconditionally from `PrivateOracleOptions.contractInstances`, which is the model the two
+ * independent tier-2 answers settled on.
+ *
+ * IT IS AN INTERFACE AND NOT AN IMPORT, for the reason `DevWalletHost` is: `wallet.js` is a separate
+ * entry point so that a page attaching no wallet pays for none of it, and a handler that imported
+ * the chain would drag the runtime in from the other side.
+ */
+export interface NoteDiscoverySource {
+  /** The note table, the tag index and the nullifier set, fed by the dev node's own block stream. */
+  readonly noteDb: DevNoteDatabase;
+  /** The wallet's tagging half — accounts, secrets, index counters. */
+  readonly tagging: DevTagging;
+  /**
+   * The ephemeral-array service. It is the DETERMINISTIC one, which is what answers
+   * `PRIVATE-EXECUTION.md` §5's measurement rather than inheriting it, and it is supplied here
+   * rather than constructed inside so that the two return-carrying oracles and the seven
+   * `*Ephemeral` bookkeeping oracles share ONE service — as upstream's do.
+   */
+  readonly ephemeral: DeterministicEphemeralArrayService;
+  /** The block this execution is anchored to. A note from a newer block is refused. */
+  readonly anchorBlockNumber: number;
+  /**
+   * The ACCOUNT scopes this execution may act for — upstream's own `this.scopes`.
+   *
+   * IT IS THE SUBJECT OF THREE OF UPSTREAM'S OWN GUARDS AND NOT A FILTER PARAMETER. `fetchTaggedLogs`,
+   * `getAppTaggingSecret` and `NoteService.getNotes` all consult it, the first two through
+   * `assertAllowedScope`, which THROWS naming the scope and the list. A handler without it lets a
+   * contract ask for another account's tagged logs and for another account's tagging secret — and
+   * neither is visibly wrong afterwards, because the answer is well-formed either way.
+   *
+   * REQUIRED AND NON-EMPTY. An empty list would make `assertAllowedScope` refuse everything, which
+   * reads as "the wallet holds nothing" rather than as a caller who forgot an argument.
+   */
+  readonly scopes: readonly AztecAddress[];
+  /**
+   * How many tagging indexes past the last used one `getPendingTaggedLogsV2` probes.
+   *
+   * A WINDOW AND NOT AN UNBOUNDED SCAN, and the number is the caller's rather than a constant here,
+   * because it is a statement about how far ahead a sender may have run — which is a property of the
+   * deployment and not of the handler.
+   */
+  readonly taggingProbeWindow?: number;
 }
 
 export interface PrivateOracleHandle {
@@ -450,13 +587,26 @@ export interface PrivateOracleHandle {
   contractVersion(): { major: number; minor: number } | undefined;
   /** The notes the frame created, the nullifiers it emitted, and the offchain effects it emitted. */
   effects(): {
-    createdNotes: readonly { owner: string; storageSlot: string; noteHash: string; counter: number }[];
+    createdNotes: readonly {
+      owner: string;
+      storageSlot: string;
+      noteHash: string;
+      counter: number;
+      /** The note's randomness, which a validation request carries and the note hash commits to. */
+      randomness: string;
+      /** The note's packed content, which is what `getNotes` hands back and `pickNotes` selects on. */
+      content: readonly string[];
+    }[];
     createdNullifiers: readonly string[];
     nullifiedNotes: readonly { innerNullifier: string; noteHash: string; counter: number }[];
     contractClassLogs: readonly { contractAddress: string; emittedLength: number; counter: number }[];
     offchainEffects: readonly string[][];
     randomFields: number;
   };
+  /** Whether a discovery source was attached, so a report says which partition was in force. */
+  hasDiscovery(): boolean;
+  /** The served set that was actually in force, as a set a check can compare. */
+  servedSet(): readonly string[];
 }
 
 /**
@@ -464,7 +614,10 @@ export interface PrivateOracleHandle {
  * and throws naming the difference. Exported so a check can exercise it over the BUILT bundle with
  * a doctored list and see it fire — a guard nobody has seen refuse is a guard nobody has tested.
  */
-export function assertOracleSurfaceMatchesDeclaration(methodNames: readonly string[]): void {
+export function assertOracleSurfaceMatchesDeclaration(
+  methodNames: readonly string[],
+  withDiscovery = false,
+): void {
   const carried = new Set(methodNames);
   const wanted = ORACLE_NAMES.map(oracleMethodName);
   const missing = wanted.filter(m => !carried.has(m));
@@ -475,17 +628,40 @@ export function assertOracleSurfaceMatchesDeclaration(methodNames: readonly stri
         `undeclared [${extra.join(', ')}]`,
     );
   }
-  const overlap = ORACLE_IMPLEMENTED.filter(n => ORACLE_REFUSING.includes(n));
-  if (overlap.length > 0) {
-    throw new Error(`the implemented and refusing sets are not disjoint: [${overlap.join(', ')}]`);
+  // BOTH PARTITIONS ARE CHECKED, NOT ONLY THE ONE IN FORCE. A handler built without a discovery
+  // source would otherwise never exercise the with-discovery partition's arithmetic, and a
+  // ninth-oracle typo in `ORACLE_DISCOVERY` would sit undetected until a page happened to attach a
+  // note database.
+  for (const [label, implemented, refusing] of [
+    ['without discovery', ORACLE_IMPLEMENTED, ORACLE_REFUSING],
+    ['with discovery', ORACLE_IMPLEMENTED_WITH_DISCOVERY, ORACLE_REFUSING_WITH_DISCOVERY],
+  ] as const) {
+    const overlap = implemented.filter(n => refusing.includes(n));
+    if (overlap.length > 0) {
+      throw new Error(`the implemented and refusing sets are not disjoint ${label}: [${overlap.join(', ')}]`);
+    }
+    if (implemented.length + refusing.length !== ORACLE_NAMES.length) {
+      throw new Error(
+        `the implemented and refusing sets do not sum to the registry ${label}: ` +
+          `${implemented.length} + ${refusing.length} !== ${ORACLE_NAMES.length}`,
+      );
+    }
   }
-  if (ORACLE_IMPLEMENTED.length + ORACLE_REFUSING.length !== ORACLE_NAMES.length) {
-    throw new Error(
-      `the implemented and refusing sets do not sum to the registry: ` +
-        `${ORACLE_IMPLEMENTED.length} + ${ORACLE_REFUSING.length} !== ${ORACLE_NAMES.length}`,
-    );
+  // AND EVERY DISCOVERY ORACLE MUST BE A REGISTRY ORACLE. `ORACLE_DISCOVERY` is a typed list, so it
+  // is the one place in this file a name could be invented; `ORACLE_REFUSING_WITH_DISCOVERY` would
+  // silently absorb a misspelling as "one more refusal" and the sums above would still hold.
+  const invented = ORACLE_DISCOVERY.filter(n => !ORACLE_NAMES.includes(n));
+  if (invented.length > 0) {
+    throw new Error(`ORACLE_DISCOVERY names oracles the registry does not declare: [${invented.join(', ')}]`);
   }
-  const unexplained = ORACLE_REFUSING.filter(n => !ORACLE_REFUSAL_REASONS[n]);
+  const inBoth = ORACLE_DISCOVERY.filter(n => ORACLE_IMPLEMENTED.includes(n));
+  if (inBoth.length > 0) {
+    throw new Error(`ORACLE_DISCOVERY overlaps the always-served set: [${inBoth.join(', ')}]`);
+  }
+  // The reasons are checked against the partition IN FORCE, because a discovery oracle that is
+  // served needs no reason and one that is refused does.
+  const refusingNow = withDiscovery ? ORACLE_REFUSING_WITH_DISCOVERY : ORACLE_REFUSING;
+  const unexplained = refusingNow.filter(n => !ORACLE_REFUSAL_REASONS[n]);
   if (unexplained.length > 0) {
     throw new Error(`refused oracles with no declared reason: [${unexplained.join(', ')}]`);
   }
@@ -577,6 +753,35 @@ export async function assertHeldAccountKeysAreSelfConsistent(
   }
 }
 
+/**
+ * Upstream's `assertAllowedScope`, which THREE of its own handlers call and this one was missing.
+ *
+ * `pxe/src/storage/allowed_scopes.ts` is fourteen lines and it is not vendored, because vendoring a
+ * fourteen-line file to get a `some(...)` would be provenance machinery around a predicate. What IS
+ * taken from upstream is the RULE and the shape of the refusal: it names the scope AND the list, so
+ * a reader can see which account was asked for and which the execution holds.
+ */
+export function assertAllowedScope(
+  scope: AztecAddress,
+  allowedScopes: readonly AztecAddress[],
+  oracle: string,
+): void {
+  if (allowedScopes.length === 0) {
+    throw new Error(
+      `${oracle}: this execution was given an EMPTY scope list, so every scope is out of scope. That ` +
+        'is a caller who omitted an argument rather than a wallet that holds nothing, and the two ' +
+        'produce the same answer, so it is refused here.',
+    );
+  }
+  if (!allowedScopes.some(allowed => allowed.equals(scope))) {
+    throw new Error(
+      `${oracle}: scope ${scope.toString()} is not in this execution's allowed scopes ` +
+        `[${allowedScopes.map(s => s.toString()).join(', ')}]. A contract may not read another ` +
+        'account\'s tagged logs or derive another account\'s tagging secret.',
+    );
+  }
+}
+
 /** `aztec_{scope}_{method}` -> `method`, by upstream's own regex rather than by a `split`. */
 export function oracleMethodName(oracleKey: string): string {
   const m = oracleKey.match(/^aztec_(\w+?)_(.+)$/);
@@ -609,14 +814,25 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
   const accountDirectory = new Map<string, HeldAccountKeys>(
     (options.accountKeys ?? []).map(a => [a.address.toString(), a]),
   );
+  const discovery = options.discovery;
   const capsules = new Map<string, Fr[]>();
-  const ephemeral = new EphemeralArrayService();
+  // ONE SERVICE PER FRAME, AND IT IS THE CALLER'S WHEN THERE IS ONE. `EphemeralArray.fromSlot`
+  // resolves a slot against whatever service `readAll` is given, so a handler that used a second
+  // service for its returns would hand back slots the bookkeeping oracles cannot see.
+  const ephemeral: EphemeralArrayService = discovery?.ephemeral ?? new EphemeralArrayService();
   const transient = new TransientArrayService();
   const executionCache = new Map<string, Fr[]>();
   const pendingNullifiers = new Set<string>();
   const pendingNotes: { noteHash: Fr; counter: number }[] = [];
   let totalPublicCalldata = 0;
-  const createdNotes: { owner: string; storageSlot: string; noteHash: string; counter: number }[] = [];
+  const createdNotes: {
+    owner: string;
+    storageSlot: string;
+    noteHash: string;
+    counter: number;
+    randomness: string;
+    content: string[];
+  }[] = [];
   const createdNullifiers: string[] = [];
   const nullifiedNotes: { innerNullifier: string; noteHash: string; counter: number }[] = [];
   const contractClassLogs: { contractAddress: string; emittedLength: number; counter: number }[] = [];
@@ -905,17 +1121,35 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
       record('aztec_utl_clearTransient', 'served', `slot=${slot.toString()}`);
     },
 
-    // ---- execution-state sinks --------------------------------------------------------------------
+    // ---- execution-state sinks, HONOURED RATHER THAN STUBBED (M36's fourth deliverable) ----------
+    //
+    // M35 served both of these and both of them were sinks: `setContractSyncCacheInvalid` recorded a
+    // line and invalidated nothing, because there was no sync cache to invalidate, and
+    // `emitOffchainEffect` pushed into an array nobody read. That was the honest thing to do with no
+    // note database attached, and it is not the same as HONOURING them. With one attached, the
+    // invalidation reaches the cache the note oracles consult and the effect is DELIVERED — and the
+    // ledger detail says which of the two happened, so "honoured" is a fact a check reads rather
+    // than a word in a document.
     setContractSyncCacheInvalid(contractAddress: AztecAddress, scopes: { data: AztecAddress[] }): void {
+      const delivered = discovery
+        ? discovery.noteDb.invalidateSyncCache(contractAddress, scopes.data)
+        : undefined;
       record(
         'aztec_utl_setContractSyncCacheInvalid',
         'served',
-        `contract=${contractAddress.toString()} scopes=${scopes.data.length}`,
+        `contract=${contractAddress.toString()} scopes=${scopes.data.length} ` +
+          (delivered === undefined ? 'honoured=no (no discovery source)' : `honoured=yes invalidated=${delivered}`),
       );
     },
     emitOffchainEffect(data: Fr[]): void {
       offchainEffects.push(data.map(f => f.toString()));
-      record('aztec_utl_emitOffchainEffect', 'served', `fields=${data.length}`);
+      const delivered = discovery ? discovery.noteDb.deliverOffchainEffect(contract, data) : undefined;
+      record(
+        'aztec_utl_emitOffchainEffect',
+        'served',
+        `fields=${data.length} ` +
+          (delivered === undefined ? 'honoured=no (no discovery source)' : `honoured=yes delivered=${delivered}`),
+      );
     },
 
     // ---- the execution cache ----------------------------------------------------------------------
@@ -959,17 +1193,23 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
     notifyCreatedNote(
       owner: AztecAddress,
       storageSlot: Fr,
-      _randomness: Fr,
+      randomness: Fr,
       _noteTypeId: unknown,
-      _note: Fr[],
+      note: Fr[],
       noteHash: Fr,
       counter: number,
     ): void {
+      // M36 KEEPS THE RANDOMNESS AND THE CONTENT, and M35 kept neither. They are not decoration: a
+      // `NoteValidationRequest` carries both, `pickNotes` selects on the content, and the note hash
+      // commits to the randomness — so a note database fed from a record that dropped them could
+      // store a note it could never validate and could never query.
       createdNotes.push({
         owner: owner.toString(),
         storageSlot: storageSlot.toString(),
         noteHash: noteHash.toString(),
         counter,
+        randomness: randomness.toString(),
+        content: note.map(f => f.toString()),
       });
       // The PENDING list is what `notifyNullifiedNote` consumes from, so a note nullified in the same
       // execution has to have been created in it. Kept beside the report rather than derived from it,
@@ -1055,6 +1295,325 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
     },
   };
 
+  // ===========================================================================================
+  // M36 — THE NINE, SERVED ONLY WHEN A DISCOVERY SOURCE IS ATTACHED
+  // ===========================================================================================
+  //
+  // Every one of them answers from `LOCAL-HISTORY.md`'s subject: the dev node's OWN block stream.
+  // None of them fetches, and a query that reaches past what this node produced is `LocalHistoryOnly`
+  // — refused by name rather than answered with the prefix that happens to exist.
+
+  /** Turns one of this database's retrieved logs into the on-chain context the wire hands back. */
+  const toResolvedTx = (log: RetrievedTaggedLog): ResolvedTx => ({
+    txHash: TxHash.fromString(log.txHash),
+    uniqueNoteHashesInTx: [...log.noteHashes],
+    // UPSTREAM'S OWN CHOICE OF FIELD AND ITS OWN HAZARD. `firstNullifierInTx` is `nullifiers[0]`,
+    // and a transaction with no nullifiers has none — upstream reads it unguarded. Here that is a
+    // named error rather than `undefined` travelling into the codec, because a zero field would be
+    // a nonce seed the note-hash derivation then uses.
+    firstNullifierInTx: (() => {
+      const first = log.nullifiers[0];
+      if (first === undefined) {
+        throw new Error(
+          `aztec_utl_getPendingTaggedLogsV2: transaction ${log.txHash} emitted no nullifiers, so it has ` +
+            'no first nullifier for note-nonce derivation. Every Aztec transaction emits at least one ' +
+            '(its own hash), so this is a fact about how the block was sealed rather than about the log.',
+        );
+      }
+      return first;
+    })(),
+    blockNumber: log.blockNumber as never,
+    blockHash: log.blockHash,
+  });
+
+  const discoveryServed: Record<string, (...args: never[]) => unknown> = discovery
+    ? {
+        // ---- note discovery -----------------------------------------------------------------------
+        getNotes(
+          owner: Option<AztecAddress>,
+          storageSlot: Fr,
+          numSelects: number,
+          selectByIndexes: number[],
+          selectByOffsets: number[],
+          selectByLengths: number[],
+          selectValues: Fr[],
+          selectComparators: number[],
+          sortByIndexes: number[],
+          sortByOffsets: number[],
+          sortByLengths: number[],
+          sortOrder: number[],
+          limit: number,
+          offset: number,
+          status: number,
+          maxNotes: number,
+          packedHintedNoteLength: number,
+        ): unknown {
+          // THE QUERY IS ASSEMBLED EXACTLY AS UPSTREAM'S HANDLER ASSEMBLES IT, including
+          // `selectByIndexes.slice(0, numSelects)` — the twelve query parameters are FIXED-WIDTH
+          // arrays on the wire and `numSelects` is how many of them are real. Reading all of them
+          // would filter on zero-valued selectors nobody asked for.
+          const picked = discovery.noteDb.getNotes({
+            contractAddress: contract,
+            owner: owner.value,
+            storageSlot,
+            status,
+            // THE EXECUTION'S OWN SCOPES, WHICH ARE REQUIRED AND NON-EMPTY. Upstream's
+            // `NoteStore.getNotes` intersects a note's scope with this set and returns [] for an
+            // empty one — correct for a caller that meant "no scopes", and a silent empty result
+            // for one that meant "the default". Measured: with `scopes: []` this oracle returned
+            // ZERO notes over a note that WAS stored, and every other figure was right.
+            scopes: discovery.scopes,
+            selects: selectByIndexes.slice(0, numSelects).map((index, i) => ({
+              selector: { index, offset: selectByOffsets[i]!, length: selectByLengths[i]! },
+              value: selectValues[i]!,
+              comparator: selectComparators[i]!,
+            })),
+            sorts: sortByIndexes.map((index, i) => ({
+              selector: { index, offset: sortByOffsets[i]!, length: sortByLengths[i]! },
+              order: sortOrder[i]!,
+            })),
+            limit,
+            offset,
+          });
+          record(
+            'aztec_utl_getNotes',
+            'served',
+            `slot=${storageSlot.toString()} status=${status} selects=${numSelects} notes=${picked.length}`,
+          );
+          return BoundedVec.from({ data: picked, maxLength: maxNotes, elementSize: packedHintedNoteLength });
+        },
+
+        async getPendingTaggedLogsV2(
+          scope: AztecAddress,
+          providedSecrets: EphemeralArray<ProvidedSecret>,
+        ): Promise<EphemeralArray<PendingTaggedLog>> {
+          // TWO SOURCES OF SECRET, AND UPSTREAM HAS BOTH. The contract may PROVIDE secrets (a
+          // handshake it already did), and the wallet DERIVES the ones it can from its own keys. A
+          // handler that read only the provided ones would find nothing for an ordinary send.
+          // UPSTREAM'S `assertAllowedScope(recipient, this.scopes)`, which this handler was missing.
+          assertAllowedScope(scope, discovery.scopes, 'aztec_utl_getPendingTaggedLogsV2');
+          const provided = providedSecrets
+            .readAll(ephemeral)
+            .map(ps => new AppTaggingSecret(ps.secret, contract, ps.mode));
+          const derived: AppTaggingSecret[] = [];
+          const sender = discovery.tagging.senderForTags();
+          if (sender !== undefined) {
+            // THE SCOPE HOLDS THE LOCAL KEYS AND THE DIRECTION IS THE SCOPE. A recipient scanning
+            // for logs sent to it derives with its OWN keys against the sender's address, and the
+            // secret is directed at itself — see `DevTagging.appTaggingSecret`'s `direction`.
+            const secret = await discovery.tagging.appTaggingSecret(scope, sender, contract, scope);
+            if (secret) {
+              derived.push(secret);
+            }
+          }
+          // DEDUPLICATED, WHICH IS UPSTREAM'S OWN LINE AND ITS OWN REASON: *"these sources can
+          // overlap (a sender that is also a PXE account, or a pre-shared secret that coincides with
+          // a sender-derived one), so we deduplicate the combined set."* Without it a secret that
+          // appears twice scans the same tags twice and returns THE SAME LOG TWICE — which is
+          // precisely the double-count `test_tagging_index_advances`' own control is about, arriving
+          // from the secret side instead of the index side.
+          const secrets = Array.from(
+            new Map([...provided, ...derived].map(s => [s.toString(), s])).values(),
+          );
+
+          // THE WINDOW IS BOUNDED AND THE BOUND IS THE CALLER'S. A scan with no bound over a hash
+          // stream is not a search, it is a loop; and a window of zero would make "no logs found"
+          // mean "nothing was looked for", which is the absence-measured-over-an-excluded-subject
+          // shape this campaign has paid for three times.
+          const window = discovery.taggingProbeWindow ?? 8;
+          if (!Number.isInteger(window) || window < 1) {
+            throw new Error(
+              `aztec_utl_getPendingTaggedLogsV2: taggingProbeWindow must be a positive integer, got ` +
+                `${String(window)}. A window of zero would report "no pending logs" without looking.`,
+            );
+          }
+          const found: RetrievedTaggedLog[] = [];
+          let probes = 0;
+          for (const secret of secrets) {
+            // THE RECIPIENT-SIDE INDEX, NOT THE SENDER-SIDE COUNTER. See `DevTagging`'s own comment:
+            // probing from the sender's next reservation starts the scan one past the index the
+            // sender just used, and reports zero over an index holding one.
+            const from = discovery.tagging.recipientSyncedIndex(secret);
+            for (let i = 0; i < window; i++) {
+              const index = from + i;
+              const tag = await discovery.tagging.siloedTag(secret, index, contract);
+              probes += 1;
+              const hits = discovery.noteDb.logsByTag(tag, undefined, discovery.anchorBlockNumber);
+              if (hits.length > 0) {
+                discovery.tagging.advanceRecipientSyncedIndex(secret, index);
+              }
+              found.push(...hits);
+            }
+          }
+          record(
+            'aztec_utl_getPendingTaggedLogsV2',
+            'served',
+            `scope=${scope.toString()} secrets=${secrets.length} (${provided.length} provided, ` +
+              `${derived.length} derived) probes=${probes} logs=${found.length}`,
+          );
+          return EphemeralArray.fromValues(
+            ephemeral,
+            found.map(log => ({ log: [...log.fields], context: toResolvedTx(log) })),
+          );
+        },
+
+        async getLogsByTagV2(
+          requests: EphemeralArray<LogRetrievalRequest>,
+        ): Promise<EphemeralArray<EphemeralArray<LogRetrievalResponse>>> {
+          const list = requests.readAll(ephemeral);
+          // UPSTREAM'S FIRST LINE, AND IT IS A CROSS-CONTRACT READ THIS HANDLER WOULD OTHERWISE
+          // ALLOW. `LogService.fetchLogsByTag` refuses a request whose `contractAddress` is not the
+          // executing frame's, by name. Without it a contract silos the tag with ANOTHER contract's
+          // address and reads that contract's tagged logs — and the answer is well-formed either
+          // way, so nothing downstream would notice. A first version of this file documented the
+          // permissive behaviour in a comment as though it were the design, which is worse than
+          // leaving it undocumented.
+          for (const request of list) {
+            if (!request.contractAddress.equals(contract)) {
+              throw new Error(
+                `aztec_utl_getLogsByTagV2: got a log retrieval request for ` +
+                  `${request.contractAddress.toString()}, and this frame is executing as ` +
+                  `${contract.toString()}. A contract may only read logs tagged for itself.`,
+              );
+            }
+          }
+          const inner: EphemeralArray<LogRetrievalResponse>[] = [];
+          let total = 0;
+          for (const request of list) {
+            // THE TAG ON THE WIRE IS UNSILOED and the index is keyed by the siloed one — upstream's
+            // `fetchLogsByTag` silos with the REQUEST's contract address, not with this frame's, so
+            // a contract may ask about another contract's logs and gets that contract's tag.
+            const siloedTag = (await SiloedTag.computeFromTagAndApp(request.tag, request.contractAddress)).value;
+            const logs = discovery.noteDb.logsByTag(
+              siloedTag,
+              request.fromBlock.value as number | undefined,
+              (request.toBlock.value as number | undefined) ?? discovery.anchorBlockNumber,
+            );
+            total += logs.length;
+            inner.push(
+              EphemeralArray.fromValues(
+                ephemeral,
+                logs.map(log => ({
+                  // UPSTREAM'S OWN SLICE, COMMENT AND ALL: the tag is field 0 and the payload is
+                  // clipped to the wire cap, because a public log can exceed the BoundedVec slot the
+                  // oracle declares.
+                  logPayload: [...log.fields].slice(1, 1 + PRIVATE_LOG_CIPHERTEXT_LEN),
+                  txHash: TxHash.fromString(log.txHash),
+                  uniqueNoteHashesInTx: [...log.noteHashes],
+                  firstNullifierInTx: toResolvedTx(log).firstNullifierInTx,
+                  blockNumber: log.blockNumber as never,
+                  blockTimestamp: log.blockTimestamp as never,
+                  blockHash: log.blockHash as never,
+                })),
+              ),
+            );
+          }
+          record('aztec_utl_getLogsByTagV2', 'served', `requests=${list.length} logs=${total}`);
+          return EphemeralArray.fromValues(ephemeral, inner);
+        },
+
+        async validateAndStoreEnqueuedNotesAndEvents(
+          noteValidationRequests: EphemeralArray<NoteValidationRequest>,
+          eventValidationRequests: EphemeralArray<unknown>,
+          scope: AztecAddress,
+        ): Promise<void> {
+          const notes = noteValidationRequests.readAll(ephemeral);
+          const events = eventValidationRequests.readAll(ephemeral);
+          // EVENTS ARE REFUSED BY NAME RATHER THAN DROPPED. Upstream stores them in a
+          // `PrivateEventStore` — another `AztecAsyncKVStore` consumer — and this wallet has none.
+          // Accepting the request and storing nothing would make `getPrivateEvents` answer an empty
+          // set that looks like "there were no events".
+          if (events.length > 0) {
+            throw new Error(
+              `aztec_utl_validateAndStoreEnqueuedNotesAndEvents: ${events.length} event validation ` +
+                'request(s) were enqueued and this wallet has no private-event store, so it refuses ' +
+                'rather than dropping them. Notes are stored; events are not, and M34 already refuses ' +
+                '`getPrivateEvents` by name for the same reason.',
+            );
+          }
+          const stored = await discovery.noteDb.validateAndStoreNotes(
+            notes.map(n => ({
+              contractAddress: n.contractAddress,
+              owner: n.owner,
+              storageSlot: n.storageSlot,
+              randomness: n.randomness,
+              noteNonce: n.noteNonce,
+              content: n.content,
+              noteHash: n.noteHash,
+              nullifier: n.nullifier,
+              txHash: n.txHash.toString(),
+            })),
+            scope,
+            discovery.anchorBlockNumber,
+          );
+          record(
+            'aztec_utl_validateAndStoreEnqueuedNotesAndEvents',
+            'served',
+            `notes=${notes.length} stored=${stored} events=${events.length} scope=${scope.toString()}`,
+          );
+        },
+
+        // ---- tagging ------------------------------------------------------------------------------
+        async getAppTaggingSecret(sender: AztecAddress, recipient: AztecAddress): Promise<Option<Fr>> {
+          // UPSTREAM'S `assertAllowedScope(sender, this.scopes)`. Its own doc says the only expected
+          // `None` is an invalid RECIPIENT — a sender outside the scopes FAILS rather than returning
+          // none, because "this wallet will not act for that account" and "that account has no
+          // derivable secret" are different answers and only one of them is about the recipient.
+          assertAllowedScope(sender, discovery.scopes, 'aztec_prv_getAppTaggingSecret');
+          const secret = await discovery.tagging.appTaggingSecret(sender, recipient, contract);
+          record(
+            'aztec_prv_getAppTaggingSecret',
+            'served',
+            `sender=${sender.toString()} recipient=${recipient.toString()} held=${secret !== undefined}`,
+          );
+          // NONE IS THE HONEST ANSWER AND NOT A REFUSAL. `Option<Field>` is the declared return, and
+          // the case it exists for is exactly this one: the wallet does not hold that sender's keys.
+          // A fabricated field here would be a tagging secret nobody can re-derive.
+          return secret === undefined ? Option.none<Fr>() : Option.some(secret.secret);
+        },
+
+        getNextTaggingIndex(secret: Fr, deliveryMode: AppTaggingSecretKind): number {
+          const app = new AppTaggingSecret(secret, contract, deliveryMode);
+          const index = discovery.tagging.nextTaggingIndex(app);
+          record(
+            'aztec_prv_getNextTaggingIndex',
+            'served',
+            `secret=${secret.toString()} mode=${String(deliveryMode)} index=${index}`,
+          );
+          return index;
+        },
+
+        getSenderForTags(): Option<AztecAddress> {
+          const sender = discovery.tagging.senderForTags();
+          record('aztec_prv_getSenderForTags', 'served', `sender=${sender?.toString() ?? 'none'}`);
+          return sender === undefined ? Option.none<AztecAddress>() : Option.some(sender);
+        },
+
+        async resolveTaggingStrategy(
+          sender: AztecAddress,
+          recipient: AztecAddress,
+          deliveryMode: AppTaggingSecretKind,
+        ): Promise<unknown> {
+          // THE SAME GUARD, because upstream's `#addressDerivedSecret` resolves through
+          // `getAppTaggingSecret` and inherits it. Applied here rather than left to be inherited,
+          // because this handler's strategy resolution does not go through that method.
+          assertAllowedScope(sender, discovery.scopes, 'aztec_prv_resolveTaggingStrategy');
+          const resolved = await discovery.tagging.resolveTaggingStrategy(
+            sender,
+            recipient,
+            contract,
+            deliveryMode,
+          );
+          record(
+            'aztec_prv_resolveTaggingStrategy',
+            'served',
+            `sender=${sender.toString()} recipient=${recipient.toString()} type=${resolved.type}`,
+          );
+          return resolved;
+        },
+      }
+    : {};
+
   // THE ONE NON-ORACLE METHOD THE VENDORED CALLBACK READS, AND LEAVING IT OUT PRODUCED A
   // MISLEADING MESSAGE RATHER THAN A MISSING ONE.
   //
@@ -1081,7 +1640,10 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
   for (const [method, fn] of Object.entries(served)) {
     handler[method] = fn;
   }
-  for (const oracle of ORACLE_REFUSING) {
+  for (const [method, fn] of Object.entries(discoveryServed)) {
+    handler[method] = fn;
+  }
+  for (const oracle of discovery ? ORACLE_REFUSING_WITH_DISCOVERY : ORACLE_REFUSING) {
     const method = oracleMethodName(oracle);
     const reason = ORACLE_REFUSAL_REASONS[oracle] ?? 'no reason declared, which is itself a defect';
     handler[method] = () => {
@@ -1101,12 +1663,15 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
     Object.keys(handler).filter(
       k => !['isMisc', 'isUtility', 'isPrivate', ...NON_ORACLE_METHODS].includes(k),
     ),
+    discovery !== undefined,
   );
 
   return {
     handler,
     calls: () => calls,
     contractVersion: () => contractVersion,
+    hasDiscovery: () => discovery !== undefined,
+    servedSet: () => (discovery ? ORACLE_IMPLEMENTED_WITH_DISCOVERY : ORACLE_IMPLEMENTED),
     effects: () => ({
       createdNotes,
       createdNullifiers,
