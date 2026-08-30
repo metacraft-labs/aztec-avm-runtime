@@ -88,6 +88,37 @@ const SHIMS = {
   // bytes of it — through replay's own install, and this points every `buffer` specifier at that
   // one copy rather than letting two exist.
   buffer: path.join(REPLAY, 'node_modules/buffer/index.js'),
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // DD-11: POSEIDON IS REDIRECTED AWAY FROM BARRETENBERG.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  //
+  // Not a shim for an absent platform — a SUBSTITUTION, and the one the reference bundle already
+  // makes. `@aztec/foundation`'s poseidon initialises `BarretenbergSync`, which drags in 4,139,020
+  // bytes of base64-embedded wasm to compute a hash. `browser/src/foundation_poseidon.ts` exports
+  // the same five names with the same signatures over a backend the page installs, and
+  // `browser_avm_host.ts` installs `avm.wasm`'s own poseidon2 — a module the page has compiled
+  // anyway. Measured: the fetch goes from 4,139,020 bytes to zero.
+  //
+  // ALIASED BY SPECIFIER, WHICH IS WHAT CATCHES EVERY IMPORTER. Every caller across
+  // `@aztec/foundation`, `@aztec/stdlib` and `@aztec/protocol-contracts` reaches it as the package
+  // subpath, so one alias covers them all; aliasing the resolved FILE would need a plugin and would
+  // miss anyone who spelled it differently.
+  '@aztec/foundation/crypto/poseidon': path.join(REPO, 'browser/src/foundation_poseidon.ts'),
+  // AND THE SUBSTITUTE'S OWN IMPORTS HAVE TO RESOLVE. It lives in `browser/src/`, which has no
+  // `node_modules`, so its `@aztec/foundation/...` imports walk up and find nothing.
+  //
+  // BY SUBPATH, NOT BY PACKAGE — AND THAT DISTINCTION IS THE WHOLE THING. Aliasing
+  // `@aztec/foundation` to the package DIRECTORY was tried and produced 415 errors:
+  // "The path @aztec/foundation/log was remapped to .../@aztec/foundation/log ... which then
+  // couldn't be resolved." An alias replaces the prefix and BYPASSES THE PACKAGE'S `exports` MAP,
+  // so every subpath in the graph loses its `./dest/...` indirection at once. Aliasing the two
+  // subpaths the substitute actually imports, at their resolved files, touches nothing else — and
+  // both point at REPLAY's install, so there is still exactly one `Fr` class in the graph, which
+  // `verify_browser_replay_dd9_clean` asserts.
+  '@aztec/foundation/curves/bn254':
+    path.join(REPLAY, 'node_modules/@aztec/foundation/dest/curves/bn254/index.js'),
+  '@aztec/foundation/serialize':
+    path.join(REPLAY, 'node_modules/@aztec/foundation/dest/serialize/index.js'),
 };
 for (const [name, file] of Object.entries(SHIMS)) {
   if (!existsSync(file)) fail(`the shim for '${name}' does not exist: ${file}`);
@@ -199,48 +230,45 @@ export function eagerClosure(meta, entrySuffix = 'src/index.ts') {
 }
 
 const meta = JSON.parse(readFileSync(META, 'utf8'));
-// THE BUDGET IS THE LIBRARY ENTRY'S, not the page's. The page additionally pulls in `ct-host` and
-// the browser AVM loader, which a consumer of the library does not, so summing them would make the
-// budget a statement about the demo rather than about what a page pays to use the client.
-const { eager, lazy } = eagerClosure(meta);
-const bytesOf = (set) => [...set].reduce((a, k) => a + meta.outputs[k].bytes, 0);
-const eagerBytes = bytesOf(eager);
-const lazyBytes = bytesOf(lazy);
+
+// BOTH ENTRIES ARE BUDGETED, AND THE PAGE IS THE ONE A USER WAITS FOR. `browser-budgets.json`
+// explains why they are two promises rather than one number.
+const ENTRY_BUDGETS = [
+  { name: 'library', suffix: 'src/index.ts', budget: budgets.library },
+  { name: 'page', suffix: 'browser-demo/replay_in_page.ts', budget: budgets.page },
+];
 
 const problems = [];
-if (eagerBytes > budgets.maxEagerBytes) {
-  problems.push(`eager total ${eagerBytes} exceeds the budget ${budgets.maxEagerBytes} `
-    + `(by ${eagerBytes - budgets.maxEagerBytes} bytes)`);
-}
-if (eager.size > budgets.maxEagerFiles) {
-  problems.push(`${eager.size} eager chunks exceeds the budget of ${budgets.maxEagerFiles}`);
-}
-// THE STRUCTURAL GUARD, which is the one that matters. A named module that must be LAZY.
-for (const name of budgets.lazyRequired) {
-  const inEager = [...eager].find((k) => path.basename(k).startsWith(`${name}-`)
-    || path.basename(k) === `${name}.js`);
-  if (inEager) {
-    problems.push(`${name} is EAGER (${path.basename(inEager)}) and the budget requires it lazy — `
-      + `DD-11: a page that only replays a public transaction must never fetch the barretenberg wasm`);
+let reported = '';
+for (const { name, suffix, budget } of ENTRY_BUDGETS) {
+  const { eager, lazy } = eagerClosure(meta, suffix);
+  const bytesOf = (set) => [...set].reduce((a, k) => a + meta.outputs[k].bytes, 0);
+  const eagerBytes = bytesOf(eager);
+  if (eagerBytes > budget.maxEagerBytes) {
+    problems.push(`${name}: eager total ${eagerBytes} exceeds the budget ${budget.maxEagerBytes} `
+      + `(by ${eagerBytes - budget.maxEagerBytes} bytes)`);
   }
-  const present = [...lazy].some((k) => path.basename(k).startsWith(`${name}-`)
-    || path.basename(k) === `${name}.js`);
-  if (!present) {
-    // ABSENT IS NOT THE SAME AS LAZY, and treating it as such is how this guard would quietly stop
-    // guarding: if bb.js were dropped from the graph the "must be lazy" test would pass vacuously.
-    problems.push(`${name} is in NEITHER the eager nor the lazy set — the guard would be vacuous. `
-      + `Either the graph changed or the chunk naming did.`);
+  if (eager.size > budget.maxEagerFiles) {
+    problems.push(`${name}: ${eager.size} eager chunks exceeds the budget of ${budget.maxEagerFiles}`);
   }
+  // THE STRUCTURAL GUARD, per entry. A named module that must be LAZY.
+  for (const bare of budgets.lazyRequired) {
+    const nameMatches = (k) => path.basename(k).startsWith(`${bare}-`) || path.basename(k) === `${bare}.js`;
+    if ([...eager].some(nameMatches)) {
+      problems.push(`${name}: ${bare} is EAGER and the budget requires it lazy — DD-11: a page that `
+        + `only replays a public transaction must never fetch the barretenberg wasm`);
+    }
+    if (![...lazy].some(nameMatches)) {
+      // ABSENT IS NOT LAZY, and treating it as such is how this guard would quietly stop guarding.
+      problems.push(`${name}: ${bare} is in NEITHER the eager nor the lazy set — the guard would be `
+        + `vacuous. Either the graph changed or the chunk naming did.`);
+    }
+  }
+  reported += `build-replay-browser-bundle: ${name} EAGER ${eagerBytes} bytes in ${eager.size} `
+    + `chunk(s) (budget ${budget.maxEagerBytes}); LAZY ${bytesOf(lazy)} bytes in ${lazy.size}\n`;
 }
 if (problems.length > 0) {
   for (const p of problems) console.error(`build-replay-browser-bundle: BUDGET FAILURE — ${p}`);
   process.exit(1);
 }
-
-const pageClosure = eagerClosure(meta, 'browser-demo/replay_in_page.ts');
-const pageBytes = [...pageClosure.eager].reduce((a, k) => a + meta.outputs[k].bytes, 0);
-console.log(`build-replay-browser-bundle: page entry ${pageBytes} bytes eager in `
-  + `${pageClosure.eager.size} chunk(s) (not budgeted; see the note at the budget)`);
-console.log(`build-replay-browser-bundle: EAGER ${eagerBytes} bytes in ${eager.size} chunk(s) `
-  + `(budget ${budgets.maxEagerBytes}); LAZY ${lazyBytes} bytes in ${lazy.size} chunk(s). `
-  + `entry ${statSync(ENTRY).size} bytes, metafile at ${META}`);
+process.stdout.write(reported);

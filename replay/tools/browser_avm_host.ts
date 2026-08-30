@@ -44,6 +44,7 @@ import type { Fr } from '@aztec/foundation/curves/bn254';
 import { serializeWithMessagePack } from '@aztec/stdlib/avm';
 
 import { compileAvmFromUrl, instantiateAvm } from '../../browser/src/loader.ts';
+import { createAvmPoseidon2, installPoseidon2 } from '../../browser/src/poseidon.ts';
 import { stepsFromOutcome, type ExecutionStep } from '../../node-host/src/steps.ts';
 import type { ReplayAvmHost, ReplayAvmInstance } from '../src/replay_execution.ts';
 
@@ -70,6 +71,27 @@ export async function createBrowserAvmHost(
 ): Promise<ReplayAvmHost> {
   const compiled = await compileAvmFromUrl(options.moduleUrl);
   const nowMs = options.nowMs ?? (() => Date.now());
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // DD-11: POSEIDON IS INSTALLED AT HOST CREATION, BEFORE ANY CALLER CAN HASH.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  //
+  // MEASURED, AND IT IS EARLIER THAN IT LOOKS. Installing it in `freshInstance()` seemed right —
+  // that is where the reactor is — and the page died with `Poseidon2NotInstalled` inside
+  // `fetchSettledTransaction`, four frames deep in `zod`: upstream's `TxSchema` computes a
+  // TRANSACTION HASH while PARSING the recorded response, so the first poseidon2 of the run happens
+  // before the replay has an AVM instance at all.
+  //
+  // So the host instantiates one reactor eagerly, purely as the hash backend, and installs it here.
+  // `runtime.ts` makes the same move for the same stated reason: there is deliberately NO lazy
+  // fallback to bb.js, so being late is a loud refusal rather than a four-megabyte download nobody
+  // notices. The cost is one extra instantiation of a module that is already compiled.
+  //
+  // ONE BACKEND FOR THE HOST'S LIFETIME. `installPoseidon2` is module-level registration; rebinding
+  // it per round would point it at whichever reactor was newest, and a hash issued against a
+  // torn-down instance is the kind of wrong answer that looks like a value.
+  const hashReactor = (await instantiateAvm(compiled, { nowMs })).reactor;
+  installPoseidon2(createAvmPoseidon2(hashReactor, serializeWithMessagePack));
   return {
     async freshInstance(): Promise<ReplayAvmInstance> {
       const { reactor } = await instantiateAvm(compiled, {

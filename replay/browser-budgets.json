@@ -1,49 +1,62 @@
 {
   "//": [
-    "THE BUDGET IS ENFORCED BY `replay/tools/build_browser_bundle.mjs`, WHICH FAILS THE BUILD.",
-    "A number in a comment is not a budget. This file is data the builder reads and the check",
-    "re-reads, so the two cannot come to disagree about what was promised.",
+    "THE BUDGETS ARE ENFORCED BY `replay/tools/build_browser_bundle.mjs`, WHICH FAILS THE BUILD.",
+    "A number in a comment is not a budget. This file is data the builder reads and",
+    "`verify_browser_replay_dd9_clean` re-reads, so the two cannot come to disagree about what was",
+    "promised.",
     "",
-    "WHAT `eager` MEANS HERE, precisely, because it is the whole point: the entry output plus the",
-    "transitive closure of its STATIC (`import-statement`) edges. An output reached only by a",
-    "`dynamic-import` edge is LAZY \u2014 the browser fetches it when the code path runs and not before.",
-    "esbuild marks split targets with `entryPoint` too, so `entryPoint` is NOT the discriminator and",
-    "using it would count 8.2 MB of lazily-fetched barretenberg as eager.",
+    "WHAT `eager` MEANS, precisely, because it is the whole point: an entry output plus the transitive",
+    "closure of its STATIC (`import-statement`) edges. An output reached only by a `dynamic-import`",
+    "edge is LAZY \u2014 the browser fetches it when the code path runs and not before. esbuild marks split",
+    "targets with `entryPoint` too, so `entryPoint` is NOT the discriminator; using it would count 8.3",
+    "MB of lazily-fetched barretenberg as eager.",
     "",
-    "WHY 1,200,000. Measured eager on 2026-08-30 is 1,107,050 bytes across four files, so this is",
-    "~8% headroom: enough that ordinary churn in `replay/src` does not fail a build, tight enough",
-    "that the regressions worth catching are caught. It is a CEILING and not a target.",
+    "TWO BUDGETS, BECAUSE THEY ARE TWO DIFFERENT PROMISES.",
+    "  `library` is `src/index.ts` \u2014 what a consumer pays to USE the replay client.",
+    "  `page` is `browser-demo/replay_in_page.ts` \u2014 what a USER LOADS. It additionally carries",
+    "  `ct-host` and the browser AVM loader, which a library consumer does not, so summing them would",
+    "  make one number a statement about neither. The page is the thing a person waits for, so it is",
+    "  budgeted rather than merely reported.",
     "",
-    "AND THE BYTE BUDGET IS THE WEAKER OF THE TWO GUARDS, DELIBERATELY. The regression that matters",
-    "is STRUCTURAL \u2014 one of the two 4 MB barretenberg blobs becoming eagerly imported \u2014 and a byte",
-    "budget catches that only incidentally, by being smaller than 4 MB. `lazyRequired` names those",
-    "two directly, so the property is asserted rather than inferred from a size. DD-11's demand is",
-    "'a page which only executes a public transaction never fetches the barretenberg wasm at all',",
-    "which is a statement about WHICH chunk a module is in, not about how many bytes there are.",
+    "WHY THESE NUMBERS. Measured 2026-08-30 AFTER the DD-11 poseidon substitution landed \u2014 set after,",
+    "deliberately, so they pin the state actually wanted rather than the one being left. Library",
+    "1,087,168 in 5 chunks; page 1,116,208 in 5. Each ceiling is ~10% above its measurement: loose",
+    "enough that ordinary churn in `replay/src` does not fail a build, tight enough that the",
+    "regressions worth catching are caught. They are CEILINGS, not targets.",
     "",
-    "`maxEagerFiles` exists so a NEW eager chunk is visible even when it is small. Four chunks",
-    "totalling 1.1 MB and five totalling 1.1 MB are different facts about the graph.",
+    "AND THE BYTE BUDGETS ARE THE WEAKER GUARD, DELIBERATELY \u2014 for both entries. The regression that",
+    "matters is STRUCTURAL: one of the two 4 MB barretenberg blobs becoming eagerly imported. A byte",
+    "budget catches that only incidentally, by being smaller than 4 MB. `lazyRequired` names those two",
+    "directly, so the property is ASSERTED rather than inferred from a size, and it is checked against",
+    "BOTH entries' closures. DD-11's demand is about WHICH CHUNK a module is in, not about how many",
+    "bytes there are \u2014 and `smoke_browser_replays_settled_transaction` \u00a75 carries the other half of",
+    "it, that the page fetches none of them at run time.",
     "",
-    "M-NOTE 2026-08-30, SECOND MEASUREMENT: adding the page entry (`browser-demo/replay_in_page.ts`) to this pass moved the library entry's eager set from 4 chunks / 1,107,050 bytes to 5 / 1,108,275 \u2014 esbuild's splitting is a function of which entries reach which module, which is the same mechanism BROWSER-PACKAGING.md records moving its figures three times. Nothing changed CLASS: the two barretenberg blobs are still lazy, which is what `lazyRequired` exists to say. `maxEagerFiles` is now exactly met, deliberately: a sixth eager chunk should require a decision, not slip through."
+    "`maxEagerFiles` exists so a NEW eager chunk is visible even when it is small. Five chunks",
+    "totalling 1.1 MB and six totalling 1.1 MB are different facts about the graph."
   ],
-  "maxEagerBytes": 1200000,
-  "maxEagerFiles": 5,
   "lazyRequired": [
     "barretenberg",
     "barretenberg-threads"
   ],
   "measured": {
     "date": "2026-08-30",
-    "entries": [
-      "src/index.ts",
-      "browser-demo/replay_in_page.ts"
-    ],
-    "libraryEagerBytes": 1108275,
+    "afterDd11PoseidonSubstitution": true,
+    "libraryEagerBytes": 1087168,
     "libraryEagerFiles": 5,
-    "pageEagerBytes": 1137170,
+    "pageEagerBytes": 1116208,
     "pageEagerFiles": 5,
-    "lazyBytes": 8304135,
+    "lazyBytes": 8304395,
     "unsplitEagerBytes": 9279574,
-    "note": "The BUDGET is the LIBRARY entry's. The page additionally pulls in ct-host and the browser AVM loader, which a consumer of the library does not, so it is reported and not budgeted."
+    "barretenbergFetchedByThePage": 0,
+    "note": "Before the poseidon substitution the page FETCHED 4,139,020 bytes of barretenberg at run time. It now fetches none; the blobs remain in the graph as lazy chunks that nothing reaches."
+  },
+  "library": {
+    "maxEagerBytes": 1200000,
+    "maxEagerFiles": 5
+  },
+  "page": {
+    "maxEagerBytes": 1230000,
+    "maxEagerFiles": 5
   }
 }

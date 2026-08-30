@@ -99,12 +99,17 @@ export async function replayInPage(options: ReplayInPageOptions): Promise<Replay
     fetchImpl: fixtureFetch(fixture),
   });
 
+  // THE AVM COMES FIRST, AND THE ORDER IS LOAD-BEARING RATHER THAN TIDY. Creating the host
+  // compiles `avm.wasm` AND installs its poseidon2 as `@aztec/foundation`'s hash backend (DD-11).
+  // Fetching first died with `Poseidon2NotInstalled` four frames inside `zod`: upstream's schema
+  // computes a transaction hash while PARSING the recorded response, so the run's first poseidon
+  // happens before the replay has an AVM instance.
+  say('compiling avm.wasm');
+  const host = await createBrowserAvmHost({ moduleUrl: options.avmWasmUrl });
+
   say('fetching the settled transaction');
   const settled = await fetchSettledTransaction(client, TxHash.fromString(fixture.provenance.txHash),
     { pinToSettlingBlock: true });
-
-  say('compiling avm.wasm');
-  const host = await createBrowserAvmHost({ moduleUrl: options.avmWasmUrl });
 
   say('hydrating');
   const hydrated = await replaySettledTransaction(host, client, settled, encodeReplayInputs, {

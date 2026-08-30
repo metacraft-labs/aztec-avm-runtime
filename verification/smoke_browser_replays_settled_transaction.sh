@@ -29,30 +29,31 @@
 # declarations were worth making.
 #
 # ════════════════════════════════════════════════════════════════════════════════════════════════
-# §5 ASSERTS A GAP RATHER THAN HIDING IT.
+# §5: DD-11 IS CLOSED, AND THE NEW STATE IS PINNED AS TIGHTLY AS THE OLD GAP WAS.
 # ════════════════════════════════════════════════════════════════════════════════════════════════
 #
-# The page FETCHES 4,139,020 BYTES OF BARRETENBERG, and DD-11's demand is "a page which only
-# executes a public transaction never fetches the barretenberg wasm at all". So this page does not
-# yet meet DD-11, and the check says so **as an assertion on the exact current state** rather than
-# as a sentence in a comment:
+# DD-11: "a page which only executes a public transaction never fetches the barretenberg wasm at
+# all". **This page fetches ZERO bytes of it.** It fetched 4,139,020 before the poseidon
+# substitution landed, and §5 pinned that number both ways so the fix would have to redden the check
+# rather than slip past it. It did, and the assertion now pins the new state instead of relaxing
+# into "less than some number":
 #
-#   * `barretenberg-*.js` IS fetched — exactly one of the two.
-#   * `barretenberg-threads-*.js` is NOT.
+#   * NO request whose path contains `barretenberg` — asserted as an exact zero.
+#   * The page's ENTIRE request list is asserted as a SET, so a new fetch of anything is a failure
+#     rather than something under a threshold.
+#   * Both barretenberg chunks are still asserted LAZY in the graph, because "not fetched" and "not
+#     in the lazy set" are different facts and losing either would matter.
 #
-# Pinned both ways, so a regression that fetched both reddens AND a fix that removes the fetch
-# reddens too — forcing the number to move by a deliberate edit rather than drifting.
+# WHY IT WORKS, so nobody re-derives it: the replay hashes — `computePublicBytecodeCommitment`,
+# `siloNullifier`, `computeFeePayerBalanceStorageSlot` — and `@aztec/foundation`'s poseidon
+# initialises `BarretenbergSync`. The build now redirects `@aztec/foundation/crypto/poseidon` to
+# `browser/src/foundation_poseidon.ts`, and `browser_avm_host.ts` installs `avm.wasm`'s OWN
+# poseidon2 as the backend — a module the page has compiled anyway, so the hash is free.
 #
-# WHY, AND WHAT THE FIX IS, so the next reader does not re-derive it: the replay path computes
-# poseidon hashes — `computePublicBytecodeCommitment` over the contract bytecode,
-# `siloNullifier` for the deployment nullifier, `computeFeePayerBalanceStorageSlot` — and
-# `@aztec/foundation`'s default poseidon backend initialises `BarretenbergSync`. The reference
-# bundle solves exactly this by REDIRECTING `foundation/dest/crypto/poseidon/index.js` to
-# `browser/src/foundation_poseidon.ts`, which hashes through `avm.wasm`'s own poseidon instead —
-# and this page already has `avm.wasm` loaded, so the hash is free. It is not applied here: the
-# shim resolves its own `@aztec/foundation` imports from `browser/`, which has no `node_modules`,
-# so wiring it needs the same alias work `buffer` needed plus a Reactor handed to the backend.
-# **Named, quantified, not half-built.**
+# AND THE INSTALL IS EARLIER THAN IT LOOKS. It happens at HOST CREATION, before the fixture is even
+# fetched, because upstream's `TxSchema` computes a transaction hash while PARSING the recorded
+# response — so the run's first poseidon2 is inside `zod`, before the replay has an AVM instance.
+# Installing it in `freshInstance()` failed with `Poseidon2NotInstalled` four frames deep.
 
 set -uo pipefail
 TEST_NAME="smoke_browser_replays_settled_transaction"
@@ -188,30 +189,49 @@ assert_true "…and the root divergence, which a page must not drop" \
   grep -q 'ct.merkle-root-divergence' "$DECODE"
 
 # ---------------------------------------------------------------------------
-echo "== 5. THE MEASURED GAP: this page does NOT yet meet DD-11, and the number is pinned"
+echo "== 5. DD-11 IS CLOSED — the page fetches NO barretenberg, pinned as an exact set"
 #
-# DD-11: "a page which only executes a public transaction never fetches the barretenberg wasm at
-# all". This one fetches 4,139,020 bytes of it, because the replay computes poseidon hashes through
-# @aztec/foundation's default backend. Asserted BOTH WAYS so neither a regression nor a fix can
-# drift past unnoticed — see this file's header for the known remedy.
+# This section pinned a 4,139,020-byte GAP both ways before the fix, precisely so the fix would have
+# to redden it. It did. It now pins the new state just as tightly: an exact zero and an exact
+# request set, not a threshold.
 # ---------------------------------------------------------------------------
-BB_REQS="$(python3 -c '
+REQS="$(python3 -c '
 import json, sys
 d = json.load(open(sys.argv[1]))
-bb = [u for u in d["requests"] if "barretenberg-" in u and "threads" not in u]
-th = [u for u in d["requests"] if "barretenberg-threads" in u]
-off = [u for u in d["requests"] if u.startswith("http") and "127.0.0.1" not in u]
-print(len(bb)); print(len(th)); print(len(off))
+reqs = [u for u in d["requests"] if u != "/favicon.ico"]
+print(len([u for u in reqs if "barretenberg" in u]))
+print(len([u for u in reqs if u.startswith("http") and "127.0.0.1" not in u]))
+print(" ".join(sorted(set(u.split("-")[0] if u.startswith("/bundle/chunk") else u for u in reqs))))
 ' "$REPORT")"
-assert_eq "exactly ONE barretenberg chunk is fetched — the gap, pinned" "1" \
-  "$(printf '%s\n' "$BB_REQS" | sed -n 1p)"
-assert_eq "…and barretenberg-threads is NOT, so half the split is already paying" "0" \
-  "$(printf '%s\n' "$BB_REQS" | sed -n 2p)"
-assert_ge "…and the chunk it fetches is the 4.1 MB one" 4000000 \
-  "$(wc -c <"$REPO_ROOT/replay/dist-browser/$(cd "$REPO_ROOT/replay/dist-browser" && ls barretenberg-*.js | grep -v threads | head -1)" | tr -d ' ')"
+BB="$(printf '%s\n' "$REQS" | sed -n 1p)"
+OFFORIGIN="$(printf '%s\n' "$REQS" | sed -n 2p)"
+REQSET="$(printf '%s\n' "$REQS" | sed -n 3p)"
 
-# THE PAGE REACHES NO NETWORK. Everything is same-origin; the fixture is L1's recording.
-assert_eq "the page made NO off-origin request, so this measures the browser and not a node" "0" \
-  "$(printf '%s\n' "$BB_REQS" | sed -n 3p)"
+assert_eq "THE PAGE FETCHES NO BARRETENBERG AT ALL — DD-11's own words, met" "0" "$BB"
+assert_eq "…and reaches no off-origin URL, so this measures the browser and not a node" "0" \
+  "$OFFORIGIN"
+
+# THE WHOLE REQUEST SET, as a set. A threshold would let a new fetch in under it; this will not.
+assert_eq "the page's entire request set is exactly what a replay needs and nothing else" \
+  "/avm.wasm /bundle/browser-demo/replay_in_page.js /bundle/chunk /ct_writer.wasm /fixture.json /index.html" \
+  "$REQSET"
+
+# AND THE CHUNKS ARE STILL LAZY IN THE GRAPH. "Not fetched" and "not in the eager closure" are
+# different facts: a page could fail to fetch one because a code path did not run this time, while
+# the module sat eagerly imported and would be fetched by the next caller.
+LAZY_NAMES="$(python3 -c '
+import json, os, sys
+m = json.load(open(sys.argv[1])); outs = m["outputs"]
+entry = next(k for k, v in outs.items() if (v.get("entryPoint") or "").endswith("browser-demo/replay_in_page.ts"))
+eager = {entry}; stack = [entry]
+while stack:
+    cur = stack.pop()
+    for imp in outs[cur].get("imports", []):
+        if imp.get("kind") == "import-statement" and imp["path"] in outs and imp["path"] not in eager:
+            eager.add(imp["path"]); stack.append(imp["path"])
+print(" ".join(sorted(os.path.basename(k) for k in set(outs) - eager)))
+' "$REPO_ROOT/replay/dist-browser/meta.json")"
+assert_contains "barretenberg is still a LAZY chunk of the PAGE entry" "barretenberg-" "$LAZY_NAMES"
+assert_contains "…and so is barretenberg-threads" "barretenberg-threads-" "$LAZY_NAMES"
 
 finish

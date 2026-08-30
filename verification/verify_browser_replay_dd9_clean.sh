@@ -223,20 +223,26 @@ EAGER_BYTES="$(printf '%s\n' "$EAGER" | sed -n 1p)"
 EAGER_FILES="$(printf '%s\n' "$EAGER" | sed -n 2p)"
 LAZY_BYTES="$(printf '%s\n' "$EAGER" | sed -n 3p)"
 LAZY_NAMES="$(printf '%s\n' "$EAGER" | sed -n 4p)"
-MAX_BYTES="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["maxEagerBytes"])' "$BUDGETS")"
+MAX_BYTES="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["library"]["maxEagerBytes"])' "$BUDGETS")"
 
 assert_true "the EAGER total is within the declared budget" \
   test "$EAGER_BYTES" -le "$MAX_BYTES"
 assert_ge "…and the budget is a real ceiling rather than an open one" 1 \
   "$(( MAX_BYTES < 2000000 ? 1 : 0 ))"
 assert_true "the eager chunk count is within budget" \
-  test "$EAGER_FILES" -le "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["maxEagerFiles"])' "$BUDGETS")"
+  test "$EAGER_FILES" -le "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["library"]["maxEagerFiles"])' "$BUDGETS")"
 
 # DD-11's OWN PROPERTY, STRUCTURALLY: the two barretenberg blobs are LAZY. A byte budget catches
 # this only incidentally, by being smaller than 4 MB; this names them.
 assert_contains "barretenberg is a LAZY chunk, not an eager one" "barretenberg-" "$LAZY_NAMES"
 assert_contains "…and so is barretenberg-threads" "barretenberg-threads-" "$LAZY_NAMES"
 assert_ge "…and together they are the bulk that a replay never fetches" 8000000 "$LAZY_BYTES"
+# BOTH ENTRIES ARE BUDGETED, and the page is the one a user waits for. Asserted here as well as
+# enforced by the builder, so a builder that stopped enforcing is visible from the check too.
+assert_ge "the PAGE entry has its own budget, because it is the thing a user loads" 1 \
+  "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(1 if d.get("page",{}).get("maxEagerBytes") else 0)' "$BUDGETS")"
+assert_true "…and it is a real ceiling rather than an open one" \
+  test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["page"]["maxEagerBytes"])' "$BUDGETS")" -lt 2000000
 assert_true "the EAGER total is a small fraction of the whole graph" \
   test "$EAGER_BYTES" -lt "$LAZY_BYTES"
 
