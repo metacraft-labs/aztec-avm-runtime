@@ -902,6 +902,19 @@ Rewritten so the write still happens and only the RECORD lies, it is 33 / 1 on p
 assertion — which is also the more dangerous of the two defects, because a ledger that reports work
 nobody did is worse than one that reports nothing.
 
+**AND A MUTATION NOTHING CAN KILL IS A FACT ABOUT THE CODE, NOT A GAP IN THE CHECK — RECORD IT AS A
+SURVIVOR AND SAY WHY AT THE LINE.** L2's M5 removes the `comparisons.length > 0` clause from
+`reproduced: comparisons.length > 0 && matched === comparisons.length`. The arm goes GREEN and no
+test over any input can make it red, because four comparisons are pushed unconditionally, so the
+array is never empty — not even for a transaction with no public half. **The three wrong responses
+are: delete the guard (it becomes live the day the comparison set becomes conditional, and what it
+prevents is the vacuous green this campaign has shipped twice); delete the arm (the next reader
+re-derives the analysis); or leave the arm in the default list unlabelled (a green arm in a harness
+whose contract is "every arm red" reads as a defect in the harness).** Keep all three: the guard,
+the arm, and a comment **at the guard** stating that a named arm cannot kill it and why. The arm
+then prints `EXPECTED SURVIVOR` and the harness's contract becomes "every arm red except the ones
+declared unkillable, and each of those names its reason".
+
 **AND A BACKUP IS ONLY AS GOOD AS THE TREE IT WAS TAKEN FROM.** The residue above is how M32's own
 stale-backup defect (below) ended: the harness's two remedies — wipe and re-take every run, and an
 in-progress marker — are both right and neither covers a source left mutated by an EARLIER session
@@ -1012,6 +1025,23 @@ subscription for `b.number >= 100` forever; `m23_require_arms` ran `node run_cha
 have done the same in turn — reporting nothing at all and blocking the sweep behind it. A trap
 fires on exit; a process that never exits has no exit. **Every subprocess a check waits on needs a
 bound, and exceeding it must be a named failure rather than a hang.**
+
+**AND WRITING THE *ARM* THAT DEMONSTRATES A HANG HAS ITS OWN TRAP, WHICH HAS NOW CAUGHT TWO
+MILESTONES IN A ROW.** The obvious mutation for a hang arm is `await new Promise(() => {})`. **It is
+not a hang.** A promise with no pending handle leaves node's event loop with nothing to wait on, the
+loop drains, and the process **exits 13** on *"unsettled top-level await"* — so the arm produces a
+non-zero rc and no summary line, which is the DIE-BEFORE-SUMMARY shape wearing a hang's label. The
+two arms then measure the same thing and the harness reports coverage of a state it never reached.
+
+L1's review recorded this exact finding — *"the hang arm's first form exited 13 on node's 'unsettled
+top-level await' — M24's exact finding, a die-before-summary wearing a hang's label"* — and **L2's
+harness walked into it anyway**, which is why it is here and not only in a milestone log.
+
+**Rule for a hang arm: block on a live handle, not on an unsettled promise.**
+`await new Promise((r) => setTimeout(r, 1e9))` keeps a timer registered, so the loop does not drain,
+node does not exit, and `timeout` has something to kill. **The arm is only a hang arm if its
+recorded rc is 124.** An rc of 13, or 1, means you wrote a second die-before-summary arm; assert the
+rc rather than reading the absence of a summary line, because both states are missing one.
 
 **Rule:** a summary line is at column 0 and ends `assertion(s), N failure(s)`; a note is indented.
 Count only summary lines, and when a total moves, get the **per-check split** before believing any
