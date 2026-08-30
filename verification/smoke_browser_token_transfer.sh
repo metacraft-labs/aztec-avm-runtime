@@ -9,7 +9,8 @@
 #
 # Every milestone from M22 to M25 recorded the same sentence: "a transaction that calls a REGISTERED
 # CONTRACT needs a builder, and upstream's only one constructs a `NativeWorldStateService`" — the
-# package DD-9 forbids. M26 vendored it (RI-72, 880 lines, `PROVENANCE.md` F20–F24). M26 BUILT the
+# package DD-9 forbids. M26 vendored it (RI-72, 880 lines, `PROVENANCE.md` F20–F24; M37 re-took the
+# four rows at the `cpp` anchor, where the price is 822 lines and F24 no longer exists). M26 BUILT the
 # transaction; this RUNS it, in a page.
 #
 # ===========================================================================================

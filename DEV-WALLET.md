@@ -117,7 +117,7 @@ So the decision is **replace**, `cannot-reach-target`, recorded as RI-95.
 Measured rather than assumed, and recorded here so nobody re-opens it. The shape M34 wants is
 `base-wallet/utils.ts`'s `simulateBatchViaNode` — upstream's own words, *"Minimal entrypoint
 structure — no real private execution, just public call requests"* — and M26's vendored
-`createTxForPublicCalls` (RI-72, `PROVENANCE.md` F20–F24) builds the same object without going
+`createTxForPublicCalls` (RI-72, `PROVENANCE.md` F20–F23; F24 retired by M37) builds the same object
 through `@aztec/pxe/simulator`'s `generateSimulatedProvingResult`, which is one of the three pxe edges
 above.
 
