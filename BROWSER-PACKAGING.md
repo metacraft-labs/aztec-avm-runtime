@@ -59,10 +59,10 @@ worth the paragraph:
 
 | entry point | eager, gzipped | files | M27's figure |
 |---|---|---|---|
-| `aztec-avm-runtime/browser` — the DD-5 reference | **263.05 KB** | 9 | 253.94 KB |
-| `aztec-avm-runtime/testing` | 288.23 KB | 12 | 277.43 KB |
-| the demo page | 289.44 KB | 12 | 277.65 KB |
-| `aztec-avm-runtime/node` | 225.42 KB | 4 | 223.61 KB |
+| `aztec-avm-runtime/browser` — the DD-5 reference | **263.1 KB** | 9 | 253.94 KB |
+| `aztec-avm-runtime/testing` | 288.28 KB | 12 | 277.43 KB |
+| the demo page | 289.5 KB | 12 | 277.65 KB |
+| `aztec-avm-runtime/node` | 225.49 KB | 4 | 223.61 KB |
 
 and, lazily, never in any eager set:
 
@@ -74,7 +74,7 @@ and, lazily, never in any eager set:
 | `chunks/FeeJuice-*.js` | 185.88 KB | yes, when a fee payer is funded |
 | `chunks/ContractInstanceRegistry-*.js` | 103.25 KB | no |
 
-**8,195.96 KB gzipped across every chunk; 263.05 KB is what the reference entry point costs.** That is
+**8,196.12 KB gzipped across every chunk; 263.1 KB is what the reference entry point costs.** That is
 the whole of DD-11 in two numbers, and the difference between them is exactly the two things DD-11
 names.
 
@@ -270,8 +270,8 @@ and the enumeration below totals 17 requests, which it did not before M27's revi
 
 ```
 1   /index.html                       the demo page
-12  /demo.js + 11 shared chunks       289.44 KB gzipped — the DEMO entry's eager set, which is
-                                      the browser entry's 263.05 KB plus the page itself
+12  /demo.js + 11 shared chunks       289.5 KB gzipped — the DEMO entry's eager set, which is
+                                      the browser entry's 263.1 KB plus the page itself
 1   /favicon.ico                      the browser's, not ours
 1   /assets/avm.wasm                  1,621,354 bytes — the AVM and its world state
 1   /assets/token_contract-Token.json the contract artifact, fetched when a contract is needed

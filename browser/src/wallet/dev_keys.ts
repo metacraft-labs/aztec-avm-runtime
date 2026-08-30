@@ -15,8 +15,17 @@
 //   **NO AMBIENT RANDOMNESS.** The seed is an argument. It is recorded in the trace metadata. A
 //   run with the same seed derives the same addresses; a run with a different seed derives
 //   different ones. `Fr.random()`, `crypto.getRandomValues` and `Math.random` appear nowhere in
-//   this file or in `dev_wallet.ts`, and `test_wallet_keys_deterministic` §4 asserts that over the
-//   BUILT bundle's own module graph with a control that can see one.
+//   this file or in `dev_wallet.ts`, and `test_wallet_keys_deterministic` §4 asserts exactly that
+//   — over these two files' COMMENT-STRIPPED SOURCE, seven spellings enumerated, with a control
+//   that finds one in a third file's code.
+//
+//   THAT SENTENCE USED TO SAY "over the BUILT bundle's own module graph", AND IT WAS FALSE. The
+//   scan is over two source files; a module either of them imports could call a random source and
+//   it would not be seen. The claim that IS about the artefact is the behavioural one beside it:
+//   the same seed derives the same accounts in Chromium and in two separate Node processes over
+//   the BUILT bundle, which no reachable random source could survive. `CAMPAIGN-BRIEF.md`'s
+//   prose-overstates-its-mechanism family, corrected rather than left, in the file it was written
+//   in.
 //
 // DD-4 is the precedent and the reason is the same: a clock read from the ambient environment makes
 // a recording that cannot be replayed, and so does a key. Upstream's own wallets call `Fr.random()`
@@ -49,14 +58,16 @@
 // `verify_public_only_page_never_fetches_barretenberg`'s instrument is what would notice otherwise,
 // and M34's own browser arm reads the same network log.
 //
-// (`foundation_grumpkin.ts`'s header says `reduce512BufferToFr` "has exactly one caller in this
-// graph: `deriveKeys`". Measured against the anchor by M34: `git grep reduce512BufferToFr` over
-// `yarn-project/` finds the two DECLARATIONS — grumpkin's and secp256k1's — and **no caller at
-// all**; `deriveKeys` goes through `@aztec/foundation/crypto/sha512`'s `sha512ToGrumpkinScalar`,
-// which is `hash.js` plus `GrumpkinScalar.fromBufferReduce`. The throw is still right — an
-// unimplemented reduction must refuse rather than answer — but the sentence naming its caller is
-// not, and it is corrected here rather than left, because it is the sentence that would stop
-// somebody trying this route.)
+// (`foundation_grumpkin.ts`'s header USED TO SAY `reduce512BufferToFr` "has exactly one caller in
+// this graph: `deriveKeys`". Measured against the anchor by M34: `git grep reduce512BufferToFr`
+// finds the two DECLARATIONS — grumpkin's and secp256k1's — and **no caller at all**; `deriveKeys`
+// goes through `@aztec/foundation/crypto/sha512`'s `sha512ToGrumpkinScalar`, which is `hash.js`
+// plus `GrumpkinScalar.fromBufferReduce`. The throw is still right — an unimplemented reduction
+// must refuse rather than answer — but the sentence naming its caller was not. M34 recorded the
+// correction HERE and left the false sentence standing in three places over there, including in
+// the message the throw carries; **M34's review corrected all three at the source**, because a
+// correction filed next door does not reach the reader of the file, and this is the sentence that
+// would stop somebody trying this route.)
 //
 // ===========================================================================================
 // THE SEPARATOR IS DERIVED, NOT TYPED, AND IT IS ASSERTED NOT TO COLLIDE.
@@ -69,10 +80,11 @@
 //
 // `CAMPAIGN-BRIEF.md`: *"a constant you have just typed into a check looks like a measurement to
 // the person typing it"*. So the value is not written down anywhere; it is computed from the label
-// at module load, `test_wallet_keys_deterministic` §3 recomputes it independently from the label it
+// at module load, `test_wallet_keys_deterministic` §5 recomputes it independently from the label it
 // reads out of the bundle, and it is asserted to collide with NONE of `DomainSeparator`'s members —
-// an assertion with a control, because a separator that silently equalled `NOTE_HASH` would make a
-// dev account secret and a note hash the same function of their inputs.
+// an assertion with a control that runs THROUGH the same detector, because a separator that
+// silently equalled `NOTE_HASH` would make a dev account secret and a note hash the same function
+// of their inputs.
 
 import { DomainSeparator } from '@aztec/constants';
 import { poseidon2HashWithSeparator } from '@aztec/foundation/crypto/poseidon';

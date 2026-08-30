@@ -33,11 +33,24 @@
 //                               reach bb.js on the browser branch.
 //   reduce512BufferToFr      -> THROWS, and see below.
 //
-// `reduce512BufferToFr` REDUCES A 512-BIT BUFFER MOD THE FIELD, and it has exactly one caller in
-// this graph: `deriveKeys`, which derives a SECRET key. This runtime has no private half —
-// `JOIN-SHAPE.md` §6 records why — and a page that reached it would be deriving keys it has no use
-// for. A throw naming the caller is better than a wrong reduction, and better than a silent
-// 7.9 MB download to do it right.
+// `reduce512BufferToFr` REDUCES A 512-BIT BUFFER MOD THE FIELD, AND IT HAS NO CALLER AT ALL.
+//
+// THIS PARAGRAPH USED TO SAY *"it has exactly one caller in this graph: `deriveKeys`"*, IN THREE
+// PLACES INCLUDING THE THROWN MESSAGE, AND IT WAS FALSE. Measured by M34's review with
+// `git grep reduce512BufferToFr` at the `cpp` anchor — over the WHOLE repository, not only
+// `yarn-project/` — and again over the four installed `@aztec/foundation` trees at the published
+// pin: **two DECLARATIONS** (grumpkin's and secp256k1's) and **not one call site**, at either
+// revision. `deriveKeys` does not go anywhere near it; it reaches
+// `@aztec/foundation/crypto/sha512`'s `sha512ToGrumpkinScalar`, which is `hash.js` plus
+// `GrumpkinScalar.fromBufferReduce`.
+//
+// **The throw is still right and the reason for it is unchanged**: an unimplemented reduction must
+// refuse rather than answer, and routing it through `@aztec/bb.js` would fetch 7.9 MB of proving
+// stack and break DD-11. What was wrong was the sentence naming a caller — and it is the sentence
+// that would stop somebody trying the key-derivation route, which M34 then took successfully
+// (`browser/src/wallet/dev_keys.ts`, RI-96: `deriveKeys` and `computeAddress` run in a page with
+// zero requests containing `barretenberg`). *A limitation stated with a false reason is worse than
+// one stated with none, because the false reason closes the search.*
 
 import { Fr } from '@aztec/foundation/curves/bn254';
 import { Point } from '@aztec/foundation/curves/grumpkin';
@@ -103,16 +116,18 @@ export class Grumpkin {
   /**
    * Converts a 512 bits long buffer to a field.
    *
-   * NOT AVAILABLE, deliberately. Its one caller in this graph is `deriveKeys`, which derives a
-   * SECRET key, and this runtime has no private half. See the file header.
+   * NOT AVAILABLE, deliberately. It has no caller anywhere in `aztec-packages` at the `cpp` anchor
+   * or at the installed pin — two declarations and no call site. See the file header.
    */
   static reduce512BufferToFr(_uint512Buf: Buffer): Promise<Fr> {
     return Promise.reject(
       new Error(
-        'Grumpkin.reduce512BufferToFr is not available in the browser build. Its only caller here ' +
-          'is deriveKeys, which derives a SECRET key; this runtime has no private half (JOIN-SHAPE.md ' +
-          '§6) and a page that reached it would be deriving keys it cannot use. The alternative — ' +
-          'routing it through @aztec/bb.js — would fetch 7.9 MB of proving stack and break DD-11.',
+        'Grumpkin.reduce512BufferToFr is not available in the browser build. It has no caller in ' +
+          'aztec-packages at either revision this repository uses, so reaching it means something ' +
+          'new is calling it; implementing it would mean routing through @aztec/bb.js, which would ' +
+          'fetch 7.9 MB of proving stack and break DD-11. Note that deriveKeys does NOT need it: it ' +
+          'goes through @aztec/foundation/crypto/sha512, and browser/src/wallet/dev_keys.ts derives ' +
+          'account keys in a page without fetching anything.',
       ),
     );
   }

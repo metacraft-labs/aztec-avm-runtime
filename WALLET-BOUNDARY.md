@@ -280,13 +280,13 @@ are supersets — and this build already ships three further entries outside it 
 | | derived |
 |---|---|
 | `wallet.js`'s own module | **0.69 KB** gzipped |
-| its eager set | **275.21 KB** gzipped across **9** files |
+| its eager set | **275.26 KB** gzipped across **9** files |
 | `@aztec/aztec.js` bytes in that eager set | **13,379** |
 | `@aztec/aztec.js` bytes in `browser.js`'s eager set | **0** |
 
 **M34 MOVED THREE OF THOSE FOUR AND THE FOURTH IS THE ONE THAT MATTERS.** M34 fills the seam, so the
 wallet entry now reaches M26's vendored transaction builder (RI-72) and `@aztec/stdlib/testing`'s
-`makeContractClassPublic`: the eager set goes **245.87 KB / 8 files -> 275.21 KB / 9**, recorded as a
+`makeContractClassPublic`: the eager set goes **245.87 KB / 8 files -> 275.26 KB / 9**, recorded as a
 `bumps` entry in `chunk-budgets.json` rather than absorbed. `wallet.js`'s OWN module falls
 **16.24 -> 0.69 KB** for the opposite reason — M34 adds an eighth entry point that shares the
 wallet's modules, so esbuild hoisted the protocol and the provider into a shared chunk and the entry
