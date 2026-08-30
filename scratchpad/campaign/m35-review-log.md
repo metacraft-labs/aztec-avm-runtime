@@ -354,3 +354,23 @@ digests taken at review start. `carry/rebase.json` and `carry/exposure.json` cam
 `sha256sum -c`, all four OK, `git status carry/` clean.
 
 **No sweep was running when mine started or finished**, and nothing under `replay/` was touched.
+
+---
+
+## Final state
+
+| repo | branch | HEAD | pushed | tree |
+|---|---|---|---|---|
+| `aztec-avm-runtime` | `dev` | `8c21cfd` | yes, `metacraft-labs` | clean, `carry/` at its pre-sweep digests |
+| `codetracer-specs` | `latest` | `d40b0989` | yes | clean (rebased onto five L0/L1-era commits, no conflict) |
+| `noir-wt4-webpage` | `wasm/webpage` | `f0e7edcd2` | **not committed** | its one pre-existing edit, untouched |
+
+Three commits in `aztec-avm-runtime`:
+
+- `d88954b` — M35's delivered work, at its own 198.
+- `9cb89b6` — the review's fixes, taking it to 212.
+- `8c21cfd` — the sweep at 11,744 and the two rules.
+
+`origin/dev` was fetched at review start, before the sweep and after the last commit and did not
+move; the push is a fast-forward. `codetracer-specs`' `origin/latest` HAD moved five commits, and the
+rebase was clean — grepped for all **four** diff3 markers afterwards, none.
