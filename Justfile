@@ -2983,6 +2983,25 @@ verify-l3:
     exit "$rc"
 
 # =================================================================================================
+# M37 — RECONCILIATION (Aztec-AVM-Runtime.milestones.org)
+#
+#   just verify-oracle-interface-hash   verify_oracle_interface_hash_matches
+#
+# THIS REPOSITORY DECLARED `ORACLE_INTERFACE_HASH` AND CHECKED IT WITH NOTHING. Upstream ships a
+# program that enforces it (`yarn-project/pxe/src/bin/check_oracle_version.ts`); we vendored the
+# constant and not the check, so it was a comment with a hex string in it. It matters most during
+# M37, whose whole job is re-taking 68 oracle entries from a new anchor.
+#
+# It is also the ONLY half that can be checked. The other half — a CONTRACT's interface against the
+# ENVIRONMENT's — is not on the wire: `aztec_misc_assertCompatibleOracleVersion` takes exactly
+# `major: U32` and `minor: U32`, and §3 pins the measurement showing the version pair is not a
+# function of the interface at all.
+# ---------------------------------------------------------------------------
+
+verify-oracle-interface-hash:
+    @verification/verify_oracle_interface_hash_matches.sh
+
+# =================================================================================================
 # L4 — THE BROWSER HALF (Aztec-Live-Chain-Replay.milestones.org)
 #
 #   just build-replay-browser-bundle   the replay client, bundled for a browser
