@@ -887,6 +887,17 @@ were absorbed silently.
   | e | M26's sweep | same two | 17,866 lines | `steps.burn.17592` |
   | f | M29's review sweep | same two | **3,943 lines** | `steps.burn.3669` |
   | g | M29's review sweep, SAME RUN | `test_existing_event_emitter_path_still_available` | 15,306 lines | `events.burn.15101` — the FALLBACK EVENT transcript, not the step one |
+  | h | M31's review sweep | `verify_observation_hook_step_records_identical` + `test_observer_does_not_perturb` | 15,688 lines | `steps.burn.15414` |
+  | i | M32's review sweep | same two | 4,051 lines | `steps.burn.3777` |
+  | j | **M37's review sweep** | same two | **32,788 lines** | `steps.burn.32514` — **the highest point yet**, and the first above 20,000 other than sighting a |
+
+  **THE EIGHT STEP-TRANSCRIPT POINTS ARE NOW 3,943 / 4,051 / 14,572 / 15,688 / 16,719 / 17,866 /
+  32,788 / 39,113, WHICH IS ESSENTIALLY THE WHOLE RANGE.** Sighting j is 32,788 of 38,915 — 84% of
+  the transcript — and sighting f is 10% of it, in the same repository, on the same input, the same
+  module and the same host. Eight points spread over an order of magnitude is not a buffer that
+  fills at a particular size, and after eight sightings the trigger is still unestablished. Every
+  one of the eight was followed by a clean re-run alone, which is the settled procedure and has
+  never yet failed to reproduce the full 807.
 
   **AND SIGHTING f IS A QUARTER THE LENGTH OF THE SHORTEST BEFORE IT**, which is worth more than
   another row: 3,943 lines against a previous minimum of 14,572. A truncation that can happen at

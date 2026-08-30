@@ -35,7 +35,23 @@ load).
 Each of these is a defect that shipped, not a precaution.
 
 ### An assertion must be capable of failing
-**Thirty-nine instances.** (**M36 added the 39th and found it in its OWN work, in a CONTROL, before
+**Forty-one instances.** (**M37's review added the 40th and the 41st, and both are the same shape:
+an assertion whose DESCRIPTION claims a measurement its comparison cannot make.** The 40th is in
+`noir`: `assert!(last > fixture_lines)` sitting beside `assert_eq!(fixture_lines, 13)` and
+`assert_eq!(last, 142)`, so `142 > 13` was true by construction — in the test written to DECLARE a
+recorder defect, and it is the assertion the test's own header credits with *"lengthening the
+fixture past 142 lines trips it"*, a property actually delivered by the length pin, which trips at
+fourteen lines rather than at a hundred and forty-three. The 41st is the msgpack check's *"with a
+fabricated field planted, the comparer still exits 3"* — the UNPLANTED run already exits 3, because
+seven pairs differ without any help, so the comparison was true whether or not the plant was ever
+seen and it caught a crash and nothing else. Both remedies are the same: assert what the input
+MOVES. The Noir test reads each fixture's length off disk instead of pinning it, and covers all
+three fixtures rather than one — because the out-of-range last step is the tree's defect and not
+`a_2`'s (`a_1_mul` records line 264 in a nine-line file, `multi_stmt_per_line` line 96 in a
+four-line file, and neither was declared). The msgpack control asserts the agreeing set moves
+11 -> 10 and the differing set 7 -> 8. *The general form: a description is not a control. When an
+assertion's sentence names a cause, ask whether the comparison would be false without it.*)
+(**M36 added the 39th and found it in its OWN work, in a CONTROL, before
 the milestone closed** — which is the second time an implementation agent has got there first, and
 the instrument was the same one M30 used: asking of each green assertion what input would make it
 red. M36's e2e claims *"a note belonging to another account is NOT discovered"*, and the control
@@ -888,6 +904,87 @@ deliberate opt-out — calibrated both ways. **And the general lesson is about b
 that takes 0.00 s over tests that SPAWN a compiler is not a baseline, and the elapsed time was the
 only thing on the screen that said so.
 
+### A RECIPE THAT PRINTS `FAILED` AND EXITS 0 IS THE MIRROR OF A CHECK THAT CANNOT FAIL
+
+**Two instances, in two milestones, and the second shipped through a review.** `just verify-m37`
+accumulated `verification/"$check".sh || rc=1` around its loop, printed `verify-m37: FAILED` in the
+`if`, and **ended at the `fi` with no `exit "$rc"`**. Measured: with
+`verify_aztec_ts_anchor_current` at five failing assertions, `just verify-m37` returned **0**. So
+the milestone's declared *"4/4, exit 0"* was taken through an instrument that could not have said
+otherwise, and in a sweep — which records `rc=` per milestone — that milestone can never be one of
+the non-zero exits. **`verify-m36` has the identical defect and passed M36's review.** Censused over
+the whole Justfile by matching the SHAPE (a recipe that accumulates `rc` and never exits with it)
+rather than the spelling: exactly those two, with `verify-m9` and `mirror-replay-engine` false
+positives that do `exit 1`. This is *"exit status AND the specific failure mode"* — this file's own
+rule — with the status side missing in the recipe that reports it. **Rule: a wrapper that summarises
+a status must return it. Grep the harness, not only the checks.**
+
+### A CHECK A MILESTONE DECLARES AND NO SWEEP RUNS IS A CHECK THAT READS AS PRESENT AND MEASURES AS ABSENT
+
+**One instance.** `verify_oracle_interface_hash_matches` is M37's, is a `status: verified` entry in
+M37's Verification section with its assertion count stated — and it landed on a standalone recipe
+(`just verify-oracle-interface-hash`) that `verify-m37` does not invoke, so **none of its 36
+assertions was in the campaign total**. It is the L0–L4 situation — check names that appear zero
+times as a summary line — arriving inside a milestone's own work, where it is worse, because the
+milestone file says the check ran. M28's exclusion of one M27 check is the deliberate shape and it
+is **PINNED by name** in `ci_browser_gate.sh` so the two lists cannot drift. This was not a
+decision; it was an omission. **Rule: when a milestone declares a check, the milestone's own recipe
+must run it — or the exclusion must be pinned by name, with its reason.**
+
+### A CONTROL THAT INJECTS INTO THE INSTRUMENT'S OUTPUT FORMAT HAS NOT RUN THROUGH THE INSTRUMENT
+
+**One instance, and it was under the only conjunct M11's green now depends on.** The narrowed
+conjunct 1 rests on a CLASSIFIER — `*.md` is documentation, an unreferenced `*.sh` is a non-input,
+**anything else is a build input** — and on two mutation arms that attack it: *"a translation unit
+with a complete, blob-accurate declaration in front of it is still refused"* and *"a path the
+classifier cannot place is refused"*. Both arms **inject the path into the decision procedure's JSON
+input**, one into `build_inputs` and one into neither list. They prove `decide()` refuses what it is
+handed; they never reach the classifier. And the classifier's fail-safe `else` branch **executes
+zero times on the real data**, because all five paths upstream changed under the build root are
+`.md` or `.sh` — so *"anything the classifier cannot place is a build input"* was a property of dead
+code. Measured: flipping `else: build_inputs.append(p)` to `non_inputs.append(p)` left every
+assertion in the check GREEN. The same function is run over synthetic paths now and the partition is
+asserted in both directions, which also exercises the rule the check never had a positive control
+for: `scripts/remake-constants.sh` IS named in a `CMakeLists.txt` under the build root and must come
+back a build input, so a `no` for the four real scripts is a measurement (5 of the 57 `.sh` files
+under the build root are cmake-referenced; **none of the 110 `.md` files is**, which is why the
+unconditional `.md` rule and the measured one agree today). Calibrated: the flip now gives two
+failures. *This is "a control has to run through the instrument, not beside it" with the bypass
+hidden in a serialisation boundary — the arm and the instrument speak the same JSON, so the arm
+looks like it is talking to it.*
+
+### A SHARED BRANCH CAN CARRY A SECOND AGENT WRITING THE SAME MILESTONE, AND THE COLLISION DETECTOR CANNOT SEE AN UNCOMMITTED ONE
+
+**One instance, and it is the largest coordination failure of the campaign.** Two agents wrote M37
+at once. The second checked `origin/dev` before pushing and recorded *"no M37 work in flight"* —
+true of the branch and false of the world, because **this campaign's own rule is that
+implementation agents never commit**, so the first agent's entire milestone was uncommitted and
+invisible to the one instrument that would have found it. Three `M37:` commits landed on
+`origin/dev` while the first agent's work sat in a working tree.
+
+The damage was containable and instructive:
+
+  * **Two `DRIFT.md` id collisions.** Both agents appended `D23` and `D24`, with different subjects.
+    Resolved the way the campaign resolves `RI-` collisions — the landed pair keeps its ids, the
+    other becomes `D25`/`D26` — with four cross-references repointed.
+  * **Two of the four entries are the SAME FINDING derived twice**, and they agree to the unit
+    (`98,304` / `817,500` for the teardown gas limits; the `l2ToL1Msgs`-into-the-`L1_TO_L2` tree).
+    Two independent derivations is corroboration this campaign almost never gets.
+  * **The second agent DID the work the first declared deferred**, which is how the deferral's reason
+    was falsified: see the `npm.deletion_era` coupling below.
+  * **And it broke a check by moving what the check reads** — `verify_aztec_ts_anchor_current`
+    selected its population by `anchor == "ts"`, the re-anchoring took that to zero, and three
+    assertions compared empty sets. The check's own non-emptiness guards fired, which is the guard
+    working; the repair is a derivation anchored to the SUBJECT (`yarn-project/`) rather than to a
+    decision.
+
+**Rule: `origin/<branch>` is not the set of work in flight when the convention is that
+implementers do not commit.** Either claim the milestone in the shared status file BEFORE writing —
+which the second agent did, and the first did not read — or accept that the branch will tell you
+nothing. And **a check whose population is selected by a DECISION (an anchor name, a status, a
+category) will go silently empty the day somebody changes the decision**; select by the subject.
+
+
 ### Conjunctions need a negative case per conjunct
 A four-tree conjunction whose only negative case exercised one tree: dropping any
 of the other three passed all twelve cases.
@@ -1179,6 +1276,59 @@ m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
 m28 353  m29 127
                                                        CAMPAIGN TOTAL 10,178
 ```
+
+**M37'S REVIEW TOOK IT TO 12,141 — AND SIX OF THE NINE NON-ZERO EXITS WERE M37'S OWN, WHICH IS THE
+OPPOSITE OF WHAT M37'S OWN SWEEP REPORTED.** Re-measured M0–M37 on 2026-08-31 by M37's review,
+**after the rebase onto `origin/dev` `33e8ad5` and after its last edit**, `setsid`-detached in this
+repository's own dev shell (node v24.19.0), one milestone at a time with nothing else running,
+`TMPDIR` and the log under `~/.cache`, **no hole in the log** (76 markers for 38 milestones):
+
+```
+m0 156   m1 181   m2 293   m3 199   m4 218   m5 236   m6 363   m7 287   m8 516   m9 807
+m10 450  m11 287  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 265  m23 509  m24 350  m25 273  m26 340  m27 345
+m28 357  m29 127  m30 218  m31 421  m32 237  m33 248  m34 217  m35 239  m36 140
+m37 171
+                                                       CAMPAIGN TOTAL 12,141
+```
+
+`12,069 − 1 + 2 + 5 + 27 + 39 = 12,141` exactly. **m1 182 -> 181** is `verify_provenance_complete`
+71 -> 70, F24's one `is tracked` assertion, its row retired with its file. **m22 260 -> 265** and
+**m26 313 -> 340** (`verify_tx_builder_vendored_not_reimplemented` 133 -> 160) are the same commit's.
+**m11 285 -> 287** is the review's classifier probe. **m37 132 -> 171** is +1 (the anchor check's
+population), +2 (the msgpack control) and **+36 for a check M37 declared and no sweep had ever run**.
+
+**AND THE SWEEP'S REAL FINDING IS THAT SIX MILESTONES WENT RED FOR ONE CAUSE, ELEVEN DOCUMENT
+FIGURES, AND EVERY ONE OF THEM WAS THIS MILESTONE'S OWN.** Re-taking fourteen vendored files and
+deleting one moved four entry points' eager gzipped size by **one hundredth of a KB each**, the
+bundle total by 0.20 KB, and removed one input from the browser metafile — and no document was
+updated, because *the agent that made the change could not run a sweep*: its host had 492 MB free
+and thirty of its thirty-seven milestones died on a work-directory precondition. m27, m28, m32, m34,
+m35 and m36 all reddened; **every count stayed exactly at its reference**, which is what says a
+pinned figure moved and not a structure; and every one of the eleven is a figure a check re-derives
+from the artefact on every run, which is the only reason any of it was found. Corrected to the
+CHECK's value and the six re-run: **345 / 357 / 237 / 217 / 239 / 140, no count moved.**
+*A sweep that cannot run is not a smaller measurement — it is the state in which a whole milestone's
+document set rots silently.*
+
+**M9 FLAKED AT AN EIGHTH DISTINCT TRUNCATION POINT AND PASSED ALONE, WHICH IS THE SETTLED
+PROCEDURE.** In the sweep: 524, rc 1, twelve failing assertions, `807 − 524 = 283 = 140 + 143`, at
+`truncated-after-32788-lines-last-key-steps.burn.32514` — **the highest point yet**. The sightings
+are now **39,113 / 16,719 / 14,572 / 17,866 / 3,943 / 15,688 / 4,051 / 32,788**; same input, same
+module, same host, so a content-dependent defect stays ruled out and the trigger stays
+unestablished. The twelve reds are 11 + 1 in the two checks `m9_completeness` is **still** not wired
+into, which is this file's own outstanding item and has been since M24. Re-run alone: **807, 7/7,
+exit 0**, split **140/143/113/73/126/83/129**, the reference exactly. **M15 did not flake** (537,
+395 s).
+
+**THE OTHER THREE REDS ARE PARALLEL TRACKS' AND ONE ATTRIBUTION DID NOT SURVIVE.** m20's
+`verify_named_checks_exist` 9/1 is **L3's** (`a601ce7`, the only commit on
+`tools/scan_reverted_transactions.mjs`, `--follow`ed) — M37 declared it L4's. m21's sixth `| grep -q`
+is L4's; m28's fifth `package.json` tree is L0's. All three recorded and not fixed. **The fourteen
+L0–L4 check names appear ZERO times as a summary line**, grepped one at a time. **A sweep is a
+writer**: `carry/*.json` checksummed before and `sha256sum -c` after — all four OK and *unchanged*,
+because M37 committed the repair every sweep since M30 had been re-deriving and discarding.
+
 
 **M37 TOOK IT TO 12,069, `delta +0`, AND ITS THREE MOVES WERE NAMED BEFORE THE SWEEP RAN — ONE OF
 THEM A PARALLEL TRACK'S.** Measured M0–M37 on 2026-08-30 by M37's implementation, **after its last

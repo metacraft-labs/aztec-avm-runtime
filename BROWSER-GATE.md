@@ -93,7 +93,7 @@ package, exactly, and RI-64 priced it at one four milestones before it was spent
 None of the three is a native-addon family and `optionalDependencies` stays at 3, which is the
 figure D22 is about. All three were found by §6 re-deriving them, which is what §6 is for.
 
-- The browser bundle's module graph has 1197 inputs.
+- The browser bundle's module graph has 1196 inputs.
 - The node bundle's module graph has 969 inputs.
 - Node builtins left external in the browser bundle: 0.
 - Node builtins left external in the node bundle: 22.
