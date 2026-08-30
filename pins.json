@@ -314,7 +314,45 @@
           "l2BlockNumber": 60620,
           "node_reported": "revertCode 0, ZERO enqueued public calls, 12 note hashes, 15 nullifiers, 2 private logs",
           "for": "the private-half deliverable: a transaction whose private half's EFFECTS the chain published and whose EXECUTION it did not, plus the public-half-absent declaration"
-        }
+        },
+        {
+            "path": "replay/fixtures/testnet_settled_tx_refblock.json",
+            "chain": "aztec-testnet",
+            "endpoint": "https://aztec-testnet.drpc.org",
+            "l1ChainId": 11155111,
+            "captured": "2026-08-30",
+            "captured_by": "replay/tools/capture_settled_fixture.mjs --pin-reference-block",
+            "txHash": "0x096056bc1af09a9f44fc7a8f65d0bc31fa9d7f4ee5223c58a27c630233fb06c7",
+            "l2BlockNumber": 62639,
+            "contractReferenceBlock": 62639,
+            "node_reported": "revertCode 0, one enqueued public call to 0x2a9a1d0e8f1974267536abefa565e7a7351f92ddbe95ec13c57c79b70664f7c8, contract class 0x2b6749411979b61926b6f8836c3a1a28c39e9c0c3fb3322ed6e776f2f02cb6dc with 23,157 bytes of packed bytecode, 9 public data writes, 1 nullifier, transactionFee 0x17d78cb873199f5d",
+            "for": "THE ONE THING L1 HANDED L2. Its eighth recorded call is `aztec_getContract [\"0x2a9a1d0e...\", 62639]` - the settling block ON THE WIRE, which L1's two recordings deliberately do not have and cannot be given, because adding the argument to an existing recording turns every one of its calls into a FixtureMiss and L1's transactions can no longer be re-captured. The fabricated-contract probe is recorded BOTH ways here, unpinned and pinned, so a future check's control cannot become a FixtureMiss either."
+          },
+          {
+            "path": "replay/fixtures/testnet_replay_tx.json",
+            "chain": "aztec-testnet",
+            "endpoint": "https://aztec-testnet.drpc.org",
+            "l1ChainId": 11155111,
+            "captured": "2026-08-30",
+            "captured_by": "replay/tools/replay_settled_transaction.mjs --capture",
+            "txHash": "0x096056bc1af09a9f44fc7a8f65d0bc31fa9d7f4ee5223c58a27c630233fb06c7",
+            "l2BlockNumber": 62639,
+            "preStateReadAt": 62638,
+            "contractReferenceBlock": 62639,
+            "recorded_calls": 22,
+            "for": "L2'S OWN FIXTURE, AND IT IS A DIFFERENT KIND OF RECORDING FROM L1'S. L1's capture recorded the calls fetchSettledTransaction makes, which are known in advance. L2's HYDRATION CALLS ARE NOT KNOWN IN ADVANCE - the AVM discovers them, round by round, by reporting the world-state queries it made - so the only list that can be right is the one produced by RUNNING THE REPLAY against a live node. That is what this file is: the fetch's own calls plus the per-slot aztec_getPublicDataWitness / aztec_getNullifierMembershipWitness reads at block 62638, every one of them a call the replay itself made. Both witness methods were already on L0's permitted fourteen and are members of the MembershipWitnessSource seam L0 declared for exactly this, so L2 widened nothing.",
+            "replay_result": {
+              "hydration_rounds": 6,
+              "seeded": "4 nullifiers + 11 public-data leaves",
+              "instructions_executed": 345,
+              "published_revertCode": 0,
+              "replayed_revertCode": 0,
+              "effects_reproduced": true,
+              "comparisons": "23 matched, 0 mismatched - revertCode, transactionFee, all 9 publicDataWrites (leafSlot AND value), and the single nullifier",
+              "gas": "the AVM's publicGas l2Gas 290,431 plus the private kernel's 590,800 is 881,231, which is block 62639's own totalManaUsed; daGas 512 + 128 = 640",
+              "tree_roots": "ALL FOUR DIFFER FROM THE BLOCK'S STATE REFERENCE, BY CONSTRUCTION AND NOT BY ERROR. See replay/src/replay_execution.ts TREE_ROOTS_DIVERGE_REASON: the values the transaction read are the chain's, fetched per-slot at the parent block; the membership proofs around them are the resident tree's. A recording that carried the chain's state reference beside this execution would be a wrong root that everything downstream believes."
+            }
+          }
       ],
       "version_headers_note": "Each fixture records the `x-aztec-*` headers TWICE: `onBatchPost` is what upstream's client saw (EMPTY, because this endpoint proxies and strips them on the array POST upstream always sends) and `onSingleObjectPost` is a deliberately un-batched probe taken in the same run. The second is labelled a RECONSTRUCTION inside the file. Playing back the first reproduces the live `assertProtocolVersion` refusal offline; the second is what says the obstacle is the proxy and not this repository's version check. A fixture that silently stored the second would be kinder than the chain it came from."
     }

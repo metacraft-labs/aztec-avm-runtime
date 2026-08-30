@@ -2858,6 +2858,54 @@ verify-l1:
     exit "$rc"
 
 # =================================================================================================
+# L2 — HISTORICAL STATE AT A BLOCK (Aztec-Live-Chain-Replay.milestones.org)
+#
+#   just replay-settled            replay the committed L2 fixture. NO NETWORK.
+#   just capture-replay-run        drive a LIVE node and write a new L2 fixture
+#
+# THE MODULE IS AN ARGUMENT AND NOT A DEFAULT, and the reason is that the wrong one produces a
+# named refusal rather than a wrong answer, which is worth keeping. `vm2wasm/avm.wasm` is M6's
+# early spike artefact — it OWNS ITS MEMORY, and `node-host`'s loader refuses it by name
+# (`AvmToolchainRegression`) because this host is for `--import-memory` modules. The module L2
+# needs is a build with M9's execution-observer patch in it, which is what
+# `$HOME/.cache/aztec-m27-browser/m27/barretenberg/cpp/build-wasm-avm/bin/avm.wasm` is after
+# `just ci-browser-gate`; an unpatched build refuses the encoding with
+# "Missing field collectExecutionSteps" instead of running without steps.
+#
+# WHAT `replay-settled` PROVES, AND IT IS THE MILESTONE'S OWN SENTENCE: "re-execution reproducing
+# the transaction's own recorded outcome — revertCode, gas consumed, and the side effects in the
+# TxEffect the chain published". It exits non-zero when the comparison does not reproduce, so it is
+# a check even before a check wraps it.
+#
+# NOTHING HERE TOUCHES A NETWORK except `capture-replay-run`, for `verify-l1`'s reason: the
+# retention horizon means a check that needs a live testnet goes red on somebody else's schedule.
+# ---------------------------------------------------------------------------
+
+avm_wasm_default := env_var_or_default('AVM_WASM_PATH', env_var('HOME') + '/.cache/aztec-m27-browser/m27/barretenberg/cpp/build-wasm-avm/bin/avm.wasm')
+
+replay-settled fixture='replay/fixtures/testnet_replay_tx.json' module=avm_wasm_default:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if [ ! -s "{{module}}" ]; then
+      echo "replay-settled: no AVM module at {{module}}." >&2
+      echo "  Remedy: just ci-browser-gate (which builds it), or set AVM_WASM_PATH." >&2
+      exit 2
+    fi
+    cd "{{justfile_directory()}}/replay" \
+      && node tools/replay_settled_transaction.mjs \
+           --fixture "{{justfile_directory()}}/{{fixture}}" --module "{{module}}"
+
+# THE ONE L2 RECIPE THAT NEEDS A LIVE CHAIN. With no `tx=` it walks back from the tip, bounded by
+# `getBlockNumber('finalized')` rather than by a guessed depth, and takes the first transaction that
+# is FIRST IN ITS BLOCK — `IntraBlockPredecessorsUnavailable` is the refusal for the rest.
+capture-replay-run url='https://aztec-testnet.drpc.org' out='replay/fixtures/testnet_replay_tx.json' tx='' module=avm_wasm_default:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    args=(--url "{{url}}" --capture "{{justfile_directory()}}/{{out}}" --module "{{module}}")
+    [ -n "{{tx}}" ] && args+=(--tx "{{tx}}")
+    cd "{{justfile_directory()}}/replay" && node tools/replay_settled_transaction.mjs "${args[@]}"
+
+# =================================================================================================
 # M34 — THE CODETRACER DEV WALLET (PUBLIC ENTRYPOINTS)
 # =================================================================================================
 #

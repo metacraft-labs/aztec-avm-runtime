@@ -81,6 +81,53 @@ export {
   type PublishedPrivateEffects,
 } from './private_half.ts';
 
+// ---- L2 ------------------------------------------------------------------------------------
+
+export {
+  ANSWERABLE_TREES,
+  HYDRATION_METHODS,
+  HydrationDidNotConverge,
+  IntraBlockPredecessorsUnavailable,
+  ModuleRefusedReplay,
+  ROUTE_DISPOSITIONS,
+  SEED_SKIP_REASONS,
+  UNANSWERABLE_TREES,
+  answerQueries,
+  emptySeed,
+  seedSize,
+  type HistoricalStateSource,
+  type HydrationRound,
+  type ResidentSeed,
+  type SeedSkipReason,
+  type SeededLeaf,
+  type SkippedQuery,
+  type WorldStateQuery,
+} from './historical_state.ts';
+
+export {
+  DEFAULT_MAX_ROUNDS,
+  STATE_REFERENCE_TREES,
+  TREE_ROOTS_DIVERGE_REASON,
+  compareToPublishedEffects,
+  declareTreeRoots,
+  queriesFrom,
+  replaySettledTransaction,
+  type EffectComparison,
+  type ReplayAvmHost,
+  type ReplayAvmInstance,
+  type ReplayOptions,
+  type ReplayOutcome,
+  type ReplayVerdict,
+  type TreeRootDeclaration,
+} from './replay_execution.ts';
+
+export {
+  PATCH_REQUIRED_CONFIG_FIELDS,
+  REPLAY_COLLECTION_FLAGS,
+  encodeReplayInputs,
+  replaySimulatorConfig,
+} from './replay_inputs.ts';
+
 // THE FIXTURE FORMAT IS DELIBERATELY NOT RE-EXPORTED HERE. It lives in `replay/tools/
 // settled_fixture.ts` because it assembles a JSON-RPC envelope by hand, and L0's
 // `verify_client_uses_upstream_schema` asserts that nothing in `replay/src` declares a wire type —
