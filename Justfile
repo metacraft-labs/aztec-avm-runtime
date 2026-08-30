@@ -2944,6 +2944,55 @@ replay-settled fixture='replay/fixtures/testnet_replay_tx.json' module=avm_wasm_
 # THE ONE L2 RECIPE THAT NEEDS A LIVE CHAIN. With no `tx=` it walks back from the tip, bounded by
 # `getBlockNumber('finalized')` rather than by a guessed depth, and takes the first transaction that
 # is FIRST IN ITS BLOCK — `IntraBlockPredecessorsUnavailable` is the refusal for the rest.
+#   just verify-l3-steppable   e2e_settled_transaction_produces_steppable_ct
+#   just verify-l3-provenance  test_recording_declares_its_provenance
+#   just verify-l3             both, in order
+#
+# THESE NEED THE AVM MODULE, THE CT WRITER AND THE REFERENCE READER, and a missing one is a `die`
+# with a remedy rather than a skip. The reader is not optional politeness: it refused three earlier
+# forms of L3's own recording — `columns: true` at rung 3, a 23-character recording id, then a
+# 36-character one that was UUID-SHAPED and not a UUIDv7 — every one of which the writer had
+# happily produced bytes for.
+#
+# THE THIRD CHECK THE MILESTONE NAMES, `test_reverted_transaction_recorded_as_reverted`, IS NOT
+# HERE, and its absence is a measurement rather than an omission: no reverted settled transaction
+# exists to write it over. See `just scan-reverted-transactions` and pins.json.
+
+verify-l3-steppable:
+    @verification/e2e_settled_transaction_produces_steppable_ct.sh
+
+verify-l3-provenance:
+    @verification/test_recording_declares_its_provenance.sh
+
+verify-l3:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      e2e_settled_transaction_produces_steppable_ct \
+      test_recording_declares_its_provenance
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-l3: FAILED" >&2
+    else
+      echo "verify-l3: all checks passed"
+    fi
+    exit "$rc"
+
+# THE MEASUREMENT THAT KEEPS test_reverted_transaction_recorded_as_reverted HONESTLY PENDING.
+# It needs a settled transaction that REVERTED, and none exists to be found. Committed so the claim
+# is re-runnable rather than quoted: a scan is a measurement of a chain at the moment it ran.
+scan-reverted-transactions url='https://aztec-testnet.drpc.org' from='' to='':
+    #!/usr/bin/env bash
+    set -uo pipefail
+    cd "{{justfile_directory()}}/replay" \
+      && node ../tools/scan_reverted_transactions.mjs --url "{{url}}" \
+           {{ if from == "" { "" } else { "--from " + from } }} \
+           {{ if to == "" { "" } else { "--to " + to } }}
+
 # L3 — THE RECORDING. Produces a `.ct` from the committed fixture and, with `read=1`, parses it with
 # the REFERENCE READER, which is the standard a container is held to here. `ct-print` refused two
 # earlier forms of the recording id — "expected 36 chars, got 23", then "not a UUIDv7" — so "the
