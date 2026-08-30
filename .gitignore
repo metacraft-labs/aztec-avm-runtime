@@ -49,3 +49,4 @@ browser/dist/
 # browser/node_modules directly above.
 /diffsim/node_modules
 /spike/node_modules
+/orchestration/node_modules

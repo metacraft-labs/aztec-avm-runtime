@@ -6,7 +6,7 @@
     "",
     "WHAT `eager` MEANS HERE, precisely, because it is the whole point: the entry output plus the",
     "transitive closure of its STATIC (`import-statement`) edges. An output reached only by a",
-    "`dynamic-import` edge is LAZY — the browser fetches it when the code path runs and not before.",
+    "`dynamic-import` edge is LAZY \u2014 the browser fetches it when the code path runs and not before.",
     "esbuild marks split targets with `entryPoint` too, so `entryPoint` is NOT the discriminator and",
     "using it would count 8.2 MB of lazily-fetched barretenberg as eager.",
     "",
@@ -15,24 +15,35 @@
     "that the regressions worth catching are caught. It is a CEILING and not a target.",
     "",
     "AND THE BYTE BUDGET IS THE WEAKER OF THE TWO GUARDS, DELIBERATELY. The regression that matters",
-    "is STRUCTURAL — one of the two 4 MB barretenberg blobs becoming eagerly imported — and a byte",
+    "is STRUCTURAL \u2014 one of the two 4 MB barretenberg blobs becoming eagerly imported \u2014 and a byte",
     "budget catches that only incidentally, by being smaller than 4 MB. `lazyRequired` names those",
     "two directly, so the property is asserted rather than inferred from a size. DD-11's demand is",
     "'a page which only executes a public transaction never fetches the barretenberg wasm at all',",
     "which is a statement about WHICH chunk a module is in, not about how many bytes there are.",
     "",
     "`maxEagerFiles` exists so a NEW eager chunk is visible even when it is small. Four chunks",
-    "totalling 1.1 MB and five totalling 1.1 MB are different facts about the graph."
+    "totalling 1.1 MB and five totalling 1.1 MB are different facts about the graph.",
+    "",
+    "M-NOTE 2026-08-30, SECOND MEASUREMENT: adding the page entry (`browser-demo/replay_in_page.ts`) to this pass moved the library entry's eager set from 4 chunks / 1,107,050 bytes to 5 / 1,108,275 \u2014 esbuild's splitting is a function of which entries reach which module, which is the same mechanism BROWSER-PACKAGING.md records moving its figures three times. Nothing changed CLASS: the two barretenberg blobs are still lazy, which is what `lazyRequired` exists to say. `maxEagerFiles` is now exactly met, deliberately: a sixth eager chunk should require a decision, not slip through."
   ],
   "maxEagerBytes": 1200000,
   "maxEagerFiles": 5,
-  "lazyRequired": ["barretenberg", "barretenberg-threads"],
+  "lazyRequired": [
+    "barretenberg",
+    "barretenberg-threads"
+  ],
   "measured": {
     "date": "2026-08-30",
-    "eagerBytes": 1107050,
-    "eagerFiles": 4,
-    "lazyBytes": 8272529,
-    "barretenbergLazyBytes": 8233876,
-    "unsplitEagerBytes": 9279574
+    "entries": [
+      "src/index.ts",
+      "browser-demo/replay_in_page.ts"
+    ],
+    "libraryEagerBytes": 1108275,
+    "libraryEagerFiles": 5,
+    "pageEagerBytes": 1137170,
+    "pageEagerFiles": 5,
+    "lazyBytes": 8304135,
+    "unsplitEagerBytes": 9279574,
+    "note": "The BUDGET is the LIBRARY entry's. The page additionally pulls in ct-host and the browser AVM loader, which a consumer of the library does not, so it is reported and not budgeted."
   }
 }

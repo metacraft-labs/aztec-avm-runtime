@@ -55,7 +55,11 @@ TEST_NAME="verify_browser_replay_dd9_clean"
 echo "== $TEST_NAME"
 l2_prepare
 
-BUNDLE="$REPO_ROOT/replay/dist-browser/index.js"
+# `src/index.js`, NOT `index.js`. esbuild preserves the entries' relative layout once there is more
+# than one, and the page entry made this pass multi-entry — so the library entry moved into
+# `dist-browser/src/`. The old path silently stopped existing and the check said so, which is the
+# assertion working.
+BUNDLE="$REPO_ROOT/replay/dist-browser/src/index.js"
 META="$REPO_ROOT/replay/dist-browser/meta.json"
 BUILDER="$REPO_ROOT/replay/tools/build_browser_bundle.mjs"
 BUDGETS="$REPO_ROOT/replay/browser-budgets.json"
@@ -81,7 +85,22 @@ $(tail -20 "$BUILD_LOG")"
 fi
 assert_file "the entry chunk was emitted" "$BUNDLE"
 assert_file "…with esbuild's metafile beside it" "$META"
-assert_ge "…and it is a real bundle rather than a stub" 500000 "$(wc -c <"$BUNDLE" | tr -d ' ')"
+EAGER_BYTES_EARLY="$(python3 -c '
+import json, sys
+m = json.load(open(sys.argv[1])); outs = m["outputs"]
+entry = next(k for k, v in outs.items() if (v.get("entryPoint") or "").endswith("src/index.ts"))
+eager = {entry}; stack = [entry]
+while stack:
+    cur = stack.pop()
+    for imp in outs[cur].get("imports", []):
+        if imp.get("kind") == "import-statement" and imp["path"] in outs and imp["path"] not in eager:
+            eager.add(imp["path"]); stack.append(imp["path"])
+print(sum(outs[k]["bytes"] for k in eager))
+' "$META")"
+# THE ENTRY FILE ITSELF IS TINY — 2,711 bytes — because splitting puts the substance in shared
+# chunks. Measuring "is this a real bundle" on the entry alone would be measuring the wrong file, so
+# the size assertion is over the EAGER CLOSURE, which is what a page actually downloads.
+assert_ge "…and the EAGER CLOSURE is a real bundle rather than a stub" 500000 "$EAGER_BYTES_EARLY"
 assert_ge "the build produced SEVERAL outputs, so splitting really happened" 5 \
   "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["outputs"]))' "$META")"
 
@@ -290,16 +309,30 @@ assert_eq "no input imports a Node builtin, by specifier, anywhere in the graph"
 # THE TRAP, RECORDED RATHER THAN AVOIDED. A naive substring count over the minified bytes finds two
 # `node:` occurrences and BOTH are inside identifiers — `shiftNodeUp(` and `getNode(`. A check built
 # on that count would be red for ever over a clean bundle.
-NAIVE="$(grep -o 'node:' "$BUNDLE" | wc -l | tr -d ' ')"
+# OVER EVERY EAGER CHUNK, not just the entry: splitting moved the substance out of the entry file,
+# and a scan of the entry alone would report zero for a bundle full of whatever it was looking for.
+EAGER_FILES_LIST="$(python3 -c '
+import json, os, sys
+m = json.load(open(sys.argv[1])); outs = m["outputs"]
+entry = next(k for k, v in outs.items() if (v.get("entryPoint") or "").endswith("src/index.ts"))
+eager = {entry}; stack = [entry]
+while stack:
+    cur = stack.pop()
+    for imp in outs[cur].get("imports", []):
+        if imp.get("kind") == "import-statement" and imp["path"] in outs and imp["path"] not in eager:
+            eager.add(imp["path"]); stack.append(imp["path"])
+print(" ".join(os.path.join(sys.argv[2], os.path.relpath(k, "dist-browser")) for k in sorted(eager)))
+' "$META" "$DIST")"
+NAIVE="$(cat $EAGER_FILES_LIST | grep -o 'node:' | wc -l | tr -d ' ')"
 assert_ge "a NAIVE substring count over the bytes finds 'node:' occurrences…" 1 "$NAIVE"
 assert_true "…every one of which is inside an identifier such as getNode( — which is why §4 reads
      the metafile's specifiers and not the bytes" \
-  bash -c "! grep -oE \"[\\\"']node:[a-z_/]+[\\\"']\" '$BUNDLE' | grep -q ."
+  bash -c "! cat $EAGER_FILES_LIST | grep -oE \"[\\\"']node:[a-z_/]+[\\\"']\" | grep -q ."
 
 # And the things a native reach would actually leave behind.
 for pat in 'process.binding' '__dirname' 'require("fs")' 'cpp_'; do
   assert_eq "the emitted bytes contain no $pat" "0" \
-    "$(grep -o -- "$pat" "$BUNDLE" | wc -l | tr -d ' ')"
+    "$(cat $EAGER_FILES_LIST | grep -o -- "$pat" | wc -l | tr -d ' ')"
 done
 
 finish

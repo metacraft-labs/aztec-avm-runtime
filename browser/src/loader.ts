@@ -99,8 +99,14 @@ export async function compileAvmFromUrl(
   if (contentType.startsWith('application/wasm') && typeof WebAssembly.compileStreaming === 'function') {
     // Re-issued from the SAME bytes rather than from a second request: `Response` is single-use and
     // a second `fetch` would double the network log this milestone's central check reads.
+    // `as BufferSource` for the same reason the `WebAssembly.compile` line below already carries
+    // it: under TS 5.9 `Uint8Array` is generic in its buffer, `ArrayBufferLike` admits
+    // `SharedArrayBuffer`, and `BodyInit`'s `ArrayBufferView` does not. SURFACED BY THE FIRST
+    // TYPE-CHECK THIS TREE HAS EVER HAD — `browser/` has no tsconfig and no recipe compiles it;
+    // the replay campaign's browser AVM host imports this loader and drags it into `tsc`. Erased
+    // at build time, so no bytes move.
     module = await WebAssembly.compileStreaming(
-      new Response(bytes, { headers: { 'content-type': 'application/wasm' } }),
+      new Response(bytes as BufferSource, { headers: { 'content-type': 'application/wasm' } }),
     );
     streaming = true;
   } else {

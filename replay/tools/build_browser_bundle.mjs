@@ -81,6 +81,13 @@ const SHIMS = {
   fs: path.join(REPO, 'browser-probe/shims/fs.js'),
   path: path.join(REPO, 'browser-probe/shims/path.js'),
   module: path.join(REPO, 'browser/src/shims/module.js'),
+  // NOT A SHIM — A RESOLUTION BASE. `globals.js` lives in `browser/src/`, which has no
+  // `node_modules`, so esbuild resolves ITS `import { Buffer } from 'buffer'` relative to that
+  // directory and fails with "the package buffer wasn't found ... but is built into node", which
+  // reads like a platform problem and is a location problem. `buffer` IS in this graph — 58,353
+  // bytes of it — through replay's own install, and this points every `buffer` specifier at that
+  // one copy rather than letting two exist.
+  buffer: path.join(REPLAY, 'node_modules/buffer/index.js'),
 };
 for (const [name, file] of Object.entries(SHIMS)) {
   if (!existsSync(file)) fail(`the shim for '${name}' does not exist: ${file}`);
@@ -102,6 +109,18 @@ for (const [name, file] of Object.entries(SHIMS)) {
 //
 // So: `--splitting` and `--outdir`. The two blobs become their own outputs, reached only when
 // something actually initialises barretenberg, which a replay does not.
+// `Buffer` AND `process` ARE FREE IDENTIFIERS IN @aztec's COMPILED OUTPUT, AND A FREE IDENTIFIER
+// IS THE WORSE PROBLEM. `import { inspect } from 'util'` fails the BUILD, loudly, with a file and a
+// line — that is what the shims above answer. A bare `Buffer.from(...)` BUILDS FINE and dies in the
+// page. Measured: without this the bundle loads and throws
+// `ReferenceError: process is not defined` from inside a shared chunk, with no progress recorded
+// and nothing in the module's own catch, because the module never ran.
+//
+// `browser/src/globals.js` already supplies both and is reused rather than rewritten. It is
+// dependency-free apart from `buffer`, which is already in this graph, so it crosses no pin.
+const GLOBALS = path.join(REPO, 'browser/src/globals.js');
+if (!existsSync(GLOBALS)) fail(`the globals injection is missing: ${GLOBALS}`);
+
 const DIST = path.join(REPLAY, 'dist-browser');
 rmSync(DIST, { recursive: true, force: true });
 mkdirSync(DIST, { recursive: true });
@@ -111,8 +130,21 @@ const BUDGETS_FILE = path.join(REPLAY, 'browser-budgets.json');
 if (!existsSync(BUDGETS_FILE)) fail(`the budgets file is missing: ${BUDGETS_FILE}`);
 const budgets = JSON.parse(readFileSync(BUDGETS_FILE, 'utf8'));
 
-const args = [
+// TWO ENTRIES IN THIS PASS, AND THEY SHARE IT FOR THE REASON `browser/build.mjs` GIVES FOR ITS
+// OWN: the page hosts the same client the library exposes, so building it separately would give it
+// a second copy of every shared chunk and make "the client costs what the client entry says it
+// costs" a comparison between two differently-built artefacts. `index.ts` is the library surface
+// DD-9 is measured on; `replay_in_page.ts` is the page that produces a container in the browser.
+const ENTRIES = [
   path.join(REPLAY, 'src/index.ts'),
+  path.join(REPLAY, 'browser-demo/replay_in_page.ts'),
+];
+for (const e of ENTRIES) {
+  if (!existsSync(e)) fail(`an entry point is missing: ${e}`);
+}
+
+const args = [
+  ...ENTRIES,
   '--bundle',
   '--format=esm',
   '--platform=browser',
@@ -120,6 +152,7 @@ const args = [
   '--splitting',
   `--outdir=${DIST}`,
   `--metafile=${META}`,
+  `--inject:${GLOBALS}`,
   ...Object.entries(SHIMS).map(([n, f]) => `--alias:${n}=${f}`),
 ];
 
@@ -129,8 +162,15 @@ try {
   fail('esbuild failed — its output is above');
 }
 
-const ENTRY = path.join(DIST, 'index.js');
+// esbuild PRESERVES THE ENTRIES' RELATIVE LAYOUT when there is more than one, so with `src/` and
+// `browser-demo/` as sources the outputs land in `dist-browser/src/` and `dist-browser/browser-demo/`.
+// Reading them from `DIST/index.js` was correct for one entry and silently wrong for two — the
+// build "succeeded" and the file was not there. The paths are derived from the metafile's own
+// `entryPoint` fields now rather than assumed.
+const ENTRY = path.join(DIST, 'src/index.js');
+const PAGE_ENTRY = path.join(DIST, 'browser-demo/replay_in_page.js');
 if (!existsSync(ENTRY)) fail(`esbuild reported success and ${ENTRY} is not there`);
+if (!existsSync(PAGE_ENTRY)) fail(`esbuild reported success and ${PAGE_ENTRY} is not there`);
 if (!existsSync(META)) fail(`esbuild reported success and ${META} is not there`);
 
 // ================================================================================================
@@ -159,6 +199,9 @@ export function eagerClosure(meta, entrySuffix = 'src/index.ts') {
 }
 
 const meta = JSON.parse(readFileSync(META, 'utf8'));
+// THE BUDGET IS THE LIBRARY ENTRY'S, not the page's. The page additionally pulls in `ct-host` and
+// the browser AVM loader, which a consumer of the library does not, so summing them would make the
+// budget a statement about the demo rather than about what a page pays to use the client.
 const { eager, lazy } = eagerClosure(meta);
 const bytesOf = (set) => [...set].reduce((a, k) => a + meta.outputs[k].bytes, 0);
 const eagerBytes = bytesOf(eager);
@@ -194,6 +237,10 @@ if (problems.length > 0) {
   process.exit(1);
 }
 
+const pageClosure = eagerClosure(meta, 'browser-demo/replay_in_page.ts');
+const pageBytes = [...pageClosure.eager].reduce((a, k) => a + meta.outputs[k].bytes, 0);
+console.log(`build-replay-browser-bundle: page entry ${pageBytes} bytes eager in `
+  + `${pageClosure.eager.size} chunk(s) (not budgeted; see the note at the budget)`);
 console.log(`build-replay-browser-bundle: EAGER ${eagerBytes} bytes in ${eager.size} chunk(s) `
   + `(budget ${budgets.maxEagerBytes}); LAZY ${lazyBytes} bytes in ${lazy.size} chunk(s). `
   + `entry ${statSync(ENTRY).size} bytes, metafile at ${META}`);

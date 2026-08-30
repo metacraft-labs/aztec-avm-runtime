@@ -3004,7 +3004,8 @@ verify-l3:
 # that wants to drive it.
 # ---------------------------------------------------------------------------
 
-#   just verify-l4                 THE OFFLINE FLOOR — the two checks that need no chain
+#   just verify-l4                 THE OFFLINE FLOOR — the three checks that need no chain
+#   just produce-container-in-page  run the whole replay IN A PAGE and write the container out
 #   just verify-l4-net             THE NETWORK CHECK — needs a live Aztec node, EVERY RUN
 #
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -3016,7 +3017,9 @@ verify-l3:
 #
 #   OFFLINE, and therefore part of the floor — `just verify-l4`:
 #     verify_browser_replay_dd9_clean            builds the bundle from local sources
-#     smoke_browser_opens_and_steps_l3_container drives a local browser over a local origin
+#     smoke_browser_replays_settled_transaction  PRODUCES a container in a page, and asserts it is
+#                                                BYTE-IDENTICAL to the Node path's
+#     smoke_browser_opens_and_steps_l3_container OPENS one and steps it
 #
 #   NEEDS A LIVE CHAIN ON EVERY RUN, and therefore NOT part of the floor — `just verify-l4-net`:
 #     the range over the replayable window
@@ -3045,6 +3048,7 @@ verify-l4:
     rc=0
     for check in \
       verify_browser_replay_dd9_clean \
+      smoke_browser_replays_settled_transaction \
       smoke_browser_opens_and_steps_l3_container
     do
       echo "=== $check"
@@ -3070,6 +3074,17 @@ verify-l4-net url='https://aztec-testnet.drpc.org' module=avm_wasm_default:
 
 verify-browser-opens-and-steps:
     @verification/smoke_browser_opens_and_steps_l3_container.sh
+
+verify-browser-produces:
+    @verification/smoke_browser_replays_settled_transaction.sh
+
+# The whole replay, in a page, with the container written out so it can be read back.
+produce-container-in-page out='/tmp/aztec-replay-page.ct' module=avm_wasm_default:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    W="{{justfile_directory()}}/ct-writer/target/wasm32-unknown-unknown/release/aztec_ct_writer.wasm"
+    [ -s "$W" ] || { echo "produce-container-in-page: no ct_writer.wasm. Remedy: just ct-writer-build" >&2; exit 2; }
+    node tools/produce_container_in_page.mjs --avm "{{module}}" --ct-writer "$W" --out "{{out}}"
 
 build-replay-browser-bundle:
     @node replay/tools/build_browser_bundle.mjs

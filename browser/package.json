@@ -1,0 +1,32 @@
+{
+  "name": "@aztec-avm-runtime/browser",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser packaging for the AVM runtime — built by build.mjs, never by npm",
+  "//": [
+    "THIS FILE DECLARES WHAT WAS ALREADY TRUE AND ADDS NOTHING ELSE. Every source under `src/` and",
+    "`demo/` is an ES module, `build.mjs` is `.mjs`, and esbuild has always treated this tree as",
+    "ESM by content. What was missing was the DECLARATION, and nothing needed it until a",
+    "TYPE-CHECKED package imported from here.",
+    "",
+    "WHY IT APPEARED NOW. The live-chain replay campaign's browser AVM host reuses",
+    "`browser/src/loader.ts` rather than re-implementing 570 lines of WASI shim — the loader is",
+    "dependency-free (node-host plus its own wasi.ts, no @aztec), so nothing crosses the npm-pin",
+    "boundary between the two packages. But `replay/tsconfig.json` is `module: NodeNext` with",
+    "`verbatimModuleSyntax`, THIS REPOSITORY HAS NO ROOT package.json, and `browser/` had none —",
+    "so tsc read `browser/src/wasi.ts` as CommonJS and refused its exports with TS1287. `browser/`",
+    "has no tsconfig and is type-checked by no recipe; this is the first time anything has asked",
+    "tsc what these files are.",
+    "",
+    "AND IT WAS MEASURED AGAINST THE SIBLING CAMPAIGN'S BUILD BEFORE BEING ADDED, IN THE CHECKOUT",
+    "WHERE THAT BUILD ACTUALLY RUNS. `just browser-build` passes every recorded gzipped budget with",
+    "this file present — seven entries, unchanged. An earlier attempt appeared to break it, but that",
+    "was measured in a worktree with no `orchestration/node_modules` install where the build had",
+    "never worked at all; the conclusion was withdrawn rather than acted on.",
+    "",
+    "NO DEPENDENCIES, DELIBERATELY, AND NO `npm ci` STEP. `build.mjs` resolves `@aztec/*` through",
+    "`orchestration/node_modules` and esbuild through `spike/` or `diffsim/`. Declaring dependencies",
+    "here would create a second install of a pinned line, which is the hazard `pins.json` exists for."
+  ]
+}
