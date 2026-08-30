@@ -39,3 +39,13 @@ browser/dist/
 # exactly one pinned @aztec nightly in this repository and exactly one install of nine hundred
 # packages. `verification/lib_m27_browser.sh` recreates it if it is missing.
 /browser/node_modules
+
+# L4's browser bundle is a BUILD PRODUCT, rebuilt by verify_browser_replay_dd9_clean on every run
+# precisely so a DD-9 claim is never made over a stale artifact.
+/replay/dist-browser/
+
+# `diffsim/node_modules` is a SYMLINK in a worktree that shares the primary checkout's install, so
+# the `node_modules/` rule above — which matches directories — does not match it. Same reason as
+# browser/node_modules directly above.
+/diffsim/node_modules
+/spike/node_modules

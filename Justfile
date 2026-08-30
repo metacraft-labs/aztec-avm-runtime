@@ -2983,6 +2983,127 @@ verify-l3:
     exit "$rc"
 
 # =================================================================================================
+# L4 — THE BROWSER HALF (Aztec-Live-Chain-Replay.milestones.org)
+#
+#   just build-replay-browser-bundle   the replay client, bundled for a browser
+#   just verify-browser-replay-dd9     verify_browser_replay_dd9_clean — ON THE BUILT ARTIFACT
+#   just mirror-replay-engine          fetch the published replay engine into a local directory
+#   just open-container-in-engine      open an L3 container in a real headless browser AND STEP IT
+#
+# THE BUNDLE IS BUILT IN ITS OWN esbuild PASS, not added to `browser/build.mjs`'s. Two reasons, and
+# the first is about other people: adding an entry to that pass moves every chunk boundary and every
+# figure in BROWSER-PACKAGING.md — that document records it happening three times — and doing so
+# from a different campaign while that campaign is being worked on is the contention hazard this
+# campaign's milestone file warns about. The second is that it COULD NOT share the pass anyway:
+# `browser/` resolves @aztec through orchestration's install (deletion_era) and replay is on
+# npm.current, and an `Fr` from the wrong install serialises as a plain object.
+#
+# `open-container-in-engine` MIRRORS THE ENGINE LOCALLY, and that is a constraint rather than a
+# convenience: `new Worker(url, {type:'module'})` throws SecurityError on a cross-origin script URL,
+# which is why BlockTracer vendors the engine into its own origin, and the same applies to any page
+# that wants to drive it.
+# ---------------------------------------------------------------------------
+
+#   just verify-l4                 THE OFFLINE FLOOR — the two checks that need no chain
+#   just verify-l4-net             THE NETWORK CHECK — needs a live Aztec node, EVERY RUN
+#
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+# THE SWEEP DECISION, MADE EXPLICITLY RATHER THAN DEFAULTED.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+#
+# L4 has checks of two kinds and they must not be summed into one number, because one of them can
+# go red for a reason that has nothing to do with this repository.
+#
+#   OFFLINE, and therefore part of the floor — `just verify-l4`:
+#     verify_browser_replay_dd9_clean            builds the bundle from local sources
+#     smoke_browser_opens_and_steps_l3_container drives a local browser over a local origin
+#
+#   NEEDS A LIVE CHAIN ON EVERY RUN, and therefore NOT part of the floor — `just verify-l4-net`:
+#     the range over the replayable window
+#
+# `verify-l1`'s header states the rule this follows: "a check that needs a live testnet is a check
+# that goes red on somebody else's schedule". The range check is worse than L1's capture in one
+# respect — the WINDOW ITSELF is a property of the chain at the moment it is read, so there is no
+# fixture of it that would not be a fixture of a moment, and the transaction count it finds is
+# whatever the chain happened to contain. A run that finds zero transactions is not a failure of
+# this code.
+#
+# SO IT IS A SEPARATE RECIPE WITH A SEPARATE NAME, and `verify-l4` does not call it. The wrong
+# resolutions, named so they are not re-proposed: folding it in makes the floor depend on a third
+# party; making it skip when the network is down makes it read as a smaller milestone; and pinning
+# a window fixture makes it assert over a moment that has passed.
+#
+# ONE MORE PRECONDITION IS A NETWORK ACT AND IT IS A DELIBERATE ONE.
+# `smoke_browser_opens_and_steps_l3_container` needs the published replay engine MIRRORED. The
+# mirror is `just mirror-replay-engine`, run once; the check DIES with that remedy rather than
+# fetching somebody else's deployment behind your back, and rather than skipping.
+# ---------------------------------------------------------------------------
+
+verify-l4:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_browser_replay_dd9_clean \
+      smoke_browser_opens_and_steps_l3_container
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-l4: FAILED" >&2
+    else
+      echo "verify-l4: all checks passed"
+    fi
+    exit "$rc"
+
+# THE NETWORK ONE. Deliberately not in `verify-l4`, and it announces itself so a green line from it
+# can never be mistaken for part of the offline floor.
+verify-l4-net url='https://aztec-testnet.drpc.org' module=avm_wasm_default:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "=== verify-l4-net: THIS CHECK NEEDS A LIVE AZTEC NODE ($url)."
+    echo "    It is NOT part of the offline floor. A run that finds no transactions in the"
+    echo "    replayable window is a fact about the chain, not a failure of this code."
+    just replay-window "{{url}}" "{{module}}"
+
+verify-browser-opens-and-steps:
+    @verification/smoke_browser_opens_and_steps_l3_container.sh
+
+build-replay-browser-bundle:
+    @node replay/tools/build_browser_bundle.mjs
+
+verify-browser-replay-dd9:
+    @verification/verify_browser_replay_dd9_clean.sh
+
+# The published engine's three files. Recorded with their statuses because "the engine is at that
+# path" is a claim about somebody else's deployment: the DIRECTORY itself 404s and only the files
+# under it serve, so a probe of the path the page NAMES would conclude the engine is absent.
+mirror-replay-engine dir='/tmp/l4engine' base='https://blocktracer.org/replay-engine':
+    #!/usr/bin/env bash
+    set -uo pipefail
+    mkdir -p "{{dir}}/pkg"
+    rc=0
+    for f in worker.js pkg/db_backend.js pkg/db_backend_bg.wasm; do
+      code=$(curl -s -o "{{dir}}/$f" -w '%{http_code}' -m 120 "{{base}}/$f")
+      echo "  {{base}}/$f -> $code  $(wc -c <"{{dir}}/$f" | tr -d ' ') bytes"
+      [ "$code" = 200 ] || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "mirror-replay-engine: at least one file did not serve" >&2
+      exit 1
+    fi
+    echo "mirror-replay-engine: mirrored into {{dir}}"
+
+# THE ACCEPTANCE CRITERION IS STEPS TAKEN AND POSITIONS REACHED, not that it loaded. Exits non-zero
+# when the container loads and cannot be stepped, because that is a finding rather than a pass.
+open-container-in-engine container='/tmp/aztec-replay.ct' engine='/tmp/l4engine' steps='400':
+    #!/usr/bin/env bash
+    set -uo pipefail
+    node tools/open_container_in_engine.mjs --container "{{container}}" --engine "{{engine}}" \
+      --steps "{{steps}}"
+
+# =================================================================================================
 # L4 — RANGE REPLAY (Aztec-Live-Chain-Replay.milestones.org)
 #
 #   just replay-window                   every replayable transaction, with the outcome table
