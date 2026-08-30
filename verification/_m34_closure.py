@@ -22,7 +22,10 @@ The groups, and the question each one answers:
   `accounts`     `@aztec/accounts`'s index, which is where upstream's account CONTRACTS live and is
                  the first place a dev wallet's key derivation would look.
 
-Every figure this prints is re-derived by `test_wallet_keys_deterministic` §2 on every run.
+Every figure this prints is re-derived and compared against `DEV-WALLET.md` by
+`e2e_wallet_public_transfer` §8 on every run. (This line named the wrong check and the wrong
+section until M34's review; a citation that points at nothing is how a reader concludes a figure is
+unpinned when it is not, and how the next agent concludes it is pinned when it is not.)
 """
 
 import importlib.util

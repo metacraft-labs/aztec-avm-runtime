@@ -405,12 +405,29 @@ assert_eq "every figure in the write-up equals what the artefacts measure" "" \
 # perturbation finds nothing, and the two assertions below would then be failing for a reason that
 # has nothing to do with the comparer. Measured, because M34's own M9 arm produced exactly that.
 PERTURBED="$WORK/perturbed.md"
-if ! python3 - "$M34_DOC" "$PERTURBED" <<'PYD'
-import sys
+if ! python3 - "$M34_DOC" "$PERTURBED" "$STEPS" <<'PYD'
+import re, sys
 src = open(sys.argv[1], encoding='utf-8').read()
-# The executed-step count, in the §4 table row that names it. One digit, one row.
-out = src.replace('| executed AVM steps | **516** |', '| executed AVM steps | **517** |')
-assert out != src, 'the perturbation did not apply: the row this control needs is gone'
+# The executed-step count, in the §4 table row that names it. One row, one figure.
+#
+# NEITHER SIDE OF THIS SUBSTITUTION IS TYPED HERE, AND BOTH HALVES WERE EARNED.
+#
+#  * The row is found by its SUBJECT, not by matching the literal `**516**`. The first version
+#    spelled it `'| executed AVM steps | **516** |' -> '… **517** |'` — a constant typed into a
+#    check, over a figure this very check RE-DERIVES from the arm — so the day the artifact moves
+#    and the document is correctly updated the needle stops matching, the `die` below fires, and a
+#    check that should be GREEN reports `81 assertion(s), 2 failure(s)`. M34's own M9 arm produced
+#    exactly that shape.
+#  * The replacement is `<what the ARM measured> + 1`, not `<what the row says> + 1`, so the
+#    perturbed document is wrong NO MATTER what the row said to begin with. Incrementing the row's
+#    own value would "repair" a document that is already off by one — which is precisely the state
+#    the M9 arm creates — and the control would then fail for a reason that has nothing to do with
+#    the comparer.
+m = re.search(r'^\| executed AVM steps \| \*\*(\d+)\*\* \|.*$', src, re.MULTILINE)
+assert m, 'the perturbation did not apply: the row this control needs is gone'
+wrong = int(sys.argv[3]) + 1
+out = src[:m.start()] + m.group(0).replace('**%s**' % m.group(1), '**%d**' % wrong, 1) + src[m.end():]
+assert out != src, 'the perturbation found the row and changed nothing: it already states arm+1'
 open(sys.argv[2], 'w', encoding='utf-8').write(out)
 PYD
 then
