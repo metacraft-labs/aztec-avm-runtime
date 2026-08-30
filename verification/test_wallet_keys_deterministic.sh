@@ -121,8 +121,17 @@ assert_eq "the wallet that ran the transfer used the seed the BUNDLE declares" \
   "$BUNDLE_SEED" "$TRANSFER_SEED"
 assert_eq "…and the key-derivation arm used the same one" "$BUNDLE_SEED" "$SEED"
 
-echo "== 4. NO AMBIENT RANDOMNESS IS REACHABLE FROM THE WALLET'S KEY PATH"
+echo "== 4. THE KEY PATH'S OWN TWO FILES NAME NO RANDOMNESS, AND TWO PROCESSES AGREE"
 
+# THE SCOPE IS THE CLAIM, AND IT IS NARROWER THAN "REACHABLE". This heading said *"no ambient
+# randomness is REACHABLE from the wallet's key path"* and the measurement below is not that: it is
+# that `dev_keys.ts`'s and `dev_wallet.ts`'s own stripped CODE names none of seven spellings. A
+# module either of them imports could call one and this scan would not see it. `CAMPAIGN-BRIEF.md`'s
+# rule is that an absence claim is only as wide as what was enumerated, and a heading is part of the
+# claim — the reachability question is answered instead by the BEHAVIOURAL half below, where two
+# separate processes and Chromium derive the same accounts from the same seed, which no reachable
+# random source could survive.
+#
 # THE SOURCE HALF, OVER CODE AND NOT OVER PROSE. Seven spellings, and the spellings are WRITTEN
 # DOWN — an absence claim is only as wide as the spellings enumerated, which is the rule M23's
 # review wrote after three true measurements of the wrong needle.
@@ -263,25 +272,31 @@ console.log(JSON.stringify([...m.UPSTREAM_SEPARATORS]));
 assert_false "the bundle exports upstream's own separator set" str_has_sub "$UPSTREAM_SEPS" 'Error'
 N_UP="$(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1])))' "$UPSTREAM_SEPS")"
 assert_ge "…and it is a real enum rather than an empty list" 30 "$N_UP"
-assert_eq "neither dev separator collides with a member of upstream's DomainSeparator" "NO_COLLISION" \
-  "$(python3 - "$UPSTREAM_SEPS" "$SEP_A" "$SEP_B" <<'PYD'
+# ONE DETECTOR, USED FOR THE SUBJECT AND FOR THE CONTROL ALIKE.
+#
+# THE FIRST VERSION HAD TWO, AND THE SECOND ONE COULD NOT FAIL. The control was a separate
+# three-line script computing `ups[0] in set(ups)` — a tautology over a list the `assert_ge 30`
+# above has already asserted non-empty — so it printed `COLLIDES` whatever the real detector did,
+# and a detector that had stopped detecting would have passed both assertions. That is
+# `CAMPAIGN-BRIEF.md`'s M32 finding word for word: *"a control has to run through the instrument,
+# not beside it"*, and the second form on its list (an assertion that cannot fail) at the same time.
+# There is one function now, so one edit moves the subject and the control together.
+_m34_collision() { # <upstream-set-json> <separator> <separator>
+  python3 - "$1" "$2" "$3" <<'PYD'
 import json, sys
 ups = set(json.loads(sys.argv[1]))
 hits = [s for s in sys.argv[2:4] if int(s) in ups]
 print('NO_COLLISION' if not hits else 'COLLIDES: ' + ' '.join(hits))
 PYD
-)"
-# THE COLLISION DETECTOR IS SHOWN TO FIRE. Without this, "no collision" is satisfied by a comparator
-# that never compares — which is the second form on `CAMPAIGN-BRIEF.md`'s list, wearing a set
-# intersection instead of a grep.
-assert_eq "…and the detector CAN say otherwise: a member of the set is reported as colliding" \
-  "COLLIDES" \
-  "$(python3 - "$UPSTREAM_SEPS" <<'PYD'
-import json, sys
-ups = json.loads(sys.argv[1])
-planted = ups[0]
-print('COLLIDES' if planted in set(ups) else 'NO_COLLISION')
-PYD
-)"
+}
+assert_eq "neither dev separator collides with a member of upstream's DomainSeparator" "NO_COLLISION" \
+  "$(_m34_collision "$UPSTREAM_SEPS" "$SEP_A" "$SEP_B")"
+# THE SAME DETECTOR, WITH ONE INPUT SUBSTITUTED FOR A MEMBER OF UPSTREAM'S OWN SET. It must name
+# the colliding value back, so "no collision" is a measurement by an instrument seen to produce one.
+PLANT="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])[0])' "$UPSTREAM_SEPS")"
+assert_false "the planted value is a substitution and not one of the dev separators" \
+  test "$PLANT" = "$SEP_A"
+assert_eq "…and the detector CAN say otherwise, naming the value it found" \
+  "COLLIDES: $PLANT" "$(_m34_collision "$UPSTREAM_SEPS" "$PLANT" "$SEP_B")"
 
 m34_finish
