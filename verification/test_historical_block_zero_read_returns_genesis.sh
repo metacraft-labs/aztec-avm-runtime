@@ -128,7 +128,7 @@ assert_contains "the only archive membership witness in the block pipeline is fo
 # one tree-name switch — the `case` label and the `return` under it — so both are excluded by their
 # own text and what remains must be nothing. The first form of this excluded only the `return` and
 # reported the label as a read, which was a true count of the wrong thing.
-VM2_ARCHIVE_READS="$(git -C "$FORK_ROOT" grep -E '\bARCHIVE\b' "$M6_BASE_REV" -- \
+VM2_ARCHIVE_READS="$(git -C "$FORK_ROOT" grep -E '(^|[^[:alnum:]_])ARCHIVE([^[:alnum:]_]|$)' "$M6_BASE_REV" -- \
       'barretenberg/cpp/src/barretenberg/vm2/*' 2>/dev/null \
      | grep -v '\.test\.cpp' \
      | grep -v 'case world_state::MerkleTreeId::ARCHIVE:' \

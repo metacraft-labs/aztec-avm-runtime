@@ -52,7 +52,16 @@ note "TypeScript anchor: $M18_TS_ANCHOR"
 # 1a. Every DEFINITION of a thing called ForkCheckpoint, anywhere in the fork at the anchor.
 # `git grep` over the commit, not over the working tree: the working tree is checked out far
 # later, where these files have moved, and a walk of it would answer a different question.
-DEFS="$(git -C "$FORK_ROOT" grep -lE '(export )?(abstract )?class ForkCheckpoint\b|const ForkCheckpoint\b|ForkCheckpoint *= *class' \
+#
+# THE WORD BOUNDARY IS SPELLED THE POSIX WAY, AND THAT IS A DEFECT M37 MET RATHER THAN A STYLE.
+# git's regex engine is the platform's. `\b` is a GNU extension: on a macOS host it matches NOTHING,
+# so this enumeration answered ZERO definitions of a class that plainly exists, and the assertion
+# below went red for a reason that had nothing to do with the fork. `([^[:alnum:]_]|$)` is the
+# POSIX ERE that means what `\b` meant, and it answers 1 on both platforms. Five other fork greps
+# in this directory carried the same spelling and were corrected in the same pass; the one in
+# `test_public_processor_never_defaults_to_cpp` was the dangerous kind, because the answer it
+# wanted was ZERO and a needle that can never match would have supplied that for ever.
+DEFS="$(git -C "$FORK_ROOT" grep -lE '(export )?(abstract )?class ForkCheckpoint([^[:alnum:]_]|$)|const ForkCheckpoint([^[:alnum:]_]|$)|ForkCheckpoint *= *class' \
   "$M18_TS_ANCHOR" -- 2>/dev/null | sed "s/^$M18_TS_ANCHOR://" | LC_ALL=C sort)"
 N_DEFS="$(printf '%s\n' "$DEFS" | grep -c . || true)"
 printf '%s\n' "$DEFS" | sed 's/^/      /'
@@ -63,7 +72,7 @@ assert_eq "and it is the one the milestone names" \
 # The parallel-directory question, asked explicitly rather than left to the grep above: a
 # checkpoint helper of this SHAPE living somewhere else under a different name is what the
 # campaign has missed twice. Every declaration of the interface it is written over.
-MTCO="$(git -C "$FORK_ROOT" grep -lE 'interface MerkleTreeCheckpointOperations\b' \
+MTCO="$(git -C "$FORK_ROOT" grep -lE 'interface MerkleTreeCheckpointOperations([^[:alnum:]_]|$)' \
   "$M18_TS_ANCHOR" -- 2>/dev/null | sed "s/^$M18_TS_ANCHOR://" | LC_ALL=C sort)"
 assert_eq "MerkleTreeCheckpointOperations is declared exactly once, so there is one shape to match" \
   "yarn-project/stdlib/src/interfaces/merkle_tree_operations.ts" "$MTCO"

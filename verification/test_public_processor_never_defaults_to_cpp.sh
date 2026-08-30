@@ -75,7 +75,7 @@ assert_contains "and the free factory hard-defaults to the C++ path too" \
 
 # Nothing overrides the protected seam anywhere in the tree, which is the part of the
 # deliverable's justification that does not survive.
-N_OVERRIDES="$(git -C "$FORK_ROOT" grep -cE 'extends PublicProcessorFactory\b' "$M18_TS_ANCHOR" -- 2>/dev/null | grep -c . || true)"
+N_OVERRIDES="$(git -C "$FORK_ROOT" grep -cE 'extends PublicProcessorFactory([^[:alnum:]_]|$)' "$M18_TS_ANCHOR" -- 2>/dev/null | grep -c . || true)"
 assert_eq "no class in the whole fork extends PublicProcessorFactory, so we would be the seam's first user" \
   "0" "$N_OVERRIDES"
 

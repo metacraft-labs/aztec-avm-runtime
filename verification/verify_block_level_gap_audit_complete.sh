@@ -97,7 +97,7 @@ assert_contains "and its LATEST sentinel is max(uint32) rather than 0" \
   "$(FORK_SHOW barretenberg/cpp/src/barretenberg/world_state_reference/merkle_tree_id.hpp)"
 
 # --- the AVM does not touch the archive ------------------------------------
-VM2_ARCHIVE="$(git -C "$FORK_ROOT" grep -n -E '\bARCHIVE\b' "$M6_BASE_REV" -- \
+VM2_ARCHIVE="$(git -C "$FORK_ROOT" grep -n -E '(^|[^[:alnum:]_])ARCHIVE([^[:alnum:]_]|$)' "$M6_BASE_REV" -- \
                  'barretenberg/cpp/src/barretenberg/vm2/*' 2>/dev/null \
                | grep -v '\.test\.cpp' | sed -E "s|^$M6_BASE_REV:||")"
 # TWO lines, in ONE file, and they are a `case` label and the `return` under it — the whole of the
@@ -189,7 +189,7 @@ ARCHIVE_H="$(m14_noir_constant ARCHIVE_HEIGHT)"
 assert_eq "ARCHIVE_HEIGHT is 30, from noir-projects' constants.nr" "30" "$ARCHIVE_H"
 assert_eq "so a TypeScript archive tree would be this many nodes" "2147483647" \
   "$(python3 -c "print(2 ** ($ARCHIVE_H + 1) - 1)")"
-TS_FULL_HEIGHT="$(git -C "$FORK_ROOT" grep -l -E '^export (class|abstract class) [A-Za-z0-9_]*(Tree|MerkleTree)\b' \
+TS_FULL_HEIGHT="$(git -C "$FORK_ROOT" grep -l -E '^export (class|abstract class) [A-Za-z0-9_]*(Tree|MerkleTree)([^[:alnum:]_]|$)' \
                    "$M6_BASE_REV" -- 'yarn-project/**/*.ts' 2>/dev/null \
                  | sed -E "s|^$M6_BASE_REV:||" | grep -v '\.test\.ts' | sort | tr '\n' ' ')"
 note "TypeScript tree classes at the anchor: $TS_FULL_HEIGHT"
