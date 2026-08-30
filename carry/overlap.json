@@ -8,18 +8,78 @@
         "p2"
       ],
       "upstream_before": "15c88c779d9a832a08094bd2d6465620bc4c2dba",
-      "upstream_after": "189faea6f4680613b278aaaa790116da9a411c5d",
+      "upstream_after": "7d59300da2b3f48d3d9255fc93ab7c0242001d74",
       "upstream_ranges": [
+        [
+          310,
+          310
+        ],
+        [
+          313,
+          315
+        ],
+        [
+          318,
+          319
+        ],
+        [
+          322,
+          323
+        ],
+        [
+          324,
+          325
+        ],
+        [
+          334,
+          335
+        ],
+        [
+          336,
+          337
+        ],
+        [
+          358,
+          358
+        ],
+        [
+          365,
+          365
+        ],
+        [
+          473,
+          474
+        ],
+        [
+          476,
+          476
+        ],
+        [
+          720,
+          720
+        ],
+        [
+          734,
+          734
+        ],
         [
           876,
           1073
+        ],
+        [
+          1148,
+          1153
+        ],
+        [
+          1192,
+          1221
         ]
       ],
-      "acknowledged_at_tip": "44a57f8c4a109dea155892aef3f46a56d7a9ad29",
-      "acknowledged_on": "2026-08-25",
-      "reason": "Upstream's commit 539fc58613b (`chore: remove labs-owned deploy workflows and scenario/kind/bench machinery`) deletes 198 lines of `ci-network-*` arms from the top-level `case \"$cmd\"` dispatch, at base lines 876..1073. Patch 2 changes one line at base line 18, in the exported-version prologue: `expected_abs_wasi_version` 27.0 -> 33.0, plus a `WASI_SDK_PREFIX` default. The two regions are ~850 lines apart and the check computes that rather than taking this sentence's word for it.",
+      "acknowledged_at_tip": "7471a61f1a92f5b2f474db714f34430253892d99",
+      "acknowledged_on": "2026-08-30",
+      "reason": "FOUR upstream commits have now touched this file since the base and the acknowledgement is re-derived rather than extended. 539fc58613b (`chore: remove labs-owned deploy workflows and scenario/kind/bench machinery`) removed 198 lines of `ci-network-*` arms at base lines 876..1073, which is what the previous revision of this entry recorded. Three more have landed since: 9d9523b9735 (`chore: labs submodule with a foundation patch series`), 38fd5fc6e9c (`chore!: build and test the labs components from the submodule`) and 703d8961492 (`chore!: delete the in-tree labs components`), which between them rewrite the top-level dispatch's labs-component arms in sixteen regions spanning base lines 310..1221. Patch 2 changes ONE line, base line 18, in the exported-version prologue: `expected_abs_wasi_version` 27.0 -> 33.0 plus a `WASI_SDK_PREFIX` default. Line 18 is 292 lines above the first region upstream touches, and the check computes that disjointness rather than taking this sentence's word for it.",
       "why_it_does_not_reach_the_build": "Neither M6's AVM_WASM build nor M10's native suites execute `bootstrap.sh`. Both configure inside `barretenberg/cpp` under the fork's own `nix develop`, and the wasi-sdk they use comes from the dev shell - `verify_avm_wasm_build.sh` asserts `WASI_SDK_PREFIX` resolves into the nix store, which is the assertion that makes this more than an assumption. `bootstrap.sh`'s pin is upstream's own developer-provisioning gate; it is what patch 2 has to move for UPSTREAM's builds, and it is not an input to ours.",
-      "consequence_if_it_stops_holding": "If upstream edits the prologue this patch touches, the blobs move, this entry expires and the check goes red - and the right response is a rebase of patch 2, not a new entry."
+      "consequence_if_it_stops_holding": "If upstream edits the prologue this patch touches, the blobs move, this entry expires and the check goes red — and the right response is a rebase of patch 2, not a new entry. That has now happened three times WITHOUT touching the prologue, which is the entry working as designed: each time the blob moved, the entry expired, and it was re-derived against the new tip rather than widened to stop expiring."
     },
     "build-images/src/Dockerfile": {
       "patch": [
@@ -36,8 +96,8 @@
       "acknowledged_at_tip": "142dfcf4b2b5430a0c160490d376f085f377966a",
       "acknowledged_on": "2026-08-26",
       "reason": "Upstream's commit fd64d8ef9c7 (`fix: copy foundry binaries instead of moving foundryup symlinks`) changes one line at base line 47, inside the `RUN curl -L https://foundry.paradigm.xyz | bash` layer: `mv $FOUNDRY_BIN_DIR/$t` -> `cp -Lp $FOUNDRY_BIN_DIR/$t`. Patch 2 changes base lines 125..128, the wasi-sdk layer, moving the download from wasi-sdk-27.0 to 33.0 and adding a `WASI_SDK_PREFIX` default. Two different layers, ~78 lines apart, and the check computes the disjointness rather than taking this sentence's word for it.",
-      "why_it_does_not_reach_the_build": "This Dockerfile builds upstream's CI image. Neither M6's AVM_WASM build nor M10's native suites run in it or read it: both configure inside `barretenberg/cpp` under the fork's own `nix develop`, and the wasi-sdk they use comes from the dev shell \u2014 `verify_avm_wasm_build.sh` asserts `WASI_SDK_PREFIX` resolves into the nix store, which is the assertion that makes this more than an assumption. The line upstream changed installs `forge`/`cast`/`anvil`/`chisel`, which no C++ target links, includes or executes.",
-      "consequence_if_it_stops_holding": "If upstream edits the wasi-sdk layer this patch touches, the blobs move, this entry expires and the check goes red \u2014 and the right response is a rebase of patch 2, not a new entry."
+      "why_it_does_not_reach_the_build": "This Dockerfile builds upstream's CI image. Neither M6's AVM_WASM build nor M10's native suites run in it or read it: both configure inside `barretenberg/cpp` under the fork's own `nix develop`, and the wasi-sdk they use comes from the dev shell — `verify_avm_wasm_build.sh` asserts `WASI_SDK_PREFIX` resolves into the nix store, which is the assertion that makes this more than an assumption. The line upstream changed installs `forge`/`cast`/`anvil`/`chisel`, which no C++ target links, includes or executes.",
+      "consequence_if_it_stops_holding": "If upstream edits the wasi-sdk layer this patch touches, the blobs move, this entry expires and the check goes red — and the right response is a rebase of patch 2, not a new entry."
     },
     "scripts/setup-container.sh": {
       "patch": [
@@ -59,7 +119,114 @@
       "acknowledged_on": "2026-08-26",
       "reason": "The same upstream commit, fd64d8ef9c7, applied to the non-Docker path: base lines 165..167, `mv $HOME/.foundry/bin/$t` -> `cp -Lp $HOME/.foundry/bin/$t` plus a two-line comment. Patch 2 changes base lines 144 and 148..151, SECTION 5 (`wasi-sdk`), moving the install from 27 to 33. SECTION 5 and the foundry section are adjacent but disjoint, and the check computes that.",
       "why_it_does_not_reach_the_build": "`scripts/setup-container.sh` provisions upstream's dev container. This runtime does not use it: M6 and M10 configure in `barretenberg/cpp` under the fork's `nix develop`, and `verify_avm_wasm_build.sh` asserts the wasi-sdk in use resolves into the nix store rather than into `/opt/wasi-sdk`, which is the path this script writes. Upstream's change is to the foundry install, which neither build reads.",
-      "consequence_if_it_stops_holding": "If upstream edits SECTION 5, the blobs move, this entry expires and the check goes red \u2014 and the right response is a rebase of patch 2, not a new entry."
+      "consequence_if_it_stops_holding": "If upstream edits SECTION 5, the blobs move, this entry expires and the check goes red — and the right response is a rebase of patch 2, not a new entry."
+    }
+  },
+  "build_root_non_inputs": {
+    "_what": "Paths upstream has changed UNDER THE BUILD ROOT that are not build inputs. Conjunct 1 of verification/_carry_overlap.py used to be `upstream changed no path under barretenberg/cpp AT ALL`, which is a SUFFICIENT condition for M6's and M10's build evidence to describe the rebased tree and was free for six upstream moves. 38fd5fc6e9c ended it: it renames `yarn-project/` to `labs/yarn-project/` in five paths under the build root, none of which any compiler reads.",
+    "_why": "The narrowed conjunct is that no BUILD INPUT changed. The classification is COMPUTED at the tip, not listed here: `*.md` is documentation, and a `*.sh` is a non-input only if its basename appears in none of the ~128 cmake inputs under the build root, so a script an add_custom_command invokes IS a build input and reclassifies itself the day it becomes one. Anything the classifier cannot place is treated as a build input, which is the fail-safe direction. This block is the SECOND half: each surviving non-input is declared, pinned to upstream's blob ids at both ends so the entry expires the moment upstream touches the path again, and separately MEASURED to be uninvoked by M6's and M10's own build machinery — by the same spliced-in-tested invocation predicate the top-level bootstrap.sh acknowledgement uses.",
+    "_maintenance": "A new path under the build root fails the check and is named. Adding an entry here is a decision that the path is not a build input; the two mechanical conjuncts (the classifier placed it as a non-input, the blobs are current) are checked rather than read, and `upstream-changed-a-build-input` cannot be waived by anything in this file.",
+    "barretenberg/cpp/bootstrap.sh": {
+      "upstream_before": "fef250ff6531e4f7dfb0e32cf3dae01fd4236b6d",
+      "upstream_after": "24f9a11de5b2e4ab768a47204d02f63f9b124592",
+      "upstream_ranges": [
+        [
+          415,
+          415
+        ],
+        [
+          463,
+          463
+        ]
+      ],
+      "declared_at_tip": "7471a61f1a92f5b2f474db714f34430253892d99",
+      "declared_on": "2026-08-30",
+      "upstream_commit": "38fd5fc6e9c chore!: build and test the labs components from the submodule (#25318)",
+      "reason": "Two lines, both inside benchmark helpers: `ultrahonk_rollup_bench_cmds` repoints an inputs directory from `../../yarn-project/...` to `../../labs/yarn-project/...`, and `bench_ivc` replaces a `BOOTSTRAP_AFTER=... ../../bootstrap.sh` invocation with `make labs-yarn-project`. Upstream's own build DRIVER, and not an input to a cmake configure. M6 and M10 do not run it: both configure inside barretenberg/cpp directly, and the check measures that neither library invokes it."
+    },
+    "barretenberg/cpp/docs/Fuzzing.md": {
+      "upstream_before": "44acc15b4235cadbbd3fdd7f7fd7560b2324311a",
+      "upstream_after": "e111827bc0f5725966e9d75e5df78f262f8cdc63",
+      "upstream_ranges": [
+        [
+          60,
+          108
+        ]
+      ],
+      "declared_at_tip": "7471a61f1a92f5b2f474db714f34430253892d99",
+      "declared_on": "2026-08-30",
+      "upstream_commit": "38fd5fc6e9c chore!: build and test the labs components from the submodule (#25318)",
+      "reason": "Documentation. Forty-nine lines describing the deleted in-tree fuzzing harness removed. CMake reads no markdown, and the classifier places `*.md` as a non-input without needing this entry to say so."
+    },
+    "barretenberg/cpp/scripts/chonk_inputs.sh": {
+      "upstream_before": "ee672638aa15d209ebe66ae4167cc0792724dc66",
+      "upstream_after": "6611bca08a71b993b96481c35fb991072de0a0e8",
+      "upstream_ranges": [
+        [
+          62,
+          62
+        ],
+        [
+          65,
+          65
+        ],
+        [
+          71,
+          72
+        ]
+      ],
+      "declared_at_tip": "7471a61f1a92f5b2f474db714f34430253892d99",
+      "declared_on": "2026-08-30",
+      "upstream_commit": "38fd5fc6e9c chore!: build and test the labs components from the submodule (#25318)",
+      "reason": "The Chonk benchmark-input capture script. The same rename: `make yarn-project` -> `make labs-yarn-project`, and one `cd` into `labs/yarn-project/end-to-end`. Not referenced from any cmake input under the build root — the check searches all of them and PRINTS its positive control — and never invoked by M6's or M10's build machinery."
+    },
+    "barretenberg/cpp/scripts/ci_benchmark_ultrahonk_circuits.sh": {
+      "upstream_before": "2b5b31ba1b81f7c64d9327f4ca576dccb77b8be9",
+      "upstream_after": "7c652017fa0626728283c29820df5c23bcda7365",
+      "upstream_ranges": [
+        [
+          6,
+          6
+        ],
+        [
+          56,
+          56
+        ],
+        [
+          97,
+          97
+        ],
+        [
+          120,
+          121
+        ]
+      ],
+      "declared_at_tip": "7471a61f1a92f5b2f474db714f34430253892d99",
+      "declared_on": "2026-08-30",
+      "upstream_commit": "38fd5fc6e9c chore!: build and test the labs components from the submodule (#25318)",
+      "reason": "The UltraHonk CI benchmark driver. The same rename in a usage comment, two `cd`s and a cache-key computation. Not a cmake input and not invoked by either build."
+    },
+    "barretenberg/cpp/scripts/pinned_chonk_inputs.sh": {
+      "upstream_before": "d26627e9f43d34b837f4d8ff44d99700103f354b",
+      "upstream_after": "eaa57f3deada1a93f87f788ed970ad684bc78ead",
+      "upstream_ranges": [
+        [
+          79,
+          79
+        ],
+        [
+          87,
+          87
+        ],
+        [
+          89,
+          89
+        ]
+      ],
+      "declared_at_tip": "7471a61f1a92f5b2f474db714f34430253892d99",
+      "declared_on": "2026-08-30",
+      "upstream_commit": "38fd5fc6e9c chore!: build and test the labs components from the submodule (#25318)",
+      "reason": "The pinned-Chonk-inputs helper. Two comment lines and one capture directory repointed under `labs/`. The READ path it computes, `barretenberg/cpp/chonk-pinned-flows`, is unchanged. Not a cmake input and not invoked by either build."
     }
   }
 }

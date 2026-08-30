@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Summarise a campaign sweep log — and REFUSE to print a total while a hole is open.
 
-    scratchpad/campaign/m35-sweep-sum.py <sweep.log> [reference.json]
+    scratchpad/campaign/m37-sweep-sum.py <sweep.log> [reference.json]
 
 Why this exists, and why it refuses rather than warns. M22's sweep lost two regions of its own
 log when `/tmp` filled, and the campaign TOTAL survived both holes while the per-milestone

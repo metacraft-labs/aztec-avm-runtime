@@ -31,9 +31,19 @@
 # `codetracer-trace-format`, and for the same reason: an archive of a named revision cannot pick
 # up a worktree's uncommitted state.
 #
-# `noir` on `blocktracer` is 1.0.0-beta.18 and the pin is 1.0.0-beta.26, with the pin NOT an
-# ancestor of `blocktracer` — so M30's module, which is built from the branch, cannot stand in
-# here and the artifact formats would not have matched if it had.
+# THIS PARAGRAPH SAID SOMETHING THAT IS NO LONGER TRUE, AND THE CONCLUSION SURVIVES ON A
+# DIFFERENT REASON. It read: *"`noir` on `blocktracer` is 1.0.0-beta.18 and the pin is
+# 1.0.0-beta.26, with the pin NOT an ancestor of `blocktracer` — so M30's module, which is built
+# from the branch, cannot stand in here"*. On 2026-08-30 the tracer branch was reconciled onto the
+# beta.26 base, so `blocktracer` now reports **1.0.0-beta.26** and `40d6574f85` **IS** an ancestor
+# of it — measured, not assumed (`git merge-base --is-ancestor`).
+#
+# What still holds, and it was always the stronger half: the branch carries four commits the pin
+# does not — the `Field` hex rendering, the fixture repin, the virtual-filesystem compiler and the
+# SSA pass-timer fix — so a module built from the branch is not a module built from the pin, and
+# `git archive` of a NAMED REVISION is the only route that cannot pick up a worktree's
+# uncommitted state. The version equality is now a reason to re-measure rather than a reason to
+# substitute: the two trees agree on the release and differ on our own work.
 #
 # ---------------------------------------------------------------------------------------------
 # WHY THE PATCH IS APPLIED HERE RATHER THAN COMMITTED ANYWHERE

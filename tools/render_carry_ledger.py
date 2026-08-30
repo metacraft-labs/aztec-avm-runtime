@@ -263,9 +263,19 @@ def main(argv: list[str] | None = None) -> int:
     w("describes the REBASED tree only under an argument. The argument used to be that")
     w("upstream had touched no path this series modifies. It has, so the argument is now")
     w("three conjuncts, checked by `verify_carry_set_applies_to_upstream_head`: upstream has")
-    w("changed nothing under `barretenberg/cpp`, which is what both builds compile; every")
+    w("changed no BUILD INPUT under `barretenberg/cpp`, which is what both builds compile; every")
     w("overlap outside that tree is acknowledged below; and the two sets of changed lines are")
     w("disjoint per file. An overlap INSIDE `barretenberg/cpp` cannot be acknowledged at all.")
+    w("")
+    w("The first conjunct was NARROWED on 2026-08-30, and only because it stopped holding for a")
+    w("change that cannot reach a compile: upstream's `chore!: build and test the labs components")
+    w("from the submodule` renames `yarn-project/` to `labs/yarn-project/` in five paths under the")
+    w("build root — one build driver, one document and three benchmark-input scripts. It used to")
+    w("read *upstream changed no path under `barretenberg/cpp` at all*, a sufficient condition that")
+    w("was free for six upstream moves. What replaces it CLASSIFIES every changed path under the")
+    w("build root, at the tip, into build inputs and non-inputs, requires the first set to be empty,")
+    w("and treats anything it cannot place as a build input. The non-inputs are listed below and")
+    w("each is separately measured to be uninvoked by either build.")
     w("")
     if overlap is None:
         w("**No acknowledgement file.** `carry/overlap.json` is missing.")
@@ -301,6 +311,31 @@ def main(argv: list[str] | None = None) -> int:
             w("*Why it does not reach the build.* %s" % e.get("why_it_does_not_reach_the_build", ""))
             w("")
             w("*If it stops holding.* %s" % e.get("consequence_if_it_stops_holding", ""))
+            w("")
+
+    # The narrowed conjunct 1's declarations. Rendered from the SAME file, so a
+    # decision recorded in data is visible in the document rather than only in the
+    # check's output — and rendered from the paths rather than from a count, so an
+    # entry that is added and not rendered is a diff nobody has to notice.
+    non_inputs = {k: v for k, v in (overlap or {}).get("build_root_non_inputs", {}).items()
+                  if not k.startswith("_")}
+    w("### Changes under `barretenberg/cpp` that are not build inputs")
+    w("")
+    if not non_inputs:
+        w("Upstream has changed no path under the build root since the base, so the first conjunct")
+        w("holds in its original, stronger form and nothing is declared here.")
+        w("")
+    else:
+        w("| Path | Upstream changes | Declared at | Upstream commit |")
+        w("| --- | --- | --- | --- |")
+        for path, e in sorted(non_inputs.items()):
+            theirs = ", ".join("%d-%d" % (a, b) for a, b in e.get("upstream_ranges", [])) or "n/a"
+            w("| `%s` | lines %s | `%s` | %s |"
+              % (path, theirs, (e.get("declared_at_tip") or "")[:10],
+                 e.get("upstream_commit", "")))
+        w("")
+        for path, e in sorted(non_inputs.items()):
+            w("**`%s`** — %s" % (path, e.get("reason", "")))
             w("")
 
     w("## Filing")

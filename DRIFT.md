@@ -1202,6 +1202,145 @@ were absorbed silently.
 
 
 
+
+## D25 — the TypeScript half of `aztec-packages` left the repository, so the `ts` anchor cannot be advanced inside it at all
+
+- id: D25
+- status: open
+- opened: 2026-08-30
+- milestone: M37 (`verify_aztec_ts_anchor_current`)
+- design-question: —
+- sides: `pins.json`'s `ts` anchor `3a68d68ac2` (2026-06-25) and the fifteen upstream paths
+  `PROVENANCE.md` F9–F23 vendor from it, versus **their total absence at upstream's tip**
+  `7471a61f1a` (2026-08-27)
+- what: M37's plan asks for the `ts` anchor to be "advanced to current", measuring it 2,007 commits
+  behind `origin/next` at `651bda5d5f1` (2026-08-20). Measured live against `upstream/next` it is
+  **2,024** behind — and the distance is not the finding. On **2026-08-27**, `703d896149`
+  (*chore!: delete the in-tree labs components*) removed `yarn-project/` from `aztec-packages`
+  entirely: **3,328 files under that directory**, in a commit touching **10,825 paths**, together
+  with `noir-projects/labs/`, `docs/`, `playground/`, `spartan/`, `aztec-up/`, `release-image/` and
+  `labs-aztec-toolchain/`. They are rebuilt from a `labs` **submodule** the tip's `.gitmodules`
+  declares — `https://github.com/aztec-labs-eng/aztec-node.git`, branch `main`, `update = none`,
+  pinned at `1f14e9a69d1` — which the `cpp` anchor's `.gitmodules` does not have. So every one of
+  the fifteen paths resolves to nothing at the tip, and "advance the `ts` anchor" has no referent
+  in this repository any more. The ceiling is `703d896149^` = **`38fd5fc6e9`** (2026-08-27,
+  *chore!: build and test the labs components from the submodule*), the last commit at which the
+  TypeScript exists in-tree, and the `cpp` anchor is **16** commits before it.
+- why it matters: the same commit is why M11 went red. `38fd5fc6e9` renames `yarn-project/` to
+  `labs/yarn-project/` in five paths under `barretenberg/cpp` — a build driver, a document and
+  three benchmark-input scripts — which broke `verify_carry_set_applies_to_upstream_head`'s
+  sufficient condition for a change no compiler can see. One upstream commit, two apparently
+  unrelated reds.
+- decision: **The re-vendoring target is the `cpp` anchor, not the tip, and the reason is a
+  measurement rather than a preference.** Every one of the fifteen paths is **byte-identical at
+  `233d8e0993` and at `38fd5fc6e9`** — sixteen commits apart, and not one of them touched a file
+  this repository vendors. So the maximum reachable in-tree TypeScript is the one already pinned,
+  and the residual staleness is `ts -> cpp`, which is **seven files** (`public_processor.ts`,
+  `public_db_sources.ts`, `public_tx_simulator_interface.ts`, `txe/block_creation.ts`,
+  `public_tx_simulation_tester.ts`, `fixtures/utils.ts`, `simple_contract_data_source.ts`) totalling
+  82 added / 100 removed lines, with the other seven byte-identical at both anchors. F22
+  (`avm/fixtures/utils.ts`) is the one path ABSENT at `cpp`, **and it MOVED rather than dying** —
+  `4377ddf64c`, the commit the `ts` anchor is defined as the parent of, RENAMED it to
+  `avm/testing/utils.ts` and shrank it 154 -> 115 lines, and `simple_contract_data_source.ts`'s own
+  import moves with it in that commit. (An earlier draft of this entry said the file was "one of the
+  ~16k lines `4377ddf64c` removed" and that the row "cannot move at all". That is a limitation
+  stated with a false reason, which this campaign records as worse than one stated with none because
+  the false reason closes the search. It is corrected here and asserted in the check, in both
+  directions and against the naming commit.)
+
+  **AND TWO OF THE SEVEN DIFFS ARE SUBSTANTIVE RATHER THAN COSMETIC, WHICH IS WHY THE RESIDUE IS
+  NAMED FILE BY FILE.** Read rather than counted:
+
+  1. **`public_processor.ts`: upstream made the simulator INJECTABLE, which is the exact obstacle
+     M22's forced edit works around.** `PROVENANCE.md`'s `processor-block-assembly` class says
+     `PublicProcessorFactory` was **removed** because *"its `protected createPublicTxSimulator`
+     hard-defaults to `TelemetryCppPublicTxSimulator`, the NAPI AVM, with no flag"*. At the `cpp`
+     anchor the factory's constructor takes `private avmSimulator: AvmSimulator` and
+     `createPublicTxSimulator` builds a `TelemetryPublicTxSimulator(this.avmSimulator, …)` — no
+     `Cpp`, no default. So a re-vendoring at `cpp` would have to RE-DERIVE that edit rather than
+     carry it, and it would very likely be smaller. Nothing here acts on that yet; it is recorded
+     because "each forced edit re-derived, not carried forward blind" is the deliverable, and this
+     is what re-deriving one found.
+  2. **`txe/src/utils/block_creation.ts` (F19, M23's chain loop) carries an upstream defect at the
+     `ts` anchor that upstream has since fixed.** At `ts` it appends
+     `padArrayEnd(txEffect.l2ToL1Msgs, Fr.ZERO, NUMBER_OF_L1_L2_MESSAGES_PER_ROLLUP)` into
+     `MerkleTreeId.L1_TO_L2_MESSAGE_TREE` — **L2-to-L1 messages into the L1-to-L2 tree**, padded to
+     the rollup's message count. At `cpp` the function takes an explicit `l1ToL2Messages: Fr[] = []`
+     and appends those, unpadded, at compact indices. This runtime's dev chain produces no L1-to-L2
+     messages and its transactions produce no `l2ToL1Msgs`, so both sides append nothing today and
+     the vendored copy is not visibly wrong — which is exactly the shape this ledger exists for.
+  **The re-anchoring itself is NOT done in M37** — it is coupled to `npm.deletion_era`, which
+  `orchestration/` is pinned to, and moving both is a change to eleven milestones' subjects rather
+  than a vendoring. What M37 delivers is the measurement that sizes it, standing and falsifiable.
+  A genuinely current TypeScript anchor would be an anchor in a SECOND REPOSITORY; the labs remote
+  is public and answers `ls-remote` (`main` at `4a7a2e2335`), and opening an anchor there is a
+  decision of a size this milestone declines to take silently.
+- evidence: `aztec-avm-runtime/verification/verify_aztec_ts_anchor_current.sh` (all of the above,
+  re-derived on every run, with the `ts -> cpp` residue as the control that the byte-identity
+  comparison can report a difference); `git ls-tree 7471a61f1a yarn-project` (empty);
+  `git show 7471a61f1a:.gitmodules`; `pins.json` `anchors.ts`.
+
+## D26 — upstream's generated IPC schemas and this reactor's exports do NOT agree field for field, in seven places, and only one kind is ours
+
+- id: D26
+- status: open
+- opened: 2026-08-30
+- milestone: M37 (`verify_msgpack_schemas_match_field_for_field`)
+- design-question: —
+- sides: upstream's `wsdb_schema.jsonc` and `avm_schema.json`, the two `ipc-codegen` inputs that
+  generate the `aztec-wsdb` and `bb-avm-sim` services, versus the C++ types this runtime's
+  `avm.wasm` exports pack and unpack — both read out of the fork's object store at `anchors.cpp`
+- what: `REACTOR-ABI.md` establishes by EXECUTION that 42 crossed types round-trip and that 33 of
+  them are declared in upstream files no overlay of ours touches. D20 records, separately, that
+  upstream moved the AVM and the world state behind a generated msgpack IPC boundary. From those
+  two true statements the campaign has been saying that upstream's IPC client and our wasm reactor
+  are "two transports over one schema". **That both sides use msgpack, and that our reactor's types
+  are upstream's declared types, was measured; field-for-field agreement was not.** Measured now,
+  over eighteen declared pairs: **eleven AGREE — with identical field ORDER, not merely equal sets
+  — and seven DIFFER**, in three kinds.
+
+  1. **A SPELLING UPSTREAM DISAGREES WITH ITSELF ABOUT.** `SequentialInsertionResult{Nullifier,
+     PublicData}`: the generated schema declares `lowLeafWitnessData` / `insertionWitnessData`
+     while upstream's own C++ struct declares
+     `SERIALIZATION_FIELDS(low_leaf_witness_data, insertion_witness_data)` — the macro that emits
+     member names verbatim, not the camel-casing one. Two sets of wire keys for one type, and
+     neither of them is ours.
+  2. **A NAME, NOT ONLY A CASE.** `FindLowLeaf`'s response field is `alreadyPresent`;
+     `GetLowIndexedLeafResponse`, which `avm_merkle_db_get_low_indexed_leaf` returns, is
+     `is_already_present`. The `is_` prefix is dropped as well as the case changed, so no case
+     transform reconciles them.
+  3. **A SHAPE.** `GetTreeInfo` answers per tree — `[treeId, root, size, depth]` — where
+     `AppendOnlyTreeSnapshot` is `[root, nextAvailableLeafIndex]`; and `GetStateReference` returns
+     a `TreeStateReference[]` where `avm_merkle_db_get_tree_roots` returns one `TreeSnapshots` with
+     four NAMED members. Upstream's IPC models the trees as a list keyed by id; the AVM models them
+     as a record.
+
+  **And the AVM schema declares nothing at all.** `avm_schema.json` is twenty-four lines: both
+  commands — `Simulate` and `SimulateWithHints`, upstream's spellings of `avm_simulate` and
+  `avm_simulate_with_hinted_dbs` — take `{inputs: "bytes"}` and return `{result: "bytes"}`. The
+  payload is opaque to the schema, while our exports take `AvmFastSimulationInputs`
+  `[wsRevision, config, tx, globalVariables, protocolContracts]` and `AvmProvingInputs`
+  `[publicInputs, hints]`.
+- why it matters: "two transports over one schema" is the sentence that makes M15's rejected
+  "chatty" arm structurally identical to upstream's IPC service rather than a road not taken, and
+  it is the sentence a future host implementer would rely on. It is true of the TRANSPORT and false
+  of the DECLARATION, and the difference decides whether a decoder written against
+  `wsdb_schema.jsonc` can read this reactor's output. It cannot, for those seven.
+- decision: **Recorded as measured, not promoted, and not repaired.** The eleven agreements include
+  every leaf type, the revision envelope and the error envelope — the last against BOTH services'
+  schemas and against upstream's own `bb::bbapi::ErrorResponse`, which is the control saying the
+  agreement is about a shape and not about our copy. The seven are upstream's own inconsistency in
+  five cases and an intentional modelling difference in two; none is a defect in this runtime, and
+  changing our exports to match a schema upstream's own C++ does not match would make things worse.
+  What is owned is the measurement: the comparison runs on every sweep and pins the agreeing and
+  differing sets BY NAME, so a set that changes is a named move rather than a total.
+- evidence: `aztec-avm-runtime/verification/verify_msgpack_schemas_match_field_for_field.sh` (29
+  assertions, the residues printed, with a fabricated field planted on the schema side of an
+  agreeing pair as the negative control); `aztec-avm-runtime/verification/_msgpack_schema_compare.py`
+  (and its `--self-test` over upstream's own `msgpack_detail::camel_case`);
+  `git show 233d8e0993:barretenberg/cpp/src/barretenberg/wsdb/wsdb_schema.jsonc`;
+  `git show 233d8e0993:barretenberg/cpp/src/barretenberg/avm/avm_schema.json`.
+
 <!-- END:drift -->
 
 ---

@@ -165,7 +165,7 @@ which files. It exits non-zero if any patch we still carry stops applying. CI ru
 weekly and on every change to the series, so the cost is a dated failure rather than
 a discovery during an emergency.
 
-Last recorded replay, onto `upstream/next` (9df414ec0e), 14 commit(s) past the base:
+Last recorded replay, onto `upstream/next` (7471a61f1a), 19 commit(s) past the base:
 
 | Patch | Result |
 | --- | --- |
@@ -182,21 +182,31 @@ and run upstream's own native suites from the base plus this stack, and that evi
 describes the REBASED tree only under an argument. The argument used to be that
 upstream had touched no path this series modifies. It has, so the argument is now
 three conjuncts, checked by `verify_carry_set_applies_to_upstream_head`: upstream has
-changed nothing under `barretenberg/cpp`, which is what both builds compile; every
+changed no BUILD INPUT under `barretenberg/cpp`, which is what both builds compile; every
 overlap outside that tree is acknowledged below; and the two sets of changed lines are
 disjoint per file. An overlap INSIDE `barretenberg/cpp` cannot be acknowledged at all.
 
+The first conjunct was NARROWED on 2026-08-30, and only because it stopped holding for a
+change that cannot reach a compile: upstream's `chore!: build and test the labs components
+from the submodule` renames `yarn-project/` to `labs/yarn-project/` in five paths under the
+build root — one build driver, one document and three benchmark-input scripts. It used to
+read *upstream changed no path under `barretenberg/cpp` at all*, a sufficient condition that
+was free for six upstream moves. What replaces it CLASSIFIES every changed path under the
+build root, at the tip, into build inputs and non-inputs, requires the first set to be empty,
+and treats anything it cannot place as a build input. The non-inputs are listed below and
+each is separately measured to be uninvoked by either build.
+
 | Path | Patch | Upstream changes | This series changes | Acknowledged at |
 | --- | --- | --- | --- | --- |
-| `bootstrap.sh` | p2 | lines 876-1073 | lines 18-18 | `44a57f8c4a` |
+| `bootstrap.sh` | p2 | lines 310-310, 313-315, 318-319, 322-323, 324-325, 334-335, 336-337, 358-358, 365-365, 473-474, 476-476, 720-720, 734-734, 876-1073, 1148-1153, 1192-1221 | lines 18-18 | `7471a61f1a` |
 | `build-images/src/Dockerfile` | p2 | lines 47-47 | lines 125-128 | `142dfcf4b2` |
 | `scripts/setup-container.sh` | p2 | lines 165-166, 167-167 | lines 144-144, 148-151 | `142dfcf4b2` |
 
-**`bootstrap.sh`** — Upstream's commit 539fc58613b (`chore: remove labs-owned deploy workflows and scenario/kind/bench machinery`) deletes 198 lines of `ci-network-*` arms from the top-level `case "$cmd"` dispatch, at base lines 876..1073. Patch 2 changes one line at base line 18, in the exported-version prologue: `expected_abs_wasi_version` 27.0 -> 33.0, plus a `WASI_SDK_PREFIX` default. The two regions are ~850 lines apart and the check computes that rather than taking this sentence's word for it.
+**`bootstrap.sh`** — FOUR upstream commits have now touched this file since the base and the acknowledgement is re-derived rather than extended. 539fc58613b (`chore: remove labs-owned deploy workflows and scenario/kind/bench machinery`) removed 198 lines of `ci-network-*` arms at base lines 876..1073, which is what the previous revision of this entry recorded. Three more have landed since: 9d9523b9735 (`chore: labs submodule with a foundation patch series`), 38fd5fc6e9c (`chore!: build and test the labs components from the submodule`) and 703d8961492 (`chore!: delete the in-tree labs components`), which between them rewrite the top-level dispatch's labs-component arms in sixteen regions spanning base lines 310..1221. Patch 2 changes ONE line, base line 18, in the exported-version prologue: `expected_abs_wasi_version` 27.0 -> 33.0 plus a `WASI_SDK_PREFIX` default. Line 18 is 292 lines above the first region upstream touches, and the check computes that disjointness rather than taking this sentence's word for it.
 
 *Why it does not reach the build.* Neither M6's AVM_WASM build nor M10's native suites execute `bootstrap.sh`. Both configure inside `barretenberg/cpp` under the fork's own `nix develop`, and the wasi-sdk they use comes from the dev shell - `verify_avm_wasm_build.sh` asserts `WASI_SDK_PREFIX` resolves into the nix store, which is the assertion that makes this more than an assumption. `bootstrap.sh`'s pin is upstream's own developer-provisioning gate; it is what patch 2 has to move for UPSTREAM's builds, and it is not an input to ours.
 
-*If it stops holding.* If upstream edits the prologue this patch touches, the blobs move, this entry expires and the check goes red - and the right response is a rebase of patch 2, not a new entry.
+*If it stops holding.* If upstream edits the prologue this patch touches, the blobs move, this entry expires and the check goes red — and the right response is a rebase of patch 2, not a new entry. That has now happened three times WITHOUT touching the prologue, which is the entry working as designed: each time the blob moved, the entry expired, and it was re-derived against the new tip rather than widened to stop expiring.
 
 **`build-images/src/Dockerfile`** — Upstream's commit fd64d8ef9c7 (`fix: copy foundry binaries instead of moving foundryup symlinks`) changes one line at base line 47, inside the `RUN curl -L https://foundry.paradigm.xyz | bash` layer: `mv $FOUNDRY_BIN_DIR/$t` -> `cp -Lp $FOUNDRY_BIN_DIR/$t`. Patch 2 changes base lines 125..128, the wasi-sdk layer, moving the download from wasi-sdk-27.0 to 33.0 and adding a `WASI_SDK_PREFIX` default. Two different layers, ~78 lines apart, and the check computes the disjointness rather than taking this sentence's word for it.
 
@@ -209,6 +219,26 @@ disjoint per file. An overlap INSIDE `barretenberg/cpp` cannot be acknowledged a
 *Why it does not reach the build.* `scripts/setup-container.sh` provisions upstream's dev container. This runtime does not use it: M6 and M10 configure in `barretenberg/cpp` under the fork's `nix develop`, and `verify_avm_wasm_build.sh` asserts the wasi-sdk in use resolves into the nix store rather than into `/opt/wasi-sdk`, which is the path this script writes. Upstream's change is to the foundry install, which neither build reads.
 
 *If it stops holding.* If upstream edits SECTION 5, the blobs move, this entry expires and the check goes red — and the right response is a rebase of patch 2, not a new entry.
+
+### Changes under `barretenberg/cpp` that are not build inputs
+
+| Path | Upstream changes | Declared at | Upstream commit |
+| --- | --- | --- | --- |
+| `barretenberg/cpp/bootstrap.sh` | lines 415-415, 463-463 | `7471a61f1a` | 38fd5fc6e9c chore!: build and test the labs components from the submodule (#25318) |
+| `barretenberg/cpp/docs/Fuzzing.md` | lines 60-108 | `7471a61f1a` | 38fd5fc6e9c chore!: build and test the labs components from the submodule (#25318) |
+| `barretenberg/cpp/scripts/chonk_inputs.sh` | lines 62-62, 65-65, 71-72 | `7471a61f1a` | 38fd5fc6e9c chore!: build and test the labs components from the submodule (#25318) |
+| `barretenberg/cpp/scripts/ci_benchmark_ultrahonk_circuits.sh` | lines 6-6, 56-56, 97-97, 120-121 | `7471a61f1a` | 38fd5fc6e9c chore!: build and test the labs components from the submodule (#25318) |
+| `barretenberg/cpp/scripts/pinned_chonk_inputs.sh` | lines 79-79, 87-87, 89-89 | `7471a61f1a` | 38fd5fc6e9c chore!: build and test the labs components from the submodule (#25318) |
+
+**`barretenberg/cpp/bootstrap.sh`** — Two lines, both inside benchmark helpers: `ultrahonk_rollup_bench_cmds` repoints an inputs directory from `../../yarn-project/...` to `../../labs/yarn-project/...`, and `bench_ivc` replaces a `BOOTSTRAP_AFTER=... ../../bootstrap.sh` invocation with `make labs-yarn-project`. Upstream's own build DRIVER, and not an input to a cmake configure. M6 and M10 do not run it: both configure inside barretenberg/cpp directly, and the check measures that neither library invokes it.
+
+**`barretenberg/cpp/docs/Fuzzing.md`** — Documentation. Forty-nine lines describing the deleted in-tree fuzzing harness removed. CMake reads no markdown, and the classifier places `*.md` as a non-input without needing this entry to say so.
+
+**`barretenberg/cpp/scripts/chonk_inputs.sh`** — The Chonk benchmark-input capture script. The same rename: `make yarn-project` -> `make labs-yarn-project`, and one `cd` into `labs/yarn-project/end-to-end`. Not referenced from any cmake input under the build root — the check searches all of them and PRINTS its positive control — and never invoked by M6's or M10's build machinery.
+
+**`barretenberg/cpp/scripts/ci_benchmark_ultrahonk_circuits.sh`** — The UltraHonk CI benchmark driver. The same rename in a usage comment, two `cd`s and a cache-key computation. Not a cmake input and not invoked by either build.
+
+**`barretenberg/cpp/scripts/pinned_chonk_inputs.sh`** — The pinned-Chonk-inputs helper. Two comment lines and one capture directory repointed under `labs/`. The READ path it computes, `barretenberg/cpp/chonk-pinned-flows`, is unchanged. Not a cmake input and not invoked by either build.
 
 ## Filing
 

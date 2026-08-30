@@ -271,7 +271,17 @@ assert_contains "the version oracle takes a major" "{ name: 'major', type: U32 }
 assert_contains "…and a minor" "{ name: 'minor', type: U32 }" "$VERSION_ORACLE"
 assert_eq "…and NOTHING ELSE — two parameters, so the contract cannot send its interface hash" "2" \
   "$(printf '%s\n' "$VERSION_ORACLE" | grep -c "name: '")"
+# `str_has_sub` rather than `printf … | grep -q`: the pipeline form is what
+# `verify_no_pipeline_predicates` pins BY NAME, and this line was a sixth survivor —
+# so M21 went 69/3 for a spelling in an M37 check. The pipe was harmless here (it is
+# inside `bash -c`, so the failure counter is not in a subshell), which is exactly why
+# a census pinned by name and not by harm is the instrument that catches it.
 assert_false "…and it declares no return type through which one could come back" \
-  bash -c "printf '%s' \"\$0\" | grep -q returnType" "$VERSION_ORACLE"
+  str_has_sub "$VERSION_ORACLE" returnType
+# …and the predicate is shown able to say YES, so the absence above is a measurement
+# rather than a needle that stopped matching.
+assert_true "…and that same predicate finds a returnType when one is spliced in" \
+  str_has_sub "$VERSION_ORACLE
+      returnType: FIELD," returnType
 
 finish

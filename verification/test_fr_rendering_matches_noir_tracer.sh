@@ -86,8 +86,19 @@ assert_true "…under the type (TypeKind::Int, \"Field\"), which is the type thi
   str_has_sub "$GLUE" 'PrintableType::Field => (TypeKind::Int, "Field".to_string()),'
 assert_true "…and to_i128 PANICS rather than truncating, above 127 bits" \
   str_has_sub "$FIELDEL" 'panic!("field element too large for i128");'
-assert_true "…gated on fits_in_i128, which is num_bits <= 127" \
-  str_has_sub "$FIELDEL" 'num_bits <= 127'
+# THE NEEDLE MOVED UNDER THIS ASSERTION, AND THE PROPERTY DID NOT. Until 2026-08-30 this read
+# `num_bits <= 127`, which matched `acir_field` at 1.0.0-beta.18. The Noir reconciliation onto the
+# beta.26 base rewrote the predicate as a method call — `self.num_bits() <= 127` — and the old
+# fixed string does not occur in `num_bits() <= 127`, because of the parentheses. So the check went
+# red for a reason that has nothing to do with its subject, which is the cheap direction and is
+# exactly what M37 exists to find: this is the "re-derive anything a reconciliation moves" case,
+# arriving in a check rather than in a document. The gate is still `num_bits() <= 127`, in
+# `fits_in_i128`, and the assertion now names the spelling that is there, with the declaration
+# beside it so a predicate that was renamed away cannot satisfy it either.
+assert_true "…gated on fits_in_i128, which is num_bits() <= 127" \
+  str_has_sub "$FIELDEL" 'self.num_bits() <= 127'
+assert_true "…and fits_in_i128 is still the predicate that gates it" \
+  str_has_sub "$FIELDEL" 'pub fn fits_in_i128(&self) -> bool {'
 # The negative control for the four above.
 assert_false "a needle in neither Noir file does not match" \
   str_has_sub "$GLUE$FIELDEL" 'ValueRecord::BigInt { b: field_value'

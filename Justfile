@@ -3332,6 +3332,59 @@ m36-arms:
     node tools/run_note_discovery_arms.mjs "$work" > "$work/note-discovery.json"
     echo "m36-arms: wrote $work/note-discovery.json"
 
+# ---------------------------------------------------------------------------
+# M37 — Reconciliation: everything on the latest upstream.
+#
+# Four checks and no build. Every one of them is a question about a REVISION —
+# which commit a branch sits on, which commit a schema was read at, which commit
+# the carry replay ran against — so they are answered out of object stores rather
+# than out of worktrees, and none of them fetches. `verify_carry_set_applies_to_
+# upstream_head` (M11) is the one check in this repository that fetches upstream,
+# and two checks fetching the same remote in one sweep would be two different tips
+# inside one measurement.
+verify-m37-noir:
+    @verification/verify_noir_base_is_reconciled.sh
+
+verify-m37-anchor:
+    @verification/verify_aztec_ts_anchor_current.sh
+
+verify-m37-msgpack:
+    @verification/verify_msgpack_schemas_match_field_for_field.sh
+
+verify-m37-m11:
+    @verification/verify_m11_carry_set_resolved_or_retired.sh
+
+verify-m37:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    # `verify_oracle_interface_hash_matches` IS M37's AND IS IN THIS LIST. It landed on a
+    # standalone recipe of its own, so the sweep — which runs `just verify-m<N>` — never counted
+    # it, and a milestone Verification entry whose assertions no sweep counts is a check that
+    # reads as absent. M28's exclusion of one M27 check is the deliberate shape: it is PINNED, by
+    # name, in `ci_browser_gate.sh`. This one was not excluded, it was simply not added.
+    for check in \
+      verify_noir_base_is_reconciled \
+      verify_aztec_ts_anchor_current \
+      verify_msgpack_schemas_match_field_for_field \
+      verify_m11_carry_set_resolved_or_retired \
+      verify_oracle_interface_hash_matches
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m37: FAILED" >&2
+    else
+      echo "verify-m37: all checks passed"
+    fi
+    # A RECIPE THAT PRINTS `FAILED` AND EXITS 0 IS THE MIRROR OF A CHECK THAT CANNOT FAIL.
+    # Without this line the loop's `|| rc=1` fed a variable nothing read, so a red check
+    # inside a sweep reported rc 0 for the whole milestone — "exit status AND the specific
+    # failure mode", with the status side missing. Found by M37's review, in M36's recipe
+    # and in M37's own, when verify_aztec_ts_anchor_current went 5-red and `just` exited 0.
+    exit "$rc"
+
 verify-m36-discovery:
     @verification/e2e_note_discovery_across_blocks.sh
 
@@ -3358,6 +3411,12 @@ verify-m36:
     else
       echo "verify-m36: all checks passed"
     fi
+    # A RECIPE THAT PRINTS `FAILED` AND EXITS 0 IS THE MIRROR OF A CHECK THAT CANNOT FAIL.
+    # Without this line the loop's `|| rc=1` fed a variable nothing read, so a red check
+    # inside a sweep reported rc 0 for the whole milestone — "exit status AND the specific
+    # failure mode", with the status side missing. Found by M37's review, in M36's recipe
+    # and in M37's own, when verify_aztec_ts_anchor_current went 5-red and `just` exited 0.
+    exit "$rc"
 
 verify-m35:
     #!/usr/bin/env bash

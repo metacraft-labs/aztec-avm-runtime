@@ -20,13 +20,38 @@ What replaces it is NOT a looser version of the same test. It is a different, an
 strictly narrower, argument with three conjuncts, each of which is computed here
 rather than asserted in prose:
 
-  1. NOTHING UPSTREAM CHANGED IS IN THE TREE THE EVIDENCE COMPILES. M6 and M10 both
-     configure in `barretenberg/cpp`, and if upstream has changed no path under it
-     then no translation unit, no CMake input and no test source that either build
-     reads can differ between BASE + stack and TIP + stack. This is the conjunct
-     that carries the weight, and it is the one that cannot be waived: an
-     acknowledgement for a path under the build root is REFUSED here, so the class
-     of overlap that would actually void the evidence has no way through.
+  1. NOTHING UPSTREAM CHANGED IS A BUILD INPUT OF THE TREE THE EVIDENCE COMPILES.
+     M6 and M10 both configure in `barretenberg/cpp`. This is the conjunct that
+     carries the weight, and it is the one that cannot be waived by an
+     acknowledgement: an entry in `carry/overlap.json` for a path under the build
+     root is REFUSED here, so the class of overlap that would actually void the
+     evidence has no way through.
+
+     NARROWED ON 2026-08-30, AND THE NARROWING IS COMPUTED RATHER THAN ARGUED.
+     For six upstream moves this conjunct was "upstream changed no path under
+     `barretenberg/cpp` AT ALL", which is a SUFFICIENT condition and was free
+     while it held. `703d896149` (*chore!: delete the in-tree labs components*)
+     ended it: `38fd5fc6e9` renames `yarn-project/` to `labs/yarn-project/` in
+     five paths under the build root — `bootstrap.sh`, `docs/Fuzzing.md` and
+     three benchmark-input scripts — and the sufficient condition became
+     unavailable for a change that cannot reach a compile.
+
+     What replaces it is NOT "trust the five". Every path upstream changed under
+     the build root is CLASSIFIED, by the caller, into `build_inputs` and
+     `build_root_non_inputs`, and this file requires:
+
+       * `build_inputs` to be EMPTY — unchanged in force; a translation unit, a
+         header or a CMake input moving still voids the evidence outright and no
+         entry anywhere can excuse it;
+       * every `build_root_non_inputs` path to carry an entry in
+         `carry/overlap.json`'s `build_root_non_inputs` block, pinned to
+         upstream's blob ids at BOTH ends exactly like an overlap acknowledgement,
+         so upstream touching the path again expires the entry.
+
+     A path the caller cannot classify must be reported as a `build_input`. The
+     classification is fail-safe in that direction on purpose: an unrecognised
+     file under the tree the evidence compiles is a reason to rebuild, not a
+     reason to look for an entry.
 
   2. EVERY OVERLAPPING PATH IS ACKNOWLEDGED, AND THE ACKNOWLEDGEMENT IS PINNED TO
      THE EXACT CHANGE. `carry/overlap.json` names each one with the reason it does
@@ -66,6 +91,10 @@ R_IN_BUILD_TREE = "overlap-inside-the-tree-the-evidence-compiles"
 R_REGION = "upstream-and-carry-change-the-same-lines"
 R_WRONG_OWNER = "acknowledgement-names-the-wrong-patch"
 R_NOT_AN_OVERLAP = "acknowledged-path-is-not-in-the-overlap"
+# The narrowed conjunct 1's two halves.
+R_BUILD_INPUT = "upstream-changed-a-build-input"
+R_NON_INPUT_UNDECLARED = "build-root-change-not-declared-a-non-input"
+R_NON_INPUT_STALE = "non-input-declaration-does-not-match-upstreams-current-change"
 
 
 def _overlaps(a: list[list[int]], b: list[list[int]]) -> list[tuple[list[int], list[int]]]:
@@ -131,13 +160,55 @@ def decide(inp: dict) -> dict:
     in_build_tree = sorted(p for p in inp["upstream_paths"]
                            if p == build_root or p.startswith(build_root.rstrip("/") + "/"))
 
+    # The narrowed conjunct 1. The caller classifies; this file decides.
+    #
+    # Anything the caller did not put in EITHER list is treated as a build input:
+    # `classified` is the union it declared, and every in-build-tree path outside it
+    # is a residue that fails. That is the fail-safe direction, and it is the reason
+    # a classifier that silently stops recognising a file makes this RED rather than
+    # smaller.
+    declared_inputs = set(inp.get("build_inputs", []))
+    declared_non = set(inp.get("build_root_non_inputs", []))
+    non_input_decl = inp.get("non_input_declarations", {})
+    up_blobs = inp["upstream_blobs"]
+
+    build_input_rejects: dict[str, list[str]] = {}
+
+    def reject_build(path: str, reason: str) -> None:
+        build_input_rejects.setdefault(path, [])
+        if reason not in build_input_rejects[path]:
+            build_input_rejects[path].append(reason)
+
+    for path in in_build_tree:
+        if path in declared_inputs or path not in declared_non:
+            # Either explicitly a build input, or unclassified — same verdict.
+            reject_build(path, R_BUILD_INPUT)
+            continue
+        entry = non_input_decl.get(path)
+        if entry is None:
+            reject_build(path, R_NON_INPUT_UNDECLARED)
+            continue
+        seen = up_blobs.get(path, {})
+        if (entry.get("upstream_before") != seen.get("before")
+                or entry.get("upstream_after") != seen.get("after")):
+            reject_build(path, R_NON_INPUT_STALE)
+
+    voided = bool(rejected) or bool(build_input_rejects)
+
     return {
         "build_root": build_root,
         "overlap": overlap,
         "accepted": [p for p in overlap if p not in rejected],
         "rejected": rejected,
         "upstream_paths_in_build_tree": in_build_tree,
-        "verdict": "void" if (rejected or in_build_tree) else "transfers",
+        "build_inputs_changed": sorted(
+            p for p, rs in build_input_rejects.items() if R_BUILD_INPUT in rs
+        ),
+        "build_root_non_inputs_accepted": sorted(
+            p for p in in_build_tree if p in declared_non and p not in build_input_rejects
+        ),
+        "build_root_rejected": build_input_rejects,
+        "verdict": "void" if voided else "transfers",
     }
 
 

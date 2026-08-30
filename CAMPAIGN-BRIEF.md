@@ -839,6 +839,55 @@ path. A genuinely optional tool would deserve the `note`, and then the milestone
 that the tool is present. **Rule: `2>/dev/null || true` followed by `if [ -n "$x" ]` is a skipped
 test. Decide which of the two it is and say so, because the `if` will otherwise decide it silently.**
 
+### A WRAPPER THAT SWALLOWS THE STATUS OF THE THING IT WRAPS, AND A REDIRECTION THAT SWALLOWS THE TRAP
+
+**Three instances, all in one small helper, and the mutation matrix found two of the three.** M37's
+`lib_m37.sh` gives its checks the two things `lib.sh` does not: a summary line on an abnormal exit
+(M22's trap, sixth copy, kept local for M22's own reason) and a BOUND on every subprocess, because
+*"a trap fires on exit; a process that never exits has no exit"*.
+
+  1. **`if timeout …; then return 0; fi; local rc=$?`.** An `if` whose condition is FALSE with no
+     `else` branch exits **0**, so `$?` after the `fi` is the `if` STATEMENT's status and not the
+     command's. The comparer exited 3, the wrapper returned 0, and exactly the two assertions that
+     read the comparer's status went red while every other assertion stayed green — which reads as a
+     defect in the subject. `|| rc=$?` is the fix, and it is the same family as this file's "a pipe
+     that put the failure counter in a subshell", one level out.
+  2. **`timeout --preserve-status` makes a timeout indistinguishable from a failure.** With it, a
+     killed command's own status comes back — **143** for SIGTERM — so the 124/137 test never fires
+     and a HANG is reported as an ordinary non-zero exit. Measured with `m37_bounded 2 sleep 20`.
+     Without the flag `timeout` returns 124 on the bound and a normal exit still returns the
+     command's own status.
+  3. **AND THE ONE THE HANG ARM FOUND, WHICH IS THE WORST OF THE THREE.** The bounded call site was
+     `m37_bounded … python3 … > "$WORK/out.json" 2>"$WORK/out.err"`. Those redirections are still in
+     force when `exit` runs the EXIT trap, so the trap's summary line went **into `out.json`** and
+     the `die` diagnostic into `out.err`, and the arm printed **nothing at all** — no summary, no
+     failure, just the harness's `restored; manifest verified`. **A check that dies with its summary
+     redirected into a scratch file reads to the sweep as a check that is not there**: this file's
+     283-assertion silent-shrink shape, arriving through a file descriptor, inside the function
+     written to prevent the other half of it. The function owns the redirection now
+     (`m37_bounded_out`), and the arm reports `10 assertion(s), 1 failure(s)` at column 0.
+
+*The general form: a wrapper is a thing under test, and the two questions to ask of one are whether
+it passes the wrapped command's status out unchanged and whether anything it holds open outlives the
+command it wraps.*
+
+### A `SKIP:` DIAGNOSTIC IS NOT LOUD IF THE TEST RUNNER CAPTURES IT
+
+**One instance, in `noir`, and it made a baseline worthless.** `tooling/tracer/tests/test_tracer.rs`
+locates `nargo` and `ct-print`, prints `SKIP: …` to **stderr** when it cannot, and returns from a
+`let Some(doc) = … else { return; }`. Its own header says *"so silent skips remain forbidden"*.
+`cargo test` **captures stderr for a PASSING test**, so with `CARGO_TARGET_DIR` pointed away from the
+worktree all six tests reported `ok. 6 passed; 0 failed` in **0.00 s** over a tree that had run
+nothing — where the real result is 3 pass / 3 fail. The `SKIP:` line was written to make skipping
+loud and the runner made it silent.
+
+This is the "conditional assertion block is a skipped test wearing an `if`" family with the guard in
+Rust and the silencer in the test runner. The remedy is the same one: **the default is to PANIC**,
+naming what is missing and the command that supplies it, with `NOIR_TRACER_ALLOW_SKIP=1` as a
+deliberate opt-out — calibrated both ways. **And the general lesson is about baselines**: a baseline
+that takes 0.00 s over tests that SPAWN a compiler is not a baseline, and the elapsed time was the
+only thing on the screen that said so.
+
 ### Conjunctions need a negative case per conjunct
 A four-tree conjunction whose only negative case exercised one tree: dropping any
 of the other three passed all twelve cases.
@@ -1130,6 +1179,70 @@ m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
 m28 353  m29 127
                                                        CAMPAIGN TOTAL 10,178
 ```
+
+**M37 TOOK IT TO 12,069, `delta +0`, AND ITS THREE MOVES WERE NAMED BEFORE THE SWEEP RAN — ONE OF
+THEM A PARALLEL TRACK'S.** Measured M0–M37 on 2026-08-30 by M37's implementation, **after its last
+edit**, `setsid`-detached in this repository's own dev shell (node v24.19.0), one milestone at a time
+with nothing else running, `TMPDIR` and the log under `~/.cache`, at `origin/dev` `d324221`, **no
+hole in the log** (76 markers for 38 milestones), **34 of 38 exit 0**:
+
+```
+m0 156  m1 182  m2 293  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 285  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 273  m26 313  m27 345
+m28 357  m29 127  m30 218  m31 421  m32 237  m33 248  m34 217  m35 239  m36 140
+m37 132
+                                                       CAMPAIGN TOTAL 12,069
+```
+
+**Every one of M0–M36 came out at its declared value TO THE ASSERTION**, and
+11,910 + 23 + 1 + 3 + 132 = 12,069 exactly. **M11 262 -> 285 is the campaign's standing red closing**
+and is entirely `verify_carry_set_applies_to_upstream_head` 52 -> 75. **M25 272 -> 273** is
+`test_fr_rendering_matches_noir_tracer` 56 -> 57: the Noir reconciliation moved a needle under it —
+`acir_field`'s `fits_in_i128` gate is spelled `self.num_bits() <= 127` at beta.26 and the fixed
+string was `num_bits <= 127`, which the parentheses defeat — so the check went red for a reason with
+nothing to do with its subject, and re-deriving it added the predicate's own declaration beside the
+gate. **M36 137 -> 140 IS NOT M37's**: the parallel `m36:` commit `86c36ad` declares
+`e2e_note_discovery_across_blocks` 74 -> 77. **M37's own 132** is 30 / 28 / 29 / 45.
+
+**M9 DID NOT FLAKE** — 807, rc 0, 1,290 s, immediately after m8's 177 s run, which is D19's standing
+condition and it did not fire; M15 did not flake either (537, 386 s). **FOUR non-zero exits and NOT
+ONE of them is this milestone's**, and none moved a count, which is what says each is a pinned list
+and not a structure: **m20** `verify_named_checks_exist` 9/1, on `test_reverted_transaction_recorded_as_reverted`
+named in **L4's** `tools/scan_reverted_transactions.mjs`; **m21** `verify_no_pipeline_predicates` 69/1,
+a **sixth** surviving `| grep -q` line in **L4's** `verify_browser_replay_dd9_clean.sh:297`;
+**m27** `verify_browser_chunk_budget` 33/1, a total-KB figure **L4's** browser half moved
+(8,230.46 declared against 8,230.24 measured); **m28** `verify_npm_pack_no_optional_native` 54/1,
+**L0's** `replay/package.json` as a fifth tree, for the sixth milestone running. All four recorded and
+deliberately not fixed — a second track editing the first track's expectations is a collision this
+campaign has already paid for. **The nine L0–L4 check names appear ZERO times as a summary line**,
+grepped one at a time. **A sweep is a writer**: `carry/*.json` checksummed before, `sha256sum -c`
+after, **all four OK** — and `exposure.json` / `rebase.json` now sit at `3836c2b6…` / `79f597b2…`,
+which are the post-sweep digests every run since M30 has produced, because M37 committed the repair
+the sweep had been re-deriving and discarding.
+
+**AND M37'S SWEEP WAS ABORTED FOUR TIMES, WHICH IS THE RULE WORKING FOUR TIMES.** Twice because
+`origin/dev` moved under it — five commits, then one more — which is the shared-branch condition this
+file already records for M33 and M34. Twice for findings, and both were bought by the only work
+available while a sweep runs:
+
+  1. **A sentence in an inventory entry inherited from the plan.** M37's own section says the AVM and
+     the WorldState "both left the addon". Measured at the addon's `NODE_API_MODULE` registration:
+     seven exported names at the `ts` anchor and **three** at the `cpp` anchor, so the AVM's departure
+     is exactly as large as claimed — but `NativeWorldStateService` is declared in `@aztec/world-state`,
+     never in `@aztec/native`, and `ipc_world_state_instance.ts` exists at **both** anchors, so the
+     world state's IPC move PREDATES the `ts` anchor. RI-100's draft had the plan's wording; the sweep
+     was killed to correct it rather than left to ship it.
+  2. **A LIMITATION STATED WITH A FALSE REASON, IN M37's OWN WORK, IN FOUR PLACES AT ONCE.** M37 had
+     written — into `DRIFT.md` D25, `pins.json`'s `anchors.ts`, the milestone section and a check's own
+     assertion text — that `PROVENANCE.md` F22's upstream file was *"one of the ~16k lines
+     `4377ddf64c` removed"* and that the row *"cannot move at all"*. It **moved**: `4377ddf64c`
+     renamed `avm/fixtures/utils.ts` to `avm/testing/utils.ts` and shrank it 154 -> 115 lines. Found
+     out of a one-line diff in a neighbouring file, not by re-reading the sentence. This file's own
+     rule is that a limitation stated with a false reason is worse than one stated with none, because
+     the false reason closes the search — and here the reason had closed the search on a row that is
+     re-anchorable. Corrected in all four, and the check now asserts the successor PRESENT at `cpp`,
+     ABSENT at `ts`, and the naming commit: `verify_aztec_ts_anchor_current` 25 -> 28.
 
 **M36 TOOK IT TO 11,910, AND MOVED EXACTLY THREE OTHER NUMBERS — TWO OF THEM ITS OWN AND ONE OF THEM
 A PARALLEL TRACK'S.** Measured M0-M36 on 2026-08-30 by M36's implementation, after its last edit,
@@ -2318,7 +2431,7 @@ Format spec: `~/ah/dev/agent-harbor/ah-lib/specs/Milestones-Files.md`.
   has now gone stale four times, and it will keep going stale**: the "one place states it" remedy
   fixes duplication, not the fact that the number is a property of a moving target rather than of
   this repository. Anything that must be TRUE rather than merely current has to be re-measured, and
-  the checks do that; the prose cannot. **THE SEVENTH IS A NEW CLASS AND IS OPEN.** For six
+  the checks do that; the prose cannot. **THE SEVENTH WAS A NEW CLASS AND M37 CLOSED IT — see the paragraph at the end of this bullet.** For six
   moves upstream changed nothing under `barretenberg/cpp`; `703d896149`
   (*chore!: delete the in-tree labs components*) changes **five** paths there —
   `barretenberg/cpp/bootstrap.sh`, `docs/Fuzzing.md`, `scripts/chonk_inputs.sh`,
@@ -2345,6 +2458,32 @@ Format spec: `~/ah/dev/agent-harbor/ah-lib/specs/Milestones-Files.md`.
   — it tells you whether conjunct 1 (nothing under the build tree) and conjunct 3 (disjoint
   regions) still hold, and if conjunct 1 has failed no acknowledgement can help and M6 and M10 owe
   a rebuild.
+
+  **AND M37 TOOK THE DECISION, SO M11 IS GREEN AND THE CLASS IS CLOSED.** All five build-root paths
+  come from ONE upstream commit, `38fd5fc6e9c`, and all five are confined to benchmark-input
+  plumbing and one document; `git diff --stat` over `barretenberg/cpp/` is five files, 15
+  insertions, 63 deletions. (**This sentence said "every one of the five is the SAME rename,
+  `yarn-project/` -> `labs/yarn-project/`", and re-derived per file by M37's review that is false of
+  two of the five**: `barretenberg/cpp/bootstrap.sh` replaces an INVOCATION —
+  `BOOTSTRAP_AFTER=barretenberg BOOSTRAP_TO=yarn-project ../../bootstrap.sh` becomes
+  `(cd ../.. && make labs-yarn-project)` — and `docs/Fuzzing.md` DELETES fifty lines of Docker
+  documentation. The conclusion is untouched, because it never rested on the shape of the edit: none
+  of the five is a CMake file, a header or a translation unit. It is on this list because a
+  characterisation of a change is a claim, and *"the same rename"* is the kind a reader accepts
+  without opening the diff.) Conjunct 1 is NARROWED rather
+  than waived: every path upstream changed under the build root is CLASSIFIED at the tip — `*.md` is
+  documentation, a `*.sh` is a non-input only if its basename appears in none of the build root's 128
+  cmake inputs *at the tip*, and **anything the classifier cannot place is a build input** — and the
+  build-input set must be EMPTY. Each surviving non-input is then DECLARED in `carry/overlap.json`'s
+  new `build_root_non_inputs` block, pinned to upstream's blob ids at both ends so it expires, and
+  separately MEASURED to be uninvoked by M6's and M10's own machinery through the same
+  spliced-in-tested predicate the top-level `bootstrap.sh` acknowledgement uses. Seven new mutation
+  arms attack it, of which the one that matters is a translation unit under the build root **with a
+  complete, blob-accurate declaration in front of it**, which is still refused. **It did not need M6's
+  and M10's builds re-run**, and the reason is the argument conjunct 1 always made applied at file
+  granularity instead of directory granularity: if no build input changed, the build cannot differ —
+  a rebuild is owed exactly when one HAS, which is the case the classifier is fail-safe about.
+  `verify_carry_set_applies_to_upstream_head` 52 -> 75, **M11 262 -> 285, 7/7, exit 0.**
 
   **AFTER FIVE OCCURRENCES, FOUR OF THEM NEEDED NO DECISION AT ALL, AND THAT IS THE MECHANISATION.**
   Only move 4 added overlaps (`build-images/src/Dockerfile`, `scripts/setup-container.sh`); moves

@@ -243,7 +243,13 @@ names rather than thirty-nine, and it is measured in
 to thirty-nine for **this** artefact on purpose — an export appearing is as much a finding as one
 disappearing — so the two trees are built and checked separately rather than reconciled in prose.
 
-## The host ABI is upstream's msgpack schemas
+## The host ABI is upstream's msgpack TYPES — and NOT upstream's generated IPC schemas
+
+*(The heading used to end at "schemas", which is the sentence the subsection below retires.
+A heading is what a scanning reader takes away, so the correction belongs in it and not only
+37 lines further down: measured field for field, upstream's own generated wsdb and
+bb-avm-sim schemas and this reactor's exports agree on eleven declared pairs and DIFFER on
+seven — `DRIFT.md` D26.)*
 
 Enumerated **by execution**: `avm_msgpack_coverage` builds a populated instance of every crossed
 type, packs it, unpacks it, re-packs it and compares the **bytes**, and requires a copy with one
@@ -276,6 +282,41 @@ The upstream schemas cover, among others: `AvmFastSimulationInputs`, `AvmProving
 `MSGPACK_CAMEL_CASE_FIELDS(context_id, contract_address, pc, opcode, gas_used)` and
 `TxSimulationResult` already carries `std::optional<std::vector<ExecutionStep>> execution_steps` —
 both added by the prepared observation-hook contribution rather than by us.
+
+### …AND "UPSTREAM'S SCHEMAS" IS TRUE OF THE TYPES AND NOT OF UPSTREAM'S GENERATED IPC SCHEMAS
+
+**M37 made the comparison this section's sentence had been standing in for, and the answer is no.**
+The paragraph above is about upstream's C++ *declarations* — 33 of the 42 crossed types are declared
+in files no overlay of ours touches, established by execution. What it does **not** say, and what
+`DRIFT.md` D20's account of upstream's move to a msgpack IPC boundary made it easy to read as saying,
+is that upstream's **generated** IPC schemas describe the same fields.
+
+`ipc-codegen` generates the `aztec-wsdb` and `bb-avm-sim` services from two files —
+`barretenberg/cpp/src/barretenberg/wsdb/wsdb_schema.jsonc` and
+`barretenberg/cpp/src/barretenberg/avm/avm_schema.json`. Compared against the C++ types this
+module's exports pack and unpack, both read out of the fork's object store at `anchors.cpp`, over
+eighteen declared pairs: **eleven agree — with identical field ORDER, not merely equal sets — and
+seven differ.**
+
+| kind | pairs | what differs |
+|---|---|---|
+| a spelling upstream disagrees with itself about | `SequentialInsertionResult{Nullifier,PublicData}` | the schema says `lowLeafWitnessData` / `insertionWitnessData`; upstream's own struct uses `SERIALIZATION_FIELDS`, which emits `low_leaf_witness_data` / `insertion_witness_data` |
+| a name, not only a case | `FindLowLeaf`'s response | `alreadyPresent` against `GetLowIndexedLeafResponse::is_already_present` — the `is_` prefix is dropped too, so no case transform reconciles them |
+| a shape | `GetTreeInfo`, `GetStateReference` | upstream's IPC models the trees as a list keyed by id (`[treeId, root, size, depth]`, `TreeStateReference[]`); the AVM models them as a record (`AppendOnlyTreeSnapshot` `[root, nextAvailableLeafIndex]`, one `TreeSnapshots` with four named members) |
+| an opaque payload | `Simulate`, `SimulateWithHints` | `avm_schema.json` is twenty-four lines; both commands take `{inputs: "bytes"}` and return `{result: "bytes"}`, so the schema declares **no AVM field at all**, while the two entry points below take `AvmFastSimulationInputs` and `AvmProvingInputs` |
+
+The eleven that agree are every leaf type (`NullifierLeafValue`, `PublicDataLeafValue`,
+`IndexedLeaf<…>` in both instantiations, `LeafUpdateWitnessData<…>` in both, `SiblingPathAndIndex`),
+the revision envelope (`WorldStateRevision`), and the error envelope `[message]` — the last against
+**both** services' schemas and against upstream's own `bb::bbapi::ErrorResponse`, which is the
+control saying that agreement is about a shape rather than about our copy.
+
+So: our reactor's types **are** upstream's, and upstream's own generated IPC description of a subset
+of them is a second, independently-written spelling that disagrees in seven places. "Two transports
+over one schema" is true of the transport and false of the declaration. Re-derived on every run by
+`verify_msgpack_schemas_match_field_for_field`, which pins the agreeing and differing sets by NAME
+rather than as totals, with a fabricated field planted on the schema side of an agreeing pair as the
+negative control. `DRIFT.md` **D26** carries the full account.
 
 ### The one type that is ours, and why
 
