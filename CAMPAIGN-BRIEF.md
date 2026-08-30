@@ -1073,11 +1073,24 @@ pending handle), rc 1 (await in a sync function), and a bound that never fires. 
 124.** Both other states are also "missing a summary line", so reading the absence of a summary
 cannot distinguish them.
 
-**Rule for a hang arm: block on a live handle, not on an unsettled promise.**
-`await new Promise((r) => setTimeout(r, 1e9))` keeps a timer registered, so the loop does not drain,
-node does not exit, and `timeout` has something to kill. **The arm is only a hang arm if its
-recorded rc is 124.** An rc of 13, or 1, means you wrote a second die-before-summary arm; assert the
-rc rather than reading the absence of a summary line, because both states are missing one.
+### THE HANG-ARM RULE, IN ONE LINE, BECAUSE THREE SHAPES IS ENOUGH TO STOP CALLING THEM ANECDOTES
+
+> **A hang arm is one whose recorded rc is 124. Every other non-zero code is a die-before-summary
+> arm wearing a hang's label. Assert the rc — never the absence of a summary line, because all of
+> these states are missing one.**
+
+Three wrong shapes, each of which cost this campaign real time across two milestones:
+
+| what you wrote | rc | what it actually is |
+|---|---|---|
+| `await new Promise(() => {})` | **13** | no pending handle → node's loop drains → *"unsettled top-level await"* |
+| `await …` inside a **synchronous** function | **1** | a syntax error at parse; the probe never ran |
+| a bound that never fires | 0 | not an arm at all; the check passes |
+| `await new Promise((r) => setTimeout(r, 1e9))` | **124** | **a hang** — a live timer keeps the loop alive, so `timeout` has something to kill |
+
+L1's review recorded the first. L2's harness reproduced it anyway. L3's harness then wrote the
+second while fixing the first. **The rule is here, above the anecdotes, because by the third time
+the pattern is the finding and the incidents are only its evidence.**
 
 **Rule:** a summary line is at column 0 and ends `assertion(s), N failure(s)`; a note is indented.
 Count only summary lines, and when a total moves, get the **per-check split** before believing any
