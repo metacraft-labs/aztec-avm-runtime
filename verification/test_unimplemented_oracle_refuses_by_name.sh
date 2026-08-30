@@ -280,6 +280,61 @@ assert_true "the error chain carries the refusal's own message" \
 assert_false "and NOT the anchor-versus-pin failure the address shim stands in for" \
   str_has_sub "$R_CHAIN" "fromFieldUnsafe is not a function"
 
+echo "== 5b. THE LADDER: THREE PROGRAMS, ONE RUNG, MEASURED RATHER THAN CLAIMED"
+
+# WHY THIS SECTION EXISTS, AND IT IS A REVIEW FINDING RATHER THAN A DELIVERABLE.
+#
+# The milestone states in three places — `PRIVATE-EXECUTION.md` section 3, the refusal reason on
+# `aztec_utl_getContractInstance` and the goal section — that `Token.transfer`,
+# `Token.mint_to_private` and `PrivateVoting.cast_vote` ALL stop at that one oracle. It is the
+# sentence that decides what tier 2 is and what M36 has to build first, and it was true: re-measured
+# by M35's review, all three stop there. **But only `transfer` was executed by any check**, so two
+# thirds of the claim was a spike measurement written into three documents and re-derived by nothing
+# — `CAMPAIGN-BRIEF.md`'s "a figure nobody re-derives rots", on the strongest claim in the milestone.
+#
+# The three are compared as a SET, and the set has to be a SINGLETON: that is what says the boundary
+# is the ORACLE. Two of the three come from one artifact and the third from a different CONTRACT, and
+# the three bytecode sizes are asserted distinct — otherwise "three programs" is satisfied by one
+# program run three times, which is this file's own first form wearing a loop.
+LADDER="$(m35_arm private.report.ladder)"
+m35_absent "private.report.ladder=$LADDER"
+LAD="$(python3 - "$LADDER" "$REFUSING" <<'PY'
+import json, sys
+rungs = json.loads(sys.argv[1])
+refusing = set(json.loads(sys.argv[2]))
+print('ROWS\t%d' % len(rungs))
+print('PROGRAMS\t%s' % ' '.join(sorted('%s.%s' % (r['contractName'], r['functionName']) for r in rungs)))
+print('CONTRACTS\t%d' % len({r['contractName'] for r in rungs}))
+print('DISTINCT_BYTECODES\t%d' % len({r['bytecodeBytes'] for r in rungs}))
+print('SMALLEST_BYTECODE\t%d' % min(r['bytecodeBytes'] for r in rungs))
+print('TYPES\t%s' % ' '.join(sorted({r['functionType'] for r in rungs})))
+print('OUTCOMES\t%s' % ' '.join(sorted({r['outcome'] for r in rungs})))
+print('STOPS\t%s' % ' '.join(sorted({str(r['stoppedAtOracle']) for r in rungs})))
+print('STOPS_NOT_REFUSING\t%s' % ' '.join(sorted(
+    {str(r['stoppedAtOracle']) for r in rungs} - refusing)))
+print('MIN_SERVED\t%d' % min(r['oraclesServed'] for r in rungs))
+print('REFUSED_COUNTS\t%s' % ' '.join(sorted({str(r['oraclesRefused']) for r in rungs})))
+PY
+)"
+l() { printf '%s\n' "$LAD" | awk -F'\t' -v k="$1" '$1==k{print $2}'; }
+
+assert_eq "the arm ran three real private programs" "3" "$(l ROWS)"
+assert_eq "…and they are the three the milestone names" \
+  "PrivateVoting.cast_vote Token.mint_to_private Token.transfer" "$(l PROGRAMS)"
+assert_eq "from two different CONTRACTS, so this is not one artifact three times" "2" "$(l CONTRACTS)"
+assert_eq "with three different bytecodes, so it is not one program three times" "3" "$(l DISTINCT_BYTECODES)"
+assert_ge "and the smallest of them is real compiled Noir rather than a stub" 5000 "$(l SMALLEST_BYTECODE)"
+assert_eq "every one of them is a private function" "abi_private" "$(l TYPES)"
+assert_eq "every one of them REFUSED" "refused" "$(l OUTCOMES)"
+# THE CLAIM ITSELF: the set of oracles the three stopped at is a SINGLETON, and it is the named one.
+assert_eq "and all three stopped at ONE oracle, which is what makes the boundary the oracle's" \
+  "aztec_utl_getContractInstance" "$(l STOPS)"
+assert_eq "…which is a declared refusing oracle rather than an incidental failure" "" "$(l STOPS_NOT_REFUSING)"
+# THE NON-DEGENERACY, the same one section 5 makes for `transfer` alone: a frame that refused at its
+# FIRST oracle would satisfy everything above and say nothing about the wire having run.
+assert_ge "each of them served oracles on the way to the rung" 2 "$(l MIN_SERVED)"
+assert_eq "and each refused exactly one" "1" "$(l REFUSED_COUNTS)"
+
 echo "== 6. THE CONTROL FOR SECTION 5: a frame that needs only served oracles COMPLETES"
 
 E_OUTCOME="$(m35_arm private.report.executes.outcome)"

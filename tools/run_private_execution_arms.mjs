@@ -88,6 +88,16 @@ const tokenArtifact = findUnder('node_modules/@aztec/noir-contracts.js/artifacts
   'probe-mt',
   'orchestration',
 ]);
+// THE LADDER'S THIRD PROGRAM. `Token.transfer` and `Token.mint_to_private` share the artifact above;
+// `PrivateVoting.cast_vote` is a different CONTRACT, which is the point — three programs stopping at
+// one oracle is a statement about the oracle and two of them from one artifact would be weaker.
+const votingArtifact = findUnder('node_modules/@aztec/noir-contracts.js/artifacts/private_voting_contract-PrivateVoting.json', [
+  'diffsim',
+  'spike',
+  'drift',
+  'probe-mt',
+  'orchestration',
+]);
 const oracleCheckArtifact = findUnder(
   'node_modules/@aztec/noir-test-contracts.js/artifacts/oracle_version_check_contract-OracleVersionCheck.json',
   ['diffsim', 'spike', 'drift', 'probe-mt', 'orchestration'],
@@ -116,6 +126,7 @@ copyTree(DIST, SITE);
 copyFileSync(AVM_WASM, path.join(SITE, 'assets/avm.wasm'));
 copyFileSync(CT_WRITER, path.join(SITE, 'assets/ct_writer.wasm'));
 copyFileSync(tokenArtifact.file, path.join(SITE, 'assets/token_contract-Token.json'));
+copyFileSync(votingArtifact.file, path.join(SITE, 'assets/private_voting_contract-PrivateVoting.json'));
 copyFileSync(oracleCheckArtifact.file, path.join(SITE, 'assets/oracle_version_check_contract-OracleVersionCheck.json'));
 copyFileSync(acvmWasm.file, path.join(SITE, 'assets/acvm_js_bg.wasm'));
 copyFileSync(noircAbiWasm.file, path.join(SITE, 'assets/noirc_abi_wasm_bg.wasm'));
@@ -209,6 +220,7 @@ const out = {
       sha256: sha(oracleCheckArtifact.file),
       bytes: statSync(oracleCheckArtifact.file).size,
     },
+    voting: { root: votingArtifact.root, sha256: sha(votingArtifact.file), bytes: statSync(votingArtifact.file).size },
     acvm: { root: acvmWasm.root, sha256: sha(acvmWasm.file), bytes: statSync(acvmWasm.file).size },
     noircAbi: { root: noircAbiWasm.root, sha256: sha(noircAbiWasm.file), bytes: statSync(noircAbiWasm.file).size },
   },

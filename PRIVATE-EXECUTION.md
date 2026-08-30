@@ -225,6 +225,7 @@ reasons are **measurements** rather than plans:
 | `Token.transfer` bytecode | **76,875** bytes |
 | oracles it served before stopping | **2** |
 | oracles it refused | **1** |
+| programs measured to stop at that oracle | **3** |
 
 The first frame **executes**: upstream's `WASMSimulator` drives the ACVM over real ACIR, upstream's
 68-entry registry deserialises every oracle call and serialises every return, and the handler answers
@@ -235,6 +236,14 @@ stronger than reading either and calling it well-formed.
 The second frame **refuses, by name**, at `aztec_utl_getContractInstance`, after serving two oracles
 on the way — the non-degeneracy that says the wire ran. A frame that refused at its first oracle
 would satisfy the same assertions and say nothing.
+
+**And the LADDER is measured on every run rather than once.** `Token.transfer`,
+`Token.mint_to_private` and `PrivateVoting.cast_vote` — two contracts, three distinct bytecodes —
+are all executed by the same arm, and `test_unimplemented_oracle_refuses_by_name` §5b asserts that
+the SET of oracles they stop at is the singleton `{aztec_utl_getContractInstance}`. That is what makes
+tier 2's boundary a property of the ORACLE rather than of one contract. It was a spike measurement
+written into three documents until M35's **review** re-took it and wired it in: the claim was true,
+and nothing re-derived it.
 
 **And that is what a milestone about refusals owes.** The refusal is asserted three ways: directly on
 the handler for all thirty-five, with the implemented ones answering on the same handler in the same
@@ -283,7 +292,7 @@ the count.)*
 | | derived |
 |---|---|
 | the wallet entry's eager set | **296.39 KB** gzipped across **9** files |
-| the wallet demo page's eager set | **332.68 KB** gzipped across **13** files |
+| the wallet demo page's eager set | **332.94 KB** gzipped across **13** files |
 | `acvm_js_bg.wasm` | **3,601,516** bytes |
 | `noirc_abi_wasm_bg.wasm` | **789,053** bytes |
 | `@aztec/aztec.js` bytes in `browser.js`'s eager set | **0** |

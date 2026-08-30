@@ -112,6 +112,10 @@ const ARTIFACT_URL = './assets/token_contract-Token.json';
 const ACVM_WASM_URL = './assets/acvm_js_bg.wasm';
 const NOIRC_ABI_WASM_URL = './assets/noirc_abi_wasm_bg.wasm';
 const ORACLE_CHECK_ARTIFACT_URL = './assets/oracle_version_check_contract-OracleVersionCheck.json';
+// A SECOND CONTRACT, and it is here for the ladder rather than for variety: the milestone's claim is
+// that Token.transfer, Token.mint_to_private and PrivateVoting.cast_vote ALL stop at the same oracle.
+// Two of those three live in the Token artifact already; the third needs its own.
+const VOTING_ARTIFACT_URL = './assets/private_voting_contract-PrivateVoting.json';
 
 /** The dev chain's own ids, so a private frame is this chain's rather than a fabricated one. */
 const PRIVATE_CHAIN_ID = 1n;
@@ -755,6 +759,55 @@ async function armPrivateExecution(): Promise<Record<string, unknown>> {
   });
   say(`Token.transfer: ${refuses.outcome} at ${refuses.stoppedAtOracle ?? '(nothing)'}`);
 
+  // THE LADDER, MEASURED ON EVERY RUN RATHER THAN ONCE IN A SPIKE.
+  //
+  // `PRIVATE-EXECUTION.md` section 3, the refusal reason on `aztec_utl_getContractInstance` and the
+  // milestone's own goal section all say the same strong thing: `Token.transfer`,
+  // `Token.mint_to_private` and `PrivateVoting.cast_vote` ALL stop at that one oracle, so tier 2's
+  // boundary is a property of the ORACLE and not of one contract. Until this loop existed the arm
+  // executed `transfer` and nothing else, and the other two rungs were a measurement taken once
+  // during the milestone's spike and then written into three documents — *"a figure nobody re-derives
+  // rots"*, on the sentence that decides what M36 has to build first. Three programs are run here and
+  // the check compares the stops as a SET.
+  //
+  // THE ARGUMENT WIDTH IS TAKEN FROM THE THING UNDER TEST. `executePrivateFunction` refuses a wrong
+  // field count naming the width the ABI declares, and this reads it back out of that refusal — which
+  // is the campaign's own rule for a number a check needs that also exists in the subject. Nothing
+  // here is a width typed into a demo.
+  const votingArtifact = await fetchJson(VOTING_ARTIFACT_URL);
+  const ladder: Record<string, unknown>[] = [];
+  for (const [doc, fnName] of [
+    [tokenArtifact, 'transfer'],
+    [tokenArtifact, 'mint_to_private'],
+    [votingArtifact, 'cast_vote'],
+  ] as const) {
+    let rung;
+    try {
+      rung = await executePrivateFunction({ ...common, artifact: doc, functionName: fnName, args: [] });
+    } catch (e) {
+      const declared = /declares (\d+) argument field\(s\)/.exec(String((e as Error).message));
+      if (!declared) throw e;
+      rung = await executePrivateFunction({
+        ...common,
+        artifact: doc,
+        functionName: fnName,
+        args: new Array(Number(declared[1])).fill(0n),
+      });
+    }
+    ladder.push({
+      contractName: rung.contractName,
+      functionName: rung.functionName,
+      functionType: rung.functionType,
+      bytecodeBytes: rung.bytecodeBytes,
+      argFields: rung.argFields,
+      outcome: rung.outcome,
+      stoppedAtOracle: rung.stoppedAtOracle,
+      oraclesServed: rung.oraclesServed,
+      oraclesRefused: rung.oraclesRefused,
+    });
+    say(`${rung.contractName}.${fnName}: ${rung.outcome} at ${rung.stoppedAtOracle ?? '(nothing)'}`);
+  }
+
   // THE SAME SEED TWICE, IN TWO SEPARATE HANDLERS. `getRandomField` is the one served oracle that
   // WOULD read ambient entropy in any other wallet, and a recording whose fields differ per run is a
   // recording that does not replay. Two handlers, same seed, four draws each, compared.
@@ -773,6 +826,13 @@ async function armPrivateExecution(): Promise<Record<string, unknown>> {
   const report = {
     executes: jsonSafe(executes),
     refuses: jsonSafe(refuses),
+    ladder: jsonSafe(ladder),
+    // THE ADDRESS THIS ARM ASKED FOR, so the check can compare the circuit's ECHO against the
+    // REQUEST instead of against a literal typed into the check. The milestone declared that literal
+    // as the lesser form of "a constant you have just typed into a check looks like a measurement";
+    // two producers out of one run is what the neighbouring `returnsHash` assertion already does, and
+    // this is the same shape for the address.
+    requestedContractAddress: contract.toString(),
     entropy: { a: entropyA, b: entropyB, other: entropyOther },
     assets: privateExecutionAssets(),
   };

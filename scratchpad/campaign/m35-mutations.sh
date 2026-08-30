@@ -133,7 +133,7 @@ arm_header() {
 }
 
 ARMS=("$@")
-[ ${#ARMS[@]} -eq 0 ] && ARMS=(M1 M2 M3 M4 M5 M6 M7 M8 M9)
+[ ${#ARMS[@]} -eq 0 ] && ARMS=(M1 M2 M3 M4 M5 M6 M7 M8 M9 M10)
 
 : > "$LOG"
 echo "M35 mutation matrix, $(date -Is)" | tee -a "$LOG"
@@ -311,6 +311,48 @@ PY
         '| `Token.transfer` bytecode | **76,874** bytes |'
       still_there PRIVATE-EXECUTION.md '**76,874** bytes' M9
       run_check verify_oracle_coverage_is_measured
+      ;;
+
+    # ---------------------------------------------------------------------------------------
+    M10) # THE STEALTH VERSION OF M1, AND THE ARM SECTION 5b EXISTS FOR. Added by M35's review.
+         #
+         # M1 makes EVERY refusal return `undefined` and still write `refused` to the ledger, so the
+         # ACIR frames still report `outcome: refused` at `aztec_utl_getContractInstance` and §5 and
+         # §5b both stay green on the frames — M1 is caught by §1 and §3b, which is coverage of the
+         # handler and not of the ladder. This is the mutation the ladder is written for: **ONE**
+         # refusing oracle returns a WELL-FORMED `ContractInstancePreimage` and writes NOTHING to the
+         # ledger, so the declared partition, the sum, the disjointness, the handler-method count, the
+         # exercised set and `assertOracleSurfaceMatchesDeclaration` all still agree with themselves
+         # and the surface arm sees nothing at all. The only things that can notice are the direct
+         # call in §1 and the three real circuits in §5/§5b, which now walk past the gate.
+      arm_header "M10 — ONE refusing oracle returns a plausible value and records nothing"
+      sub browser/src/wallet/private_oracles.ts \
+        '    const reason = ORACLE_REFUSAL_REASONS[oracle] ?? '"'"'no reason declared, which is itself a defect'"'"';
+    handler[method] = () => {' \
+        '    const reason = ORACLE_REFUSAL_REASONS[oracle] ?? '"'"'no reason declared, which is itself a defect'"'"';
+    if (oracle === '"'"'aztec_utl_getContractInstance'"'"') {
+      const zeroFieldForTheStealthArm = new Fr(0n);
+      handler[method] = () => ({
+        salt: zeroFieldForTheStealthArm,
+        deployer: AztecAddress.fromField(zeroFieldForTheStealthArm),
+        originalContractClassId: zeroFieldForTheStealthArm,
+        initializationHash: zeroFieldForTheStealthArm,
+        immutablesHash: zeroFieldForTheStealthArm,
+        publicKeys: {
+          npkMHash: zeroFieldForTheStealthArm,
+          ivpkM: { x: zeroFieldForTheStealthArm, y: zeroFieldForTheStealthArm, isInfinite: false },
+          ovpkMHash: zeroFieldForTheStealthArm,
+          tpkMHash: zeroFieldForTheStealthArm,
+          mspkMHash: zeroFieldForTheStealthArm,
+          fbpkMHash: zeroFieldForTheStealthArm,
+        },
+      });
+      continue;
+    }
+    handler[method] = () => {'
+      rebuild
+      still_there browser/src/wallet/private_oracles.ts 'zeroFieldForTheStealthArm' M10
+      run_check test_unimplemented_oracle_refuses_by_name M35_ARMS_REFRESH=1
       ;;
 
     *)

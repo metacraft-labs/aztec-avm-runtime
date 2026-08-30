@@ -650,6 +650,47 @@ the rest of a line and made a reached package look unreached), and then assert B
 stripper left code behind and that it removed the prose. Three assertions where there was one, and
 the file whose comment caused the failure is the fixture that proves the stripper works.
 
+### A SENTENCE THAT NAMES THREE SUBJECTS AND A CHECK THAT EXERCISES ONE
+
+**One instance, and it was the strongest sentence in the milestone.** M35's whole tier-2 boundary
+rests on *"`Token.transfer`, `Token.mint_to_private` and `PrivateVoting.cast_vote` all stop at
+`aztec_utl_getContractInstance`"* — written into the refusal reason the handler carries, into
+`PRIVATE-EXECUTION.md` §3 and into the milestone's goal section, because three programs stopping at
+one rung is what makes the boundary a property of the ORACLE rather than of one contract. **Every
+check executed `transfer` and nothing else.** Two thirds of the claim was a spike measurement taken
+once, published in three places, and re-derived by nothing.
+
+Re-taken by M35's review against the built bundle, **the claim is true to the byte** — 17,582 and
+9,507 bytes of real ACIR, two served oracles each, the same rung — so this is *"a figure nobody
+re-derives rots"* rather than a false statement. The remedy is not a corrected number: the arm runs
+all three now and the check asserts the set of stops is a **singleton**, with the non-degeneracies
+that say it is three programs and not one run three times (two distinct contracts, three distinct
+bytecode sizes). **And the assertions needed an arm of their own**: the matrix's existing "an
+unimplemented oracle returns instead of refusing" leaves the ledger's `refused` record in place, so
+the frames still report a refusal at the named oracle and the ladder cannot see it. The arm that
+exercises it makes **one** oracle return a well-formed value and record **nothing** — which leaves
+the partition, the sum, the disjointness, the handler-method count, the exercised set and the
+construction-time guard all agreeing with themselves.
+
+**Rule: when a sentence names N subjects, count how many the check runs.** A claim quantified over a
+set is only as strong as the members the instrument touched, and the ones it did not touch are
+invisible in exactly the direction that reads as settled.
+
+### A MUTATION MATRIX TAKEN BEFORE THE LAST EDIT IS NOT A MEASUREMENT OF THE TREE THAT SHIPS
+
+**One instance, and it was honestly labelled, which is why it survived.** M35 took its nine-arm matrix
+before three deliberate sweep aborts added nineteen assertions, left the table at its delivered values
+and *said so* — the right response to a figure that has moved under its subject, and better than
+silently re-typing it. It is still a matrix measured against a tree nobody ships. Re-run by M35's
+review against the shipped tree, eight arms reproduce their failure sets exactly at the new counts and
+**M1 moves from four failures to five**: the fifth is the arity-chosen control the third abort added,
+an assertion the declared matrix never exercised at all.
+
+This is *"run your sweep after your last edit"* with the subject changed, and the cost is the same
+shape: nobody re-reads a table whose numbers agree with the prediction beside them. **Rule: re-take
+the matrix after the last edit, exactly as you re-take the sweep** — and if you cannot, label it, then
+expect the review to re-take it and report what moved.
+
 ### Conjunctions need a negative case per conjunct
 A four-tree conjunction whose only negative case exercised one tree: dropping any
 of the other three passed all twelve cases.

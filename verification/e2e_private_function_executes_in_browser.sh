@@ -98,8 +98,20 @@ assert_ge "by a margin a no-op could not produce" 800 "$E_SOLVED"
 echo "== 3. THE CIRCUIT'S OWN PUBLIC INPUTS, and one of them is cross-checked against the ledger"
 
 pub() { printf '%s' "$E_PUB" | python3 -c "import json,sys; print(json.load(sys.stdin).get('$1','MISSING'))"; }
-assert_eq "the public inputs name the contract the frame was built for" \
-  "0x0000000000000000000000000000000000000000000000000000000000000777" "$(pub contractAddress)"
+# THE ADDRESS IS COMPARED AGAINST THE REQUEST, NOT AGAINST A LITERAL.
+#
+# This assertion carried `0x0…777` typed into the check, over a value `wallet_main.ts` also types in
+# two places — the family `CAMPAIGN-BRIEF.md` records as *"a constant you have just typed into a check
+# looks like a measurement to the person typing it"*. M35 declared it, correctly, as the LESSER form:
+# it fails RED rather than silently green. It is still a constant, and the arm already knows what it
+# asked for, so the comparison is now between the address the arm REQUESTED and the address the
+# CIRCUIT echoed into its public inputs — two producers out of one run, which is what the
+# `returnsHash` assertion below already does for the hash.
+REQ_ADDR="$(m35_arm private.report.requestedContractAddress)"
+m35_absent "private.report.requestedContractAddress=$REQ_ADDR"
+assert_true "the requested address is a real field rather than zero, so the echo below is not 0 == 0" \
+  test "$REQ_ADDR" != "0x0000000000000000000000000000000000000000000000000000000000000000"
+assert_eq "the public inputs echo the contract address the arm ASKED for" "$REQ_ADDR" "$(pub contractAddress)"
 assert_true "the side-effect counter advanced" test "$(pub endSideEffectCounter)" -gt "$(pub startSideEffectCounter)"
 # THE CROSS-CHECK. `returnsHash` is a value the CIRCUIT computed and wrote into its public inputs;
 # `setHashPreimage` is an oracle call the circuit made with the same hash. Two independent paths out

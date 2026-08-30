@@ -126,6 +126,10 @@ def main(doc_path, chunks_path, arms_path, registry_path, vendored_tsv_path):
     compare("`Token.transfer` bytecode", private["refuses"]["bytecodeBytes"], "refuses-bytes")
     compare("oracles it served before stopping", private["refuses"]["oraclesServed"], "refuses-served")
     compare("oracles it refused", private["refuses"]["oraclesRefused"], "refuses-refused")
+    # The ladder's own row. Added by M35's review: the three-program claim was in three documents and
+    # in no check, so the arm runs all three now and this compares the count the document states
+    # against the number of rungs the arm actually executed. §5b compares the STOPS as a set.
+    compare("programs measured to stop at that oracle", len(private["ladder"]), "ladder-rows")
 
     # ---- §5: the ephemeral-array measurement, from the BROWSER arm.
     compare("oracles whose RETURN type carries an `EphemeralArray`",

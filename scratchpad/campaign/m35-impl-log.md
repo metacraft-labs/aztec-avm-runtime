@@ -104,7 +104,14 @@ closure names it nowhere and the relative closure does.
 
 All 49 byte-identical to the anchor with only the generated provenance header added:
 `just check-drift` reports **630** identical against a previous 581, and the two new tree rows take
-it **22 -> 24** (one `tracked file count matches` assertion each). `verify_provenance_complete`
+it **22 -> 24** (one `tracked file count matches` assertion each).
+
+*(CORRECTED BY M35'S REVIEW, because this step's figures are the state BEFORE
+`transient_array_service.ts` was taken and were never brought forward. The pxe tree ships as **37**
+files, the two trees as **50**, and `just check-drift` re-run by the review reports **631** identical
+— 581 + 50 — not 630. `PROVENANCE.md` V11, `PRIVATE-EXECUTION.md` §2 and the `check-drift` row are
+all right; only this paragraph was stale, and nothing re-derives it because it is a scratchpad. Left
+in place with the correction beside it rather than silently re-typed.)* `verify_provenance_complete`
 goes **68 -> 70**: tree rows add no per-file assertion, and the +2 is one per inventory id no row
 had cited before — RI-64 and RI-97, exact in both parts.
 
