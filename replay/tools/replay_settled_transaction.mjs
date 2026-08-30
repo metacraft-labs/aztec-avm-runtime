@@ -113,6 +113,40 @@ const outcome = await replaySettledTransaction(host, client, settled, encodeRepl
     + `${r.skipped.length} skipped`),
 });
 
+// ---- THE CONTROL'S DATA, CAPTURED AS A REAL CHAIN ANSWER ----------------------------------------
+// `e2e_replay_matches_published_effects`'s control replays against the WRONG block's state — the
+// SETTLING block instead of its parent — so every read returns the value the transaction itself
+// wrote and the comparison must fail. That control has to run OFFLINE like everything else, so its
+// answers are captured here, from the live node, in the same run.
+//
+// IT IS A SECOND PASS AND NOT A SECOND FUNCTION. The loop is re-run with
+// `preStateBlockForControls: 'settling-block'`, so what gets recorded is exactly the set of calls
+// the control will make — the same discovery, at the other block. Listing the slots by hand would
+// be a guess about what the control asks for, which is the mistake `historical_state.ts` exists to
+// stop being made about the subject.
+//
+// L1's precedent: its fabricated probes are asked OF THE LIVE NODE so that its own answers are on
+// record, rather than synthesised. Same here, with nothing fabricated at all — every one of these
+// is a real witness at a real block.
+if (capturePath) {
+  console.error('replay: capturing the wrong-block control\'s answers (pre-state at the SETTLING '
+    + 'block, which is what the control replays against)');
+  try {
+    await replaySettledTransaction(host, client, settled, encodeReplayInputs, {
+      preStateBlockForControls: 'settling-block',
+      onRound: (r) => console.error(
+        `replay: [control] round ${r.round} — ${r.queries} reported, ${r.added} seeded`),
+    });
+    console.error('replay: [control] the wrong-block run CONVERGED — its calls are recorded');
+  } catch (err) {
+    // A control that refuses is still a control, and its calls are still recorded. What must not
+    // happen is the capture aborting: the subject's own recording is already complete by this
+    // point, and losing it because the control threw would be the tail wagging the dog.
+    console.error(`replay: [control] the wrong-block run ended with ${err?.name ?? 'an error'} — `
+      + 'recorded anyway, which is what the control is for');
+  }
+}
+
 // ---- the report -------------------------------------------------------------------------------
 const report = {
   txHash: settled.txHash,

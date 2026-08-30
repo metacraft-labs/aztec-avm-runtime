@@ -23,7 +23,7 @@
       "commit": "3a68d68ac29aaf04fc6251c80a8eb874043cb260",
       "short": "3a68d68ac2",
       "date": "2026-06-25",
-      "identity": "4377ddf64c^ — the parent of 'refactor: remove the TS AVM simulator'",
+      "identity": "4377ddf64c^ \u2014 the parent of 'refactor: remove the TS AVM simulator'",
       "what": "The TypeScript anchor. The last commit at which yarn-project/simulator/src still contained the TS AVM and the public orchestration we reuse. Vendored into spike/src, diffsim/src and drift/src, and checked out as the worktree upstream/tsavm."
     },
     "historical-protocol-specs": {
@@ -31,7 +31,7 @@
       "commit": "9fe19ba7a19d76a819f1ee3dd968697170eebf7b",
       "short": "9fe19ba7a1",
       "date": "2025-10-23",
-      "identity": "0285bb092b^ — the parent of 'chore(docs): Remove protocol specs from next'",
+      "identity": "0285bb092b^ \u2014 the parent of 'chore(docs): Remove protocol specs from next'",
       "what": "The only commit at which docs/docs/protocol-specs/ still exists. Vendored into reference/historical-protocol-specs/. ABANDONED upstream on purpose; see reference/PROVENANCE.md before trusting anything from it."
     },
     "trace_format": {
@@ -58,7 +58,7 @@
     "_comment": [
       "Two @aztec/* nightly lines are in the tree at once, deliberately, and they are not",
       "interchangeable. `current` is THE pin: new work uses it. `deletion_era` is frozen",
-      "evidence — the published line whose src/public tree is byte-comparable with the `ts`",
+      "evidence \u2014 the published line whose src/public tree is byte-comparable with the `ts`",
       "anchor, which is what lets the deleted TS AVM run at all, and which still ships the",
       "in-process NAPI AVM the differential oracle needs. Bumping `deletion_era` would destroy",
       "the artefact rather than update it."
@@ -92,7 +92,7 @@
       "THE NETWORK IS NOT PINNED, AND THAT SENTENCE HAS CHANGED ITS REASON. L0's implementation",
       "probed five candidate endpoints on 2026-08-29 and recorded that every one of them failed;",
       "the transcript is still in `probed_endpoints` below and every one of those five still fails.",
-      "L0's REVIEW re-took the search on the same day and found TWO THAT ANSWER — dRPC's Aztec",
+      "L0's REVIEW re-took the search on the same day and found TWO THAT ANSWER \u2014 dRPC's Aztec",
       "mainnet and Aztec testnet endpoints, both running nodeVersion 5.2.0, both answering a real",
       "`aztec_getNodeInfo`, and both advertising `x-aztec-l2circuitsvktreeroot` and",
       "`x-aztec-l2protocolcontractshash` EQUAL TO THE TWO VALUES PINNED BELOW. So the protocol pin",
@@ -106,12 +106,12 @@
       "headers and a BATCH (array) POST comes back WITHOUT them. Upstream's own",
       "`createAztecNodeClient` always batches (`sendBatch`, `batchWindowMS = 0`), so through these",
       "endpoints upstream's versioning handler never sees a header, and `assertProtocolVersion`",
-      "refuses them naming the absence — which is the SAFE direction and the behaviour L0 designed,",
+      "refuses them naming the absence \u2014 which is the SAFE direction and the behaviour L0 designed,",
       "but it means a pinned `rpc_url` pointing at a proxy would be an endpoint this repository's own",
       "version check cannot verify. Pinning the network needs a DIRECT node endpoint, or a",
       "deliberately un-batched version probe. That was offered to L1 as its first task and L1 DID",
       "NOT TAKE IT, deliberately: no direct (non-proxying) Aztec endpoint was found, and the",
-      "alternative — an un-batched version probe issued by the client — is a SECOND WAY OF TALKING",
+      "alternative \u2014 an un-batched version probe issued by the client \u2014 is a SECOND WAY OF TALKING",
       "TO A NODE, which is the kind of second wire path L0's whole 'nothing here declares a schema'",
       "deliverable exists to prevent. So `network` stays UNESTABLISHED, and every L1 fixture records",
       "the header absence AS WHAT THE CLIENT SAW, beside an un-batched probe explicitly labelled a",
@@ -120,7 +120,7 @@
       "WHAT IS PINNED IS THE PROTOCOL-LEVEL HALF, AND UPSTREAM PINS EXACTLY THAT HALF THE SAME WAY.",
       "`yarn-project/aztec/src/cli/versioning.ts` at the `cpp` anchor returns, when it has no chain",
       "config, `{ l2CircuitsVkTreeRoot: getVKTreeRoot().toString(), l2ProtocolContractsHash:",
-      "protocolContractsHash.toString() }` — a PARTIAL ComponentsVersions with the two fields that",
+      "protocolContractsHash.toString() }` \u2014 a PARTIAL ComponentsVersions with the two fields that",
       "are a property of the protocol rather than of a deployment. `validatePartialComponentVersions",
       "Match` and `getVersioningResponseHandler` both ignore undefined fields, so a partial is",
       "upstream's own supported shape and not a weakening we invented.",
@@ -134,56 +134,56 @@
     "corresponds_to_anchor": "cpp",
     "corresponds_to_npm_pin": "current",
     "protocol_version": {
-      "_comment": "A Partial<ComponentsVersions> in upstream's own vocabulary (@aztec/stdlib/versioning). The three network-level fields — l1ChainId, l1RollupAddress, rollupVersion — are DELIBERATELY ABSENT until an endpoint is established; see probed_endpoints.",
+      "_comment": "A Partial<ComponentsVersions> in upstream's own vocabulary (@aztec/stdlib/versioning). The three network-level fields \u2014 l1ChainId, l1RollupAddress, rollupVersion \u2014 are DELIBERATELY ABSENT until an endpoint is established; see probed_endpoints.",
       "l2ProtocolContractsHash": "0x2c075866eafc88a1f6f9addc7e337c6e64e45d1cb7fd7c0d612ebcec72aab2ca",
       "l2CircuitsVkTreeRoot": "0x2b3b6ea4412b9c8f6457a37f91a2870306f8641e07e16a49b68bda6f8bc02892"
     },
     "protocol_version_derivation": {
       "l2ProtocolContractsHash": "protocolContractsHash from @aztec/protocol-contracts",
       "l2CircuitsVkTreeRoot": "getVKTreeRoot() from @aztec/noir-protocol-circuits-types/vk-tree",
-      "upstream_producer": "yarn-project/aztec/src/cli/versioning.ts at anchors.cpp — getVersions(undefined)"
+      "upstream_producer": "yarn-project/aztec/src/cli/versioning.ts at anchors.cpp \u2014 getVersions(undefined)"
     },
     "probed_endpoints": [
       {
         "url": "https://aztec-testnet-fullnode.zkv.xyz",
         "date": "2026-08-29",
-        "result": "HTTP 522 from Cloudflare — origin unreachable"
+        "result": "HTTP 522 from Cloudflare \u2014 origin unreachable"
       },
       {
         "url": "https://aztec-alpha-testnet-fullnode.zkv.xyz",
         "date": "2026-08-29",
-        "result": "HTTP 522 from Cloudflare — origin unreachable"
+        "result": "HTTP 522 from Cloudflare \u2014 origin unreachable"
       },
       {
         "url": "https://testnet.aztec.network",
         "date": "2026-08-29",
-        "result": "HTTP 404 — a Netlify marketing site, not a node"
+        "result": "HTTP 404 \u2014 a Netlify marketing site, not a node"
       },
       {
         "url": "https://full-node.alpha-testnet.aztec.network",
         "date": "2026-08-29",
-        "result": "no response within 20 s — DNS or connect failure"
+        "result": "no response within 20 s \u2014 DNS or connect failure"
       },
       {
         "url": "https://rpc.testnet.aztec.network",
         "date": "2026-08-29",
-        "result": "no response within 20 s — DNS or connect failure"
+        "result": "no response within 20 s \u2014 DNS or connect failure"
       },
       {
         "url": "https://aztec.drpc.org",
         "date": "2026-08-29",
         "probed_by": "L0 review",
-        "result": "HTTP 200 — ANSWERS. aztec_getNodeInfo -> nodeVersion 5.2.0, l1ChainId 1, rollupVersion 4248422647, rollupAddress 0x91ff8bbd8ebb07893010d50a48a1609e5ebd8e34",
+        "result": "HTTP 200 \u2014 ANSWERS. aztec_getNodeInfo -> nodeVersion 5.2.0, l1ChainId 1, rollupVersion 4248422647, rollupAddress 0x91ff8bbd8ebb07893010d50a48a1609e5ebd8e34",
         "x_aztec_l2circuitsvktreeroot": "0x2b3b6ea4412b9c8f6457a37f91a2870306f8641e07e16a49b68bda6f8bc02892",
         "x_aztec_l2protocolcontractshash": "0x2c075866eafc88a1f6f9addc7e337c6e64e45d1cb7fd7c0d612ebcec72aab2ca",
         "matches_protocol_version_pin": true,
-        "caveat": "A PROXY. Version headers are present on a single-object POST and ABSENT on a batch (array) POST, and upstream's client always batches — so assertProtocolVersion refuses it, naming the absence."
+        "caveat": "A PROXY. Version headers are present on a single-object POST and ABSENT on a batch (array) POST, and upstream's client always batches \u2014 so assertProtocolVersion refuses it, naming the absence."
       },
       {
         "url": "https://aztec-testnet.drpc.org",
         "date": "2026-08-29",
         "probed_by": "L0 review",
-        "result": "HTTP 200 — ANSWERS. aztec_getNodeInfo -> nodeVersion 5.2.0, l1ChainId 11155111 (Sepolia), rollupVersion 1821665230, rollupAddress 0xd73a91bdcf6891c7642f3e460036e1ef2cc23178",
+        "result": "HTTP 200 \u2014 ANSWERS. aztec_getNodeInfo -> nodeVersion 5.2.0, l1ChainId 11155111 (Sepolia), rollupVersion 1821665230, rollupAddress 0xd73a91bdcf6891c7642f3e460036e1ef2cc23178",
         "x_aztec_l2circuitsvktreeroot": "0x2b3b6ea4412b9c8f6457a37f91a2870306f8641e07e16a49b68bda6f8bc02892",
         "x_aztec_l2protocolcontractshash": "0x2c075866eafc88a1f6f9addc7e337c6e64e45d1cb7fd7c0d612ebcec72aab2ca",
         "matches_protocol_version_pin": true,
@@ -198,7 +198,7 @@
         "this pin today, and a node running a DIFFERENT PROTOCOL would be'. Aztec mainnet and Aztec",
         "testnet were both read on the same day: their two PROTOCOL-level headers are IDENTICAL to each",
         "other and to the pin, and their three NETWORK-level headers all differ. So the first half of",
-        "that sentence is demonstrated — today's pin genuinely cannot tell mainnet from testnet — and",
+        "that sentence is demonstrated \u2014 today's pin genuinely cannot tell mainnet from testnet \u2014 and",
         "the second half is the reason the pin is worth having at all."
       ],
       "identical_across_both_chains": [
@@ -220,28 +220,28 @@
         "",
         "BOTH OF L1'S ARE TESTNET, AND THAT WAS A MEASUREMENT RATHER THAN A PREFERENCE. Aztec",
         "mainnet answered and was COMPLETELY IDLE. Two independent sightings on 2026-08-29: 150",
-        "consecutive blocks (64395-64544) with zero transactions, and — re-taken by L1's review at",
-        "tip 64571 — 200 consecutive blocks (64372-64571) with zero transactions.",
+        "consecutive blocks (64395-64544) with zero transactions, and \u2014 re-taken by L1's review at",
+        "tip 64571 \u2014 200 consecutive blocks (64372-64571) with zero transactions.",
         "",
         "THAT SENTENCE IS NO LONGER TRUE, AND L2 RE-TOOK IT RATHER THAN INHERITING IT.",
         "On 2026-08-30 MAINNET CARRIES REAL TRANSACTIONS. Scanning 66150-66290 (141 blocks, 3",
         "unanswered) found two: block 66214, tx",
-        "0x14129ed50f0212f537966175494427b44f91da087251f394313888b96e9f7cde — 2 note hashes, 3",
-        "nullifiers, 1 public log, 2 public data writes — and block 66217, tx",
-        "0x064b75d658b79219bad0b62455a37d4df18248262738df39b78b56d91a811ebc — 6 note hashes, 13",
+        "0x14129ed50f0212f537966175494427b44f91da087251f394313888b96e9f7cde \u2014 2 note hashes, 3",
+        "nullifiers, 1 public log, 2 public data writes \u2014 and block 66217, tx",
+        "0x064b75d658b79219bad0b62455a37d4df18248262738df39b78b56d91a811ebc \u2014 6 note hashes, 13",
         "nullifiers, 1 public data write. Both revertCode 0. So the campaign's second standing",
         "chain fact is RETIRED: there IS something on mainnet to capture.",
         "",
         "AND MAINNET IS STILL NOT A DEMO SOURCE, WHICH IS A DIFFERENT SENTENCE AND THE USEFUL ONE.",
         "Two transactions in 141 blocks is roughly one per seventy, and the replayability window is",
-        "the finality lag below — 38 blocks when this was taken. A scan of the whole replayable",
+        "the finality lag below \u2014 38 blocks when this was taken. A scan of the whole replayable",
         "window 66250-66292 found ZERO transactions. So a mainnet transaction is typically ALREADY",
         "PRUNED by the time anything notices it, and a mainnet demo would need a FOLLOWER catching",
         "transactions as they appear, not a scan finding them afterwards.",
         "",
         "TESTNET, MEANWHILE, HAS A HEARTBEAT, AND THAT IS WHAT MAKES A DEMO POSSIBLE AT ALL.",
-        "One transaction every ELEVEN blocks, almost exactly — 62507, 62518, 62529, 62540, 62551,",
-        "62562, 62573, 62584, 62595, 62606, 62617, 62628, 62639 — each one public, revertCode 0,",
+        "One transaction every ELEVEN blocks, almost exactly \u2014 62507, 62518, 62529, 62540, 62551,",
+        "62562, 62573, 62584, 62595, 62606, 62617, 62628, 62639 \u2014 each one public, revertCode 0,",
         "1 nullifier and 9 public data writes, against the same contract",
         "0x2a9a1d0e8f1974267536abefa565e7a7351f92ddbe95ec13c57c79b70664f7c8 with the same 23,157",
         "bytes of packed bytecode as L1's fixture. Eleven blocks is about thirteen minutes, and the",
@@ -254,7 +254,7 @@
         "AND THE CAPTURE HAS A DEADLINE, WHICH NOTHING IN THIS REPOSITORY HAD RECORDED.",
         "`getTxByHash` PRUNES AND `getTxEffect` DOES NOT, so a settled transaction can become",
         "UNREPLAYABLE WHILE REMAINING PERFECTLY VISIBLE: the node keeps EFFECTS indefinitely and",
-        "TRANSACTION BODIES for a window, and a replay needs the body — it is what",
+        "TRANSACTION BODIES for a window, and a replay needs the body \u2014 it is what",
         "`AvmTxHint.fromTx` consumes.",
         "",
         "THE WINDOW IS NOT A BLOCK COUNT AND IT IS NOT ~36. L1's implementation measured two",
@@ -265,7 +265,7 @@
         "",
         "  * `AztecNodeService.getTxByHash` (yarn-project/aztec-node/src/aztec-node/server.ts:637)",
         "    calls `p2pClient.getTxByHashFromPool` and NOTHING ELSE. It never consults the tx",
-        "    ARCHIVE — that is a separate method, `getArchivedTxByHash`, which the node does not",
+        "    ARCHIVE \u2014 that is a separate method, `getArchivedTxByHash`, which the node does not",
         "    expose, and `archivedTxLimit` (P2P_ARCHIVED_TX_LIMIT) defaults to 0 anyway.",
         "  * The pool deletes a mined tx when its block is FINALIZED:",
         "    `tx_pool_v2_impl.ts#prepareFinalization` takes the finalized block as the cutoff and",
@@ -302,7 +302,8 @@
           "txHash": "0x2090b63ca3a2714010ae02cf24b2e967965bf481305d929175af971e6ab56ad7",
           "l2BlockNumber": 60616,
           "node_reported": "revertCode 0, one enqueued public call to 0x2a9a1d0e8f1974267536abefa565e7a7351f92ddbe95ec13c57c79b70664f7c8, contract class 0x2b6749411979b61926b6f8836c3a1a28c39e9c0c3fb3322ed6e776f2f02cb6dc with 23,157 bytes of packed bytecode, 9 public data writes, 1 nullifier",
-          "for": "the demo path: a settled transaction with a public half and a real contract to resolve"
+          "for": "the demo path: a settled transaction with a public half and a real contract to resolve",
+          "regenerable": "FROZEN, CORRECTLY. Its transaction fell out of getTxByHash about an hour after it settled and can never be re-fetched. `just capture-replay-fixture` still runs and would produce a DIFFERENT transaction, which is why L1's entry in the milestone file says a replacement is necessarily a different subject."
         },
         {
           "path": "replay/fixtures/testnet_private_only_tx.json",
@@ -313,48 +314,52 @@
           "txHash": "0x1533315086638c2c474dde463c6a6a5ad684f6bd26869c2af9a77519ad4a07e0",
           "l2BlockNumber": 60620,
           "node_reported": "revertCode 0, ZERO enqueued public calls, 12 note hashes, 15 nullifiers, 2 private logs",
-          "for": "the private-half deliverable: a transaction whose private half's EFFECTS the chain published and whose EXECUTION it did not, plus the public-half-absent declaration"
+          "for": "the private-half deliverable: a transaction whose private half's EFFECTS the chain published and whose EXECUTION it did not, plus the public-half-absent declaration",
+          "regenerable": "FROZEN, CORRECTLY, for the same reason as the fixture above \u2014 and harder to replace besides, because it needs a transaction with NO public half and those appear on no schedule."
         },
         {
-            "path": "replay/fixtures/testnet_settled_tx_refblock.json",
-            "chain": "aztec-testnet",
-            "endpoint": "https://aztec-testnet.drpc.org",
-            "l1ChainId": 11155111,
-            "captured": "2026-08-30",
-            "captured_by": "replay/tools/capture_settled_fixture.mjs --pin-reference-block",
-            "txHash": "0x096056bc1af09a9f44fc7a8f65d0bc31fa9d7f4ee5223c58a27c630233fb06c7",
-            "l2BlockNumber": 62639,
-            "contractReferenceBlock": 62639,
-            "node_reported": "revertCode 0, one enqueued public call to 0x2a9a1d0e8f1974267536abefa565e7a7351f92ddbe95ec13c57c79b70664f7c8, contract class 0x2b6749411979b61926b6f8836c3a1a28c39e9c0c3fb3322ed6e776f2f02cb6dc with 23,157 bytes of packed bytecode, 9 public data writes, 1 nullifier, transactionFee 0x17d78cb873199f5d",
-            "for": "THE ONE THING L1 HANDED L2. Its eighth recorded call is `aztec_getContract [\"0x2a9a1d0e...\", 62639]` - the settling block ON THE WIRE, which L1's two recordings deliberately do not have and cannot be given, because adding the argument to an existing recording turns every one of its calls into a FixtureMiss and L1's transactions can no longer be re-captured. The fabricated-contract probe is recorded BOTH ways here, unpinned and pinned, so a future check's control cannot become a FixtureMiss either."
+          "path": "replay/fixtures/testnet_settled_tx_refblock.json",
+          "chain": "aztec-testnet",
+          "endpoint": "https://aztec-testnet.drpc.org",
+          "l1ChainId": 11155111,
+          "captured": "2026-08-30",
+          "captured_by": "replay/tools/capture_settled_fixture.mjs --pin-reference-block",
+          "txHash": "0x096056bc1af09a9f44fc7a8f65d0bc31fa9d7f4ee5223c58a27c630233fb06c7",
+          "l2BlockNumber": 62639,
+          "contractReferenceBlock": 62639,
+          "node_reported": "revertCode 0, one enqueued public call to 0x2a9a1d0e8f1974267536abefa565e7a7351f92ddbe95ec13c57c79b70664f7c8, contract class 0x2b6749411979b61926b6f8836c3a1a28c39e9c0c3fb3322ed6e776f2f02cb6dc with 23,157 bytes of packed bytecode, 9 public data writes, 1 nullifier, transactionFee 0x17d78cb873199f5d",
+          "for": "THE ONE THING L1 HANDED L2. Its eighth recorded call is `aztec_getContract [\"0x2a9a1d0e...\", 62639]` - the settling block ON THE WIRE, which L1's two recordings deliberately do not have and cannot be given, because adding the argument to an existing recording turns every one of its calls into a FixtureMiss and L1's transactions can no longer be re-captured. The fabricated-contract probe is recorded BOTH ways here, unpinned and pinned, so a future check's control cannot become a FixtureMiss either.",
+          "regenerable": "REGENERABLE, AND THE WIRING WAS MISSING UNTIL IT WAS CHECKED. `just capture-replay-fixture pin=1`. The `pin` parameter did not exist when this file was first captured, so the fixture was frozen by an accident of the CLI rather than by the retention horizon \u2014 which is the only reason a fixture here is allowed to be frozen. Proven on 2026-08-30 by regenerating to a scratch path: a fresh transaction in block 62672, with `aztec_getContract [\"0x2a9a1d0e...\", 62672]` on the wire and the fabricated probe recorded both ways."
+        },
+        {
+          "path": "replay/fixtures/testnet_replay_tx.json",
+          "chain": "aztec-testnet",
+          "endpoint": "https://aztec-testnet.drpc.org",
+          "l1ChainId": 11155111,
+          "captured": "2026-08-30",
+          "captured_by": "replay/tools/replay_settled_transaction.mjs --capture",
+          "txHash": "0x096056bc1af09a9f44fc7a8f65d0bc31fa9d7f4ee5223c58a27c630233fb06c7",
+          "l2BlockNumber": 62639,
+          "preStateReadAt": 62638,
+          "contractReferenceBlock": 62639,
+          "recorded_calls": 22,
+          "for": "L2'S OWN FIXTURE, AND IT IS A DIFFERENT KIND OF RECORDING FROM L1'S. L1's capture recorded the calls fetchSettledTransaction makes, which are known in advance. L2's HYDRATION CALLS ARE NOT KNOWN IN ADVANCE - the AVM discovers them, round by round, by reporting the world-state queries it made - so the only list that can be right is the one produced by RUNNING THE REPLAY against a live node. That is what this file is: the fetch's own calls plus the per-slot aztec_getPublicDataWitness / aztec_getNullifierMembershipWitness reads at block 62638, every one of them a call the replay itself made. Both witness methods were already on L0's permitted fourteen and are members of the MembershipWitnessSource seam L0 declared for exactly this, so L2 widened nothing.",
+          "replay_result": {
+            "hydration_rounds": 6,
+            "seeded": "4 nullifiers + 11 public-data leaves",
+            "instructions_executed": 345,
+            "published_revertCode": 0,
+            "replayed_revertCode": 0,
+            "effects_reproduced": true,
+            "comparisons": "23 matched, 0 mismatched - revertCode, transactionFee, all 9 publicDataWrites (leafSlot AND value), and the single nullifier",
+            "gas": "the AVM's publicGas l2Gas 290,431 plus the private kernel's 590,800 is 881,231, which is block 62639's own totalManaUsed; daGas 512 + 128 = 640",
+            "tree_roots": "ALL FOUR DIFFER FROM THE BLOCK'S STATE REFERENCE, BY CONSTRUCTION AND NOT BY ERROR. See replay/src/replay_execution.ts TREE_ROOTS_DIVERGE_REASON: the values the transaction read are the chain's, fetched per-slot at the parent block; the membership proofs around them are the resident tree's. A recording that carried the chain's state reference beside this execution would be a wrong root that everything downstream believes."
           },
-          {
-            "path": "replay/fixtures/testnet_replay_tx.json",
-            "chain": "aztec-testnet",
-            "endpoint": "https://aztec-testnet.drpc.org",
-            "l1ChainId": 11155111,
-            "captured": "2026-08-30",
-            "captured_by": "replay/tools/replay_settled_transaction.mjs --capture",
-            "txHash": "0x096056bc1af09a9f44fc7a8f65d0bc31fa9d7f4ee5223c58a27c630233fb06c7",
-            "l2BlockNumber": 62639,
-            "preStateReadAt": 62638,
-            "contractReferenceBlock": 62639,
-            "recorded_calls": 22,
-            "for": "L2'S OWN FIXTURE, AND IT IS A DIFFERENT KIND OF RECORDING FROM L1'S. L1's capture recorded the calls fetchSettledTransaction makes, which are known in advance. L2's HYDRATION CALLS ARE NOT KNOWN IN ADVANCE - the AVM discovers them, round by round, by reporting the world-state queries it made - so the only list that can be right is the one produced by RUNNING THE REPLAY against a live node. That is what this file is: the fetch's own calls plus the per-slot aztec_getPublicDataWitness / aztec_getNullifierMembershipWitness reads at block 62638, every one of them a call the replay itself made. Both witness methods were already on L0's permitted fourteen and are members of the MembershipWitnessSource seam L0 declared for exactly this, so L2 widened nothing.",
-            "replay_result": {
-              "hydration_rounds": 6,
-              "seeded": "4 nullifiers + 11 public-data leaves",
-              "instructions_executed": 345,
-              "published_revertCode": 0,
-              "replayed_revertCode": 0,
-              "effects_reproduced": true,
-              "comparisons": "23 matched, 0 mismatched - revertCode, transactionFee, all 9 publicDataWrites (leafSlot AND value), and the single nullifier",
-              "gas": "the AVM's publicGas l2Gas 290,431 plus the private kernel's 590,800 is 881,231, which is block 62639's own totalManaUsed; daGas 512 + 128 = 640",
-              "tree_roots": "ALL FOUR DIFFER FROM THE BLOCK'S STATE REFERENCE, BY CONSTRUCTION AND NOT BY ERROR. See replay/src/replay_execution.ts TREE_ROOTS_DIVERGE_REASON: the values the transaction read are the chain's, fetched per-slot at the parent block; the membership proofs around them are the resident tree's. A recording that carried the chain's state reference beside this execution would be a wrong root that everything downstream believes."
-            }
-          }
+          "regenerable": "REGENERABLE. `just capture-replay-run`, which drives the REAL replay against a live node and records every call it makes \u2014 including the wrong-block control's second pass. It has to be that: L2's hydration calls are discovered by the AVM at run time, so a hand-listed capture would be a guess about what the check will ask for."
+        }
       ],
-      "version_headers_note": "Each fixture records the `x-aztec-*` headers TWICE: `onBatchPost` is what upstream's client saw (EMPTY, because this endpoint proxies and strips them on the array POST upstream always sends) and `onSingleObjectPost` is a deliberately un-batched probe taken in the same run. The second is labelled a RECONSTRUCTION inside the file. Playing back the first reproduces the live `assertProtocolVersion` refusal offline; the second is what says the obstacle is the proxy and not this repository's version check. A fixture that silently stored the second would be kinder than the chain it came from."
+      "version_headers_note": "Each fixture records the `x-aztec-*` headers TWICE: `onBatchPost` is what upstream's client saw (EMPTY, because this endpoint proxies and strips them on the array POST upstream always sends) and `onSingleObjectPost` is a deliberately un-batched probe taken in the same run. The second is labelled a RECONSTRUCTION inside the file. Playing back the first reproduces the live `assertProtocolVersion` refusal offline; the second is what says the obstacle is the proxy and not this repository's version check. A fixture that silently stored the second would be kinder than the chain it came from.",
+      "regeneration_note": "A FIXTURE THAT CAN BE REGENERATED IS WORTH MORE THAN ONE THAT CANNOT \u2014 BUT ONLY IF REGENERATING IT IS ACTUALLY WIRED UP. `l1_prepare` now asserts, for every declared fixture, that `provenance.capturedBy` names a script that exists and is TRACKED, so the wiring is checked offline rather than described. What it deliberately does NOT assert is that re-running the script reproduces the file: against a live chain it never could, and for L1's two the transactions are gone, so the honest claim is that the path exists and is committed."
     }
   },
   "npm_exceptions": {
@@ -420,7 +425,7 @@
       "date": "2026-08-29",
       "milestone": "L1 (Aztec-Live-Chain-Replay)",
       "change": "NO PIN VALUE MOVED. npm.current stays 5.3.0-nightly.20260819 and npm.deletion_era stays 5.0.0-nightly.20260626; cpp, ts, historical-protocol-specs, trace_format and trace_format_nim are unchanged, and no npm consumer was added or moved. What is ADDED is `live_chain.captured_fixtures`: an index of the two settled-transaction recordings L1 captured from Aztec testnet, the script that captured them, and the retention measurement that bounds when a capture is possible at all.",
-      "reason": "L1's deliverable is 'fixtures captured from a live chain and committed, so the suite runs without a network, with the capture script committed beside them', and the campaign's standing instruction is to record provenance per fixture — endpoint, block, transaction, capture time, and what the node reported — because 'fabricated or unlabelled fixtures are the failure mode this campaign is built to avoid'. Each fixture file carries its own full provenance block; this entry is the index and the place two facts about the CHAIN live, neither of which belongs in a fixture: mainnet is live and completely idle (150 consecutive blocks with zero transactions on 2026-08-29, re-taken by L1's review as 200 consecutive blocks), so both fixtures are testnet by necessity rather than by preference; and `getTxByHash` prunes while `getTxEffect` does not, so a settled transaction can become unreplayable while remaining perfectly visible. The second is why the capture recipe is deliberately not part of `verify-l1`. L1's review corrected the SHAPE of that second fact: it is not a block count. The node serves a tx body only from the ACTIVE POOL, and the pool deletes a mined tx when its block is FINALIZED, so the horizon is `getBlockNumber() - getBlockNumber('finalized')` — a finality lag, fixed in time (~52 minutes measured) and variable in blocks (35-37 at L1's sightings, 54-65 at the review's four hours later). See `captured_fixtures._comment` for the upstream call chain that establishes it. The `network` field stays UNESTABLISHED and `rpc_url` stays null: L1 did not pin an endpoint, because the reason L0 recorded still holds — both reachable endpoints are proxies that strip the version headers on the batch POST upstream's client always sends, and each fixture records that emptiness as what the client actually saw.",
+      "reason": "L1's deliverable is 'fixtures captured from a live chain and committed, so the suite runs without a network, with the capture script committed beside them', and the campaign's standing instruction is to record provenance per fixture \u2014 endpoint, block, transaction, capture time, and what the node reported \u2014 because 'fabricated or unlabelled fixtures are the failure mode this campaign is built to avoid'. Each fixture file carries its own full provenance block; this entry is the index and the place two facts about the CHAIN live, neither of which belongs in a fixture: mainnet is live and completely idle (150 consecutive blocks with zero transactions on 2026-08-29, re-taken by L1's review as 200 consecutive blocks), so both fixtures are testnet by necessity rather than by preference; and `getTxByHash` prunes while `getTxEffect` does not, so a settled transaction can become unreplayable while remaining perfectly visible. The second is why the capture recipe is deliberately not part of `verify-l1`. L1's review corrected the SHAPE of that second fact: it is not a block count. The node serves a tx body only from the ACTIVE POOL, and the pool deletes a mined tx when its block is FINALIZED, so the horizon is `getBlockNumber() - getBlockNumber('finalized')` \u2014 a finality lag, fixed in time (~52 minutes measured) and variable in blocks (35-37 at L1's sightings, 54-65 at the review's four hours later). See `captured_fixtures._comment` for the upstream call chain that establishes it. The `network` field stays UNESTABLISHED and `rpc_url` stays null: L1 did not pin an endpoint, because the reason L0 recorded still holds \u2014 both reachable endpoints are proxies that strip the version headers on the batch POST upstream's client always sends, and each fixture records that emptiness as what the client actually saw.",
       "drift_entries_opened": []
     }
   ]

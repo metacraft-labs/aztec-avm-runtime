@@ -88,6 +88,29 @@ l1_prepare() {
     assert_true "…and $f is TRACKED, so the suite runs from a clean checkout" \
       git -C "$REPO_ROOT" ls-files --error-unmatch "replay/fixtures/$f"
   done
+  # EVERY FIXTURE SAYS HOW IT WAS TAKEN, AND THE THING IT NAMES EXISTS.
+  #
+  # "A fixture that can be regenerated is worth more than one that cannot, but only if regenerating
+  # it is actually wired up." `provenance.capturedBy` is that wiring, and until this assertion
+  # existed it was a string nobody read: L2's `testnet_settled_tx_refblock.json` names a script that
+  # needs `--pin-reference-block`, and no recipe passed it, so the fixture was frozen by an accident
+  # of the CLI rather than by the retention horizon. That is now `just capture-replay-fixture
+  # pin=1`, and this assertion is what stops the next one drifting the same way.
+  #
+  # L1's two fixtures are frozen CORRECTLY and this assertion does not pretend otherwise: their
+  # transactions fell out of `getTxByHash` an hour after they settled, so the script they name can
+  # still run and would produce a DIFFERENT transaction. What is asserted is that the path exists
+  # and is committed — not that re-running it reproduces the file, which for a live chain it never
+  # could.
+  for f in "${L1_ALL_FIXTURES[@]}"; do
+    local capturer
+    capturer="$(l1_json "$L1_FIXTURE_DIR/$f" "d['provenance']['capturedBy']")"
+    assert_prefix "…$f names the script that took it" "replay/tools/" "$capturer"
+    assert_file "…and that script is on disk" "$REPO_ROOT/${capturer%% *}"
+    assert_true "…and is TRACKED, so regeneration is wired up rather than described" \
+      git -C "$REPO_ROOT" ls-files --error-unmatch "${capturer%% *}"
+  done
+
   # The set, not just the members: an undeclared fixture is as much a finding as a missing one.
   assert_eq "the fixtures on disk are exactly the ones declared here, L1's and L2's" \
     "$(printf '%s\n' "${L1_ALL_FIXTURES[@]}" | sort | tr '\n' ' ')" \

@@ -228,6 +228,14 @@ export function compareToPublishedEffects(
     comparisons,
     matched,
     mismatched: comparisons.length - matched,
+    // `comparisons.length > 0` IS UNREACHABLE TODAY AND IS KEPT ANYWAY, WHICH IS A STATEMENT AND
+    // NOT AN OVERSIGHT. `revertCode`, `transactionFee` and the two length comparisons are pushed
+    // unconditionally above, so the array is never empty for any input this function can be given —
+    // not even a transaction with no public half, which still yields eighteen comparisons. L2's
+    // mutation arm M5 removes this clause and NO CHECK CAN SEE IT; that is recorded as a surviving
+    // mutation rather than papered over. It stays because the day the comparison set becomes
+    // conditional on the public half being present, the guard becomes live and what it prevents is
+    // "zero mismatches over zero comparisons" — the vacuous green this campaign has shipped twice.
     reproduced: comparisons.length > 0 && matched === comparisons.length,
   };
 }
@@ -261,9 +269,27 @@ export type ReplayOptions = {
   readonly maxRounds?: number;
   /** Called after each round, so a caller can show progress without this module printing. */
   readonly onRound?: (round: HydrationRound) => void;
+  /**
+   * WHICH BLOCK THE PRE-STATE IS READ AT. Correct is the settling block's PARENT, which is the
+   * default and the only value any real replay uses.
+   *
+   * EXPORTED FOR THE CONTROL AND FOR NOTHING ELSE, and named so that is impossible to miss —
+   * `createUnguardedNodeClientForControls` and `resolvePublicContractsUnguardedForControls` are the
+   * precedents and the reason is theirs: "re-execution reproduces the published effects" is worth
+   * nothing unless something demonstrates what a replay against the WRONG state does. Set it to the
+   * SETTLING block and every read returns the value the transaction ITSELF wrote, so a
+   * read-modify-write increments an already-incremented counter and the comparison must fail.
+   *
+   * It is a MODE OF THE SUBJECT, not a second function: one loop, one seeding path, one comparison.
+   * A control that ran different code would constrain the control's code and not the replay's.
+   */
+  readonly preStateBlockForControls?: 'parent' | 'settling-block';
 };
 
 export type ReplayOutcome = {
+  /** The block every pre-state read was taken at. CARRIED, so a caller cannot mistake a control
+   * run for a real one — see `ReplayOptions.preStateBlockForControls`. */
+  readonly preStateBlock: number;
   readonly revertCode: number;
   readonly result: Record<string, unknown>;
   readonly rounds: readonly HydrationRound[];
@@ -298,7 +324,12 @@ export async function replaySettledTransaction(
     throw new IntraBlockPredecessorsUnavailable(
       settled.txHash, settled.l2BlockNumber, settled.txIndexInBlock);
   }
-  const parent = BlockNumber(settled.l2BlockNumber - 1);
+  // `parent` keeps its name because that is what it is in every real call. The control's value is
+  // the settling block itself, and the variable is still the thing every read is taken at, so a
+  // reader of the loop below does not have to hold two names for one idea.
+  const parent = options.preStateBlockForControls === 'settling-block'
+    ? BlockNumber(settled.l2BlockNumber)
+    : BlockNumber(settled.l2BlockNumber - 1);
   const maxRounds = options.maxRounds ?? DEFAULT_MAX_ROUNDS;
   const inputBytes = encodeInputs(settled);
 
@@ -379,7 +410,7 @@ export async function replaySettledTransaction(
     const progress = answered.added + (round === 1 ? seedSize(seed).nullifiers + seedSize(seed).publicData : 0);
 
     if (round > 1 && progress === 0 && outcome !== undefined) {
-      return finish(instance, outcome, settled, rounds, seed);
+      return finish(instance, outcome, settled, rounds, seed, parent);
     }
     if (round > 1 && progress === 0 && outcome === undefined) {
       // THE LOOP HAS SETTLED AND THE MODULE STILL REFUSES. That is not "did not converge" — it is a
@@ -407,9 +438,11 @@ function finish(
   settled: SettledTransaction,
   rounds: HydrationRound[],
   seed: ResidentSeed,
+  preStateBlock: number,
 ): ReplayOutcome {
   const stats = (outcome.result['stats'] ?? {}) as Record<string, unknown>;
   return {
+    preStateBlock,
     revertCode: outcome.revertCode,
     result: outcome.result,
     rounds,

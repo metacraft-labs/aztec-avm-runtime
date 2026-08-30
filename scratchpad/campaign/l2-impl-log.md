@@ -86,3 +86,71 @@ evidence is one green run and not a measured floor.
 The control that matters most, named so it is not re-derived: **seed the pre-state at
 block 62639 instead of 62638** and the replay reads the values the transaction ITSELF
 wrote. That is the "green and measuring nothing" arm this deliverable most needs.
+
+---
+
+# L2's verification, added after the first landing
+
+The first L2 commit named the three `verification/*.sh` checks as **not done** rather
+than letting `just replay-settled` exiting non-zero stand in for a gate. They exist now.
+
+## The floor
+
+| check | assertions | what its control is |
+|---|---|---|
+| `e2e_replay_matches_published_effects` | **92** | the SAME loop with the pre-state read at the SETTLING block instead of its parent — every read returns the value the transaction itself wrote |
+| `verify_hydrated_roots_match_state_reference` | **91** | `declareTreeRoots` handed the CHAIN'S OWN roots must answer `agrees` for all four; plus a half-control perturbing one root by one nibble |
+| `verify_state_route_decided_on_measurement` | **99** | the two upstream sources re-read from the anchor's OBJECT STORE, with every absence paired to a presence from the same file |
+
+`just verify-l2` — **282 assertions, 0 failures**, offline, against the M27 module.
+`just verify-l1` went 292 → **328** (141 / 110 / 77) with the `capturedBy` assertions.
+
+## The mutation harness — 16 arms red, 1 recorded survivor
+
+`scratchpad/campaign/l2-mutations.sh`. The three that matter:
+
+- **M6** makes `preStateBlockForControls` a no-op → 16 failures, ALL in §3 and §4.
+  This is the arm that tests the **control** rather than the subject: without it,
+  "the control does not reproduce" could be true because the control never ran.
+- **M14** reports the roots as the UNSEEDED ones while leaving seeding intact → exactly
+  **2** failures, both §2's "the tree MOVED", with §1 entirely green. That is the proof
+  §2 is load-bearing: an EMPTY tree also differs from the chain.
+- **M11** turns `collectHints` off → 7 failures including "the module reported real
+  world-state queries: expected >= 15, got 0". Route 3's premise, measured.
+
+**M13 mutates the FIXTURE**, in L1's discipline: one recorded `getPublicDataWitness`
+value incremented by one → 5 failures. The slot still matches, so the hydration seeds it
+happily; only the arithmetic downstream disagrees. That is a wrong VALUE at a RIGHT slot,
+which is the exact shape `historical_state.ts` refuses to produce by coercion.
+
+## Three things the harness found in L2's own work
+
+1. **`MHANG` was not a hang.** Its first form was `await new Promise(() => {})`, which has
+   no pending handle — node's loop drains and the process exits **13** on "unsettled
+   top-level await". A die-before-summary wearing a hang's label. **L1's review recorded
+   the identical trap and I walked into it anyway.** Fixed with a long TIMER, which is a
+   live handle: rc **124**, killed at its bound.
+2. **`M5` SURVIVES, and is recorded as a survivor rather than deleted.**
+   `reproduced: comparisons.length > 0 && …` — the length guard is **unreachable**, because
+   `revertCode`, `transactionFee` and the two length comparisons are pushed
+   unconditionally, so the array is never empty for any input. Not even a transaction with
+   no public half distinguishes the two forms. A mutation nothing can kill is a fact about
+   the code, not a gap in the check. The guard is kept and `replay_execution.ts` now says
+   why at the line.
+3. **`M8` could not reach the section it was written for**, and is kept labelled COARSE.
+   With nothing seeded the AVM refuses and the probe dies first, so what caught it was the
+   exit-status assertion — MDIE's statement, not §2's. M14 was written to actually reach §2.
+
+## The regeneration wiring, which was missing
+
+`testnet_settled_tx_refblock.json` names a capture script that needs
+`--pin-reference-block`, and **no recipe passed it** — so the fixture was frozen by an
+accident of the CLI rather than by the retention horizon, which is the only reason a
+fixture here is allowed to be frozen. Now `just capture-replay-fixture pin=1`, proven by
+regenerating to a scratch path: a fresh transaction in block **62672**, with
+`aztec_getContract ["0x2a9a1d0e…", 62672]` on the wire.
+
+`l1_prepare` now asserts, for every declared fixture, that `provenance.capturedBy` names a
+script that exists and is TRACKED — so the wiring is checked offline instead of described.
+It deliberately does NOT assert that re-running reproduces the file: against a live chain
+it never could, and L1's two transactions are gone.
