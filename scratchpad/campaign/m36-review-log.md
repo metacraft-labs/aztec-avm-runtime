@@ -505,3 +505,32 @@ is the way it will keep arriving.
 **Corrected at the source**, in `LOCAL-HISTORY.md` §7, with the measurement and a pointer to §3b for
 the analysis. `_m36_doc_figures.py` and the boundary check's own §2/§6 needles both still pass:
 **M36 re-run at 137 (74 / 29 / 34)** after all three of this review's edits.
+
+---
+
+## Step 12 — WHAT WAS COMMITTED, AND THE FINAL STATE
+
+Fetched before committing: `HEAD == origin/dev == 4b627dc`, `rev-list --left-right --count` = `0 0`,
+so the sweep at `4b627dc` remains a measurement of the tree that ships. Committed `e473e71` and
+pushed to `metacraft-labs` with a normal push — **no force**. `4b627dc..e473e71  dev -> dev`.
+
+**Nothing under `replay/` is in the commit** — `git diff --cached --name-only | grep -c '^replay/'`
+is **0**. `noir-wt4-webpage` was not touched and not committed. All four diff3 markers grepped for
+after the edits: the only `<<<<<<<` in the tree is `CAMPAIGN-BRIEF.md`'s own prose *about* the
+markers; no line-anchored marker exists anywhere.
+
+Five review edits, each measured to move no count:
+
+| edit | why | count |
+|---|---|---|
+| `verify_local_history_boundary_declared.sh` — `die` for the conditional block | a silent 3-assertion skip that PASSED | 34, unchanged |
+| `_manifest_parser.py` — `FX-\d{2,}` in **two** places | the sibling of the bug M36 fixed, in the same file | M2 293, unchanged |
+| `LOCAL-HISTORY.md` §7 — the `cast_vote` bullet | stale and false on the shipped tree | 137, unchanged |
+| `e2e_note_discovery_across_blocks.sh` — header said FOUR over seven controls, numbered 1,2,3,4,5,7,6 | a header that miscounts its own list is how a control goes missing | 74, unchanged |
+| the milestone file — the fabricated-instance sentence, and "Four controls" -> "Seven" | the behavioural half is a superseded path | n/a |
+
+Plus `CAMPAIGN-BRIEF.md`: the two new defect families, and a review paragraph recording that 11,910
+was re-derived and nothing moved.
+
+**Final: M36 = 137 (74 / 29 / 34), 3/3, exit 0; campaign total 11,910, `delta +0`.**
+`carry/*.json` byte-identical to its pre-review digests on all four.

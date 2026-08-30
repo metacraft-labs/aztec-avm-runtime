@@ -26,7 +26,9 @@
 #                    this file's ancestors record a whole milestone that passed on `0 == 0`.
 #
 # ===========================================================================================
-# THE FOUR CONTROLS, EACH FOR A DIFFERENT WAY THIS COULD BE VACUOUS
+# THE SEVEN CONTROLS, EACH FOR A DIFFERENT WAY THIS COULD BE VACUOUS
+# (the header said FOUR while listing seven, and the list was numbered 1,2,3,4,5,7,6 — corrected by
+#  M36's review; a header that miscounts its own list is how a control goes missing unnoticed)
 # ===========================================================================================
 #
 #   1. ANOTHER ACCOUNT'S NOTE IS NOT DISCOVERED — and its own wallet DOES find it. Both halves, so
@@ -43,10 +45,10 @@
 #      `LogService.fetchLogsByTag`, which this handler was missing until upstream's BODY was read
 #      against it. The permissive version is not visibly wrong afterwards: the tag silos with the
 #      requested contract and the answer is well-formed either way.
-#   7. THE SAME NOTE VALIDATED TWICE IS ONE NOTE WITH TWO SCOPES — upstream keys a stored note by
+#   6. THE SAME NOTE VALIDATED TWICE IS ONE NOTE WITH TWO SCOPES — upstream keys a stored note by
 #      its siloed nullifier. A table of rows would return it twice and a contract would spend it
 #      twice; the scope SET is the non-degeneracy that says the second validation was recorded.
-#   6. A CONTRACT MAY NOT DERIVE ANOTHER ACCOUNT'S TAGGING SECRET — upstream's
+#   7. A CONTRACT MAY NOT DERIVE ANOTHER ACCOUNT'S TAGGING SECRET — upstream's
 #      `assertAllowedScope(sender, this.scopes)`, likewise missing. Upstream's own doc says the only
 #      expected `None` from `getAppTaggingSecret` is an INVALID RECIPIENT, so the two answers are
 #      kept apart: an out-of-scope sender FAILS and an invalid recipient returns `None`.
