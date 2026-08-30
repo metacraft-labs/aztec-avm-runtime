@@ -192,7 +192,14 @@ row_for() { printf '%s\n' "$DOC" | grep -F "$1" | head -1; }
 # reported 91 assertions and 0 failures. So each figure is looked for on ITS OWN ROW.
 CHUNKS="$BROWSER_DIST/chunks.json"
 assert_file "the build's own chunk report exists" "$CHUNKS"
-for entry in browser.js testing.js demo.js node/node.js worker.js worker-demo.js; do
+# THE LIST IS THE TABLE'S, AND IT HAS TO BE EXTENDED WHEN THE TABLE IS.
+#
+# `wallet-demo.js` was added to §5's table by M34 and NOT to this loop, so its figure was the one
+# row of that table nothing re-derived — and it had already rotted: the table said `309.51 KB` where
+# the build's own report said `309.91`, a value M34 itself moved in a later step and did not carry
+# back. `CAMPAIGN-BRIEF.md`'s "a figure nobody re-derives rots" family, inside the table this check
+# exists to keep honest. Added by M34's review, with the count declared: three assertions per entry.
+for entry in browser.js testing.js demo.js node/node.js worker.js worker-demo.js wallet-demo.js; do
   KB="$(python3 -c '
 import json, sys
 c = json.load(open(sys.argv[1]))

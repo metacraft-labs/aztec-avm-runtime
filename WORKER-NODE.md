@@ -199,15 +199,21 @@ anomaly: a further entry sharing the same modules lets esbuild hoist MORE into c
 entries already carry, and a chunk counted once is smaller than the same code duplicated. Nothing was
 removed from any entry's graph, and the file counts are unchanged.
 
+*(M34 added the `wallet-demo.js` row and did not add `wallet-demo.js` to
+`test_worker_transferable_container_not_copied` §10's entry list, so it was the one row of this table
+nothing re-derived — and it had already rotted, stating `309.51 KB` against a build reporting
+`309.91`. M34's review put the entry in the loop; every row here is re-derived from `chunks.json`
+now, three assertions each.)*
+
 | entry point | before M32 | M32's measurement | current |
 |---|---|---|---|
-| `browser.js` | 255.79 KB, 7 files | 255.87 KB, 8 files | **263.05 KB, 9 files** |
-| `testing.js` | 279.77 KB, 8 files | 279.93 KB, 10 files | **288.23 KB, 12 files** |
-| `demo.js` | 280.97 KB, 8 files | 281.12 KB, 10 files | **289.44 KB, 12 files** |
-| `node/node.js` | 225.36 KB, 4 files | 225.36 KB, 4 files | **225.42 KB, 4 files** |
-| `worker.js` | — | 282.40 KB, 9 files | **290.72 KB, 11 files** |
-| `worker-demo.js` | — | 283.48 KB, 11 files | **291.79 KB, 13 files** |
-| `wallet-demo.js` | — | — | **309.51 KB, 13 files** |
+| `browser.js` | 255.79 KB, 7 files | 255.87 KB, 8 files | **263.10 KB, 9 files** |
+| `testing.js` | 279.77 KB, 8 files | 279.93 KB, 10 files | **288.28 KB, 12 files** |
+| `demo.js` | 280.97 KB, 8 files | 281.12 KB, 10 files | **289.50 KB, 12 files** |
+| `node/node.js` | 225.36 KB, 4 files | 225.36 KB, 4 files | **225.49 KB, 4 files** |
+| `worker.js` | — | 282.40 KB, 9 files | **290.78 KB, 11 files** |
+| `worker-demo.js` | — | 283.48 KB, 11 files | **291.85 KB, 13 files** |
+| `wallet-demo.js` | — | — | **309.99 KB, 13 files** |
 
 `node/node.js` is unmoved in both moves, and for the same reason: the Node pass is a separate one.
 
