@@ -904,6 +904,42 @@ m28 353  m29 127
                                                        CAMPAIGN TOTAL 10,178
 ```
 
+**M35'S REVIEW TOOK IT TO 11,744, AND MOVED EXACTLY THREE OTHER MILESTONES — ALL THREE M35'S OWN
+DECLARED MOVES, RE-CONFIRMED.** Re-measured M0-M35 on 2026-08-30 by M35's review, **after its last
+commit**, `setsid`-detached in this repository's own dev shell (node v24.19.0), one milestone at a
+time with nothing else running, `TMPDIR` and the log under `~/.cache`, **no hole in the log** (72
+markers for 36 milestones), **34 of 36 exit 0**:
+
+```
+m0 156  m1 181  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 262  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
+m28 357  m29 127  m30 218  m31 421  m32 237  m33 248  m34 217  m35 212
+                                                       CAMPAIGN TOTAL 11,744
+```
+
+**Every one of M0-M34 came out at its reference value TO THE ASSERTION**, and
+11,524 + 212 + 4 + 2 + 2 = 11,744 exactly, `delta +0`. **M35's own 212** is 64 / 95 / 53, declared at
+198, and the fourteen the review added are in two checks and nothing else — twelve for §5b and two for
+an address. Both are above; the first is the section this file now carries a rule for.
+
+**M9 DID NOT FLAKE** — 807, rc 0, 1,284 s, immediately after m8's 177 s run, which is D19's standing
+condition and it did not fire; M15 did not flake either (537, 383 s). **The two non-zero exits are
+both already on this file's list.** M11 is **262 with nine failing assertions**, split 5 / 2 / 2, the
+recorded ninth-upstream-move signature with the count unchanged; not repaired, `carry/` left at HEAD.
+M28 is **357 with ONE failing assertion and it is L0's** — `verify_npm_pack_no_optional_native` pins
+the tracked `package.json` list and got `… probe-mt replay spike` where it wants `… probe-mt spike`;
+its own count is unchanged at 54, which is what says a pinned list moved and not a structure, and it
+is recorded rather than fixed for the fourth milestone running. **L0's and L1's six check names appear
+ZERO times in the whole sweep log**, grepped one at a time. **A sweep is a writer**:
+`carry/rebase.json` and `carry/exposure.json` were `aaeb6877…` / `ec959b84…` before, came out
+`79f597b2…` / `3836c2b6…` — the same two post-sweep digests every run since M30 — and were restored,
+`sha256sum -c`, all four OK.
+
+**AND THE MATRIX WAS RE-TAKEN TWICE, WHICH IS WHERE THE ARM MOVED.** Once against the tree M35 shipped
+(M1 four failures -> **five**) and again after the review's own last edit, where M10 joins it at
+95 / 13. See the rule above; the numbers are in the milestone's own table.
+
 **M35 TOOK IT TO 11,730, AND MOVED EXACTLY THREE OTHER MILESTONES — ALL THREE DECLARED IN THE
 REFERENCE TABLE BEFORE THE SWEEP RAN.** Measured M0-M35 on 2026-08-30 by M35's implementation, after
 its last edit, `setsid`-detached in this repository's own dev shell (node v24.19.0), one milestone at

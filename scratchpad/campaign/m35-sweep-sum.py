@@ -193,7 +193,31 @@ REFERENCE = {
     #
     # M35's own 198 is 64 / 83 / 51 across `verify_oracle_coverage_is_measured`,
     # `test_unimplemented_oracle_refuses_by_name` and `e2e_private_function_executes_in_browser`.
-    "m35": 198,
+    #
+    # M35'S REVIEW TAKES IT 198 -> 212, in two checks and nothing else. Both numbers were declared in
+    # the milestone section and in the review's own commit message BEFORE its sweep was launched; this
+    # table is brought in step with them.
+    #   * `test_unimplemented_oracle_refuses_by_name` 83 -> 95. A new §5b, twelve assertions, for the
+    #     milestone's strongest sentence: `Token.transfer`, `Token.mint_to_private` and
+    #     `PrivateVoting.cast_vote` all stop at `aztec_utl_getContractInstance`. That is written in the
+    #     refusal reason, in `PRIVATE-EXECUTION.md` §3 and in the goal section, and only `transfer` was
+    #     ever EXECUTED by a check — two thirds of the claim was a spike measurement re-derived by
+    #     nothing. Re-taken by the review it is true to the byte, and it is a per-run measurement now:
+    #     the arm runs all three and the SET of stops is asserted to be a singleton, with the
+    #     non-degeneracies that say it is three programs (two contracts, three distinct bytecodes) and
+    #     not one run three times. Matrix arm M10 shows those assertions can fail — M1 leaves the
+    #     ledger's `refused` record in place, so the frames still report a refusal and §5b cannot see
+    #     it.
+    #   * `e2e_private_function_executes_in_browser` 51 -> 53. §3 compared the circuit's echoed
+    #     `contractAddress` against `0x0…777` TYPED INTO THE CHECK; the arm reports the address it
+    #     REQUESTED now and the two are compared, with a non-degeneracy that the request is not zero.
+    #     Two producers out of one run, which is what the `returnsHash` assertion beside it already
+    #     does.
+    # `verify_oracle_coverage_is_measured` stays 64; its document comparer covers 35 figures against
+    # 34, under the same three assertions. The build moved ONE figure — `wallet-demo.js`'s eager set
+    # 332.68 -> 332.94 KB and the all-chunk total 8,219.06 -> 8,219.32 — corrected in the four places
+    # that carry it before this sweep, with M27 345, M32 237, M33 248 and M34 217 re-measured.
+    "m35": 212,
 }
 REFERENCE["m11"] = 262
 REFERENCE["m1"] = 181

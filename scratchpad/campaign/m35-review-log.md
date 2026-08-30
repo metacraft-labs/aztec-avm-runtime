@@ -253,3 +253,104 @@ set did not move. Re-run afterwards: `verify_browser_chunk_budget` 33,
 `verify_browser_bundle_no_node_builtins` 67, `verify_browser_bundle_no_native_deps` 45,
 `verify_browser_entry_points_are_dd5_shaped` 40, `verify_browser_bundle_builds` 54 — every one at its
 reference value, zero failures.
+
+---
+
+## Step 10 — STATUS HONESTY
+
+Five verification entries: three `passed` with a `file:` that exists and contains the named check,
+two `pending`.
+
+**The two pending entries are honestly pending.** `e2e_wallet_private_transfer` and
+`e2e_joined_private_public_trace` both name `aztec_utl_getContractInstance` as the blocker, and I
+measured that blocker myself on three programs. Neither entry has a `file:`, neither carries prose in
+`status:`, and the second declares that it depends on the first rather than on anything of its own.
+
+**The fifth entry is not a lowered bar.** `e2e_private_function_executes_in_browser` claims something
+the four planned entries do not name — a real private function executing in a page — and it does not
+substitute for either pending entry: nothing in it asserts anything about `transfer`, a transaction,
+or a joined container. It is a different claim, and it is the third rung of the campaign's own ladder
+for what M35 actually shipped.
+
+**And the write-up says the same thing where a reader arrives first.** `PRIVATE-EXECUTION.md` §7's
+first bullet is *"`transfer` does not run"*, the goal section leads with it, and `:next_steps:` opens
+with it. That is what an honest partial looks like.
+
+---
+
+## Step 11 — WHAT DID NOT SURVIVE
+
+Five, and none of them is a false headline.
+
+1. **THE LADDER WAS CLAIMED FOR THREE PROGRAMS AND MEASURED FOR ONE.** Fixed; see Step 9. The claim
+   itself is TRUE — re-taken, all three stop at the same rung.
+2. **THE MUTATION MATRIX WAS DECLARED AGAINST A TREE THAT WAS NOT SHIPPED.** Honestly labelled, and
+   still not a measurement of what ships: re-taken, **M1 is five failures and not four**.
+3. **§5b'S PREDECESSOR HAD NO ARM.** The matrix's own M1 cannot see a refusing oracle that returns a
+   plausible value *and records nothing* — the ledger's `refused` entry keeps `stoppedAtOracle`
+   pointing at the right name. M10 added.
+4. **AN ADDRESS COMPARED AGAINST A LITERAL.** Declared by the milestone as the lesser form, and
+   correctly so; replaced with the request/echo comparison anyway.
+5. **THE IMPL LOG'S STEP 3 IS THE PRE-`transient_array_service.ts` STATE** — 36 pxe files, 49 total,
+   `check-drift` 630 identical — and was never brought forward. The shipped figures are 37, 50 and
+   **631** (581 + 50), and `PROVENANCE.md`, `PRIVATE-EXECUTION.md` §2 and the `check-drift` row are
+   all correct. Corrected in place with the reason beside it.
+
+**And what survived unchanged, having been attacked:** the 68/3/49/16 count four ways, the 53-entry
+control and its recorded reason, the 33/35 partition and its disjointness, 33 exercised = 33
+implemented in both directions, the refusal-by-name property under a stealth mutation, all four
+upstream validations, the three aborts' claims, the 50-file / 4,961-line vendoring at
+`local-edits: none`, `check-drift` 22 → 24, `verify_provenance_complete` 68 → 70,
+`@aztec/noir-acvm_js`'s empty dependency list, RI-64's narrowed identity claim, the M28 353 → 357 and
+M33 246 → 248 attributions, the browser network evidence in both directions, and `still_there`'s
+exit 5.
+
+**No assertion in M35's shipped set was found to be incapable of failing.** The campaign's running
+total does not move.
+
+---
+
+## Step 12 — THE SWEEP: M0–M35 at 11,744, delta +0, no hole
+
+Measured 2026-08-30 **after my last commit**, `setsid`-detached in this repository's own dev shell
+(node v24.19.0), one milestone at a time with nothing else running, `TMPDIR` and the log under
+`~/.cache`, **72 markers for 36 milestones: no hole**, **34 of 36 exit 0**:
+
+```
+m0 156  m1 181  m2 292  m3 199  m4 218  m5 236  m6 363  m7 287  m8 516  m9 807
+m10 450  m11 262  m12 691  m13 458  m14 460  m15 537  m16 223  m17 297  m18 283
+m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
+m28 357  m29 127  m30 218  m31 421  m32 237  m33 248  m34 217  m35 212
+                                                   CAMPAIGN TOTAL 11,744
+```
+
+**11,524 + 212 + 4 + 2 + 2 = 11,744 exactly**, `delta +0` against a reference table naming all four
+moves in advance — M35's own 212, M28 353 → 357, M33 246 → 248, M1 179 → 181. Every one of M0–M34
+came out at its reference value TO THE ASSERTION.
+
+**M9 did not flake**: 807, rc 0, 1,284 s, immediately after m8's 177 s run, which is D19's standing
+condition and it did not fire. M15 did not flake either (537, 383 s).
+
+**The two non-zero exits are both already on the record, and both were read rather than assumed.**
+M11 is **262 with nine failing assertions, split 5 / 2 / 2** across
+`verify_carry_set_applies_to_upstream_head`, `verify_carry_ledger_complete` and
+`verify_carry_exposure_measured` — the ninth-upstream-move signature exactly, count unchanged, not
+repaired, `carry/` left at HEAD. M28 is **357 with ONE failing assertion and it is L0's**:
+`verify_npm_pack_no_optional_native` got `ct-host diffsim drift node-host orchestration probe-mt
+replay spike` where it pins the same list without `replay`. **That check's own count is unchanged at
+54**, which is what says the pinned list moved and not a structure — so M35's +4 (in
+`verify_browser_bundle_no_node_builtins` and `verify_browser_bundle_no_native_deps`) does not
+interact with it at all.
+
+**L0 and L1 contribute zero, and that is a measurement**: their six check names —
+`verify_node_client_surface_narrow`, `test_node_client_refusals_distinguishable`,
+`verify_client_uses_upstream_schema`, `e2e_fetch_settled_transaction`,
+`test_missing_contract_artifact_refused`, `test_private_half_declared_absent` — appear **zero times
+in the whole sweep log**, grepped one at a time.
+
+**A sweep is a writer.** `carry/*.json` were checksummed before the sweep and were identical to the
+digests taken at review start. `carry/rebase.json` and `carry/exposure.json` came out `79f597b2…` /
+`3836c2b6…` — the same two post-sweep digests every run since M30 — and were restored from HEAD,
+`sha256sum -c`, all four OK, `git status carry/` clean.
+
+**No sweep was running when mine started or finished**, and nothing under `replay/` was touched.
