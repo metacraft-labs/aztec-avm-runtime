@@ -32,9 +32,11 @@ import { WASMSimulator } from '../vendor/simulator/private/acvm_wasm.ts';
 import { toACVMWitness } from '../vendor/simulator/private/acvm/serialize.ts';
 import { buildACIRCallback } from '../vendor/pxe/contract_function_simulator/oracle/acir_callback.ts';
 import {
+  type HeldAccountKeys,
   type HeldContractInstance,
   type OracleCall,
   ORACLE_ENVIRONMENT_VERSION,
+  assertHeldAccountKeysAreSelfConsistent,
   assertHeldInstancesAreSelfConsistent,
   createPrivateOracleHandler,
 } from './private_oracles.ts';
@@ -183,6 +185,11 @@ export interface PrivateExecutionRequest {
    * than by remembering to.
    */
   readonly contractInstances?: readonly HeldContractInstance[];
+  /**
+   * The accounts whose keys the wallet holds, for tier 2's second rung. Omitted means it holds
+   * none and every address answers "not registered" — which is what M35 shipped.
+   */
+  readonly accountKeys?: readonly HeldAccountKeys[];
 }
 
 export interface PrivateExecutionReport {
@@ -342,12 +349,18 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
   // derivations, before a single opcode runs.
   const contractInstances = request.contractInstances ?? [];
   await assertHeldInstancesAreSelfConsistent(contractInstances);
+  // AND THE ACCOUNT DIRECTORY, for the reason its own guard records: `try_get_public_keys` does not
+  // constrain what this oracle returns, so an incoherent triple would not be caught downstream at
+  // all on that path. Checking it here is not a nicety.
+  const accountKeys = request.accountKeys ?? [];
+  await assertHeldAccountKeysAreSelfConsistent(accountKeys);
 
   const oracles = createPrivateOracleHandler({
     contractAddress,
     entropySeed: toFieldValue(request.entropySeed, 'entropySeed'),
     writeLine: request.writeLine,
     contractInstances,
+    accountKeys,
   });
 
   const fields = [...contextFields, ...args];

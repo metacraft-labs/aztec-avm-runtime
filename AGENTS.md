@@ -144,6 +144,61 @@ Both are registered in the workspace manifests under the `codetracer` project.
 The fork is a workspace-root **sibling**, not nested under this repo; the
 verification checks assert that, so moving it will fail them.
 
+## Setting up a FRESH worktree
+
+None of this is in the flake, and a fresh clone will fail in ways that read like
+code problems rather than setup problems. Written down because it was rediscovered
+the expensive way.
+
+**1. `browser/node_modules` is a SYMLINK and it is gitignored**, so it does not
+exist in a new worktree:
+
+```
+ln -sfn ../orchestration/node_modules browser/node_modules
+```
+
+Without it, `node browser/build.mjs` fails with ~122 `Could not resolve "@aztec/…"`
+errors. esbuild resolves from the importing file upward and `browser/` has no
+package of its own — the errors name the packages, so it reads like a missing
+dependency rather than a missing symlink. `.gitignore` explains the arrangement;
+nothing creates it for you.
+
+**2. `npm ci` is needed in TWO trees, and they are not interchangeable.**
+
+```
+(cd orchestration && npm ci)   # the @aztec pin the browser bundle builds against
+(cd diffsim      && npm ci)    # the contract ARTIFACTS the arms execute, and esbuild
+```
+
+`orchestration/` carries `@aztec/{stdlib,foundation,constants,noir-acvm_js,…}`.
+It does **not** carry `@aztec/noir-contracts.js`, so the M35 arms cannot find
+`token_contract-Token.json` without `diffsim/`. `browser/build.mjs` also takes its
+esbuild binary from `spike/` or `diffsim/` rather than installing one.
+
+`drift/` is a third line (`5.3.0-nightly.20260819`, matching the `cpp` anchor) and
+is only needed for the ABI control in `PRIVATE-EXECUTION.md` §3b.
+
+**3. The browser checks need a real browser and `avm.wasm`:**
+
+```
+just avm-wasm-build-m27                 # long from cold; ccache helps enormously
+verification/build_ct_writer_wasm.sh    # needs codetracer-trace-format fetched at its pinned rev
+export M27_CHROMIUM=...                 # see the note below
+export AVM_WASM_PATH="$HOME/.cache/aztec-m27-browser/m27/barretenberg/cpp/build-wasm-avm/bin/avm.wasm"
+```
+
+`build_ct_writer_wasm.sh` fails with *"does not have the pinned trace_format
+revision"* if the sibling `codetracer-trace-format` checkout has not fetched it;
+a plain `git fetch origin` there fixes it.
+
+**On macOS**, `e2e_private_function_executes_in_browser` §1 asserts the browser
+version string contains `Chromium`, and **no macOS build reports that word** —
+Google Chrome, Chrome for Testing and `chrome-headless-shell` all say
+`Google Chrome…`, and nixpkgs has no `aarch64-darwin` chromium. 52 of that check's
+53 assertions pass there and the 53rd structurally cannot. Everything else in the
+M35 set is green on macOS. See the milestone file for the open decision; do not
+quietly loosen the needle.
+
 ## Before you push
 
 `just check-repo-hygiene` — a flake, a lock, an `.envrc` and no uncommitted

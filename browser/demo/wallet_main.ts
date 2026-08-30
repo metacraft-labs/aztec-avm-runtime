@@ -826,6 +826,22 @@ async function armPrivateExecution(): Promise<Record<string, unknown>> {
       heldInstances.map(i => i.address.toString()).join(', '),
   );
 
+  // TIER 2, RUNG 2: THE ACCOUNT KEY DIRECTORY, AND IT IS THE WALLET'S OWN DERIVATION PUBLISHED
+  // RATHER THAN A NEW SOURCE OF KEYS. `deriveDevAccounts` (RI-96) already produces exactly the
+  // triple this oracle returns — public keys, partial address, and the address that
+  // `computeAddress` derives FROM them — from a seed that is an argument and is never generated.
+  // Nothing here is invented; the directory is a view of what `dev_keys.ts` already computes.
+  const keyAccounts = await deriveDevAccounts(DEFAULT_DEV_WALLET_SEED, 3);
+  const heldAccountKeys = keyAccounts.map(a => ({
+    address: a.address,
+    publicKeys: a.publicKeys,
+    partialAddress: a.partialAddress,
+  }));
+  say(
+    `[wallet] holding keys for ${heldAccountKeys.length} account(s): ` +
+      heldAccountKeys.map(a => a.address.toString()).join(', '),
+  );
+
   // THE MILESTONE'S HEADLINE REFUSAL, RE-TAKEN ONE RUNG HIGHER. This is the same 76,875-byte
   // `Token.transfer` M35 shipped, and it is still refused by name on a real circuit — but the
   // oracle it now stops at is the first one it needs that is genuinely UNIMPLEMENTED, rather than
@@ -835,6 +851,7 @@ async function armPrivateExecution(): Promise<Record<string, unknown>> {
     ...common,
     contractAddress: tokenInstance.address,
     contractInstances: heldInstances,
+    accountKeys: heldAccountKeys,
     artifact: tokenArtifact,
     functionName: 'transfer',
     // `to` and `amount`, two fields, read as the ABI declares them. The values do not matter: the
@@ -853,6 +870,7 @@ async function armPrivateExecution(): Promise<Record<string, unknown>> {
       ...common,
       contractAddress: inst.address,
       contractInstances: heldInstances,
+      accountKeys: heldAccountKeys,
       artifact: doc,
       functionName: fnName,
     };
@@ -881,6 +899,13 @@ async function armPrivateExecution(): Promise<Record<string, unknown>> {
       // possible if `assert_eq(instance.to_address(), address)` held inside the circuit. A count
       // of four would be satisfied by four other oracles.
       servedOracles: rung.oracleCalls.filter(c => c.outcome === 'served').map(c => c.oracle),
+      // A RUNG CAN NOW STOP WITHOUT AN ORACLE REFUSING, and the error is the only place that says
+      // why. Tier 2 rung 2 returns `Option::none()` for an account it does not hold, so the frame
+      // is halted by UPSTREAM'S OWN named assertion inside the circuit rather than by a throw of
+      // ours — `outcome: failed`, `stoppedAtOracle: null`, and the reason readable only here.
+      oracleCalls: rung.oracleCalls,
+      error: rung.error ?? null,
+      errorChain: rung.errorChain ?? null,
     });
     say(`${rung.contractName}.${fnName}: ${rung.outcome} at ${rung.stoppedAtOracle ?? '(nothing)'}`);
   }
@@ -894,6 +919,7 @@ async function armPrivateExecution(): Promise<Record<string, unknown>> {
     ...common,
     contractAddress: unheldAddress,
     contractInstances: heldInstances,
+    accountKeys: heldAccountKeys,
     artifact: tokenArtifact,
     functionName: 'transfer',
     args: [0x444n, 5n],
@@ -918,6 +944,25 @@ async function armPrivateExecution(): Promise<Record<string, unknown>> {
     inconsistentDirectoryError = String((e as Error).message);
   }
   say(`inconsistent directory: ${inconsistentDirectoryError.slice(0, 80)}`);
+
+  // RUNG 2'S GUARD CONTROL. Same shape as the one above and it matters more, because
+  // `try_get_public_keys` does not constrain what this oracle returns: on that path an incoherent
+  // triple is caught by nothing downstream at all.
+  let inconsistentKeysError = '';
+  try {
+    await executePrivateFunction({
+      ...common,
+      contractAddress: tokenInstance.address,
+      contractInstances: heldInstances,
+      accountKeys: [{ ...heldAccountKeys[0]!, partialAddress: new Fr(0x99) }],
+      artifact: tokenArtifact,
+      functionName: 'transfer',
+      args: [0x444n, 5n],
+    });
+  } catch (e) {
+    inconsistentKeysError = String((e as Error).message);
+  }
+  say(`inconsistent keys: ${inconsistentKeysError.slice(0, 80)}`);
 
   // THE SAME SEED TWICE, IN TWO SEPARATE HANDLERS. `getRandomField` is the one served oracle that
   // WOULD read ambient entropy in any other wallet, and a recording whose fields differ per run is a
@@ -958,6 +1003,13 @@ async function armPrivateExecution(): Promise<Record<string, unknown>> {
     unheld: jsonSafe(unheld),
     unheldAddress: unheldAddress.toString(),
     inconsistentDirectoryError,
+    // Tier 2 rung 2's evidence: the accounts held, and the guard's message.
+    heldAccountKeys: heldAccountKeys.map(a => ({
+      address: a.address.toString(),
+      partialAddress: a.partialAddress.toString(),
+      npkMHash: a.publicKeys.npkMHash.toString(),
+    })),
+    inconsistentKeysError,
     entropy: { a: entropyA, b: entropyB, other: entropyOther },
     assets: privateExecutionAssets(),
   };
@@ -992,10 +1044,18 @@ async function armOracleSurface(): Promise<Record<string, unknown>> {
     immutablesHash: new Fr(28),
     publicKeys: PublicKeys.default(),
   });
+  const surfaceAccount = (await deriveDevAccounts(DEFAULT_DEV_WALLET_SEED, 1))[0]!;
   const handle = createPrivateOracleHandler({
     contractAddress: contract,
     entropySeed: toFieldValue(PRIVATE_ENTROPY_SEED, 'seed'),
     writeLine: (line: string) => say(line),
+    accountKeys: [
+      {
+        address: surfaceAccount.address,
+        publicKeys: surfaceAccount.publicKeys,
+        partialAddress: surfaceAccount.partialAddress,
+      },
+    ],
     contractInstances: [
       {
         address: surfaceInstance.address,
@@ -1038,6 +1098,23 @@ async function armOracleSurface(): Promise<Record<string, unknown>> {
   } catch (e) {
     observations.getContractInstanceMiss = `refused as ${(e as Error).name}`;
   }
+
+  // tier 2 rung 2 — BOTH DIRECTIONS, and the miss is an ANSWER here rather than a throw, because
+  // the oracle's declared return is an Option and the protocol defines the "not registered"
+  // encoding. A handler that threw would break `try_get_public_keys`, whose whole purpose is to
+  // ask and accept `None`.
+  const gotKeys = (await h.getPublicKeysAndPartialAddress(surfaceAccount.address)) as {
+    value?: { partialAddress: { toString(): string } };
+  };
+  observations.getPublicKeysAndPartialAddress =
+    gotKeys.value?.partialAddress.toString() === surfaceAccount.partialAddress.toString()
+      ? 'answered with the partial address that derives its own key'
+      : 'ANSWERED WITH THE WRONG PARTIAL ADDRESS';
+  const missKeys = (await h.getPublicKeysAndPartialAddress(await AztecAddress.fromNumber(0x6262))) as {
+    value?: unknown;
+  };
+  observations.getPublicKeysAndPartialAddressMiss =
+    missKeys.value === undefined ? 'answered none for an unregistered account' : 'ANSWERED FOR AN UNKNOWN ACCOUNT';
 
   // capsules
   h.setCapsule(contract, F(1n), [F(11n), F(12n)], scope);

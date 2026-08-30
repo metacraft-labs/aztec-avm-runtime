@@ -315,8 +315,25 @@ print('SMALLEST_BYTECODE\t%d' % min(r['bytecodeBytes'] for r in rungs))
 print('TYPES\t%s' % ' '.join(sorted({r['functionType'] for r in rungs})))
 print('OUTCOMES\t%s' % ' '.join(sorted({r['outcome'] for r in rungs})))
 print('STOPS\t%s' % ' '.join(sorted({str(r['stoppedAtOracle']) for r in rungs})))
+# A rung can now halt WITHOUT an oracle refusing - tier 2 rung 2 answers `Option::none()` and the
+# CIRCUIT stops the frame - so the oracle-stops are separated from the null one.
+print('STOPS_AT_ORACLE\t%s' % ' '.join(sorted(
+    {str(r['stoppedAtOracle']) for r in rungs if r['stoppedAtOracle'] is not None})))
 print('STOPS_NOT_REFUSING\t%s' % ' '.join(sorted(
-    {str(r['stoppedAtOracle']) for r in rungs} - refusing)))
+    {str(r['stoppedAtOracle']) for r in rungs if r['stoppedAtOracle'] is not None} - refusing)))
+print('HALTED_IN_CIRCUIT\t%d' % sum(1 for r in rungs if r['stoppedAtOracle'] is None))
+print('CIRCUIT_HALT_ERRORS\t%s' % ' ;; '.join(sorted(
+    str(r['error']) for r in rungs if r['stoppedAtOracle'] is None)))
+print('OUTCOMES_BY_PROGRAM\t%s' % ' '.join(sorted(
+    '%s=%s' % (r['functionName'], r['outcome']) for r in rungs)))
+# The oracle version the BYTECODE declared, read out of the rung that halted in the circuit - so
+# "the version check passed over an incompatible pair" is a reading rather than a claim.
+vers = set()
+for r in rungs:
+    for c in r['oracleCalls']:
+        if c['oracle'] == 'aztec_misc_assertCompatibleOracleVersion':
+            vers.add(c['detail'].split('contract=')[1].split(' ')[0])
+print('CONTRACT_VERSION\t%s' % ' '.join(sorted(vers)))
 print('MIN_SERVED\t%d' % min(r['oraclesServed'] for r in rungs))
 print('REFUSED_COUNTS\t%s' % ' '.join(sorted({str(r['oraclesRefused']) for r in rungs})))
 # TIER 2 RUNG 1'S OWN EVIDENCE, READ OUT OF EVERY RUNG'S SERVED SET.
@@ -339,7 +356,10 @@ assert_eq "from two different CONTRACTS, so this is not one artifact three times
 assert_eq "with three different bytecodes, so it is not one program three times" "3" "$(l DISTINCT_BYTECODES)"
 assert_ge "and the smallest of them is real compiled Noir rather than a stub" 5000 "$(l SMALLEST_BYTECODE)"
 assert_eq "every one of them is a private function" "abi_private" "$(l TYPES)"
-assert_eq "every one of them REFUSED" "refused" "$(l OUTCOMES)"
+# TWO REFUSE AT AN ORACLE AND ONE HALTS IN THE CIRCUIT, and 5d says which is which by name. The
+# set is asserted EXACTLY rather than relaxed to "not empty": a second rung falling into the
+# circuit-halt bucket is a regression and must be read as one.
+assert_eq "two refuse at an oracle and one halts in the circuit" "failed refused" "$(l OUTCOMES)"
 # THE CLAIM ITSELF, AND IT IS NO LONGER A SINGLETON — WHICH IS THE RESULT, NOT A REGRESSION.
 #
 # M35 measured this set as the singleton `{aztec_utl_getContractInstance}` and that was true: tier 2's
@@ -352,9 +372,10 @@ assert_eq "every one of them REFUSED" "refused" "$(l OUTCOMES)"
 #
 # The set is asserted EXACTLY rather than by size, so a rung that regressed back to
 # `getContractInstance` — the shape a broken directory produces — fails here by name.
-assert_eq "the three now stop at three DIFFERENT oracles, and these are they" \
-  "aztec_prv_getSenderForTags aztec_utl_getNotes aztec_utl_getPublicKeysAndPartialAddress" \
-  "$(l STOPS)"
+# Rung 2 moved the third program AGAIN, and it no longer stops at an oracle at all - see 5d.
+assert_eq "the two that stop at an oracle stop at M36's, and these are they" \
+  "aztec_prv_getSenderForTags aztec_utl_getNotes" \
+  "$(l STOPS_AT_ORACLE)"
 assert_eq "…each of which is a declared refusing oracle rather than an incidental failure" "" "$(l STOPS_NOT_REFUSING)"
 # AND THE RUNG THEY ALL WALKED PAST. Without this the assertions above are satisfied by three
 # programs that failed for three unrelated reasons.
@@ -368,7 +389,8 @@ assert_eq "none of which is the zero address, so the derivation produced somethi
 # THE NON-DEGENERACY, the same one section 5 makes for `transfer` alone: a frame that refused at its
 # FIRST oracle would satisfy everything above and say nothing about the wire having run.
 assert_ge "each of them served oracles on the way to the rung" 2 "$(l MIN_SERVED)"
-assert_eq "and each refused exactly one" "1" "$(l REFUSED_COUNTS)"
+assert_eq "each that refused refused exactly one, and the circuit-halted one refused none" \
+  "0 1" "$(l REFUSED_COUNTS)"
 
 echo "== 5c. TIER 2 RUNG 1'S TWO CONTROLS: 'served' must not mean 'answers anything'"
 
@@ -419,6 +441,69 @@ assert_true "…naming the address it is filed under and the one it derives to" 
   str_has_sub "$GUARD" "derives to"
 assert_true "…and saying which of the circuit's assertions it would otherwise have hit" \
   str_has_sub "$GUARD" "get_contract_instance"
+
+echo "== 5d. TIER 2 RUNG 2, ITS GUARD, AND AN ABI GAP THE VERSION CHECK CANNOT SEE"
+
+# RUNG 2 ANSWERS ABSENCE RATHER THAN THROWING IT, AND THAT IS READ OFF THE RETURN TYPE.
+# `aztec_utl_getPublicKeysAndPartialAddress` declares `OPTION(PUBLIC_KEYS_AND_PARTIAL_ADDRESS)`, so
+# "not registered" HAS a home in the type and upstream's own `get_public_keys_and_partial_address`
+# turns it into a named failure via `.expect(...)`. Throwing instead would substitute our refusal
+# for the protocol's and break `try_get_public_keys`, whose purpose is to ask and accept `None`.
+KEYS_HELD="$(m35_arm private.report.heldAccountKeys)"
+KEYS_GUARD="$(m35_arm private.report.inconsistentKeysError)"
+m35_absent "private.report.heldAccountKeys=$KEYS_HELD" \
+  "private.report.inconsistentKeysError=$KEYS_GUARD"
+
+assert_ge "the wallet holds keys for a real number of accounts" 3 \
+  "$(printf '%s' "$KEYS_HELD" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+assert_eq "…and it answered for one it holds, with that account's own partial address" \
+  "answered with the partial address that derives its own key" "$(o getPublicKeysAndPartialAddress)"
+# THE OTHER DIRECTION, AND IT IS AN ANSWER RATHER THAN A THROW.
+assert_eq "…and answered NONE for an account it does not hold, rather than throwing" \
+  "answered none for an unregistered account" "$(o getPublicKeysAndPartialAddressMiss)"
+
+# THE GUARD, AND IT CARRIES MORE WEIGHT HERE THAN RUNG 1'S DOES.
+# `get_public_keys` constrains this oracle's answer — assert_eq(account, AztecAddress::compute(...)),
+# and upstream ships its own test for it. `try_get_public_keys` does NOT: it is unconstrained,
+# discards the partial address and asserts nothing. So on that path this guard is the only check.
+assert_true "an incoherent key triple is refused before the frame starts" \
+  str_has_sub "$KEYS_GUARD" "not self-consistent"
+assert_true "…naming the address it is filed under and the one it derives to" \
+  str_has_sub "$KEYS_GUARD" "derive to"
+assert_true "…and saying which consumer would NOT have caught it" \
+  str_has_sub "$KEYS_GUARD" "try_get_public_keys"
+
+# ===========================================================================================
+# AND THE FINDING SERVING THIS ORACLE EXPOSED, ASSERTED SO IT CANNOT ROT INTO A PUZZLE
+# ===========================================================================================
+#
+# `PrivateVoting.cast_vote` no longer stops at an oracle. It halts INSIDE THE CIRCUIT, and the
+# reason is a wire-shape disagreement between the contract artifact and the vendored registry:
+#
+#   ts anchor / older line   PUBLIC_KEYS_AND_PARTIAL_ADDRESS serialises to ONE slot holding an
+#                            8-element array, so OPTION(...) is 2 slots
+#   cpp anchor / vendored    it is a STRUCT whose shape flattens to 8 scalar slots, so OPTION(...)
+#                            is 9 slots
+#
+# The artifacts this arm runs declare oracle version 30.0; the environment implements 30.8. Same
+# MAJOR, environment minor >= contract minor — so `assertCompatibleOracleVersion` PASSES, and the
+# two are still wire-incompatible. That is measured here rather than described: the ACVM's own
+# message names both counts.
+#
+# The severity is bounded and that is asserted too: this fails LOUDLY at the foreign call, it does
+# not produce a plausible value. And it was invisible until an oracle whose shape moved was actually
+# SERVED — which is why it is recorded as a finding about the remaining refusals rather than about
+# this one oracle.
+assert_eq "one rung halts inside the circuit rather than at an oracle" "1" "$(l HALTED_IN_CIRCUIT)"
+assert_eq "…and it is cast_vote, with the other two still refused at an oracle" \
+  "cast_vote=failed mint_to_private=refused transfer=refused" "$(l OUTCOMES_BY_PROGRAM)"
+assert_true "…and the ACVM names the wire-shape mismatch rather than failing vaguely" \
+  str_has_sub "$(l CIRCUIT_HALT_ERRORS)" "output values were provided as a foreign call result"
+# THE NUMBERS, BOTH OF THEM, so a future change to either side is visible rather than absorbed.
+assert_true "…stating what the environment offered" str_has_sub "$(l CIRCUIT_HALT_ERRORS)" "9 output values"
+assert_true "…and what the compiled contract expects" str_has_sub "$(l CIRCUIT_HALT_ERRORS)" "2 destination slots"
+# AND THE VERSION CHECK PASSED ANYWAY, WHICH IS THE POINT.
+assert_eq "the version check accepted the pair it could not protect" "30.0" "$(l CONTRACT_VERSION)"
 
 echo "== 6. THE CONTROL FOR SECTION 5: a frame that needs only served oracles COMPLETES"
 

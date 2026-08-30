@@ -51,7 +51,11 @@ import { poseidon2HashWithSeparator } from '@aztec/foundation/crypto/poseidon';
 // than two functions that ought to agree. Re-implementing it here would have produced a guard that
 // passes exactly when it is wrong in the same way the handler is.
 import { computeContractAddressFromInstance } from '@aztec/stdlib/contract';
-import type { PublicKeys } from '@aztec/stdlib/keys';
+// `computeAddress` is the TypeScript half of the circuit's `AztecAddress::compute(public_keys,
+// partial_address)`, and it is the SAME function `dev_keys.ts` already derives its accounts with
+// (RI-96) — so the wallet's derivation, this guard and `aztec-nr`'s assertion are three uses of one
+// computation rather than three that ought to agree.
+import { computeAddress, type PublicKeys } from '@aztec/stdlib/keys';
 
 import { ORACLE_REGISTRY } from '../vendor/pxe/contract_function_simulator/oracle/oracle_registry.ts';
 import { ORACLE_VERSION_MAJOR, ORACLE_VERSION_MINOR } from '../vendor/pxe/oracle_version.ts';
@@ -86,6 +90,10 @@ export const ORACLE_IMPLEMENTED: readonly string[] = Object.freeze(
     // tier 2's first rung — the contract instance directory. Served from what the wallet HOLDS,
     // and refused by name for an address it does not. See `ContractInstanceNotHeld`.
     'aztec_utl_getContractInstance',
+    // tier 2's SECOND rung — the account key directory (RI-96). Its absence encoding is upstream's
+    // `Option::none()` rather than a throw, and the reason is in the handler body: unlike rung 1,
+    // this oracle's declared return is an `Option`, so "not registered" HAS a home in the type.
+    'aztec_utl_getPublicKeysAndPartialAddress',
     // capsules — a per-(contract, slot) field store, scoped
     'aztec_utl_setCapsule',
     'aztec_utl_getCapsule',
@@ -159,9 +167,10 @@ export const ORACLE_REFUSAL_REASONS: Readonly<Record<string, string>> = Object.f
   aztec_utl_getAuthWitness:
     'tier 2 (adapters): an authwit store in the wallet. WalletSchema.createAuthWit refuses in M34 ' +
     'for the same reason, so serving this one would be a value with no producer',
-  aztec_utl_getPublicKeysAndPartialAddress:
-    'tier 2 (adapters): the wallet derives its own accounts\' keys (RI-96) but has no directory of ' +
-    'anybody else\'s',
+  // `aztec_utl_getPublicKeysAndPartialAddress` WAS HERE and is now served — tier 2's second rung,
+  // over the same RI-96 derivation the wallet already had. See section 3b of PRIVATE-EXECUTION.md,
+  // and read its constraint note: this oracle's answer is constrained on ONE of its two consumer
+  // paths and not on the other.
   aztec_utl_doesNullifierExist: 'tier 2 (adapters): ResidentMerkleDb.nullifierExists is the primitive',
   aztec_utl_getL1ToL2MembershipWitnessV2: 'tier 2 (adapters): an L1-to-L2 message-tree witness',
   aztec_utl_getFromPublicStorage: 'tier 2 (adapters): ResidentMerkleDb.readPublicDataLeaf is the primitive',
@@ -359,6 +368,46 @@ export interface PrivateOracleOptions {
    * as an oracle that does not exist.
    */
   readonly contractInstances?: readonly HeldContractInstance[];
+  /**
+   * The accounts whose public keys this wallet holds, for
+   * `aztec_utl_getPublicKeysAndPartialAddress` — tier 2's second rung.
+   *
+   * Same boundary as the directory above, and the same default: omitted means the wallet holds
+   * nothing, and every address answers "not registered". `deriveDevAccounts` (RI-96) already
+   * produces exactly this triple for the wallet's own accounts, so this is the wallet publishing
+   * what it derives rather than a new source of keys.
+   */
+  readonly accountKeys?: readonly HeldAccountKeys[];
+}
+
+/**
+ * One account whose keys the wallet holds: an address, upstream's `PublicKeys`, and the partial
+ * address that together with them DERIVES that address.
+ *
+ * **THE ADDRESS IS A FUNCTION OF THE OTHER TWO, AND THE CIRCUIT CHECKS IT — ON ONE PATH.**
+ * `aztec-nr`'s `get_public_keys` is:
+ *
+ * ```
+ * let (public_keys, partial_address) = unsafe { get_public_keys_and_partial_address(account) };
+ * assert_eq(account, AztecAddress::compute(public_keys, partial_address),
+ *           "Invalid public keys hint for address");
+ * ```
+ *
+ * — the same shape as rung 1, and upstream ships its own test (`get_public_keys_fails_with_bad_hint`)
+ * proving a fabricated answer fails there.
+ *
+ * **BUT `try_get_public_keys` DOES NOT CHECK IT**, and that is recorded here rather than left to be
+ * discovered: it is `unconstrained`, it DISCARDS the partial address, and it performs no assertion —
+ * so on that path a wrong answer is not caught by the circuit. `PRIVATE-EXECUTION.md` §3b states
+ * what that means for this wallet. `assertHeldAccountKeysAreSelfConsistent` therefore is not merely
+ * a better error message the way rung 1's guard is; on the unconstrained path it is the ONLY thing
+ * checking the relation.
+ */
+export interface HeldAccountKeys {
+  /** The account address, which must equal what the two fields below derive to. */
+  readonly address: AztecAddress;
+  readonly publicKeys: PublicKeys;
+  readonly partialAddress: Fr;
 }
 
 /**
@@ -493,6 +542,41 @@ export async function assertHeldInstancesAreSelfConsistent(
   }
 }
 
+/**
+ * Re-derives every held account's address from its own public keys and partial address, and throws
+ * naming any that disagrees.
+ *
+ * **THIS ONE IS LOAD-BEARING IN A WAY RUNG 1'S IS NOT, AND THE DIFFERENCE IS UPSTREAM'S.** Rung 1's
+ * guard is a better error message for something the circuit would have caught anyway. Here the
+ * circuit catches it on `get_public_keys` and NOT on `try_get_public_keys`, which is `unconstrained`,
+ * discards the partial address and asserts nothing. So for that consumer this function is the only
+ * check that the triple is coherent, and it runs before the frame starts rather than never.
+ */
+export async function assertHeldAccountKeysAreSelfConsistent(
+  accounts: readonly HeldAccountKeys[],
+): Promise<void> {
+  const seen = new Set<string>();
+  for (const [i, held] of accounts.entries()) {
+    const key = held.address.toString();
+    if (seen.has(key)) {
+      throw new Error(
+        `the account key directory holds two entries for ${key}; an address is a key and a second ` +
+          `entry for it would silently shadow the first`,
+      );
+    }
+    seen.add(key);
+    const derived = await computeAddress(held.publicKeys, held.partialAddress);
+    if (!derived.equals(held.address)) {
+      throw new Error(
+        `account key directory entry ${i} is not self-consistent: it is filed under ${key} but its ` +
+          `own public keys and partial address derive to ${derived.toString()}. aztec-nr's ` +
+          `get_public_keys asserts exactly this equality — but try_get_public_keys does NOT, so on ` +
+          `that path nothing downstream would have caught it.`,
+      );
+    }
+  }
+}
+
 /** `aztec_{scope}_{method}` -> `method`, by upstream's own regex rather than by a `split`. */
 export function oracleMethodName(oracleKey: string): string {
   const m = oracleKey.match(/^aztec_(\w+?)_(.+)$/);
@@ -520,6 +604,10 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
   // mid-execution could answer its own question.
   const instanceDirectory = new Map<string, HeldContractInstance>(
     (options.contractInstances ?? []).map(h => [h.address.toString(), h]),
+  );
+  // The account key directory, same construction and same fixed-for-the-frame property.
+  const accountDirectory = new Map<string, HeldAccountKeys>(
+    (options.accountKeys ?? []).map(a => [a.address.toString(), a]),
   );
   const capsules = new Map<string, Fr[]>();
   const ephemeral = new EphemeralArrayService();
@@ -655,6 +743,40 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
         immutablesHash: held.immutablesHash,
         publicKeys: held.publicKeys,
       };
+    },
+
+    // ---- tier 2, rung 2: the account key directory (RI-96) --------------------------------------
+    //
+    // ABSENCE IS RETURNED HERE, NOT THROWN, AND THAT IS NOT A WEAKENING OF RUNG 1'S RULE — IT IS
+    // THE SAME RULE READ OFF A DIFFERENT RETURN TYPE.
+    //
+    // Rung 1's `getContractInstance` declares a BARE `CONTRACT_INSTANCE`, so "I do not know" has
+    // nowhere to go in the type and must be a throw. This oracle declares
+    // `OPTION(PUBLIC_KEYS_AND_PARTIAL_ADDRESS)`: the protocol itself defines an encoding for "not
+    // registered", and upstream's own `get_public_keys_and_partial_address` turns it into a NAMED
+    // failure — `.expect(f"Public keys not registered for account {address}")`. Throwing instead
+    // would be substituting our refusal for the protocol's, and it would BREAK
+    // `try_get_public_keys`, whose entire purpose is to ask the question and accept `None` as an
+    // answer. A contract asking "does this account have registered keys?" must get `false`, not an
+    // aborted frame.
+    //
+    // So the miss is recorded as SERVED with `present=false` — the same shape `getCapsule` uses for
+    // a miss — and it is visible in the ledger either way, which is what DEV-WALLET.md §1's first
+    // design property actually asks for. It is NOT an `unavailable`: that outcome means "served
+    // oracle, no answer possible, the frame halts here", and this frame does not halt.
+    getPublicKeysAndPartialAddress(address: AztecAddress): Option<{
+      publicKeys: PublicKeys;
+      partialAddress: Fr;
+    }> {
+      const held = accountDirectory.get(address.toString());
+      record(
+        'aztec_utl_getPublicKeysAndPartialAddress',
+        'served',
+        `address=${address.toString()} registered=${held !== undefined}`,
+      );
+      return held
+        ? Option.some({ publicKeys: held.publicKeys, partialAddress: held.partialAddress })
+        : Option.none();
     },
 
     // ---- capsules -----------------------------------------------------------------------------

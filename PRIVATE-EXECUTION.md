@@ -57,9 +57,16 @@ that had silently stopped matching would report one number for all three.
 `#[aztec]` macro injects it — and this handler throws `OracleVersionIncompatible` on a major
 disagreement rather than continuing. The two MINORS differ, deliberately: the artefacts this tree
 carries are the `deletion_era` line (2026-06-26) and the wire layer is the `cpp` anchor's
-(2026-08-19), and upstream's own rule is that a minor gap in that direction is not breaking
+(2026-08-19), and upstream's own stated rule is that a minor gap in that direction is not breaking
 (`environment minor >= contract minor`). That is what makes the comparison a comparison rather than
 an identity, and the check asserts the two are unequal for exactly that reason.
+
+> **AND THAT RULE HAS NOW BEEN FALSIFIED BY MEASUREMENT — see §3b.** Serving tier 2's second rung
+> exposed a 30.0-versus-30.8 pair that this check PASSES and that is nevertheless wire-incompatible:
+> `aztec_utl_getPublicKeysAndPartialAddress` regrouped its return from 2 slots to 9 between the
+> anchors. So the sentence above describes what upstream's versioning *claims*, and §3b records what
+> this tree *measured*. The gap fails loudly rather than silently, and it was invisible for as long
+> as the oracle was refused — which is a statement about the 33 oracles still refused.
 
 ---
 
@@ -129,7 +136,7 @@ The four renames are a rename and not new behaviour, measured on both sides: `fr
 
 ---
 
-## 3. THE SURFACE: 68 ORACLES, 34 SERVED, 34 REFUSED BY NAME
+## 3. THE SURFACE: 68 ORACLES, 35 SERVED, 33 REFUSED BY NAME
 
 **Owned by `verify_oracle_coverage_is_measured` §4–§5 and
 `test_unimplemented_oracle_refuses_by_name`.**
@@ -137,10 +144,10 @@ The four renames are a rename and not new behaviour, measured on both sides: `fr
 | | derived |
 |---|---|
 | oracles in the registry | **68** |
-| implemented | **34** |
-| refusing | **34** |
-| refusals carrying a declared reason | **34** |
-| implemented oracles EXERCISED in the browser | **34** |
+| implemented | **35** |
+| refusing | **33** |
+| refusals carrying a declared reason | **33** |
+| implemented oracles EXERCISED in the browser | **35** |
 
 The partition is never typed against a list of names: `ORACLE_NAMES` is
 `Object.keys(ORACLE_REGISTRY)` — the vendored registry's own keys — and `ORACLE_REFUSING` is that set
@@ -199,8 +206,10 @@ Every refusal names the oracle, the TIER it belongs to and the milestone that ow
 reasons are **measurements** rather than plans:
 
 - **`aztec_utl_getContractInstance` WAS the gate and is now served** — tier 2's first rung, built
-  rather than argued away. See §3a; the three programs that all stopped there now stop at three
-  different oracles, and two of the three are M36's.
+  rather than argued away. See §3a; the three programs that all stopped there moved apart.
+- **`aztec_utl_getPublicKeysAndPartialAddress` is served too** — tier 2's second rung, over RI-96's
+  own derivation. See §3b, and read its constraint table: this oracle's answer is constrained on
+  `get_public_keys` and NOT on `try_get_public_keys`.
 - **`aztec_utl_getNoteHashMembershipWitness` needs a value-to-index lookup**, and
   `ResidentMerkleWriteOperations.findLeafIndices` REFUSES by name (RI-67). A sibling path can be
   taken by INDEX here and not by value; that is a gap in the runtime, not a gap in the handler.
@@ -227,6 +236,9 @@ it is now spent — the rung is built.
 | `Token.transfer` | `aztec_utl_getNotes` | **M36** | 4 |
 | `Token.mint_to_private` | `aztec_prv_getSenderForTags` | **M36** | 17 |
 | `PrivateVoting.cast_vote` | `aztec_utl_getPublicKeysAndPartialAddress` | tier 2 | 4 |
+
+*(That third row is what rung 2 then addressed — see §3b. `cast_vote` now serves that oracle and
+halts inside the circuit instead, on an ABI gap §3b measures.)*
 
 **The stop set was a singleton and is now three distinct oracles, and that is the result rather
 than a regression.** A singleton said "the boundary is one oracle". Three distinct stops say the
@@ -291,6 +303,87 @@ on either kind — `stoppedAtOracle` reads both, because one that only read `ref
 This directory serves **instances the wallet was given** — a chain it produced, registered into, or
 derived. It is not an archiver and it is not a view of a chain it synced. An empty directory is the
 default, and with it every address refuses.
+
+---
+
+## 3b. TIER 2, RUNG 2: THE ACCOUNT KEY DIRECTORY — AND AN ABI GAP THE VERSION CHECK CANNOT SEE
+
+**Owned by `test_unimplemented_oracle_refuses_by_name` §5d.**
+
+`aztec_utl_getPublicKeysAndPartialAddress` is served, over the derivation the wallet already had:
+`deriveDevAccounts` (RI-96) produces public keys, a partial address, and the address that
+upstream's `computeAddress` derives **from** them. The directory publishes that triple; it is not a
+new source of keys.
+
+### Absence is ANSWERED here, not thrown, and that is read off the return type
+
+Rung 1's `getContractInstance` declares a bare `CONTRACT_INSTANCE`, so "I do not know" has nowhere
+to go in the type and must be a throw. This oracle declares `OPTION(PUBLIC_KEYS_AND_PARTIAL_ADDRESS)`
+— the protocol defines the "not registered" encoding itself, and upstream's own
+`get_public_keys_and_partial_address` turns it into a named failure with
+`.expect(f"Public keys not registered for account {address}")`.
+
+Throwing instead would substitute our refusal for the protocol's, and would **break
+`try_get_public_keys`**, whose entire purpose is to ask the question and accept `None`. A contract
+asking "does this account have registered keys?" must get `false`, not an aborted frame. So the miss
+is recorded as `served` with `registered=false`, visible in the ledger either way — the same shape
+`getCapsule` uses for a miss.
+
+### The circuit constrains this answer on ONE path and not the other
+
+This is the part worth reading twice.
+
+| consumer | constrains the answer? |
+|---|---|
+| `get_public_keys` | **yes** — `assert_eq(account, AztecAddress::compute(public_keys, partial_address), "Invalid public keys hint for address")`, and upstream ships `get_public_keys_fails_with_bad_hint` to prove it |
+| `try_get_public_keys` | **no** — it is `unconstrained`, DISCARDS the partial address, and asserts nothing |
+
+So unlike rung 1, where the circuit catches every fabrication, here a wrong answer reaching the
+unconstrained path is caught by nothing downstream. That is why
+`assertHeldAccountKeysAreSelfConsistent` is not merely a better error message the way rung 1's guard
+is: **on that path it is the only check the relation gets**, and it runs before the frame starts.
+Its message says so, naming `try_get_public_keys` explicitly.
+
+### THE FINDING: a wire-shape change that `assertCompatibleOracleVersion` passes
+
+Serving this oracle exposed something that had been invisible while it refused. `cast_vote` no
+longer stops at an oracle — it halts **inside the circuit**, and the ACVM names why:
+
+```
+Assertion failed: 9 output values were provided as a foreign call result for 2 destination slots
+```
+
+The two sides, both read from source rather than inferred:
+
+| anchor | `PUBLIC_KEYS_AND_PARTIAL_ADDRESS` serialisation | `OPTION(...)` slots |
+|---|---|---|
+| `ts` (`3a68d68ac2`) | `v => [[...v.publicKeys.toFields(), v.partialAddress]]` — **one** slot holding an 8-array | **2** |
+| `cpp` (vendored) | `STRUCT([...])`, whose shape flattens to 8 scalar slots | **9** |
+
+Same eight field values; regrouped. And the version check does not see it: the artifacts this arm
+runs declare oracle version **30.0**, the environment implements **30.8** — same MAJOR, environment
+minor ≥ contract minor, so `assertCompatibleOracleVersion` **passes** over a wire-incompatible pair.
+`oracle_version.ts` states upstream's own rule — bump MAJOR for breaking, MINOR only for additive —
+and a slot regrouping of an existing oracle is not additive.
+
+**Confirmed from both directions rather than argued.** Re-run with the `drift` line's
+`PrivateVoting` artifact (`5.3.0-nightly.20260819`, the `current` pin that matches the `cpp`
+anchor), the version pair reads `contract=30.8 environment=30.8`, the slot-count error **disappears
+entirely**, and the frame proceeds to upstream's own `Assertion failed` from
+`.expect("Public keys not registered…")` — the correct named failure for an account the wallet does
+not hold.
+
+**Two things bound the severity, and both matter:**
+
+1. It fails **loudly**, at the foreign call, with both counts named. It does not return a plausible
+   value, so it is not the failure mode this product cannot ship.
+2. It was invisible until an oracle whose shape had moved was actually **served**. That is a
+   statement about the *remaining* refusals, not about this one oracle: **33 oracles are still
+   refused, and any of them whose wire shape moved between the anchors carries the same latent gap.**
+
+The pairing itself — a 30.0 test corpus against a 30.8 environment — is anchor/pin reconciliation
+work and belongs to **M37**, not here. It is recorded, measured on both lines, and deliberately not
+changed under an unrelated milestone.
 
 ---
 
@@ -374,8 +467,8 @@ the count.)*
 
 | | derived |
 |---|---|
-| the wallet entry's eager set | **296.97 KB** gzipped across **9** files |
-| the wallet demo page's eager set | **334.07 KB** gzipped across **13** files |
+| the wallet entry's eager set | **297.12 KB** gzipped across **9** files |
+| the wallet demo page's eager set | **334.51 KB** gzipped across **13** files |
 | `acvm_js_bg.wasm` | **3,601,516** bytes |
 | `noirc_abi_wasm_bg.wasm` | **789,053** bytes |
 | `@aztec/aztec.js` bytes in `browser.js`'s eager set | **0** |
