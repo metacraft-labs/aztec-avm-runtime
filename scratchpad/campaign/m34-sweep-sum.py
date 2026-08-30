@@ -60,7 +60,13 @@ REFERENCE = {
     #     a doctored report that keeps the count and moves all sixteen blocks into the last 200 ms
     #     gives a largest interval of 3,812 ms against 252, and fails two assertions.
     # The `detached` fix is a correction to `entry_worker.ts` and adds no assertion.
-    "m32": 234,
+    # M34's REVIEW takes M32 234 -> 237. `test_worker_transferable_container_not_copied` 71 -> 74:
+    # its §10 re-derives WORKER-NODE.md §5's packaging table for a TYPED LIST of six entries, and
+    # M34 added a `wallet-demo.js` ROW without adding `wallet-demo.js` to that list — so the row was
+    # re-derived by nothing and had already rotted (309.51 against a build reporting 309.91). Three
+    # assertions per entry: the row exists, its size and file count together, and in the AFTER
+    # column.
+    "m32": 237,
     # M33 adds four checks of its own and moves EXACTLY ONE other milestone's count — M1's, by
     # four, DECLARED BEFORE THE SWEEP RAN. It VENDORS three files, so `verify_provenance_complete`
     # goes 64 -> 68: M22's mechanism exactly, one `is tracked` assertion per new single-file row
@@ -133,7 +139,18 @@ REFERENCE = {
     # `verify_npm_pack_no_optional_native` pins the tracked `package.json` list EXACTLY and
     # `replay/package.json` is a fifth tree. The COUNT is unchanged at 353, which is what says it is
     # a pinned list rather than a structure.
-    "m34": 210,
+    # M34's REVIEW takes its own 210 -> 217, in two checks and nothing else:
+    #   * test_wallet_keys_deterministic 49 -> 50. The collision detector's control was a SECOND
+    #     script computing `ups[0] in set(ups)` — a tautology over a list already asserted
+    #     non-empty. One function serves the subject and the control now, and the control asserts
+    #     the planted value is a substitution rather than one of the dev separators (+1).
+    #   * test_deployment_through_wallet 33 -> 39. The milestone's headline identity — the wallet
+    #     route and the direct path execute the same program to the step — was prose. The shortcut
+    #     arm reports its own executedSteps/contexts now and §5b asserts it: the absent-field guard,
+    #     a >= 100 floor, the step identity, the context identity, the declining arm's 0 as the
+    #     control, and the §5 comparator control re-taken over two values of the same kind (+6).
+    # e2e_wallet_public_transfer stays 83 and verify_wallet_decisions_appear_in_trace stays 45.
+    "m34": 217,
 }
 REFERENCE["m11"] = 262
 
