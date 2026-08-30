@@ -43,6 +43,8 @@
 import type { Fr } from '@aztec/foundation/curves/bn254';
 import { BlockNumber } from '@aztec/foundation/branded-types';
 
+import type { ExecutionStep } from '../../node-host/src/steps.ts';
+
 import {
   HydrationDidNotConverge,
   IntraBlockPredecessorsUnavailable,
@@ -89,6 +91,15 @@ export interface ReplayAvmInstance {
   treeRoots(): Record<string, unknown>;
   /** Upstream's msgpack input in, upstream's decoded result out. Throws on a module refusal. */
   simulate(input: Uint8Array): { revertCode: number; result: Record<string, unknown> };
+  /**
+   * The executed step stream of the LAST simulation, or `null` when collection was off.
+   *
+   * `null` RATHER THAN `[]`, and the distinction is upstream's own: `stepsFromOutcome` returns null
+   * for "you did not ask" and an array for "this is what ran". Collapsing them would make a
+   * misconfigured run indistinguishable from a transaction that executed nothing, which is exactly
+   * the pair `ExecutedStepsUnusable` names separately.
+   */
+  executedSteps(): readonly ExecutionStep[] | null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -299,6 +310,14 @@ export type ReplayOutcome = {
   readonly verdict: ReplayVerdict;
   /** The AVM's own count, not a length this module measured. */
   readonly instructionsExecuted: number;
+  /**
+   * The executed step stream, carried so L3 does not have to re-run to get it.
+   *
+   * It is the FINAL round's, which is the run every other field describes — a stream from an
+   * earlier round would be an execution against a partially hydrated tree, and the recording would
+   * step through a program that never happened.
+   */
+  readonly steps: readonly ExecutionStep[] | null;
 };
 
 export const DEFAULT_MAX_ROUNDS = 12;
@@ -345,25 +364,7 @@ export async function replaySettledTransaction(
 
   for (let round = 1; round <= maxRounds; round += 1) {
     const instance = await host.freshInstance();
-    for (const contract of settled.contracts) {
-      const cc = contract.contractClass!;
-      instance.registerContractClass({
-        id: cc.id, artifactHash: cc.artifactHash, privateFunctionsRoot: cc.privateFunctionsRoot,
-        packedBytecode: cc.packedBytecode,
-        publicBytecodeCommitment: await bytecodeCommitment(cc.packedBytecode),
-      });
-      const i = contract.instance!;
-      instance.registerContractInstance(i.address as unknown as Fr, {
-        salt: i.salt, deployer: i.deployer, currentContractClassId: i.currentContractClassId,
-        originalContractClassId: i.originalContractClassId,
-        initializationHash: i.initializationHash, immutablesHash: i.immutablesHash,
-        publicKeys: i.publicKeys,
-      });
-    }
-    for (const value of seed.nullifiers.values()) if (value !== null) instance.insertNullifier(value);
-    for (const entry of seed.publicData.values()) {
-      if (entry !== null) instance.insertPublicDataLeaf(entry.slot, entry.value);
-    }
+    await applySeed(instance, settled, seed);
 
     let outcome: { revertCode: number; result: Record<string, unknown> } | undefined;
     let queries: WorldStateQuery[] = [];
@@ -442,6 +443,7 @@ function finish(
 ): ReplayOutcome {
   const stats = (outcome.result['stats'] ?? {}) as Record<string, unknown>;
   return {
+    steps: instance.executedSteps(),
     preStateBlock,
     revertCode: outcome.revertCode,
     result: outcome.result,
@@ -451,6 +453,152 @@ function finish(
     roots: declareTreeRoots(instance, settled),
     verdict: compareToPublishedEffects(settled, outcome),
     instructionsExecuted: Number(stats['total_instructions_executed'] ?? -1),
+  };
+}
+
+/**
+ * Register the contracts and insert the seed into a fresh instance.
+ *
+ * ONE SEEDING PATH, SHARED BY THE HYDRATION LOOP AND THE RECORDING PASS. The two-pass design below
+ * only means anything if the second pass runs against exactly the tree the first one converged on,
+ * and "exactly" is a property of construction here rather than of two code paths agreeing.
+ */
+export async function applySeed(
+  instance: ReplayAvmInstance,
+  settled: SettledTransaction,
+  seed: ResidentSeed,
+): Promise<void> {
+  for (const contract of settled.contracts) {
+    const cc = contract.contractClass!;
+    instance.registerContractClass({
+      id: cc.id, artifactHash: cc.artifactHash, privateFunctionsRoot: cc.privateFunctionsRoot,
+      packedBytecode: cc.packedBytecode,
+      publicBytecodeCommitment: await bytecodeCommitment(cc.packedBytecode),
+    });
+    const i = contract.instance!;
+    instance.registerContractInstance(i.address as unknown as Fr, {
+      salt: i.salt, deployer: i.deployer, currentContractClassId: i.currentContractClassId,
+      originalContractClassId: i.originalContractClassId,
+      initializationHash: i.initializationHash, immutablesHash: i.immutablesHash,
+      publicKeys: i.publicKeys,
+    });
+  }
+  for (const value of seed.nullifiers.values()) if (value !== null) instance.insertNullifier(value);
+  for (const entry of seed.publicData.values()) {
+    if (entry !== null) instance.insertPublicDataLeaf(entry.slot, entry.value);
+  }
+}
+
+/**
+ * THE TWO PASSES DISAGREED. A recording is not written over an execution nobody measured.
+ *
+ * The step pass runs with `collectHints` OFF (see `RECORDING_PASS_REASON`), so it is a genuinely
+ * separate execution and not a re-read of the first one's result. That is exactly why it has to be
+ * compared: two runs over one seed SHOULD be identical, and "should" is the word this campaign has
+ * been burned by. Every field compared here is one a divergence would move.
+ */
+export class RecordingPassDiverged extends Error {
+  readonly kind = 'replay-recording-pass-diverged' as const;
+  readonly differences: readonly string[];
+
+  constructor(txHash: string, differences: readonly string[]) {
+    super(
+      `the hydration pass and the step-collection pass of ${txHash} do not describe the same `
+        + `execution: ${differences.join('; ')}. The two run over ONE seed and differ only in which `
+        + `collection flags are set, so they must agree; a container written from the second pass `
+        + `while the verdict came from the first would be a recording of one execution labelled `
+        + `with another's outcome.`,
+    );
+    this.name = 'RecordingPassDiverged';
+    this.differences = differences;
+  }
+}
+
+/**
+ * WHY THERE ARE TWO PASSES AT ALL, MEASURED IN THIS MILESTONE AND NOT EXPLAINED.
+ *
+ * The shipped module will not produce hints and an execution step stream in the same run. Measured
+ * over the demo subject, four configurations, everything else held constant:
+ *
+ *   flags                         executionSteps   instructions   effects reproduced
+ *   (none)                        array[181]       181            no
+ *   statistics + publicInputs     array[181]       181            no
+ *   hints                         NULL             345            YES
+ *   hints + statistics + inputs   NULL             345            YES
+ *
+ * The 181/345 split is route 3 working: without hints the loop discovers nothing, the tree is
+ * under-seeded and the transaction reverts early. The NULL is the finding — with `collect_hints`
+ * on, `execution_steps` comes back absent rather than empty.
+ *
+ * THE CAUSE IS NOT ESTABLISHED AND IS NOT GUESSED AT HERE. `execution_steps` is not upstream's
+ * field at all: `PublicSimulatorConfig` at `anchors.cpp` declares seven flags and
+ * `collect_execution_steps` is not among them — it is M9's carried patch, gated on
+ * `AVM_HAS_EXECUTION_OBSERVER`, and that patch's own harness sets the two flags independently
+ * without declaring them exclusive. So this is recorded as a MEASUREMENT with the matrix above,
+ * in the shape this campaign uses for `avm_steps_count()` answering 0 while the statistic says 345.
+ *
+ * The design follows the measurement rather than fighting it: pass one hydrates WITH hints, pass
+ * two records WITHOUT them over the seed pass one converged on — and the two are compared, because
+ * a second execution is a second execution.
+ */
+export const RECORDING_PASS_REASON =
+  'The shipped module does not produce hints and an execution step stream in one run: with '
+  + 'collectHints on, executionSteps comes back NULL. Measured over four configurations; cause not '
+  + 'established. So hydration and recording are two passes over ONE seed, and their outcomes are '
+  + 'compared rather than assumed equal.';
+
+/** The step stream, plus the outcome the second pass produced, over an already-converged seed. */
+export type RecordingPass = {
+  readonly revertCode: number;
+  readonly result: Record<string, unknown>;
+  readonly steps: readonly ExecutionStep[] | null;
+  readonly instructionsExecuted: number;
+  readonly verdict: ReplayVerdict;
+};
+
+/**
+ * Run the step-collection pass over a converged seed, and refuse if it is not the same execution.
+ *
+ * `encodeForRecording` is passed in for the same reason `encodeInputs` is: the encoder lives in
+ * `replay_inputs.ts` and this module decides no field of it.
+ */
+export async function recordingPass(
+  host: ReplayAvmHost,
+  settled: SettledTransaction,
+  hydrated: ReplayOutcome,
+  encodeForRecording: (settled: SettledTransaction) => Uint8Array,
+): Promise<RecordingPass> {
+  const instance = await host.freshInstance();
+  await applySeed(instance, settled, hydrated.seed);
+  const outcome = instance.simulate(encodeForRecording(settled));
+  const stats = (outcome.result['stats'] ?? {}) as Record<string, unknown>;
+  const instructionsExecuted = Number(stats['total_instructions_executed'] ?? -1);
+  const verdict = compareToPublishedEffects(settled, outcome);
+
+  const differences: string[] = [];
+  if (outcome.revertCode !== hydrated.revertCode) {
+    differences.push(`revertCode ${hydrated.revertCode} vs ${outcome.revertCode}`);
+  }
+  if (instructionsExecuted !== hydrated.instructionsExecuted) {
+    differences.push(
+      `instructionsExecuted ${hydrated.instructionsExecuted} vs ${instructionsExecuted}`);
+  }
+  if (verdict.reproduced !== hydrated.verdict.reproduced) {
+    differences.push(`reproduced ${hydrated.verdict.reproduced} vs ${verdict.reproduced}`);
+  }
+  if (verdict.matched !== hydrated.verdict.matched) {
+    differences.push(`matched ${hydrated.verdict.matched} vs ${verdict.matched}`);
+  }
+  if (differences.length > 0) {
+    throw new RecordingPassDiverged(settled.txHash, differences);
+  }
+
+  return {
+    revertCode: outcome.revertCode,
+    result: outcome.result,
+    steps: instance.executedSteps(),
+    instructionsExecuted,
+    verdict,
   };
 }
 

@@ -2944,6 +2944,29 @@ replay-settled fixture='replay/fixtures/testnet_replay_tx.json' module=avm_wasm_
 # THE ONE L2 RECIPE THAT NEEDS A LIVE CHAIN. With no `tx=` it walks back from the tip, bounded by
 # `getBlockNumber('finalized')` rather than by a guessed depth, and takes the first transaction that
 # is FIRST IN ITS BLOCK — `IntraBlockPredecessorsUnavailable` is the refusal for the rest.
+# L3 — THE RECORDING. Produces a `.ct` from the committed fixture and, with `read=1`, parses it with
+# the REFERENCE READER, which is the standard a container is held to here. `ct-print` refused two
+# earlier forms of the recording id — "expected 36 chars, got 23", then "not a UUIDv7" — so "the
+# writer returned bytes" is demonstrably not the same claim as "this is a container".
+replay-record out='/tmp/aztec-replay.ct' fixture='replay/fixtures/testnet_replay_tx.json' module=avm_wasm_default read='':
+    #!/usr/bin/env bash
+    set -uo pipefail
+    W="{{justfile_directory()}}/ct-writer/target/wasm32-unknown-unknown/release/aztec_ct_writer.wasm"
+    if [ ! -s "$W" ]; then
+      echo "replay-record: no ct_writer.wasm at $W. Remedy: just ct-writer-build" >&2
+      exit 2
+    fi
+    cd "{{justfile_directory()}}/replay" \
+      && node tools/replay_settled_transaction.mjs \
+           --fixture "{{justfile_directory()}}/{{fixture}}" --module "{{module}}" \
+           --ct "{{out}}" --ct-writer "$W" || exit 1
+    if [ -n "{{read}}" ]; then
+      R="${HOME}/.cache/aztec-m24-ctprint/ct-print"
+      [ -x "$R" ] || { echo "replay-record: no ct-print. Remedy: just ct-print-build" >&2; exit 2; }
+      "$R" --full "{{out}}" >/dev/null || { echo "replay-record: the reference reader REFUSED {{out}}" >&2; exit 1; }
+      echo "replay-record: the reference reader parsed {{out}}"
+    fi
+
 capture-replay-run url='https://aztec-testnet.drpc.org' out='replay/fixtures/testnet_replay_tx.json' tx='' module=avm_wasm_default:
     #!/usr/bin/env bash
     set -uo pipefail

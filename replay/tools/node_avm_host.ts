@@ -21,6 +21,7 @@ import type { Fr } from '@aztec/foundation/curves/bn254';
 import { serializeWithMessagePack } from '@aztec/stdlib/avm';
 
 import { compileAvm, instantiateAvm } from '../../node-host/src/loader.ts';
+import { stepsFromOutcome, type ExecutionStep } from '../../node-host/src/steps.ts';
 import type { ReplayAvmHost, ReplayAvmInstance } from '../src/replay_execution.ts';
 
 /** The four resident tree roots, read back as the module has them. */
@@ -41,6 +42,17 @@ export async function createNodeAvmHost(modulePath: string): Promise<ReplayAvmHo
       const reactor = await instantiateAvm(compiled);
       const contractDb = reactor.createContractDb();
       const merkleDb = reactor.createMerkleDb();
+      // THE ZERO-EXTRA-CROSSING PATH. `TxSimulationResult.execution_steps` already carries the whole
+      // stream, so `stepsFromOutcome` decodes it out of the result this instance already holds
+      // rather than draining it back through `avm_steps_batch`. `steps.ts`'s header records that
+      // both paths are upstream's and that this one costs no further crossings.
+      //
+      // NOT `avm_steps_count()`. Measured on this very subject: with the three collection flags on,
+      // that export answered 0 in the same run in which `stats.total_instructions_executed` said
+      // 345 and the result carried 345 records. The count is read from the AVM's own statistic
+      // instead, and `buildSettledRecording` asserts the two agree — so the disagreement is a
+      // refusal rather than a shorter container.
+      let lastSteps: readonly ExecutionStep[] | null = null;
       return {
         registerContractClass(fields) {
           reactor.callWithBlob('avm_contract_db_register_class', contractDb,
@@ -63,10 +75,14 @@ export async function createNodeAvmHost(modulePath: string): Promise<ReplayAvmHo
         },
         simulate(input: Uint8Array) {
           const outcome = reactor.simulate(input, contractDb, merkleDb);
+          lastSteps = stepsFromOutcome(outcome as never);
           return {
             revertCode: outcome.revertCode,
             result: (outcome.result ?? {}) as Record<string, unknown>,
           };
+        },
+        executedSteps() {
+          return lastSteps;
         },
       };
     },

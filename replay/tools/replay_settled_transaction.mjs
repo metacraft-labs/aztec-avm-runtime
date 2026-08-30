@@ -26,11 +26,18 @@ import { defaultFetch } from '@aztec/foundation/json-rpc/client';
 import { TxHash } from '@aztec/stdlib/tx/tx-hash';
 
 import {
+  RUNG_BYTECODE_VALUE,
+  buildSettledRecording,
   createReplayNodeClient,
+  encodeRecordingInputs,
   encodeReplayInputs,
   fetchSettledTransaction,
+  recordingIdFor,
+  recordingPass,
   replaySettledTransaction,
 } from '../src/index.ts';
+import { CtWriter, instantiateCtWriter, resolveTracingConfig, WRITER_PATH_A_PURE_RUST }
+  from '../../ct-host/src/index.ts';
 import { COMPONENTS_VERSION_FIELDS } from '../src/pinned_protocol_version.ts';
 import { createNodeAvmHost } from './node_avm_host.ts';
 import {
@@ -49,6 +56,9 @@ const arg = (name, fallback) => {
 const fixturePath = arg('fixture');
 const capturePath = arg('capture');
 const modulePath = arg('module', process.env.AVM_WASM_PATH);
+const ctOut = arg('ct');
+const ctWriterPath = arg('ct-writer', process.env.CT_WRITER_WASM_PATH
+  ?? 'ct-writer/target/wasm32-unknown-unknown/release/aztec_ct_writer.wasm');
 const json = argv.includes('--json');
 
 if (!modulePath) {
@@ -113,6 +123,48 @@ const outcome = await replaySettledTransaction(host, client, settled, encodeRepl
     + `${r.skipped.length} skipped`),
 });
 
+// ---- L3: THE RECORDING --------------------------------------------------------------------------
+// Written BEFORE the wrong-block control pass, deliberately: the control re-runs the loop and would
+// leave `outcome` describing an execution nobody wants a container of.
+let recording = null;
+if (ctOut) {
+  const writerBytes = await readFile(ctWriterPath);
+  // THE SESSION IS OPENED AT RUNG 3 AND THE MODULE IS TOLD SO TWICE — here, and again per contract
+  // through `declareRung`. `recording.ts` explains why 3 is a ceiling and not a shortfall: an Aztec
+  // node serves no debug symbols and no file map, so there is nothing to position a pc with.
+  const writer = new CtWriter(
+    await instantiateCtWriter(writerBytes),
+    resolveTracingConfig({
+      program: 'aztec-live-chain-replay',
+      recordingId: recordingIdFor(settled.txHash,
+        settled.blockData.header.globalVariables.timestamp),
+      sourcePath: `/aztec/${settled.txHash}.avm`,
+      workdir: '/aztec',
+      mappingRung: RUNG_BYTECODE_VALUE,
+      // COLUMNS OFF, AND THE ARTEFACT REFUSED THEM BEFORE THIS COMMENT EXISTED.
+      // The first draft copied `columns: true` from the browser path, which is at rung 1 and has
+      // real source columns. `resolveTracingConfig` threw `ColumnAwarenessUnavailable`: "enabling
+      // column mode would advertise breakpoint-sharp columns over positions that are program
+      // counters." That is M24's guard catching this milestone in exactly the dishonesty this
+      // milestone is otherwise built to avoid, and it is recorded rather than quietly corrected.
+      columns: false,
+    }, WRITER_PATH_A_PURE_RUST),
+    { batchRecords: 64 },
+  );
+  // THE STEP PASS. The hydration pass ran with `collectHints` on and therefore produced NO step
+  // stream — see RECORDING_PASS_REASON. This runs the same seed again with the flags the other way
+  // round, and REFUSES if the two passes do not describe the same execution.
+  const pass = await recordingPass(host, settled, outcome, encodeRecordingInputs);
+  console.error(`replay: step pass — ${pass.steps?.length ?? 'NULL'} step(s), revertCode `
+    + `${pass.revertCode}, ${pass.verdict.matched}/${pass.verdict.comparisons.length} matched, `
+    + 'and it agrees with the hydration pass');
+  recording = buildSettledRecording(writer, settled, { ...outcome, steps: pass.steps }, pass.steps);
+  await writeFile(ctOut, recording.container);
+  console.error(`replay: wrote ${ctOut} — ${recording.bytes} bytes, ${recording.events} event(s), `
+    + `${recording.steps} step(s), ${recording.callsOpened} frame(s), `
+    + `${recording.logEvents} log event(s), rung ${recording.declaredRung}`);
+}
+
 // ---- THE CONTROL'S DATA, CAPTURED AS A REAL CHAIN ANSWER ----------------------------------------
 // `e2e_replay_matches_published_effects`'s control replays against the WRONG block's state — the
 // SETTLING block instead of its parent — so every read returns the value the transaction itself
@@ -165,6 +217,14 @@ const report = {
     mismatched: outcome.verdict.mismatched,
   },
   mismatches: outcome.verdict.comparisons.filter(c => !c.matches),
+  steps: outcome.steps?.length ?? null,
+  recording: recording === null ? null : {
+    bytes: recording.bytes, events: recording.events, steps: recording.steps,
+    callsOpened: recording.callsOpened, logEvents: recording.logEvents,
+    declaredRung: recording.declaredRung, distinctOpcodes: recording.distinctOpcodes,
+    contexts: recording.contexts, stepsPositioned: recording.stepsPositioned,
+    stepsUnpositioned: recording.stepsUnpositioned,
+  },
   roots: outcome.roots.declarations,
   rootsAnyAgree: outcome.roots.anyAgrees,
   skipped: outcome.rounds.flatMap(r => r.skipped.map(s => ({ value: s.value, reason: s.reason }))),

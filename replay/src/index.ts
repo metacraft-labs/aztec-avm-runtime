@@ -106,11 +106,15 @@ export {
 
 export {
   DEFAULT_MAX_ROUNDS,
+  RECORDING_PASS_REASON,
+  RecordingPassDiverged,
   STATE_REFERENCE_TREES,
   TREE_ROOTS_DIVERGE_REASON,
   compareToPublishedEffects,
   declareTreeRoots,
+  applySeed,
   queriesFrom,
+  recordingPass,
   replaySettledTransaction,
   type EffectComparison,
   type ReplayAvmHost,
@@ -118,13 +122,33 @@ export {
   type ReplayOptions,
   type ReplayOutcome,
   type ReplayVerdict,
+  type RecordingPass,
   type TreeRootDeclaration,
 } from './replay_execution.ts';
+
+// ---- L3 ------------------------------------------------------------------------------------
+
+export {
+  CHAIN_CONTRACT_RUNG_CEILING_REASON,
+  ExecutedStepsUnusable,
+  RECORDING_METADATA_KEYS,
+  REPLAY_STEP_PRODUCER,
+  RUNG_BYTECODE_VALUE,
+  STEP_STREAM_FAULTS,
+  buildSettledRecording,
+  recordingIdFor,
+  type RecordingMetadataKey,
+  type RecordingWriter,
+  type SettledRecording,
+  type StepStreamFault,
+} from './recording.ts';
 
 export {
   PATCH_REQUIRED_CONFIG_FIELDS,
   REPLAY_COLLECTION_FLAGS,
+  encodeRecordingInputs,
   encodeReplayInputs,
+  recordingSimulatorConfig,
   replaySimulatorConfig,
 } from './replay_inputs.ts';
 

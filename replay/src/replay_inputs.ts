@@ -83,10 +83,36 @@ export function replaySimulatorConfig(): Record<string, unknown> {
  * trace.
  */
 export function encodeReplayInputs(settled: SettledTransaction): Uint8Array {
+  return encodeWith(settled, replaySimulatorConfig());
+}
+
+/**
+ * The configuration the RECORDING pass runs under: hints OFF, execution steps ON.
+ *
+ * See `RECORDING_PASS_REASON` in `replay_execution.ts` for the measurement that forces the split.
+ * `collectStatistics` stays on because `total_instructions_executed` is what the two passes are
+ * compared on and what `buildSettledRecording` requires to equal the number of decoded records;
+ * `collectPublicInputs` stays on because the second pass's verdict is compared to the first's.
+ */
+export function recordingSimulatorConfig(): Record<string, unknown> {
+  const upstream = PublicSimulatorConfig.from({
+    collectHints: false,
+    collectStatistics: true,
+    collectPublicInputs: true,
+  });
+  return { ...upstream, ...PATCH_REQUIRED_CONFIG_FIELDS, collectExecutionSteps: true };
+}
+
+/** The bytes for the recording pass. Same encoder, other configuration. */
+export function encodeRecordingInputs(settled: SettledTransaction): Uint8Array {
+  return encodeWith(settled, recordingSimulatorConfig());
+}
+
+function encodeWith(settled: SettledTransaction, config: Record<string, unknown>): Uint8Array {
   const globalVariables = settled.blockData.header.globalVariables;
   const inputs = new AvmFastSimulationInputs(
     new WorldStateRevision(0, settled.l2BlockNumber, true),
-    replaySimulatorConfig() as unknown as PublicSimulatorConfig,
+    config as unknown as PublicSimulatorConfig,
     AvmTxHint.fromTx(settled.tx, globalVariables.gasFees),
     globalVariables,
     ProtocolContractsList,

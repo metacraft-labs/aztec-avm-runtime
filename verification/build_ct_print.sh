@@ -97,9 +97,28 @@ build_one() { # <rev> <tree-dir> <out-binary>
   fi
   rm -rf "$tree"; mkdir -p "$tree"
   git -C "$NIM_REPO" archive "$rev" | tar -x -C "$tree" || die "git archive of $rev failed"
-  ( cd "$tree" && nim c -d:release --mm:arc -p:src --passC:"-I$INC" --passL:"-L$LIB" \
-      -o:"$out" src/codetracer_ct_print.nim ) >/dev/null 2>&1 \
-    || die "building ct-print at $rev failed (re-run without the output suppressed to see why)"
+  # THE HOST COMPILER IS PINNED, AND WITHOUT THIS THE BUILD FAILS IN THIS REPOSITORY'S OWN DEV
+  # SHELL. `wasi-sdk-33`'s `bin` is ahead of the C toolchain on PATH — it has to be, that is how
+  # `avm.wasm` gets built — so bare `clang`, which is what nim reaches for by default, is the
+  # WASM cross-compiler. Nim then compiles a native binary against the wasi sysroot and dies on
+  # `signal.h:2: "wasm lacks signal support"` and `use of undeclared identifier '__stdinp'`.
+  #
+  # `cc` is the nixpkgs clang WRAPPER and is the host compiler; `command -v cc` resolves it here
+  # rather than hard-coding a store path. The failure this prevents is not subtle once seen, and it
+  # was invisible for as long as the build's output was suppressed — which is the second half of the
+  # fix below.
+  local hostcc
+  hostcc="$(command -v cc)" || die "no host C compiler on PATH (cc)"
+  # THE OUTPUT IS KEPT, NOT DISCARDED. `>/dev/null 2>&1` with a `die` that says "re-run without the
+  # output suppressed to see why" is a diagnostic that requires the reader to do the work again by
+  # hand; this campaign's own rule is that a check that dies must say why on the first run. The log
+  # goes beside the binary so the next failure is one `cat` away.
+  ( cd "$tree" && nim c -d:release --mm:arc -p:src \
+      --cc:clang --clang.exe:"$hostcc" --clang.linkerexe:"$hostcc" \
+      --passC:"-I$INC" --passL:"-L$LIB" \
+      -o:"$out" src/codetracer_ct_print.nim ) >"$out.build.log" 2>&1 \
+    || die "building ct-print at $rev failed; the compiler's own output is in $out.build.log:
+$(tail -20 "$out.build.log" 2>/dev/null)"
   [ -x "$out" ] || die "the build reported success but $out is not there"
   printf '%s\n' "$rev" >"$out.rev"
   say "built $(basename "$out") @ ${rev:0:10} ($(wc -c <"$out") bytes)"
@@ -123,7 +142,9 @@ build_probe() { # <rev> <tree-dir> <out-binary>
   [ -f "$REPO_ROOT/verification/ct_split_probe.nim" ] || die "verification/ct_split_probe.nim is missing"
   cp "$REPO_ROOT/verification/ct_split_probe.nim" "$tree/ct_split_probe.nim" \
     || die "could not copy the probe into $tree"
-  ( cd "$tree" && nim c -d:release --mm:arc -p:src --passC:"-I$INC" --passL:"-L$LIB" \
+  ( cd "$tree" && nim c -d:release --mm:arc -p:src \
+      --cc:clang --clang.exe:"$(command -v cc)" --clang.linkerexe:"$(command -v cc)" \
+      --passC:"-I$INC" --passL:"-L$LIB" \
       -o:"$out" ct_split_probe.nim ) >"$WORK/ct-split-probe.build.log" 2>&1 \
     || die "building ct-split-probe at $rev failed; see $WORK/ct-split-probe.build.log"
   [ -x "$out" ] || die "the build reported success but $out is not there"
