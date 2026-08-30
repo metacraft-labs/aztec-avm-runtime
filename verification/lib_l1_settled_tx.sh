@@ -39,6 +39,25 @@ export L1_SRC L1_TOOLS L1_FIXTURE_DIR L1_CAPTURE_SCRIPT
 L1_FIXTURES=(testnet_settled_tx.json testnet_private_only_tx.json)
 export L1_FIXTURES
 
+# L2'S FIXTURES, DECLARED HERE AND NOT MIXED INTO L1'S, AND THE SEPARATION IS THE POINT.
+#
+# THIS GUARD CAUGHT L2, WHICH IS WHY IT IS BEING EXTENDED RATHER THAN LOOSENED. L2 captured two new
+# recordings into the same directory, and all three L1 checks went from 0 failures to 1 — the same
+# failure, naming both new files. That is the assertion doing exactly what its comment says: "a
+# fixture that appeared without being declared must be one too." Deleting the assertion, or
+# replacing the exact-set comparison with a subset one, would have made the finding go away instead
+# of the gap.
+#
+# They are a SEPARATE array because L1's checks must keep asserting L1's set. Every L1 assertion is
+# over recordings whose transactions can never be re-captured, and folding L2's files into
+# `L1_FIXTURES` would mean an L1 check silently passing over an L2 artefact. `L1_ALL_FIXTURES` is
+# the union, used for the directory-contents comparison alone.
+L2_FIXTURES=(testnet_settled_tx_refblock.json testnet_replay_tx.json)
+export L2_FIXTURES
+
+L1_ALL_FIXTURES=("${L1_FIXTURES[@]}" "${L2_FIXTURES[@]}")
+export L1_ALL_FIXTURES
+
 l1_prepare() {
   l0_prepare
 
@@ -61,9 +80,17 @@ l1_prepare() {
     assert_true "…and $f is TRACKED, so the suite runs from a clean checkout" \
       git -C "$REPO_ROOT" ls-files --error-unmatch "replay/fixtures/$f"
   done
+  # L2's are asserted present and tracked too — a declared fixture that is not committed is the
+  # failure this pair exists for, and it does not become less of one for belonging to a later
+  # milestone.
+  for f in "${L2_FIXTURES[@]}"; do
+    assert_file "…the declared L2 fixture $f" "$L1_FIXTURE_DIR/$f"
+    assert_true "…and $f is TRACKED, so the suite runs from a clean checkout" \
+      git -C "$REPO_ROOT" ls-files --error-unmatch "replay/fixtures/$f"
+  done
   # The set, not just the members: an undeclared fixture is as much a finding as a missing one.
-  assert_eq "the fixtures on disk are exactly the ones declared here" \
-    "$(printf '%s\n' "${L1_FIXTURES[@]}" | sort | tr '\n' ' ')" \
+  assert_eq "the fixtures on disk are exactly the ones declared here, L1's and L2's" \
+    "$(printf '%s\n' "${L1_ALL_FIXTURES[@]}" | sort | tr '\n' ' ')" \
     "$(cd "$L1_FIXTURE_DIR" && ls -1 ./*.json 2>/dev/null | sed 's|^\./||' | sort | tr '\n' ' ')"
 }
 
