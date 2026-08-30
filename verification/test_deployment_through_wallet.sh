@@ -166,11 +166,48 @@ assert_eq "…and so is the address it deployed to" "$S_ADDR" "$ADDRESS"
 assert_true "…over a real class id and not two absences" \
   str_has_re "$CLASS_ID" '^0x[0-9a-f]{64}$'
 assert_true "…and a real address" str_has_re "$ADDRESS" '^0x[0-9a-f]{64}$'
-# AND THE COMPARATOR IS SHOWN TO SAY NO. The two arms ran in separate runtimes and their TRANSACTION
-# hashes differ, through the same comparison — so "these two fields are equal" is a result rather
-# than a property of the instrument.
-assert_false "the same comparison distinguishes the two runs' transactions" \
-  test "$(m34_arm transfer.report.send.sent.txHash)" = "$(m34_arm shortcut.report.contractAddress)"
+# AND THE COMPARATOR IS SHOWN TO SAY NO, OVER TWO VALUES OF THE SAME KIND.
+#
+# THIS CONTROL USED TO COMPARE A TRANSACTION HASH WITH A CONTRACT ADDRESS — two different kinds,
+# under a label claiming it "distinguishes the two runs' transactions". It could only have failed if
+# BOTH were `MISSING`, which makes it a degeneracy guard wearing a comparator's label rather than a
+# demonstration that the equality above is a result. Retaken by M34's review over two real
+# `0x`-64-hex field elements from the SAME arm — the class id and the address, which the assertions
+# above have just shown are both real and which must not be equal — so the instrument is seen to
+# separate two values it could have joined.
+assert_false "the same comparison separates two real field elements that differ" \
+  test "$CLASS_ID" = "$ADDRESS"
+# …and the degeneracy guard the old form was actually providing, kept and named as one.
+assert_false "…over two values neither of which is MISSING" \
+  test "$CLASS_ID" = "MISSING"
+
+echo "== 5b. THE TWO ROUTES EXECUTE THE SAME PROGRAM, AND THAT IS NOW A MEASUREMENT"
+
+# `DEV-WALLET.md` §4: *"the step count is M27's and M29's direct-path figure to the step, which is
+# the interesting part: the wallet route and the back-door route execute the same program."* Until
+# M34's review nothing asserted it — §3 asserts FLOORS, and §8 re-derives the document's 516 from
+# the wallet arm alone, so the sentence's right-hand side was a number measured in another
+# milestone's arm run and re-derived by nobody. That is `CAMPAIGN-BRIEF.md`'s "a figure nobody
+# re-derives rots" family sitting under the milestone's headline claim.
+#
+# The direct path runs in the SAME browser session, in a runtime of its own, so the right-hand side
+# is a measurement rather than a citation. And the agreement is NOT by construction: the wallet
+# enters M26's vendored builder through its no-`fnName` branch with `[derivedSelector, ...args]`
+# after re-deriving the selector from the artifact IT registered, while `runTokenTransfer` enters
+# through the `fnName` branch and lets the builder derive and prepend. Two routes, one program.
+W_STEPS="$(m34_arm transfer.report.executedSteps)"
+W_CONTEXTS="$(m34_arm transfer.report.contexts)"
+S_STEPS="$(m34_arm shortcut.report.executedSteps)"
+S_CONTEXTS="$(m34_arm shortcut.report.contexts)"
+m34_absent "transfer.report.executedSteps=$W_STEPS" "transfer.report.contexts=$W_CONTEXTS" \
+  "shortcut.report.executedSteps=$S_STEPS" "shortcut.report.contexts=$S_CONTEXTS"
+# NON-DEGENERACY FIRST: two zeroes are also equal, and the declining arm proves 0 is reachable.
+assert_ge "the direct path executed a real program too" 100 "$S_STEPS"
+assert_eq "the wallet route executes the direct route's program, to the step" "$S_STEPS" "$W_STEPS"
+assert_eq "…across the same number of AVM contexts" "$S_CONTEXTS" "$W_CONTEXTS"
+# AND THE SAME COMPARISON IS SHOWN TO SEPARATE STEP COUNTS: the declining arm's is 0.
+assert_false "…and the same comparison would notice a route that executed something else" \
+  test "$(m34_arm declined.report.executedSteps)" = "$W_STEPS"
 
 echo "== 6. THE SHORTCUT IS THE ONE M27 SHIPPED, unchanged"
 

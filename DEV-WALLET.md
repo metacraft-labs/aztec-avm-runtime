@@ -181,10 +181,24 @@ around the seam at any point.
 | wallet decisions recorded | **13** |
 | requests containing `barretenberg` | **0** |
 
-The step count is M27's and M29's direct-path figure to the step, which is the interesting part: the
-wallet route and the back-door route execute the same program. `revertCode` is read separately from
-`outcome` for M29's reason — `processed` is upstream's word for "the public processor turned it into
-a `TxEffect`", and a transaction that reverts at instruction one is still processed.
+The step count is the direct path's figure **to the step**, which is the interesting part: the wallet
+route and the back-door route execute the same program. **That is an assertion now and it was prose
+until M34's review** — `test_deployment_through_wallet` §5b compares this arm's `executedSteps` and
+`contexts` against the `shortcut` arm's, which runs `runTokenTransfer` in a runtime of its own **in
+the same browser session**, with a non-degeneracy floor beside it and the declining arm's `0` as the
+control that the comparison separates. Before that, the left-hand side was re-derived from the arm
+and the right-hand side was a number measured in another milestone's arm run that nothing here
+re-derived, which is the family this campaign calls "a figure nobody re-derives rots" — in the
+sentence carrying this milestone's headline.
+
+**And the agreement is not by construction.** The wallet enters M26's vendored builder through its
+no-`fnName` branch with `[derivedSelector, ...args]`, after re-deriving the selector from the
+artifact IT registered; `runTokenTransfer` enters through the `fnName` branch and lets the builder
+derive and prepend. Two different entries into one builder, one identical program.
+
+`revertCode` is read separately from `outcome` for M29's reason — `processed` is upstream's word for
+"the public processor turned it into a `TxEffect`", and a transaction that reverts at instruction one
+is still processed.
 
 **The one thing this page proves that nothing else does.** M33's review established that a metafile
 records IMPORTS and a free identifier is not one: with `const _nodeOnlyProbe = setImmediate;` planted,
@@ -240,8 +254,8 @@ a second copy of every shared chunk.
 
 | | derived |
 |---|---|
-| the wallet entry's eager set | **275.21 KB** gzipped across **9** files |
-| the wallet demo page's eager set | **309.91 KB** gzipped across **13** files |
+| the wallet entry's eager set | **275.26 KB** gzipped across **9** files |
+| the wallet demo page's eager set | **309.99 KB** gzipped across **13** files |
 | `@aztec/aztec.js` bytes in `browser.js`'s eager set | **0** |
 
 **One budget was bumped and it is recorded as data rather than absorbed.** The wallet entry's eager

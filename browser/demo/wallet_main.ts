@@ -571,6 +571,18 @@ async function armDirectShortcut(): Promise<Record<string, unknown>> {
   try {
     const report = await runTokenTransfer(o, raw);
     say(`[DEV SHORTCUT] the direct path still works: ${report.outcome}, revertCode ${report.revertCode}`);
+    // THE DIRECT PATH'S OWN STEP COUNT, READ OUT OF ITS OWN RUNTIME.
+    //
+    // ADDED BY M34's REVIEW, AND THE REASON IS THE MILESTONE'S HEADLINE. `DEV-WALLET.md` §4 says
+    // "the step count is M27's and M29's direct-path figure to the step, which is the interesting
+    // part: the wallet route and the back-door route execute the same program" — and nothing
+    // asserted it. The LEFT side (the wallet route's 516) was re-derived from this arm report; the
+    // RIGHT side was a sentence about a number measured in another milestone's arm run, which is
+    // `CAMPAIGN-BRIEF.md`'s "a figure nobody re-derives rots" exactly. The direct path runs HERE, in
+    // this same browser session, in a runtime of its own — so the right-hand number costs two
+    // fields, and `test_deployment_through_wallet` §5 asserts the identity with the non-degeneracy
+    // floor beside it.
+    const executed = o.steps.last;
     return jsonSafe({
       label: 'DEV SHORTCUT — the direct store write, kept and named',
       contractAddress: report.contractAddress,
@@ -579,6 +591,8 @@ async function armDirectShortcut(): Promise<Record<string, unknown>> {
       revertCode: report.revertCode,
       registeredClasses: report.registeredClasses,
       registeredInstances: report.registeredInstances,
+      executedSteps: executed === null ? 0 : executed.steps.length,
+      contexts: executed === null ? 0 : new Set(executed.steps.map(s => s.contextId)).size,
     });
   } finally {
     await o.close();
