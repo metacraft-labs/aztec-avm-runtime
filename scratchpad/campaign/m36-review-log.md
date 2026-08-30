@@ -534,3 +534,33 @@ was re-derived and nothing moved.
 
 **Final: M36 = 137 (74 / 29 / 34), 3/3, exit 0; campaign total 11,910, `delta +0`.**
 `carry/*.json` byte-identical to its pre-review digests on all four.
+
+### The `codetracer-specs` side moved twelve commits, and it was checked rather than assumed
+
+`origin/latest` had gone `d40b0989..9dcb1d30` (L2's and L3's milestone updates) while this review
+ran. Rebased; **one conflict, in M36's own section, with diff3's four markers** — and the base region
+was EMPTY, so both sides were appends at one point. **Both kept**, the parallel track's planning note
+first. All four markers grepped separately afterwards: `0 / 0 / 0 / 0`.
+
+That note is worth its own sentence, because it is **independent corroboration of this review's one
+overturned claim**: written by the parallel track before M36 started, it records that
+`PrivateVoting.cast_vote` *"serves `getPublicKeysAndPartialAddress` and then halts inside the circuit
+on a wire-shape disagreement"* — which is exactly what I re-measured against the shipped bundle, and
+exactly what `LOCAL-HISTORY.md` §7 was still denying. Two agents, one measurement, arrived at
+separately.
+
+**The specs move cannot have moved a count**: `git diff --name-only d40b0989..9dcb1d30 -- upstream-bugs/`
+is empty, so M11's carry set is untouched at seven `aztec-*` directories and the sweep's M11 = 262
+stands. This is the M20 hazard the brief records — a commit in the *other* repository moving a
+milestone — checked for and absent.
+
+### Final state
+
+| repo | branch | HEAD | pushed |
+|---|---|---|---|
+| `aztec-avm-runtime` | `dev` | `4809637` | yes, no force |
+| `codetracer-specs` | `latest` | `e945625c` | yes, no force |
+| `noir-wt4-webpage` | `wasm/webpage` | `f0e7edcd2` | **not touched, not committed** |
+
+`git status` clean in both committed repos; `carry/*.json` **all four OK** against the digests taken
+before the review began.
