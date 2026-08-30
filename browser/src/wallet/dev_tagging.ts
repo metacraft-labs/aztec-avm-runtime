@@ -159,9 +159,38 @@ export class DevTagging {
   /** The sender `getSenderForTags` answers with, or `undefined` when the wallet has no default. */
   #senderForTags: AztecAddress | undefined;
 
+  /**
+   * THE DEFAULT SENDER MUST BE AN ACCOUNT THIS WALLET CONTROLS, AND NOTHING DOWNSTREAM CHECKS IT.
+   *
+   * `messages/delivery/mod.nr`'s `resolve_sender` states the requirement and enforces nothing:
+   *
+   *   > tag senders are unconstrained; the sender comes from the builder override or the
+   *   > wallet-provided default tag sender, **which must be an account the PXE controls so it can
+   *   > own and recover the resulting tagging/handshake state**.
+   *
+   * "Unconstrained" is the operative word. A sender named here that this wallet cannot derive a
+   * secret AS produces no error anywhere: `getSenderForTags` answers it, the contract tags with it,
+   * the transaction is valid, the log is emitted — and the tagging state belongs to an account
+   * nobody can recover, so the recipient never discovers the message. A liveness failure with
+   * nothing attached to it, which is the shape this campaign turns into a loud one.
+   *
+   * The check is here rather than at the oracle because it is a property of the WALLET's
+   * configuration, not of any one call: answering it correctly a thousand times does not make an
+   * unrecoverable sender recoverable.
+   */
   constructor(accounts: readonly TaggingAccount[], senderForTags?: AztecAddress) {
     for (const account of accounts) {
       this.#accounts.set(account.address.toString(), account);
+    }
+    if (senderForTags !== undefined && !this.#accounts.has(senderForTags.toString())) {
+      throw new Error(
+        `DevTagging: the default sender ${senderForTags.toString()} is not one of the ` +
+          `${this.#accounts.size} account(s) this wallet can derive tagging secrets as. Upstream's ` +
+          `resolve_sender requires the default tag sender to be an account the wallet CONTROLS, so ` +
+          `it can own and recover the tagging state — and nothing enforces it downstream, because ` +
+          `tag senders are unconstrained. A sender named here but underivable would emit messages ` +
+          `whose tagging state is unrecoverable, with no error raised anywhere.`,
+      );
     }
     this.#senderForTags = senderForTags;
   }

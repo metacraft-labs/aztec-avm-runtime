@@ -309,8 +309,8 @@ two independently constructed services, and a different seed produces different 
 
 | | derived |
 |---|---|
-| the wallet entry's eager set | **304.12 KB** gzipped across **9** files |
-| the wallet demo page's eager set | **343.59 KB** gzipped across **13** files |
+| the wallet entry's eager set | **304.3 KB** gzipped across **9** files |
+| the wallet demo page's eager set | **343.82 KB** gzipped across **13** files |
 | `@aztec/aztec.js` bytes in `browser.js`'s eager set | **0** |
 | files vendored into `browser/src/vendor/pxe_notes` | **2** |
 

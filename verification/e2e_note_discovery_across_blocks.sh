@@ -268,16 +268,32 @@ assert_eq "the registry is upstream's 68" "68" "$S_REGISTRY"
 assert_ge "the always-served set is a real set" 30 "$S_SERVED_WITHOUT"
 assert_ge "and the refusing set is too, so the partition is not degenerate" 20 "$S_REFUSING_WITH"
 
-echo "== 8. THE FOUR CONTROLS"
+echo "== 8. THE CONTROLS"
 
 F_REFUSAL="$(m36_arm discovery.report.controls.fabricatedRefusal)"
 B_REFUSAL="$(m36_arm discovery.report.controls.boundaryRefusal)"
 U_REFUSAL="$(m36_arm discovery.report.controls.unregisteredRefusal)"
 X_REFUSAL="$(m36_arm discovery.report.controls.crossContractRefusal)"
 S_REFUSAL="$(m36_arm discovery.report.controls.outOfScopeRefusal)"
+T_REFUSAL="$(m36_arm discovery.report.controls.uncontrolledSenderRefusal)"
 m36_absent "controls.fabricatedRefusal=$F_REFUSAL" "controls.boundaryRefusal=$B_REFUSAL" \
   "controls.unregisteredRefusal=$U_REFUSAL" "controls.crossContractRefusal=$X_REFUSAL" \
-  "controls.outOfScopeRefusal=$S_REFUSAL"
+  "controls.outOfScopeRefusal=$S_REFUSAL" "controls.uncontrolledSenderRefusal=$T_REFUSAL"
+
+# THE PRECONDITION UPSTREAM STATES AND ENFORCES NOWHERE.
+# `resolve_sender` requires the default tag sender to be an account the wallet CONTROLS, in a
+# comment; tag senders are unconstrained, so nothing downstream checks it. A sender the wallet
+# cannot derive as raises NO error: the oracle answers it, the contract tags with it, the
+# transaction is valid, and the tagging state belongs to an account nobody can recover — the
+# recipient simply never finds the message. A liveness failure with nothing attached, which is why
+# it is refused at CONFIGURATION time rather than per call: answering it correctly a thousand times
+# does not make an unrecoverable sender recoverable.
+assert_true "a default tag sender the wallet cannot derive as is refused" \
+  str_has_sub "$T_REFUSAL" "is not one of the"
+assert_true "…in upstream's own terms, so the requirement is findable" \
+  str_has_sub "$T_REFUSAL" "an account the wallet CONTROLS"
+assert_true "…and saying why nothing downstream would have caught it" \
+  str_has_sub "$T_REFUSAL" "unconstrained"
 
 assert_true "a fabricated note is REFUSED rather than stored" \
   test "$F_REFUSAL" != "null"

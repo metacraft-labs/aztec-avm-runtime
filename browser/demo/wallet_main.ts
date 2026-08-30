@@ -1476,6 +1476,21 @@ async function armNoteDiscovery(): Promise<Record<string, unknown>> {
   const mine = await buildTaggingHalf(DEFAULT_DEV_WALLET_SEED);
   const theirs = await buildTaggingHalf(OTHER_WALLET_SEED);
 
+  // CONTROL: A DEFAULT TAG SENDER THE WALLET CANNOT DERIVE AS.
+  //
+  // `resolve_sender` requires the default tag sender to be an account the PXE CONTROLS, and enforces
+  // nothing — tag senders are unconstrained. So a sender named here that this wallet has no keys for
+  // raises no error anywhere downstream: the oracle answers it, the contract tags with it, the
+  // transaction is valid, and the tagging state belongs to an account nobody can recover. The
+  // recipient simply never finds the message. This is that liveness failure made loud, at the point
+  // the wallet is configured rather than at the point somebody notices missing notes.
+  let uncontrolledSenderRefusal = 'ACCEPTED A SENDER THE WALLET DOES NOT CONTROL';
+  try {
+    new DevTagging([], theirs.accounts[0]!.address);
+  } catch (e) {
+    uncontrolledSenderRefusal = String((e as Error).message).slice(0, 600);
+  }
+
   // The contract instance, DERIVED — its address is a function of the instance, which is why a
   // fabricated preimage cannot satisfy `get_contract_instance` (LOCAL-HISTORY.md section 2).
   const dispatch = getContractFunctionArtifact(PUBLIC_DISPATCH_FN_NAME, loaded);
@@ -1909,6 +1924,7 @@ async function armNoteDiscovery(): Promise<Record<string, unknown>> {
       unregisteredRefusal,
       crossContractRefusal,
       outOfScopeRefusal,
+      uncontrolledSenderRefusal,
     },
     sinks: {
       invalidSyncCacheCount: noteDb.invalidSyncCacheCount,
