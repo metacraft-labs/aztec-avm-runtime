@@ -1731,6 +1731,10 @@ verify-no-pipe-predicates:
 verify-truncation-uniform:
     @verification/verify_transcript_truncation_detection_uniform.sh
 
+# A settled read request verifies through the resident world state; an unsettled one is rejected.
+verify-settled-reads:
+    @verification/test_settled_read_request_verification.sh
+
 # Run the whole M21 verification set; every check runs even if an earlier one fails.
 verify-m21:
     #!/usr/bin/env bash
@@ -1743,6 +1747,7 @@ verify-m21:
       test_aztec_node_adapter_surface_minimal \
       e2e_form_b_local_tx_roundtrip \
       verify_txe_private_flow_prior_art_consulted \
+      test_settled_read_request_verification \
       verify_no_pipeline_predicates \
       verify_transcript_truncation_detection_uniform
     do
