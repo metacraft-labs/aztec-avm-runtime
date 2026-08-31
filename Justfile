@@ -1537,6 +1537,10 @@ verify-debug-logs:
 verify-ts-wasm-token:
     @verification/e2e_ts_wasm_token_transfer.sh
 
+# Upstream's AMM recipe: three Tokens, the AMM, and all four of its self-sent internal functions.
+verify-ts-wasm-amm:
+    @verification/e2e_ts_wasm_amm.sh
+
 # CALL and STATICCALL fork and merge; a reverted nested call leaves nothing; unused gas returns.
 verify-ts-wasm-nested:
     @verification/e2e_ts_wasm_nested_call_fork_merge.sh
@@ -1565,6 +1569,7 @@ verify-m18:
       verify_ts_simulator_configuration_named_not_inverted \
       e2e_ts_wasm_result_decodes_as_upstream_types \
       e2e_ts_wasm_token_transfer \
+      e2e_ts_wasm_amm \
       e2e_ts_wasm_nested_call_fork_merge \
       e2e_ts_wasm_phase_revert_semantics \
       test_custom_bytecode_unhappy_paths

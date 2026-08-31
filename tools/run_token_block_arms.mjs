@@ -43,7 +43,8 @@ function findArtifact(relative) {
 const token = findArtifact('@aztec/noir-contracts.js/artifacts/token_contract-Token.json');
 const avmTest = findArtifact('@aztec/noir-test-contracts.js/artifacts/avm_test_contract-AvmTest.json');
 const child = findArtifact('@aztec/noir-test-contracts.js/artifacts/child_contract-Child.json');
-for (const [name, hit] of [['Token', token], ['AvmTest', avmTest], ['Child', child]]) {
+const amm = findArtifact('@aztec/noir-contracts.js/artifacts/amm_contract-AMM.json');
+for (const [name, hit] of [['Token', token], ['AvmTest', avmTest], ['Child', child], ['AMM', amm]]) {
   if (hit.file === null) {
     console.error(`no ${name} artifact under any of:\n  ${hit.tried.join('\n  ')}`);
     process.exit(3);
@@ -137,6 +138,7 @@ const arms = await runTokenBlockArms(reactor, {
   token: JSON.parse(readFileSync(token.file, 'utf8')),
   avmTest: JSON.parse(readFileSync(avmTest.file, 'utf8')),
   child: JSON.parse(readFileSync(child.file, 'utf8')),
+  amm: JSON.parse(readFileSync(amm.file, 'utf8')),
 }, opcodes);
 
 process.stdout.write(
@@ -148,6 +150,7 @@ process.stdout.write(
         token: { root: token.root, sha256: sha(token.file) },
         avmTest: { root: avmTest.root, sha256: sha(avmTest.file) },
         child: { root: child.root, sha256: sha(child.file) },
+        amm: { root: amm.root, sha256: sha(amm.file) },
       },
       opcodes,
       arms,

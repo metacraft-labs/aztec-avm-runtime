@@ -43,8 +43,9 @@
 // are whatever the contract itself wrote, and they are read back through the contract's own
 // `balance_of_public`. *A value read out of the subject beats a value derived beside it.*
 
-import { CONTRACT_INSTANCE_REGISTRY_CONTRACT_ADDRESS } from '@aztec/constants';
+import { CONTRACT_INSTANCE_REGISTRY_CONTRACT_ADDRESS, DomainSeparator } from '@aztec/constants';
 import { DateProvider } from '@aztec/foundation/timer';
+import { poseidon2HashWithSeparator } from '@aztec/foundation/crypto/poseidon';
 import { Fr } from '@aztec/foundation/curves/bn254';
 import { GasFees } from '@aztec/stdlib/gas';
 import { AztecAddress } from '@aztec/stdlib/aztec-address';
@@ -1201,9 +1202,391 @@ async function runCustomBytecodeArm(
   }
 }
 
+/**
+ * =============================================================================================
+ * THE AMM ARM: FOUR CONTRACTS, FOUR SELF-SENT INTERNAL CALLS, AND A POOL THAT HOLDS ITS INVARIANT.
+ * =============================================================================================
+ *
+ * M18's `e2e_ts_wasm_amm` entry, and the residue it was left with on 2026-08-31 reads:
+ *
+ *   "THREE Token instances plus the AMM, each with its own deployment and initialization nullifier
+ *    and its own `constructor` and `set_minter` run, balance seeding for each, and each internal
+ *    call enqueued with `sender` set to the AMM's own address."
+ *
+ * That is what this function does. The recipe is upstream's own
+ * `yarn-project/simulator/src/public/fixtures/amm_test.ts` at the `cpp` anchor, call for call, with
+ * two differences that are both stated rather than implied:
+ *
+ *   * upstream's `registerAndDeployContract` and `executeTxWithLabel` live in the simulator half
+ *     RI-72 deliberately dropped, so the deploy is `createContractClassAndInstance` +
+ *     `registerDirectly` (what `registerAndDeployContract` is, minus the world-state service) and
+ *     the execute is a real transaction through `PublicProcessor` and a sealed block;
+ *   * upstream stops at three of the AMM's four public entry points. **This runs all four.**
+ *     `CAMPAIGN-BRIEF.md`'s rule — *"when a sentence names N subjects, count how many the check
+ *     runs"* — is why: the entry's sentence is about four `abi_only_self` functions, and a claim
+ *     quantified over a set is only as strong as the members the instrument touched.
+ *
+ * THE PARTIAL NOTES ARE UPSTREAM'S OWN WORKAROUND AND ARE KEPT AS ONE. Each `finalize_*_to_private`
+ * consumes a partial-note VALIDITY COMMITMENT that the private half would have emitted; the private
+ * half does not run here, so the commitment is computed with upstream's own
+ * `poseidon2HashWithSeparator(…, DomainSeparator.PARTIAL_NOTE_VALIDITY_COMMITMENT)` and inserted,
+ * siloed by the emitting token, exactly as `amm_test.ts` does. Every one of them is reported, so a
+ * check can assert that the seeding happened rather than inferring it from a transaction that
+ * worked.
+ *
+ * TWO CONTROLS, EACH ONE VARIABLE, AND EACH ONE ATTACKS A DIFFERENT HALF:
+ *
+ *   `selfSend: false`  every `_`-prefixed AMM call is enqueued with the USER as `sender` instead of
+ *                      the AMM. `#[only_self]` must refuse all four. Without this arm, "the calls
+ *                      were self-sent" is a fact about the driver's own arguments and nothing
+ *                      measures whether the contract cares.
+ *   `setMinter: false` the same `set_minter` transaction runs with `approve = false`. The AMM then
+ *                      cannot mint the liquidity token, so `_add_liquidity` reverts — which makes
+ *                      every "the pool has liquidity" assertion falsifiable by something other than
+ *                      the sender.
+ *
+ * Both controls keep the block shape identical to the full arm's, so a check compares two runs of
+ * the same sequence rather than a sequence against its absence.
+ */
+async function runAmmArm(
+  reactor: ReactorLike,
+  raw: { token: unknown; amm: unknown },
+  opts: { selfSend: boolean; setMinter: boolean },
+): Promise<Record<string, unknown>> {
+  const tokenArtifact = loadContractArtifact(raw.token as never);
+  const ammArtifact = loadContractArtifact(raw.amm as never);
+  const world = openWorld(reactor);
+  try {
+    const admin = await AztecAddress.fromNumber(ADMIN);
+    const user = await AztecAddress.fromNumber(SENDER);
+
+    // ---- the three tokens and the AMM, each registered and each about to run its constructor ----
+    const tokenConstructorArgs = (name: string, symbol: string) => [admin, name, symbol, 18];
+    const t0Args = tokenConstructorArgs('Token0', 'TK0');
+    const t1Args = tokenConstructorArgs('Token1', 'TK1');
+    const lpArgs = tokenConstructorArgs('Liquidity', 'LPT');
+    const token0 = await createContractClassAndInstance(t0Args, admin, tokenArtifact, /*seed=*/ 1201);
+    const token1 = await createContractClassAndInstance(t1Args, admin, tokenArtifact, /*seed=*/ 1202);
+    const lp = await createContractClassAndInstance(lpArgs, admin, tokenArtifact, /*seed=*/ 1203);
+    const ammConstructorArgs = [
+      token0.contractInstance.address,
+      token1.contractInstance.address,
+      lp.contractInstance.address,
+    ];
+    const amm = await createContractClassAndInstance(ammConstructorArgs, admin, ammArtifact, /*seed=*/ 1204);
+
+    const dataSource = new SimpleContractDataSource();
+    const deployed: Record<string, { classes: number; instances: number; nullifier: string; address: string }> = {};
+    for (const [name, art, made] of [
+      ['token0', tokenArtifact, token0],
+      ['token1', tokenArtifact, token1],
+      ['liquidityToken', tokenArtifact, lp],
+      ['amm', ammArtifact, amm],
+    ] as const) {
+      await dataSource.addNewContract(art, made.contractClass, made.contractInstance);
+      const r = await registerDirectly(world, made.contractClass, made.contractInstance);
+      deployed[name] = { ...r, address: made.contractInstance.address.toString() };
+    }
+
+    const merkleTouches: string[] = [];
+    const tripwire = new Proxy(
+      {},
+      {
+        get(_t, p) {
+          merkleTouches.push(`get:${String(p)}`);
+          throw new Error(`the vendored transaction builder read merkleTree.${String(p)}`);
+        },
+      },
+    );
+    const tester = new PublicTxSimulationTester(tripwire as never, dataSource);
+
+    const t0 = token0.contractInstance.address;
+    const t1 = token1.contractInstance.address;
+    const lpAt = lp.contractInstance.address;
+    const ammAt = amm.contractInstance.address;
+
+    /** The `sender` an `#[only_self]` call is enqueued with — the arm's first variable. */
+    const selfSender = opts.selfSend ? ammAt : user;
+
+    /**
+     * Upstream's own validity-commitment seeding, and the two halves are reported separately.
+     *
+     * `poseidon2HashWithSeparator([commitment, completer], PARTIAL_NOTE_VALIDITY_COMMITMENT)` is
+     * `amm_test.ts`'s `computePartialNoteValidityCommitment` verbatim; `siloNullifier(emitter, …)`
+     * is what `BaseAvmSimulationTester.insertNullifier` does before it writes. Both values are
+     * returned so a check can assert the seeding is real rather than reading it off a transaction
+     * that happened to succeed.
+     */
+    const seededNotes: {
+      note: string;
+      emitter: string;
+      noteCommitment: string;
+      validityCommitment: string;
+      siloed: string;
+    }[] = [];
+    const seedPartialNote = async (label: string, emitter: AztecAddress, commitment: Fr) => {
+      // The COMPLETER is the AMM in every one of these, because the AMM is the contract that calls
+      // `finalize_*_to_private`. That is upstream's own argument at every one of its seven call
+      // sites, and it is what binds the commitment to this pool rather than to a note in general.
+      const validity = await poseidon2HashWithSeparator(
+        [commitment, ammAt],
+        DomainSeparator.PARTIAL_NOTE_VALIDITY_COMMITMENT,
+      );
+      const siloed = await siloNullifier(emitter, validity);
+      world.seeding.insertNullifier(siloed);
+      seededNotes.push({
+        note: label,
+        emitter: emitter.toString(),
+        noteCommitment: commitment.toString(),
+        validityCommitment: validity.toString(),
+        siloed: siloed.toString(),
+      });
+      return { commitment };
+    };
+
+    // Upstream's own note commitments, kept so the two recipes stay comparable line by line, plus
+    // two more for the fourth entry point upstream does not exercise.
+    const NOTE = {
+      refund0: new Fr(42),
+      refund1: new Fr(66),
+      liquidity: new Fr(99),
+      swapOut: new Fr(166),
+      removeToken0: new Fr(111),
+      removeToken1: new Fr(222),
+      exactOutChange: new Fr(333),
+      exactOutOut: new Fr(444),
+    };
+
+    const INITIAL_TOKEN_BALANCE = 1_000_000_000n;
+    const amount0Max = (INITIAL_TOKEN_BALANCE * 6n) / 10n;
+    const amount0Min = (INITIAL_TOKEN_BALANCE * 4n) / 10n;
+    const amount1Max = (INITIAL_TOKEN_BALANCE * 5n) / 10n;
+    const amount1Min = (INITIAL_TOKEN_BALANCE * 4n) / 10n;
+    const swapAmountIn = amount0Min / 10n;
+    const swapAmountOutMin = amount1Min / 100n;
+    const exactOutAmountOut = 1_000_000n;
+    const exactOutAmountInMax = 10_000_000n;
+    const liquidityToRemove = 100n;
+
+    const config = { token0: t0, token1: t1, liquidity_token: lpAt };
+    const increase = (token: AztecAddress, amount: bigint): TestEnqueuedCall => ({
+      // INTERNAL FUNCTION: upstream's own comment is "Sender must be 'this'". The token's own
+      // `#[only_self]` is a second subject of the same property, and it is deliberately left
+      // SELF-SENT in both controls so that the `selfSend` arm isolates the AMM's four.
+      sender: token,
+      address: token,
+      fnName: '_increase_public_balance',
+      args: [ammAt, amount],
+    });
+    const view = (token: AztecAddress, fnName: string, args: unknown[]): TestEnqueuedCall => ({
+      address: token,
+      fnName,
+      args,
+      isStaticCall: true,
+    });
+
+    const blocks: BlockRecord[] = [];
+
+    // ---- BLOCK 1: four constructors, one block ----------------------------------------------
+    blocks.push(
+      await runOneBlock(reactor, world, tester, 'constructors', [
+        { label: 'token0Ctor', sender: admin, appCalls: [{ address: t0, fnName: 'constructor', args: t0Args }] },
+        { label: 'token1Ctor', sender: admin, appCalls: [{ address: t1, fnName: 'constructor', args: t1Args }] },
+        { label: 'lpCtor', sender: admin, appCalls: [{ address: lpAt, fnName: 'constructor', args: lpArgs }] },
+        { label: 'ammCtor', sender: admin, appCalls: [{ address: ammAt, fnName: 'constructor', args: ammConstructorArgs }] },
+      ]),
+    );
+
+    // ---- BLOCK 2: the AMM becomes the liquidity token's minter (or, in the control, does not) --
+    blocks.push(
+      await runOneBlock(reactor, world, tester, 'setMinter', [
+        {
+          label: 'setMinter',
+          sender: admin,
+          appCalls: [{ address: lpAt, fnName: 'set_minter', args: [ammAt, opts.setMinter] }],
+        },
+      ]),
+    );
+    blocks.push(
+      await runOneBlock(reactor, world, tester, 'minterCheck', [
+        { label: 'isMinter', sender: admin, appCalls: [view(lpAt, 'is_minter', [ammAt])] },
+      ]),
+    );
+
+    // ---- BLOCK 3: the pool is empty. A DELTA needs a before. ---------------------------------
+    blocks.push(
+      await runOneBlock(reactor, world, tester, 'poolBefore', [
+        { label: 'poolToken0', sender: user, appCalls: [view(t0, 'balance_of_public', [ammAt])] },
+        { label: 'poolToken1', sender: user, appCalls: [view(t1, 'balance_of_public', [ammAt])] },
+        { label: 'lpSupply', sender: user, appCalls: [view(lpAt, 'total_supply', [])] },
+      ]),
+    );
+
+    // ---- BLOCK 4: ADD LIQUIDITY. Two token transfers and the AMM's first self-sent call. ------
+    const refund0 = await seedPartialNote('refundToken0', t0, NOTE.refund0);
+    const refund1 = await seedPartialNote('refundToken1', t1, NOTE.refund1);
+    const liquidityNote = await seedPartialNote('liquidity', lpAt, NOTE.liquidity);
+    blocks.push(
+      await runOneBlock(reactor, world, tester, 'addLiquidity', [
+        {
+          label: 'addLiquidity',
+          sender: user,
+          appCalls: [
+            increase(t0, amount0Max),
+            increase(t1, amount1Max),
+            {
+              sender: selfSender,
+              address: ammAt,
+              fnName: '_add_liquidity',
+              args: [config, refund0, refund1, liquidityNote, amount0Max, amount1Max, amount0Min, amount1Min],
+            },
+          ],
+        },
+      ]),
+    );
+    blocks.push(
+      await runOneBlock(reactor, world, tester, 'poolAfterAdd', [
+        { label: 'poolToken0', sender: user, appCalls: [view(t0, 'balance_of_public', [ammAt])] },
+        { label: 'poolToken1', sender: user, appCalls: [view(t1, 'balance_of_public', [ammAt])] },
+        { label: 'lpSupply', sender: user, appCalls: [view(lpAt, 'total_supply', [])] },
+        {
+          label: 'lockedLiquidity',
+          sender: user,
+          appCalls: [view(lpAt, 'balance_of_public', [await AztecAddress.fromNumber(0)])],
+        },
+      ]),
+    );
+
+    // ---- BLOCK 5: SWAP, exact in. The AMM's second self-sent call. ----------------------------
+    const swapOutNote = await seedPartialNote('swapExactInOut', t1, NOTE.swapOut);
+    blocks.push(
+      await runOneBlock(reactor, world, tester, 'swapExactIn', [
+        {
+          label: 'swapExactIn',
+          sender: user,
+          appCalls: [
+            increase(t0, swapAmountIn),
+            {
+              sender: selfSender,
+              address: ammAt,
+              fnName: '_swap_exact_tokens_for_tokens',
+              args: [t0, t1, swapAmountIn, swapAmountOutMin, swapOutNote],
+            },
+          ],
+        },
+      ]),
+    );
+    blocks.push(
+      await runOneBlock(reactor, world, tester, 'poolAfterSwapIn', [
+        { label: 'poolToken0', sender: user, appCalls: [view(t0, 'balance_of_public', [ammAt])] },
+        { label: 'poolToken1', sender: user, appCalls: [view(t1, 'balance_of_public', [ammAt])] },
+      ]),
+    );
+
+    // ---- BLOCK 6: SWAP, exact out. The AMM's THIRD self-sent call, and upstream does not run it.
+    const exactOutChange = await seedPartialNote('swapExactOutChange', t1, NOTE.exactOutChange);
+    const exactOutOut = await seedPartialNote('swapExactOutOut', t0, NOTE.exactOutOut);
+    blocks.push(
+      await runOneBlock(reactor, world, tester, 'swapExactOut', [
+        {
+          label: 'swapExactOut',
+          sender: user,
+          appCalls: [
+            increase(t1, exactOutAmountInMax),
+            {
+              sender: selfSender,
+              address: ammAt,
+              fnName: '_swap_tokens_for_exact_tokens',
+              args: [t1, t0, exactOutAmountInMax, exactOutAmountOut, exactOutChange, exactOutOut],
+            },
+          ],
+        },
+      ]),
+    );
+    blocks.push(
+      await runOneBlock(reactor, world, tester, 'poolAfterSwapOut', [
+        { label: 'poolToken0', sender: user, appCalls: [view(t0, 'balance_of_public', [ammAt])] },
+        { label: 'poolToken1', sender: user, appCalls: [view(t1, 'balance_of_public', [ammAt])] },
+      ]),
+    );
+
+    // ---- BLOCK 7: REMOVE LIQUIDITY. The AMM's fourth self-sent call. --------------------------
+    const removeNote0 = await seedPartialNote('removeToken0', t0, NOTE.removeToken0);
+    const removeNote1 = await seedPartialNote('removeToken1', t1, NOTE.removeToken1);
+    blocks.push(
+      await runOneBlock(reactor, world, tester, 'removeLiquidity', [
+        {
+          label: 'removeLiquidity',
+          sender: user,
+          appCalls: [
+            increase(lpAt, liquidityToRemove),
+            {
+              sender: selfSender,
+              address: ammAt,
+              fnName: '_remove_liquidity',
+              args: [config, liquidityToRemove, removeNote0, removeNote1, 1n, 1n],
+            },
+          ],
+        },
+      ]),
+    );
+    blocks.push(
+      await runOneBlock(reactor, world, tester, 'poolAfterRemove', [
+        { label: 'poolToken0', sender: user, appCalls: [view(t0, 'balance_of_public', [ammAt])] },
+        { label: 'poolToken1', sender: user, appCalls: [view(t1, 'balance_of_public', [ammAt])] },
+        { label: 'lpSupply', sender: user, appCalls: [view(lpAt, 'total_supply', [])] },
+      ]),
+    );
+
+    return {
+      selfSend: opts.selfSend,
+      setMinter: opts.setMinter,
+      tokenArtifactName: tokenArtifact.name,
+      ammArtifactName: ammArtifact.name,
+      deployed,
+      // The four `abi_only_self` AMM functions this arm drives, named rather than counted, so a
+      // check that says "all four" is comparing against the artifact's own attribute scan.
+      internalFunctions: ['_add_liquidity', '_swap_exact_tokens_for_tokens', '_swap_tokens_for_exact_tokens', '_remove_liquidity'],
+      // Every AMM public function the ARTIFACT declares `abi_only_self`, read off the artifact, so
+      // "the four this arm drives are all of them" is a measurement rather than a list.
+      //
+      // READ OFF THE RAW JSON AND NOT OFF THE LOADED ARTIFACT, and the first version did the
+      // latter and came back an EMPTY LIST: `loadContractArtifact` does not carry
+      // `custom_attributes` through. An empty list would have made "the four are all of them"
+      // vacuously true, so the check asserts the scan found four rather than that it found no
+      // fifth — which is the difference between a measurement and an absence nobody looked for.
+      artifactOnlySelfPublicFunctions: ((raw.amm as { functions?: { name: string; custom_attributes?: string[] }[] }).functions ?? [])
+        .filter(f => (f.custom_attributes ?? []).includes('abi_public') && (f.custom_attributes ?? []).includes('abi_only_self'))
+        .map(f => f.name)
+        .sort(),
+      selfSender: selfSender.toString(),
+      ammAddress: ammAt.toString(),
+      user: user.toString(),
+      amounts: {
+        amount0Max: amount0Max.toString(),
+        amount1Max: amount1Max.toString(),
+        amount0Min: amount0Min.toString(),
+        amount1Min: amount1Min.toString(),
+        swapAmountIn: swapAmountIn.toString(),
+        swapAmountOutMin: swapAmountOutMin.toString(),
+        exactOutAmountOut: exactOutAmountOut.toString(),
+        exactOutAmountInMax: exactOutAmountInMax.toString(),
+        liquidityToRemove: liquidityToRemove.toString(),
+      },
+      seededNotes,
+      merkleTouches: [...merkleTouches],
+      merkleTripwireControl: tripwireControl(tester),
+      merkleTouchesAfterControl: merkleTouches.length,
+      blocks,
+    };
+  } finally {
+    world.release();
+  }
+}
+
 export async function runTokenBlockArms(
   reactor: ReactorLike,
-  artifacts: { token: unknown; avmTest: unknown; child: unknown },
+  artifacts: { token: unknown; avmTest: unknown; child: unknown; amm: unknown },
   opcodes: { setOpcode: number; invalidOpcode: number; invalidTag: number },
 ): Promise<Record<string, unknown>> {
   return {
@@ -1227,5 +1610,16 @@ export async function runTokenBlockArms(
     phasesSetupReverts: await runPhaseArm(reactor, artifacts.avmTest, 'setupReverts'),
     phasesTeardownReverts: await runPhaseArm(reactor, artifacts.avmTest, 'teardownReverts'),
     customBytecode: await runCustomBytecodeArm(reactor, artifacts.avmTest, opcodes),
+    amm: await runAmmArm(reactor, { token: artifacts.token, amm: artifacts.amm }, { selfSend: true, setMinter: true }),
+    ammNotSelfSent: await runAmmArm(
+      reactor,
+      { token: artifacts.token, amm: artifacts.amm },
+      { selfSend: false, setMinter: true },
+    ),
+    ammNoMinter: await runAmmArm(
+      reactor,
+      { token: artifacts.token, amm: artifacts.amm },
+      { selfSend: true, setMinter: false },
+    ),
   };
 }

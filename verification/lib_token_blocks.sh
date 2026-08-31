@@ -271,6 +271,7 @@ tb_note_provenance() {
   note "module sha256 $(tb_arm_meta module.sha256)"
   note "Token artifact sha256 $(tb_arm_meta artifacts.token.sha256)"
   note "AvmTest artifact sha256 $(tb_arm_meta artifacts.avmTest.sha256)"
+  note "AMM artifact sha256 $(tb_arm_meta artifacts.amm.sha256)"
 }
 
 tb_arm_meta() { # <dotted path outside arms>

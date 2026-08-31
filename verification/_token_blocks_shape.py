@@ -30,6 +30,9 @@ EXPECTED_ARMS = [
     "phasesSetupReverts",
     "phasesTeardownReverts",
     "customBytecode",
+    "amm",
+    "ammNotSelfSent",
+    "ammNoMinter",
 ]
 
 
