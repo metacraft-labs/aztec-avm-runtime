@@ -339,7 +339,19 @@ echo "== 6. the entry's OTHER half is still true, and it is asserted rather than
 # has not changed: what changed is that upstream's own step 2 is now RUN, in a tree nothing ships,
 # so the seam this runtime does have can be compared against it.
 
-SHIPPED_CODE="$(cat "$REPO_ROOT/orchestration/src"/*.ts "$REPO_ROOT/browser/src"/*.ts | grep -v '^[[:space:]]*[/*]')"
+# THE SCAN IS RECURSIVE, AND ITS FIRST FORM WAS NOT — found by reading this check during the sweep
+# window, which is the one thing that window is for. `orchestration/src/*.ts` and `browser/src/*.ts`
+# glob ONE directory each, so `orchestration/src/vendor/` and `browser/src/wallet/` were outside the
+# scan while the claim is about the shipped sources. The VERDICT does not change — both scans answer
+# zero, measured — but a census that is narrower than its own sentence is this campaign's most
+# repeated defect, and the citation the closeout pass recorded in `browser/src/wallet/dev_wallet.ts`
+# is in a directory the narrow form never opened.
+SHIPPED_FILES="$(find "$REPO_ROOT/orchestration/src" "$REPO_ROOT/browser/src" -type f -name '*.ts' | LC_ALL=C sort)"
+assert_ge "the shipped-source scan reaches every source file under both trees, not one directory each" \
+  40 "$(printf '%s\n' "$SHIPPED_FILES" | grep -c . || true)"
+assert_true "…including the two subdirectories a single-level glob would have missed" \
+  test "$(printf '%s\n' "$SHIPPED_FILES" | grep -c '/src/vendor/\|/src/wallet/' || true)" -ge 2
+SHIPPED_CODE="$(printf '%s\n' "$SHIPPED_FILES" | xargs cat | grep -v '^[[:space:]]*[/*]')"
 assert_ge "the shipped-source scan has code to look at" 500 \
   "$(printf '%s\n' "$SHIPPED_CODE" | grep -c . || true)"
 assert_false "no shipped source DEFINES or CALLS generateSimulatedProvingResult" \

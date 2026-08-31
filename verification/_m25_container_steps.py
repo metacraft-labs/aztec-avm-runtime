@@ -131,10 +131,13 @@ def main():
     n = min(len(steps), len(drained))
 
     def mismatches(offset):
+        # `offset` is 0 for the real pairing and 1 for the control. It is never negative, and the
+        # branch that handled a negative one is gone: a fail-safe arm that never executes is a
+        # property of dead code, which this campaign has a rule about.
         bad = 0
-        for i in range(n - abs(offset)):
+        for i in range(n - offset):
             s = steps[i]
-            r = drained[i + offset] if offset >= 0 else drained[i]
+            r = drained[i + offset]
             if str(s.get("contextId")) != r.get("ctx") \
                or str(s.get("opcode")) != r.get("op") \
                or str(s.get("l2Gas")) != r.get("l2") \

@@ -393,3 +393,26 @@ Pre-sweep state: `dev` clean and one commit ahead of `origin/dev` (the arithmeti
 `verify-m`/`verify-l` process, load average 0.49, `carry/*.json` checksummed, the browser bundle
 rebuilt from the RESTORED sources after the mutation matrix and verified back at its shipped
 figures (8,230.78 KB total, `browser.js` 265.79 KB).
+
+### THE SWEEP WAS ABORTED ONCE, SIX MINUTES IN, AND THE ABORT BOUGHT A CENSUS THAT WAS NARROWER THAN ITS OWN SENTENCE
+
+The sweep is a long window in which the only safe work is read-only, and the brief says what that
+window is for. Reading this pass's own four checks for the shapes it lists found one:
+
+**`test_form_b_tx_matches_pxe_bytes` §6 asserts that no SHIPPED SOURCE defines or calls
+`generateSimulatedProvingResult` — and scanned `orchestration/src/*.ts` and `browser/src/*.ts`,
+which glob ONE directory each.** `orchestration/src/vendor/` and `browser/src/wallet/` were outside
+it, and `browser/src/wallet/dev_wallet.ts` is one of the five citation sites the closeout pass
+recorded. Measured before the fix and after: **both scans answer zero**, so the verdict is unchanged
+and the entry's conclusion is untouched — but a census narrower than its own sentence is this
+campaign's most repeated defect, and the two subdirectories are now asserted to be IN the file list
+rather than assumed. `test_form_b_tx_matches_pxe_bytes` 78 → **80**, m21 449 → **451**.
+
+And one smaller thing in the same read: `_m25_container_steps.py`'s comparer carried a branch for a
+NEGATIVE offset that nothing ever passes. A fail-safe arm that never executes is a property of dead
+code; it is gone.
+
+The run was killed six minutes in, at m2, both fixed, the two checks re-run (80 / 0 and 56 / 0), and
+the sweep restarted after the last edit rather than finished and explained.
+
+**Revised prediction: m18 576, m21 451, m25 453, m28 358, m31 450 — TOTAL 12,869.**

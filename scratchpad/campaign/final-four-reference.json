@@ -1,5 +1,5 @@
 {
- "_total": 12867,
+ "_total": 12869,
  "_baseline": 12534,
  "_declared_moves": {
   "m18": {
@@ -10,9 +10,9 @@
   },
   "m21": {
    "from": 369,
-   "to": 449,
-   "delta": 80,
-   "checks": "test_form_b_tx_matches_pxe_bytes 78 + verify_transcript_truncation_detection_uniform 55 -> 57 (the census's population 32 -> 33 and reaching set 12 -> 13, which the new probe-driving check joins)"
+   "to": 451,
+   "delta": 82,
+   "checks": "test_form_b_tx_matches_pxe_bytes 80 + verify_transcript_truncation_detection_uniform 55 -> 57 (the census's own population 32 -> 33 and reaching set 12 -> 13, which the new probe-driving check joins)"
   },
   "m25": {
    "from": 308,
@@ -54,7 +54,7 @@
  "m18": 576,
  "m19": 180,
  "m20": 237,
- "m21": 449,
+ "m21": 451,
  "m22": 349,
  "m23": 512,
  "m24": 350,
