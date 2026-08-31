@@ -1533,6 +1533,10 @@ verify-halves-compose:
 verify-debug-logs:
     @verification/test_debug_log_events_surface.sh
 
+# Token constructor, mint, transfer and burn, with the side effects and the gas.
+verify-ts-wasm-token:
+    @verification/e2e_ts_wasm_token_transfer.sh
+
 # Type-check the orchestration package against the nix-pinned tsc.
 typecheck-orchestration:
     @cd orchestration && tsc -p tsconfig.json && echo "orchestration: type-checks"
@@ -1547,7 +1551,8 @@ verify-m18:
       verify_no_telemetry_client_in_import_graph \
       test_public_processor_never_defaults_to_cpp \
       verify_ts_simulator_configuration_named_not_inverted \
-      e2e_ts_wasm_result_decodes_as_upstream_types
+      e2e_ts_wasm_result_decodes_as_upstream_types \
+      e2e_ts_wasm_token_transfer
     do
       echo "=== $check"
       verification/"$check".sh || rc=1
