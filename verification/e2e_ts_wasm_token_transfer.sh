@@ -159,8 +159,17 @@ assert_eq "the control's constructor still succeeded, so the zeros are about the
 # PART 6 — THROUGH THE ORCHESTRATION, and the vendored builder stayed off the world state
 # ---------------------------------------------------------------------------
 
-assert_eq "the vendored transaction builder read no world state during the whole arm" \
-  "[]" "$(tb_arm tokenFlows merkleTouches)"
+assert_eq "the vendored transaction builder read no world state during the whole arm" "[]" "$(tb_arm tokenFlows merkleTouches)"
+# THE CONTROL FOR THAT EMPTY LIST, and without it the zero above means nothing. Every trap on the
+# merkle proxy THROWS, so an observation aborts the arm and no report exists — which makes
+# `merkleTouches` necessarily empty in every report a check can read, and the assertion above
+# satisfied by a tripwire wired to nothing. `CAMPAIGN-BRIEF.md` records that as the 26th and 27th
+# instances of "an assertion must be capable of failing"; the driver touches the field the vendored
+# constructor assigned, off the tester itself, and it must THROW.
+assert_prefix "…and the tripwire is armed: touching it through the builder's own field throws" \
+  "threw:" "$(tb_arm tokenFlows merkleTripwireControl)"
+assert_eq "…recording exactly the one deliberate observation" \
+  "1" "$(tb_arm tokenFlows merkleTouchesAfterControl)"
 assert_eq "the contract was registered in the module's own contract store" \
   "1" "$(tb_arm tokenFlows registeredDirectly.classes)"
 assert_eq "and its instance with it" "1" "$(tb_arm tokenFlows registeredDirectly.instances)"

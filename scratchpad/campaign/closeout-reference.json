@@ -1,12 +1,12 @@
 {
- "_total": 12496,
+ "_total": 12507,
  "_baseline": 12176,
  "_declared_moves": {
   "m18": {
    "from": 283,
-   "to": 471,
-   "delta": 188,
-   "checks": "e2e_ts_wasm_token_transfer 49 + e2e_ts_wasm_nested_call_fork_merge 38 + e2e_ts_wasm_phase_revert_semantics 39 + test_custom_bytecode_unhappy_paths 62"
+   "to": 473,
+   "delta": 190,
+   "checks": "e2e_ts_wasm_token_transfer 51 + e2e_ts_wasm_nested_call_fork_merge 38 + e2e_ts_wasm_phase_revert_semantics 39 + test_custom_bytecode_unhappy_paths 62"
   },
   "m21": {
    "from": 334,
@@ -16,9 +16,9 @@
   },
   "m22": {
    "from": 265,
-   "to": 340,
-   "delta": 75,
-   "checks": "e2e_block_token_flows 37 + e2e_block_deployments_through_processor 38"
+   "to": 349,
+   "delta": 84,
+   "checks": "e2e_block_token_flows 39 + e2e_block_deployments_through_processor 45"
   },
   "m25": {
    "from": 284,
@@ -45,11 +45,11 @@
  "m15": 537,
  "m16": 225,
  "m17": 297,
- "m18": 471,
+ "m18": 473,
  "m19": 180,
  "m20": 237,
  "m21": 367,
- "m22": 340,
+ "m22": 349,
  "m23": 512,
  "m24": 350,
  "m25": 308,

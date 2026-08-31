@@ -161,6 +161,16 @@ assert_true "the state reference moved across the mint-and-transfer block" \
   test "$(tb_block tokenFlows construct stateReferenceAfter)" \
        != "$(tb_block tokenFlows mintAndTransfer stateReferenceAfter)"
 assert_eq "the vendored transaction builder never read a world state" "[]" "$(tb_arm tokenFlows merkleTouches)"
+# THE CONTROL FOR THAT EMPTY LIST, and without it the zero above means nothing. Every trap on the
+# merkle proxy THROWS, so an observation aborts the arm and no report exists — which makes
+# `merkleTouches` necessarily empty in every report a check can read, and the assertion above
+# satisfied by a tripwire wired to nothing. `CAMPAIGN-BRIEF.md` records that as the 26th and 27th
+# instances of "an assertion must be capable of failing"; the driver touches the field the vendored
+# constructor assigned, off the tester itself, and it must THROW.
+assert_prefix "…and the tripwire is armed: touching it through the builder's own field throws" \
+  "threw:" "$(tb_arm tokenFlows merkleTripwireControl)"
+assert_eq "…recording exactly the one deliberate observation" \
+  "1" "$(tb_arm tokenFlows merkleTouchesAfterControl)"
 assert_eq "the contract store's checkpoint depth is back to zero after the block" \
   "0" "$(tb_block tokenFlows mintAndTransfer checkpointDepthAfter.contracts)"
 

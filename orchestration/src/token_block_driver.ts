@@ -433,6 +433,29 @@ async function registerDirectly(
   return { classes, instances, nullifier: nullifier.toString() };
 }
 
+/**
+ * THE TRIPWIRE'S CONTROL, AND WITHOUT IT THE TRIPWIRE'S ZERO MEANS NOTHING.
+ *
+ * Every trap on the merkle proxy THROWS, so an observation aborts the arm and no report is produced
+ * at all — which means `merkleTouches` is necessarily empty in every report a check can read, and an
+ * assertion that it is empty is satisfied by a tripwire wired to nothing. `CAMPAIGN-BRIEF.md`
+ * records this as the 26th and 27th instances of "an assertion must be capable of failing"; M26
+ * answered it in `join_e2e_driver.ts` and the first version of THIS file did not carry the answer
+ * over. Found by self-review while a sweep was running, which is the one thing that window is for.
+ *
+ * `tester.merkleTree` is the field the vendored constructor assigned
+ * (`vendor/public_tx_simulation_tester.ts:61`), so touching it touches the reference the builder was
+ * handed rather than a second proxy made beside it. `NOT-THROWN` means the tripwire is not armed.
+ */
+function tripwireControl(tester: PublicTxSimulationTester): string {
+  try {
+    void (tester as never as { merkleTree: Record<string, unknown> }).merkleTree['getTreeInfo'];
+  } catch (e) {
+    return `threw:${e instanceof Error ? e.message : String(e)}`;
+  }
+  return 'NOT-THROWN';
+}
+
 const ADMIN = 42;
 const SENDER = 111;
 const RECEIVER = 222;
@@ -575,7 +598,11 @@ async function runTokenArm(
         burn_public: (await getFunctionSelector('burn_public', artifact)).toString(),
         balance_of_public: (await getFunctionSelector('balance_of_public', artifact)).toString(),
       },
-      merkleTouches,
+      // The snapshot taken BEFORE the control's deliberate touch, so the control cannot make this
+      // list non-empty and the two facts stay independent.
+      merkleTouches: [...merkleTouches],
+      merkleTripwireControl: tripwireControl(tester),
+      merkleTouchesAfterControl: merkleTouches.length,
       blocks,
     };
   } finally {
@@ -714,6 +741,54 @@ async function runDeploymentArm(
       ]),
     );
 
+    // ===========================================================================================
+    // THE DELIBERATE EXTRACTION PROBE, AND IT IS THE POSITIVE CONTROL FOR A COUNTER THAT READS ZERO.
+    // ===========================================================================================
+    //
+    // The check's strongest sentence is that `PublicProcessor` NEVER calls
+    // `contractsDB.addNewContracts` for a transaction with public calls — asserted as a count of
+    // zero. A counter wired to nothing reads zero too, and so does a store that could not extract a
+    // deployment even if asked. Both would satisfy that assertion, and the three have different
+    // remedies.
+    //
+    // So the same transaction shape is handed to `addNewContracts` BY HAND, after the blocks, and
+    // the flush is drained: the counter goes to one and the flush registers what the transaction
+    // carried. That separates "the processor did not ask" from "there was nothing to find", which
+    // is the whole content of the finding.
+    const probeTx = await tester.createTx(deployer, [], [
+      { address: helper.contractInstance.address, fnName: 'add_args_return', args: [1n, 2n] },
+    ]);
+    const probeClass = await createContractClassAndInstance(
+      /*constructorArgs=*/ [],
+      deployer,
+      artifact,
+      /*seed=*/ 97,
+    );
+    await addNewContractClassToTx(probeTx as never, probeClass.contractClass as never);
+    await addNewContractInstanceToTx(probeTx as never, probeClass.contractInstance as never);
+    const probeCalls = { addNewContracts: 0 };
+    const probeDb = world.contractsDb as unknown as Record<string, (...a: never[]) => unknown>;
+    const probeOriginal = probeDb.addNewContracts;
+    probeDb.addNewContracts = (...a: never[]) => {
+      probeCalls.addNewContracts += 1;
+      return probeOriginal.apply(world.contractsDb, a);
+    };
+    let probe: Record<string, unknown>;
+    try {
+      world.contractsDb.addNewContracts(probeTx as never);
+      const queued = world.contractsDb.pendingRegistrations;
+      const flushed = await world.contractsDb.flush();
+      probe = {
+        calls: probeCalls.addNewContracts,
+        queuedBeforeFlush: queued,
+        registered: flushed,
+        subjectClassId: probeClass.contractClass.id.toString(),
+        subjectAddress: probeClass.contractInstance.address.toString(),
+      };
+    } finally {
+      probeDb.addNewContracts = probeOriginal;
+    }
+
     return {
       deployInBlockOne: opts.deployInBlockOne,
       subjectArtifact: artifact.name,
@@ -723,8 +798,11 @@ async function runDeploymentArm(
       contractAddressNullifier: nullifierFromHelper,
       carrierAddress: helper.contractInstance.address.toString(),
       carrierClassId: helper.contractClass.id.toString(),
-      merkleTouches,
+      merkleTouches: [...merkleTouches],
+      merkleTripwireControl: tripwireControl(tester),
+      merkleTouchesAfterControl: merkleTouches.length,
       privateOnlyCarrier: privateOnly,
+      extractionProbe: probe,
       blocks,
     };
   } finally {

@@ -103,6 +103,29 @@ assert_eq "the processor never called addNewContracts for a transaction with pub
 assert_eq "so the deferred flush registered nothing" \
   '{"classes":0,"instances":0}' "$(tb_block deployment publish registrations)"
 
+# ===========================================================================================
+# THE POSITIVE CONTROL FOR THAT ZERO, AND IT SEPARATES THREE THINGS A ZERO CANNOT.
+# ===========================================================================================
+#
+# A count of zero is equally produced by a counter wired to nothing, by a store that could not
+# extract a deployment even if it were asked, and by the fact this check means to state — that the
+# PROCESSOR never asks. The three have different remedies. So the driver hands the same transaction
+# shape to `addNewContracts` BY HAND, after the blocks, and drains the flush.
+assert_eq "the counter counts: a deliberate call reads one" \
+  "1" "$(tb_arm deployment extractionProbe.calls)"
+assert_eq "…the store QUEUED what the transaction carried" \
+  "1" "$(tb_arm deployment extractionProbe.queuedBeforeFlush)"
+assert_eq "…and the flush registered a class and an instance from it" \
+  '{"classes":1,"instances":1}' "$(tb_arm deployment extractionProbe.registered)"
+assert_prefix "…for a contract class the probe names" "0x" "$(tb_arm deployment extractionProbe.subjectClassId)"
+# So the zero above is a fact about the PROCESSOR and not about the store or the counter.
+
+assert_eq "the vendored transaction builder read no world state" "[]" "$(tb_arm deployment merkleTouches)"
+assert_prefix "…and the tripwire is armed, so that empty list is a measurement" \
+  "threw:" "$(tb_arm deployment merkleTripwireControl)"
+assert_eq "…recording exactly the one deliberate observation" \
+  "1" "$(tb_arm deployment merkleTouchesAfterControl)"
+
 # ---------------------------------------------------------------------------
 # PART 2 — CALLABLE. In the same block, and in a later one.
 # ---------------------------------------------------------------------------

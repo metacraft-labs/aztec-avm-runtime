@@ -245,3 +245,41 @@ yesterday's (see the specs commit `d12d4c31`).
 `just check-repo-hygiene` **28** and `verify_reuse_inventory_complete` **19** — all unchanged, and
 the two failures in that set are the parallel tracks' known reds (L3's
 `tools/scan_reverted_transactions.mjs`, L4's sixth `| grep -q`), with their counts unmoved.
+
+## Step 8 — THE SWEEP WAS ABORTED THREE MINUTES IN, AND THE ABORT BOUGHT TWO VACUOUS ASSERTIONS
+
+The sweep is a long window in which the only safe work is read-only, and the brief says what that
+window is for. Re-reading this pass's own eight checks for assertions that cannot fail found **two,
+both in this pass's own work**, and the sweep was killed at m2 rather than finished and explained.
+
+### 1. A TRIPWIRE WIRED TO NOTHING — the campaign's 26th and 27th instances, reproduced
+
+`e2e_block_token_flows` and `e2e_ts_wasm_token_transfer` both asserted
+`merkleTouches == []` — "the vendored transaction builder never read a world state".
+
+**Every trap on that proxy THROWS.** So an observation aborts the arm and no report exists, which
+makes the list *necessarily* empty in every report a check can read, and the assertion satisfied by
+a tripwire wired to nothing. M26 met exactly this and answered it in `join_e2e_driver.ts` with a
+`merkleTripwireControl` that touches the field the vendored constructor assigned, **off the tester
+itself** — and the first version of this file did not carry the answer over.
+
+Fixed in the driver and asserted in both checks: the control must come back `threw:…`, and the
+post-control observation count must be **1**. `e2e_block_token_flows` 37 → **39**,
+`e2e_ts_wasm_token_transfer` 49 → **51**.
+
+### 2. A ZERO WITH NO POSITIVE CONTROL, under the deployment check's strongest sentence
+
+`e2e_block_deployments_through_processor` asserts that `PublicProcessor` never calls
+`contractsDB.addNewContracts` for a transaction with public calls — as a count of **zero**. A
+counter wired to nothing reads zero; so does a store that could not extract a deployment even if
+asked; so does the fact the check means to state. **Three different causes, three different
+remedies, one assertion.** And the arm that looked like a control — the private-only carrier — reads
+zero too, because that transaction fails *before* the call.
+
+The driver now hands the same transaction shape to `addNewContracts` **by hand**, after the blocks,
+and drains the flush: the counter reads **1**, the store **queues 1**, and the flush registers
+**one class and one instance**. So the zero is a fact about the PROCESSOR and not about the store or
+the counter — which is the whole content of the finding.
+`e2e_block_deployments_through_processor` 38 → **45**.
+
+**Revised prediction: m18 473, m21 367, m22 349, m25 308 — 331 new assertions, TOTAL 12,507.**
