@@ -1,5 +1,5 @@
 {
- "_total": 12532,
+ "_total": 12534,
  "_baseline": 12176,
  "_declared_moves": {
   "m18": {
@@ -10,9 +10,9 @@
   },
   "m21": {
    "from": 334,
-   "to": 367,
-   "delta": 33,
-   "checks": "test_settled_read_request_verification 33"
+   "to": 369,
+   "delta": 35,
+   "checks": "test_settled_read_request_verification 33 + verify_transcript_truncation_detection_uniform 53 -> 55 (the census's own population and reaching set, which the new check joins)"
   },
   "m22": {
    "from": 265,
@@ -48,7 +48,7 @@
  "m18": 498,
  "m19": 180,
  "m20": 237,
- "m21": 367,
+ "m21": 369,
  "m22": 349,
  "m23": 512,
  "m24": 350,

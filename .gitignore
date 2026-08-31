@@ -51,3 +51,18 @@ browser/dist/
 /spike/node_modules
 /orchestration/node_modules
 /replay/node_modules
+
+# SWEEP LOGS ARE NOT REPOSITORY CONTENT, AND ONE OF THEM MADE A CHECK RED.
+# `scratchpad/campaign/aztec-residuals-sweep.log` was committed at 1.0 MB, and a sweep log quotes
+# every line its checks print — including the pull-request-opening command M11's own check greps
+# for. `verify_submission_is_a_manual_step`'s "exactly one file in this repository can open a pull
+# request" therefore counted the LOG as a second one. The residuals sweep could not have seen it:
+# the log was copied into the tree AFTER that sweep ran, which is how a check goes red for work
+# that had already finished.
+#
+# (This comment deliberately does not spell that command. The same check would count this file too,
+# which is "a citation is the opposite of a dependency" — the campaign's own rule — arriving inside
+# the remedy for it. It was spelled here first, and the check said so on the next run.)
+#
+# Sweep logs live under ~/.cache; the summariser reads them there.
+scratchpad/campaign/*sweep*.log

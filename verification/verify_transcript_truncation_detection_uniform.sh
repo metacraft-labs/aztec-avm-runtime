@@ -106,7 +106,14 @@ note "$N_POP check(s) depend on a transcript having finished"
 # spelling of the question this milestone unified — and THIS CENSUS is what caught it, in M29's own
 # sweep, before anything was declared. 30 -> 31 with the reaching set 8 -> 9 and the not-reaching
 # set unchanged at 22, which is the split that says the new member did not join the backlog.
-assert_eq "the derived population is exactly the recorded size, in both directions" "31" "$N_POP"
+#
+# AND THE CLOSEOUT PASS ADDED THE THIRTY-SECOND, ON THE SAME TERMS. M21's own
+# `test_settled_read_request_verification` drives a probe with a `settledReads.done` sentinel and
+# CALLS the shared refusal, so it joins the population and the reaching set together: 31 -> 32 with
+# the reaching set 11 -> 12 and the not-reaching set unchanged at 20. That is the split that says a
+# new member did not join the backlog, and it is the reason this census is derived rather than
+# listed — the check that would otherwise have to be remembered is the one it exists to find.
+assert_eq "the derived population is exactly the recorded size, in both directions" "32" "$N_POP"
 
 # Declared exceptions, each with a reason. An exception that no longer matches a real file FAILS,
 # which is what stops this list from silently outliving what it excuses.
@@ -210,10 +217,11 @@ EOF
 # that says WHICH, rather than a number that moved by one for an unstated reason.
 note "not reaching the shared implementation:$MISSING"
 assert_eq "the set that does not reach it is exactly the recorded size" "20" "$N_MISSING"
-assert_eq "…and the eleven that DO are the six comparers, the node-host runs, M21's two probes and M9's two" \
-  "11" "$((N_POP - N_MISSING))"
+assert_eq "…and the twelve that DO are the six comparers, the node-host runs, M21's three probes and M9's two" \
+  "12" "$((N_POP - N_MISSING))"
 for _m9_converted in test_observer_fires_on_exceptional_halt \
-                     test_existing_event_emitter_path_still_available; do
+                     test_existing_event_emitter_path_still_available \
+                     test_settled_read_request_verification; do
   assert_true "$_m9_converted reaches the shared refusal (open from M24 to 2026-08-31)" \
     reaches_refusal "$REPO_ROOT/verification/$_m9_converted.sh"
   # …and it is in the POPULATION, or the assertion above is about a file this census never looks
