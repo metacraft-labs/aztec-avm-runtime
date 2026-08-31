@@ -256,10 +256,18 @@ assert_contains "…and the nested frame's WITH it, so the emit works" \
   "$(m31_arm "$SUC.siloedNullifiers.inner")" "$SUC_NULLS"
 # The counts, as well as the membership: the two lists differ by exactly one entry, which is what
 # says the difference is the nested frame's nullifier and not a list that lost everything.
-REV_N="$(printf '%s' "$REV_NULLS" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
-SUC_N="$(printf '%s' "$SUC_NULLS" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
-assert_ge "the subject's transaction recorded nullifiers at all" 1 "$REV_N"
-assert_eq "…and the control's list is longer by exactly one" "$((REV_N + 1))" "$SUC_N"
+# ARITHMETIC OVER AN ACCESSOR'S OUTPUT NEEDS A GUARD. `lib.sh` runs with `set -u` and bash's
+# `$(( ))` treats a bare word as a VARIABLE, so `$(( MISSING + 1 ))` is an unbound-variable error
+# that KILLS the check rather than failing it. Reproduced directly, and measured in this pass's own
+# `e2e_trace_token_transfer_steppable`, where a mutation arm reported seven assertions fewer than
+# the check has. `num` substitutes a sentinel, and the two counts are asserted NUMERIC first.
+num() { case "${1:-}" in ('' | *[!0-9]*) printf '%s' "${2:--1}" ;; (*) printf '%s' "$1" ;; esac; }
+REV_N="$(printf '%s' "$REV_NULLS" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' 2>/dev/null || printf 'MISSING')"
+SUC_N="$(printf '%s' "$SUC_NULLS" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' 2>/dev/null || printf 'MISSING')"
+assert_true "both nullifier lists were counted, so the comparison below is over numbers" \
+  test "$(num "$REV_N" no)" != "no" -a "$(num "$SUC_N" no)" != "no"
+assert_ge "the subject's transaction recorded nullifiers at all" 1 "$(num "$REV_N" 0)"
+assert_eq "…and the control's list is longer by exactly one" "$(( $(num "$REV_N" 0) + 1 ))" "$SUC_N"
 
 # ---------------------------------------------------------------------------
 echo "== 4c. WITNESS THREE — what the nullifier tree itself answers"

@@ -60,6 +60,33 @@ tb_summary_on_abnormal_exit
 tb_require_arms
 tb_note_provenance
 
+# ===========================================================================================
+# ARITHMETIC OVER AN ACCESSOR'S OUTPUT NEEDS A GUARD, AND THE PROOF IS A REPRODUCTION.
+# ===========================================================================================
+#
+# `lib.sh` runs with `set -u`, and bash's `$(( ))` treats a bare word as a VARIABLE — so
+# `$(( MISSING * 3 ))` is `bash: MISSING: unbound variable` and the shell EXITS. Reproduced
+# directly: `bash -c 'set -u; X=MISSING; echo "$(( X + 1 ))"; echo after'` prints the error and
+# never prints `after`. Every accessor in this file returns `MISSING` for a field that is not
+# there — deliberately, because two empty strings compare equal — so every arithmetic site below
+# was one absent field away from KILLING the check instead of failing it. That is
+# `CAMPAIGN-BRIEF.md`'s silent-shrink family, and this pass measured it in its own
+# `e2e_trace_token_transfer_steppable`, where a mutation arm reported 46 assertions where the
+# check has 53.
+#
+# `num` substitutes a sentinel for anything that is not a number, and the values it protects are
+# asserted NUMERIC first — so an absent reading is a named failure and the count does not move.
+#
+# THE HELPERS ARE DECLARED HERE, AT THE TOP, AND THE FIRST FIX PUT THEM HALFWAY DOWN. The loop in
+# PART 3 then ran with `num: command not found` three times and one arithmetic syntax error, and
+# FOUR assertions of that loop vanished — 78 to 75 — which is the same silent shrink one level
+# further in. A helper is only defined from its declaration onward.
+num() { case "${1:-}" in ('' | *[!0-9]*) printf '%s' "${2:--1}" ;; (*) printf '%s' "$1" ;; esac; }
+all_numeric() { # <value>… -> prints every value that is not a number, or nothing
+  local v
+  for v in "$@"; do case "$v" in ('' | *[!0-9]*) printf '%s ' "$v" ;; esac; done
+}
+
 # ---------------------------------------------------------------------------
 # PART 0 — the arms are against the wasm module and the pinned artifacts
 # ---------------------------------------------------------------------------
@@ -145,7 +172,7 @@ VIEW_STEPS="$(tb_block amm poolBefore instructionsPerSimulation.0)"
 assert_ge "a plain balance view executes a real dispatch too, which is the yardstick" 100 "$VIEW_STEPS"
 for pair in "add:$ADD_STEPS" "swapExactIn:$SWAP_IN_STEPS" "swapExactOut:$SWAP_OUT_STEPS" "remove:$REMOVE_STEPS"; do
   assert_true "${pair%%:*} executed more instructions than a view call, so it is not a stub" \
-    test "${pair#*:}" -gt "$((VIEW_STEPS * 3))"
+    test "$(num "${pair#*:}" 0)" -gt "$(( $(num "$VIEW_STEPS" 0) * 3 ))"
 done
 assert_eq "the four instruction counts are four distinct values" "4" \
   "$(printf '%s\n%s\n%s\n%s\n' "$ADD_STEPS" "$SWAP_IN_STEPS" "$SWAP_OUT_STEPS" "$REMOVE_STEPS" | sort -u | wc -l | tr -d ' ')"
@@ -179,6 +206,23 @@ LIQ_REMOVED="$(tb_arm amm amounts.liquidityToRemove)"
 
 ADD_T0="$(amm_ret poolAfterAdd 0)"; ADD_T1="$(amm_ret poolAfterAdd 1)"
 ADD_LP="$(amm_ret poolAfterAdd 2)"; ADD_LOCKED="$(amm_ret poolAfterAdd 3)"
+IN_T0="$(amm_ret poolAfterSwapIn 0)"; IN_T1="$(amm_ret poolAfterSwapIn 1)"
+OUT_T0="$(amm_ret poolAfterSwapOut 0)"; OUT_T1="$(amm_ret poolAfterSwapOut 1)"
+REM_T0="$(amm_ret poolAfterRemove 0)"; REM_T1="$(amm_ret poolAfterRemove 1)"; REM_LP="$(amm_ret poolAfterRemove 2)"
+
+# EVERY VALUE THAT ENTERS AN ARITHMETIC EXPRESSION BELOW IS A NUMBER, asserted before the first one
+# does, and asserted where all of them are already READ. The first form of this assertion named
+# variables that had not been assigned yet — `set -u` killed the SUBSHELL the command substitution
+# runs in, the parent carried on with an empty string, and `assert_eq "" ""` passed. An assertion
+# that cannot fail, created while fixing an instance of the family it belongs to.
+NON_NUMERIC="$(all_numeric "$BEFORE_T0" "$BEFORE_T1" "$BEFORE_LP" "$ADD_T0" "$ADD_T1" "$ADD_LP" \
+  "$ADD_LOCKED" "$IN_T0" "$IN_T1" "$OUT_T0" "$OUT_T1" "$REM_T0" "$REM_T1" "$REM_LP" \
+  "$AMOUNT0_MAX" "$AMOUNT1_MAX" "$SWAP_IN" "$SWAP_OUT_MIN" "$EXACT_OUT" "$EXACT_IN_MAX" "$LIQ_REMOVED")"
+assert_eq "every balance, supply and amount this section computes with is a number" "" "$NON_NUMERIC"
+# …AND THE CENSUS CAN REPORT ONE. A value the accessor really does produce for an absent field is
+# run through the same predicate, so the empty list above is a measurement.
+assert_eq "…and the same predicate names a non-number when it sees one" "MISSING " \
+  "$(all_numeric "$(amm_ret poolAfterAdd 99)")"
 
 assert_eq "after add_liquidity the pool holds the full token0 deposit" "$AMOUNT0_MAX" "$ADD_T0"
 assert_eq "…and the full token1 deposit" "$AMOUNT1_MAX" "$ADD_T1"
@@ -190,29 +234,26 @@ assert_true "…including a locked minimum at the zero address" test "$ADD_LOCKE
 assert_true "…which is a fraction of the supply rather than the whole of it" \
   test "$ADD_LOCKED" -lt "$ADD_LP"
 
-IN_T0="$(amm_ret poolAfterSwapIn 0)"; IN_T1="$(amm_ret poolAfterSwapIn 1)"
 assert_eq "the exact-in swap moved exactly the input amount into the pool" \
-  "$((ADD_T0 + SWAP_IN))" "$IN_T0"
+  "$(( $(num "$ADD_T0" 0) + $(num "$SWAP_IN" 0) ))" "$IN_T0"
 assert_true "…and took token1 out of it" test "$IN_T1" -lt "$ADD_T1"
-assert_true "…at least the minimum the caller demanded" test "$((ADD_T1 - IN_T1))" -ge "$SWAP_OUT_MIN"
+assert_true "…at least the minimum the caller demanded" test "$(( $(num "$ADD_T1" 0) - $(num "$IN_T1" 0) ))" -ge "$(num "$SWAP_OUT_MIN" 0)"
 # THE CONSTANT-PRODUCT INVARIANT. A pool that handed out more than the curve allows would satisfy
 # every assertion above; this is the contract's own property and it is computed from the read-back
 # reserves rather than pinned.
 assert_true "the constant-product invariant did not fall across the exact-in swap" \
-  test "$((IN_T0 * IN_T1))" -ge "$((ADD_T0 * ADD_T1))"
+  test "$(( $(num "$IN_T0" 0) * $(num "$IN_T1" 0) ))" -ge "$(( $(num "$ADD_T0" 0) * $(num "$ADD_T1" 0) ))"
 
-OUT_T0="$(amm_ret poolAfterSwapOut 0)"; OUT_T1="$(amm_ret poolAfterSwapOut 1)"
 assert_eq "the exact-out swap took exactly the requested amount of token0 out" \
-  "$((IN_T0 - EXACT_OUT))" "$OUT_T0"
+  "$(( $(num "$IN_T0" 0) - $(num "$EXACT_OUT" 0) ))" "$OUT_T0"
 assert_true "…and put token1 in" test "$OUT_T1" -gt "$IN_T1"
 assert_true "…no more than the maximum the caller allowed, so the change was refunded" \
-  test "$((OUT_T1 - IN_T1))" -le "$EXACT_IN_MAX"
+  test "$(( $(num "$OUT_T1" 0) - $(num "$IN_T1" 0) ))" -le "$(num "$EXACT_IN_MAX" 0)"
 assert_true "the constant-product invariant did not fall across the exact-out swap either" \
-  test "$((OUT_T0 * OUT_T1))" -ge "$((IN_T0 * IN_T1))"
+  test "$(( $(num "$OUT_T0" 0) * $(num "$OUT_T1" 0) ))" -ge "$(( $(num "$IN_T0" 0) * $(num "$IN_T1" 0) ))"
 
-REM_T0="$(amm_ret poolAfterRemove 0)"; REM_T1="$(amm_ret poolAfterRemove 1)"; REM_LP="$(amm_ret poolAfterRemove 2)"
 assert_eq "remove_liquidity burned exactly the liquidity the caller sent in" \
-  "$((ADD_LP - LIQ_REMOVED))" "$REM_LP"
+  "$(( $(num "$ADD_LP" 0) - $(num "$LIQ_REMOVED" 0) ))" "$REM_LP"
 assert_true "…and paid token0 out of the pool" test "$REM_T0" -lt "$OUT_T0"
 assert_true "…and token1 with it" test "$REM_T1" -lt "$OUT_T1"
 

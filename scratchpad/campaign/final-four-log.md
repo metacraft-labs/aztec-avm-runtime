@@ -416,3 +416,38 @@ The run was killed six minutes in, at m2, both fixed, the two checks re-run (80 
 the sweep restarted after the last edit rather than finished and explained.
 
 **Revised prediction: m18 576, m21 451, m25 453, m28 358, m31 450 — TOTAL 12,869.**
+
+### AND THE SWEEP WAS ABORTED A SECOND TIME, TWO MINUTES IN, FOR THE SAME FAMILY IN A DIFFERENT FILE
+
+*"When you fix an instance of a form, grep for the form in the file you are fixing before you leave
+it"* — one level up: **grep for it in the files this pass wrote.** The arithmetic hazard the C2 arm
+found in `e2e_trace_token_transfer_steppable` was censused across all four new checks:
+
+| check | unguarded `$(( ))` sites over an accessor's output |
+|---|---|
+| `e2e_ts_wasm_amm` | **8** |
+| `test_nested_call_reverted_contributes_no_side_effects` | **1** |
+| `e2e_trace_token_transfer_steppable` | 0 (fixed) |
+| `test_form_b_tx_matches_pxe_bytes` | 0 |
+
+Reproduced directly rather than argued: `bash -c 'set -u; X=MISSING; echo "$(( X + 1 ))"; echo after'`
+prints `MISSING: unbound variable` and **never prints `after`**. Every accessor in those files returns
+`MISSING` for an absent field — deliberately — so each of those nine sites was one absent field away
+from KILLING its check instead of failing it. All nine are guarded, and the values they consume are
+asserted NUMERIC first.
+
+**AND THE FIRST FIX INTRODUCED TWO DEFECTS OF ITS OWN, BOTH CAUGHT BY RUNNING IT.**
+
+  1. **The helpers were declared halfway down the file**, after the loop in PART 3 that uses them.
+     Result: `num: command not found` three times, one arithmetic syntax error, and **four
+     assertions of that loop vanished** — 78 → 75. The same silent shrink, one level further in.
+     A helper is only defined from its declaration onward; they are at the top now.
+  2. **The numeric census named variables that had not been assigned yet.** `set -u` killed the
+     SUBSHELL the command substitution runs in, the parent carried on with an empty string, and
+     `assert_eq "" ""` PASSED. *An assertion that cannot fail, created while fixing an instance of
+     the family it belongs to.* Every value is read before the census now, and the census carries
+     its own positive control — the same predicate run over a reading that really is `MISSING`.
+
+`e2e_ts_wasm_amm` 78 → **80**, `test_nested_call_reverted_contributes_no_side_effects` 89 → **90**.
+
+**Revised prediction: m18 578, m21 451, m25 454, m28 358, m31 450 — TOTAL 12,872.**
