@@ -353,11 +353,23 @@ process.stdout.write('
         # still reporting a revert — the state this check's sentinel assertion exists for.
         # Predicted: the "above the enum's sentinel" assertion, the opcode-named diagnostic, and
         # the "four DIFFERENT diagnostics" count, which falls to three.
+      # TWO SUBSTITUTIONS, AND THE SECOND ONE IS WHY. The tool has its own guard — it refuses to
+      # produce an arm run whose "invalid" byte is below the sentinel — so the first form of this
+      # arm made the tool exit 6, the check died at its precondition with `0 assertion(s), 1
+      # failure(s)`, and NOT ONE assertion of the section the arm was written for ever ran. That is
+      # the "a mutation that crashes has not exercised the assertion it was written for" state,
+      # arriving through a guard rather than through a bug. Disabling the tool's guard is what lets
+      # the arm reach the CHECK's, and having both is the point: one refuses to MAKE the bad arm,
+      # the other refuses to BELIEVE it.
       arm_header "M11 — the byte called an invalid opcode is a VALID one"
       sub tools/run_token_block_arms.mjs \
         '  invalidOpcode: 0xff,' \
         '  invalidOpcode: 0x00,'
+      sub tools/run_token_block_arms.mjs \
+        'if (opcodes.invalidOpcode < sentinel) {' \
+        'if (false) { // ZZZ_CLOSEOUT_GUARD_OFF'
       still_there tools/run_token_block_arms.mjs 'invalidOpcode: 0x00,' M11
+      still_there tools/run_token_block_arms.mjs 'ZZZ_CLOSEOUT_GUARD_OFF' M11
       run_check test_custom_bytecode_unhappy_paths
       ;;
 
