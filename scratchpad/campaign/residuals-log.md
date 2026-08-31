@@ -175,3 +175,108 @@ byte-cursor defect. I am instructed not to commit that worktree (`f0e7edcd2`, on
 edit, `wasm/webpage` in zero published refs), so this is a divergence recorded rather than closed.
 It is also why the M26 join checks are unaffected by the fix, and why the sweep should not move on
 its account.
+
+## Step 4 — THE PENDING 21, ENTRY BY ENTRY
+
+Full before/after is in the report. Summary: **15 of 21 stated reasons were stale**; 6 left, each
+with its blocker **re-measured today rather than quoted**. No entry's *conclusion* changed — which
+is the point: this campaign's defect is a stale reason surviving a correct conclusion.
+
+Two whole groups were blocked on things that now exist — M26's vendored transaction builder (7
+entries) and M35/M36's vendored simulator + 68-oracle registry (5 entries) — and three individual
+reasons were **false**, not merely superseded:
+
+1. `e2e_ts_wasm_nested_call_fork_merge` said the shipping module is "M12's thirty-nine-export
+   module". Dumped `WebAssembly.Module.exports`: **55 exports, eight `avm_coordinator_*`**. The
+   four-export module is M6's spike and is deliberately unused.
+2. `e2e_block_deployments_through_processor` said there is no later block because sealing needs an
+   uncarried archive extension. `test_block_seal_updates_archive` is passing and asserts three
+   blocks sealed and the archive going 1 leaf to 4.
+3. `test_settled_read_request_verification`'s stated route **never existed**: `verifyReadRequests`
+   is a bare `async function` with two references in the whole package and no export path reaching
+   it, so vendoring or installing `@aztec/pxe` would never have produced it.
+
+And `e2e_wallet_private_transfer` — whose reason M35 kept current — had gone stale the *other* way:
+with M36's discovery source attached, `Token.mint_to_private` **executes** (1,047-entry witness, 22
+served oracles).
+
+## Step 5 — `npm.deletion_era`: MEASURED, AND LARGER THAN CLAIMED
+
+M37's Outstanding task said moving `orchestration/` to `npm.current` is *"one mechanical rename at
+two call sites"*. Probed every `@aztec/*` symbol `orchestration/src` imports against **both**
+installed pins — `orchestration/node_modules` at `deletion_era` and `drift/node_modules` at
+`current` — so neither side is a tree that excludes the subject:
+
+- **140 module-level symbols across 35 subpaths resolve identically**, zero import errors on either
+  side. *(A first version of this probe reported zero differences because every module failed to
+  import in BOTH trees — Node resolves a bare specifier relative to the importing module, not the
+  cwd. Two missing keys agreeing. Caught by asserting the error count instead of reading the diff.)*
+- **Three member-set differences across 88 classes.** Only one is used: `AztecAddress`'s
+  `fromNumber` / `fromField` / `fromString` / `fromBigInt` -> the `*Unsafe` spellings — **four
+  methods, not one**. `SiblingPath.deserialize` is gone at `current` and is not called;
+  `HashedValues.schemaFor` is additive.
+- **TWELVE call sites across SEVEN files**, not two: `fromNumber` x7, `fromField` x4, `fromString`
+  x1. The two the entry counted are the vendored pair; the other ten are this repository's own code
+  and move in the opposite direction.
+- **"Retire `npm.deletion_era`" is not achievable as written.** It has three consumers and
+  `pins.json` says bumping it "would destroy the artefact rather than update it".
+
+Not done, and left with the true number rather than the claimed one. A value-and-member probe is
+also blind to behavioural change across two months of nightlies, and M34's review already recorded
+upstream schemas differing at the pin in ways silent until something runs.
+
+## Step 6 — D19 CLOSED: the trigger is the pipe, reproduced on demand, and fixed
+
+The single largest finding of this pass. `m6_in_devshell` ran its dev-shell command as
+`( … ) | awk …`, so every guest launched through it — **node, in seven libraries** — had fd 1 on a
+**pipe** whose reader is `awk`. D19 asked "whether the loss depends on the sink being a pipe rather
+than a file" on the day it opened and nobody had looked.
+
+Four arms, same module, same host, same command, one variable:
+
+| arm | fd 1 | reader | stdout | sentinel | stderr | exit |
+|---|---|---|---|---|---|---|
+| A | pipe | `cat` | 39,200 lines | present | 21,082 B | 0 |
+| B | pipe | python, **10 s sleep first** | **504 lines / 53,186 B** | **absent** | 21,082 B | **0** |
+| C | pipe | same python, no sleep | 39,200 | present | 21,082 B | 0 |
+| D | **file** | — | 39,200 | present | 21,082 B | 0 |
+
+Arm B is the recorded signature exactly and it is **deterministic** — 504 / 53,186 three runs out of
+three — which is why the real sightings looked random: on a loaded box it is `awk` that stalls.
+libuv adopts a pipe fd 1 as a non-blocking Socket and the guest's WASI `fd_write` goes straight to
+that fd, so a write that cannot complete is **dropped rather than retried**; a C++/Rust guest blocks
+and retries, which is why native and wasmtime were complete in the very runs where V8 was not.
+
+It explains every row of the ledger that had never explained the others: all eight sightings inside
+sweeps and none alone; points scattered rather than at a buffer size; sighting c stopping
+mid-record; sighting g truncating a second transcript in one run; and `93d8255` not helping.
+
+**Fixed and proved by the same harness**: the payload goes through a file, and under the same
+10-second starvation the result is **byte-identical to the clean baseline**. Cost stated: output is
+no longer streamed while produced.
+
+## Step 7 — the sweep reference, which now checks itself
+
+`m37rev-reference.json` summed to **12,114** against a declared 12,141 — `m26` 313 where the live
+sweep measures 340. Corrected on disk (12,114 + 27 = 12,141 exactly).
+
+The generalising fix is in `residuals-sweep-sum.py`: **a reference file declares its own `_total`
+and the summariser REFUSES one that does not add up.** Calibrated three ways — a good reference
+passes with a self-check line, a reference with no `_total` is refused, and the exact stale value
+(`m26: 313`) is refused naming the `-27`.
+
+**Declared before the sweep runs**, from the 12,141 baseline:
+
+| milestone | check | from | to | delta |
+|---|---|---|---|---|
+| m16 | `verify_fallback_cost_priced` | 145 | 147 | **+2** |
+| m21 | `verify_transcript_truncation_detection_uniform` | 44 | 50 | **+6** |
+| m23 | `verify_sequencer_reuse_enumeration_recorded` | 60 | 63 | **+3** |
+| m25 | `test_fr_rendering_matches_noir_tracer` | 57 | 68 | **+11** |
+| m36 | `e2e_note_discovery_across_blocks` | 77 | 87 | **+10** |
+
+`m2` unchanged (the `fx = 26 + i` fix moves no count, which is how a narrowing is told from a
+re-pin) and **m9 unchanged at 807** (the refusals and the trap add no assertion). Every milestone
+attribution was derived from the Justfile rather than remembered.
+
+**PREDICTED TOTAL 12,173** = 12,141 + 32.
