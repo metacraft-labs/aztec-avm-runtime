@@ -119,11 +119,23 @@ m14_noir_constant() { # <NAME>
 # THE ENUMERATION, as patterns rather than as lists.
 #
 # `([A-Za-z0-9_]+::)*` and not `([A-Za-z_]+::)*`: M13's review measured that the second finds seven
-# implementations where the first finds eight, because `avm2` has a digit in it. `\b` on the
-# interface name, because `LowLevelMerkleDBInterface` is a prefix of nothing today and that is
+# implementations where the first finds eight, because `avm2` has a digit in it. A word boundary on
+# the interface name, because `LowLevelMerkleDBInterface` is a prefix of nothing today and that is
 # exactly the kind of thing that stops being true.
+#
+# THE BOUNDARY IS SPELT `([^[:alnum:]_]|$)` AND NOT `\b`, AND THAT IS THE SEVENTH SITE.
+# `\b` is a GNU extension; git's regex engine is the platform's, so on a macOS host it matches
+# NOTHING. 769e209 fixed six such call sites in verification/ and MISSED THIS ONE, which is a
+# variable rather than a literal inside a `git grep` line and so did not match the grep that found
+# the others. Measured against the fork at the anchor: with `\b`, 0 implementations; with the POSIX
+# form, 5 — `HintedRawMerkleDB`, `HintingRawDB`, `MemoryMerkleDB`, `MockLowLevelMerkleDB` and
+# `WsdbIpcMerkleDB`, exactly `M14_EXPECTED_MERKLE_IMPLS` below.
+#
+# It cost M37's sweep two assertions in `verify_block_level_gap_audit_complete` — the COUNT and the
+# IDENTITY — and both failed loudly rather than vacuously, because the expectation is 5 and a
+# broken needle answers 0. That is the only reason it is a visible failure and not a silent pass.
 # ---------------------------------------------------------------------------
-M14_MERKLE_IMPL_REGEX='class [A-Za-z0-9_]+ (final )?: public ([A-Za-z0-9_]+::)*LowLevelMerkleDBInterface\b'
+M14_MERKLE_IMPL_REGEX='class [A-Za-z0-9_]+ (final )?: public ([A-Za-z0-9_]+::)*LowLevelMerkleDBInterface([^[:alnum:]_]|$)'
 
 # The five, as an IDENTITY: "class path" per line, sorted. Six would fail this, and so would four.
 # `WsdbIpcMerkleDB` is under `vm2_wsdb/`, a barretenberg subdirectory PARALLEL to `vm2/` — the same

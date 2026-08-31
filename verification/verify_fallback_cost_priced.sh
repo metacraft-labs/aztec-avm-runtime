@@ -132,7 +132,18 @@ assert_ge "…and it is a decorator holding a target it forwards to" 1 \
 # The deleted package's own interfaces went with it: nothing implements them anywhere, and there is
 # no merkle-tree package left in yarn-project/. The second half is the control for the first — a
 # zero over interfaces that no longer exist is not a finding on its own.
-DELETED_RE='implements [A-Za-z0-9_.]*(AppendOnlyTree|IndexedTree|UpdateOnlyTree)\b'
+# THE BOUNDARY IS `([^[:alnum:]_]|$)` AND NOT `\b`, AND THIS IS THE EIGHTH SITE 769e209 MISSED.
+# It is the WORSE class the commit's own message names: `\b` is a GNU extension, git's regex engine
+# is the platform's, and on macOS the needle matches NOTHING — so `DELETED_IMPLS` is 0, and 0 is
+# exactly what the assertion below WANTS. It passed, vacuously, for a platform reason.
+#
+# Measured at the anchor: the POSIX form also returns 0, so the assertion's VERDICT was right and
+# no count moves. That is luck, not evidence. And the control on the next assertion does not cover
+# it: `m16_words` runs PLAIN grep over three file paths, and plain grep here is GNU grep, which
+# implements `\b` — so the control establishes that a GNU-grep needle matches, while the zero it is
+# controlling came from a GIT-grep needle that cannot. The two greps are different engines and the
+# control was scoped to the wrong one.
+DELETED_RE='implements [A-Za-z0-9_.]*(AppendOnlyTree|IndexedTree|UpdateOnlyTree)([^[:alnum:]_]|$)'
 DELETED_IMPLS="$( ( cd "$FORK_ROOT" && git grep -lE "$DELETED_RE" "$CPP_ANCHOR" -- '*.ts' ) 2>/dev/null | grep -vc '\.test\.ts' )"
 assert_eq "nothing in the fork implements the deleted package's tree interfaces" "0" "${DELETED_IMPLS:-0}"
 # THE SAME REGEX, run over the package that DOES implement them, must find them. Without this the

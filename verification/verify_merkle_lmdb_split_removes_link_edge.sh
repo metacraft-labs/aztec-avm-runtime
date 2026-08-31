@@ -129,13 +129,39 @@ assert_false "after: world_state_reference does not depend on crypto_merkle_tree
 # ---------------------------------------------------------------------------
 # 3. The linked binaries — "links no LMDB object"
 # ---------------------------------------------------------------------------
-mdb_syms() { nm -C "$1" 2>/dev/null | grep -c ' mdb_' ; }
+# THE `_?` IS THE MACH-O SYMBOL PREFIX, AND WITHOUT IT THIS WHOLE SECTION WAS VACUOUS.
+#
+# Mach-O gives every C symbol a leading underscore; ELF does not. `mdb_env_create` is listed by
+# `nm` as `_mdb_env_create` on macOS and `mdb_env_create` on Linux, so a needle anchored as
+# `' mdb_'` — space then `m` — matches NOTHING on this host. Measured on the very binaries below:
+#
+#   base/crypto_merkle_tree_tests          ' mdb_' -> 0     ' _?mdb_' -> 145
+#   patched/crypto_merkle_tree_tests       ' mdb_' -> 0     ' _?mdb_' -> 0
+#   patched/crypto_merkle_tree_lmdb_tests  ' mdb_' -> 0     ' _?mdb_' -> 145
+#
+# So the reader answered 0 for EVERY binary, where the truth is 145 / 0 / 145. The damage is
+# asymmetric and the vacuous half is the dangerous half:
+#
+#   * `before: ... contains LMDB object code` (>= 1) FAILED, loudly, on a true statement.
+#   * `after: ... contains NO LMDB object code` (== 0) PASSED — vacuously. So did
+#     `after: it does not define mdb_env_create`. Those two are the milestone's actual claim, and
+#     they were being satisfied by a reader that could not have said anything else.
+#
+# A negative assertion read through a broken instrument is not evidence, and these two are exactly
+# the shape `Testing/Verification-Harness-Traps.md` warns about: the check passes because the set it
+# quantifies over is empty for a reason that has nothing to do with the subject.
+#
+# `_?` and not a platform branch: it is correct on both, and it keeps ONE code path measured here.
+mdb_syms() { nm -C "$1" 2>/dev/null | grep -cE ' _?mdb_' ; }
 # Note: no `grep -q` in a pipe from nm — lib.sh sets `pipefail`, and grep -q's
 # early exit makes nm die of SIGPIPE, which would fail the pipeline whatever the
 # symbol table says.
 has_sym() {
   local out; out="$(nm -C "$1" 2>/dev/null)"
-  case "$out" in *" T mdb_env_create"*) return 0 ;; esac
+  case "$out" in
+    *" T mdb_env_create"*)  return 0 ;;
+    *" T _mdb_env_create"*) return 0 ;;
+  esac
   return 1
 }
 
