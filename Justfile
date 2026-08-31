@@ -1537,6 +1537,10 @@ verify-debug-logs:
 verify-ts-wasm-token:
     @verification/e2e_ts_wasm_token_transfer.sh
 
+# CALL and STATICCALL fork and merge; a reverted nested call leaves nothing; unused gas returns.
+verify-ts-wasm-nested:
+    @verification/e2e_ts_wasm_nested_call_fork_merge.sh
+
 # Type-check the orchestration package against the nix-pinned tsc.
 typecheck-orchestration:
     @cd orchestration && tsc -p tsconfig.json && echo "orchestration: type-checks"
@@ -1552,7 +1556,8 @@ verify-m18:
       test_public_processor_never_defaults_to_cpp \
       verify_ts_simulator_configuration_named_not_inverted \
       e2e_ts_wasm_result_decodes_as_upstream_types \
-      e2e_ts_wasm_token_transfer
+      e2e_ts_wasm_token_transfer \
+      e2e_ts_wasm_nested_call_fork_merge
     do
       echo "=== $check"
       verification/"$check".sh || rc=1
