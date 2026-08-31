@@ -256,9 +256,16 @@ assert_eq "all five programs were registered in the module, one class each" "5" 
 assert_eq "and one instance each" "5" \
   "$(tb_arm customBytecode registered \
      | python3 -c 'import json,sys; print(sum(v["instances"] for v in json.load(sys.stdin).values()))')"
-assert_eq "every one of the five blocks sealed or refused the seal identically, so none aborted" "1" \
-  "$(for b in invalidOpcode truncatedInstruction invalidTag pcOutOfRange wellFormed; do
-       tb_block customBytecode "$b" sealRefusal; done | sort -u | wc -l | tr -d ' ')"
+# EVERY BLOCK REACHED ITS SEAL, AND THE VALUE IS ASSERTED RATHER THAN THE AGREEMENT. A set of size
+# one is equally produced by five blocks that all reported `MISSING`, which is what an arm that
+# never ran looks like through the accessor. So the value is named first and the agreement second.
+SEAL_VERDICT="$(tb_block customBytecode wellFormed sealRefusal)"
+assert_true "the seal verdict is a real one rather than a missing field" \
+  test "$SEAL_VERDICT" != "MISSING"
+for b in invalidOpcode truncatedInstruction invalidTag pcOutOfRange wellFormed; do
+  assert_eq "$b reached its seal and got the same verdict, so it did not abort" \
+    "$SEAL_VERDICT" "$(tb_block customBytecode "$b" sealRefusal)"
+done
 assert_eq "and the contract store's checkpoint depth is zero after the last of them" \
   "0" "$(tb_block customBytecode wellFormed checkpointDepthAfter.contracts)"
 

@@ -77,8 +77,14 @@ for a in $ARMS; do
 done
 assert_eq "the four arms are the four cases and not one case four times" "4" \
   "$(for a in $ARMS; do tb_arm "$a" which; done | sort -u | wc -l | tr -d ' ')"
+# AGREEMENT PLUS THE VALUE. Four arms that all read `MISSING` agree too, which is what an arm the
+# accessor cannot reach looks like — so the address is asserted to be an address before the four are
+# asserted to share it.
+PHASE_ADDRESS="$(tb_arm phasesAllSucceed contractAddress)"
+assert_prefix "the arms name a real contract address" "0x" "$PHASE_ADDRESS"
 assert_eq "all four ran against the same contract, so the phase is the only variable" "1" \
   "$(for a in $ARMS; do tb_arm "$a" contractAddress; done | sort -u | wc -l | tr -d ' ')"
+assert_eq "…and it is that address" "$PHASE_ADDRESS" "$(tb_arm phasesTeardownReverts contractAddress)"
 
 SETUP_VALUE="$(tb_arm phasesAllSucceed expected.setup)"
 APP_VALUE="$(tb_arm phasesAllSucceed expected.app)"
@@ -167,8 +173,11 @@ assert_eq "the three revert phases produced three different module codes" "3" \
       "$(tb_block phasesAllSucceed phases rawRevertCodes.0)" \
       "$(tb_block phasesAppReverts phases rawRevertCodes.0)" \
       "$(tb_block phasesTeardownReverts phases rawRevertCodes.0)" | sort -u | wc -l | tr -d ' ')"
-assert_true "the setup arm is the only one that did not produce a ProcessedTx at all" \
-  test "$(tb_block phasesSetupReverts phases rawRevertCodes)" = "[]"
+# "THE ONLY ONE" IS ASSERTED AS A COUNT OVER ALL FOUR, not claimed beside a single reading.
+assert_eq "the setup arm produced no ProcessedTx at all" \
+  "[]" "$(tb_block phasesSetupReverts phases rawRevertCodes)"
+assert_eq "…and it is the ONLY arm of the four that did not" "1" \
+  "$(for a in $ARMS; do [ "$(tb_block "$a" phases rawRevertCodes)" = "[]" ] && echo x; done | wc -l | tr -d ' ')"
 assert_eq "and the read-backs are three different patterns" "3" \
   "$(printf '%s\n%s\n%s\n' \
       "$(tb_block phasesAllSucceed readBack returnValues)" \
@@ -177,7 +186,17 @@ assert_eq "and the read-backs are three different patterns" "3" \
 
 # The read-back block is itself asserted to work, so "everything reads zero" in the setup arm is a
 # fact about that arm and not about a reader that always answers zero.
-assert_eq "the read-back transactions themselves all succeeded in every arm" "1" \
+#
+# THE FIRST VERSION OF THIS ASSERTED ONLY THAT THE FOUR ARMS AGREED — a set of size one — which four
+# arms whose read-backs all REVERTED would satisfy just as well. A set size standing in for a value
+# is the same shape as a depth of zero standing in for a merge, and it is asserted as the VALUE now,
+# with the agreement kept beside it.
+READBACK_CODES='{"readSetup":0,"readApp":0,"readTeardown":0}'
+assert_eq "the read-back transactions all succeeded, in every arm" "1" \
   "$(for a in $ARMS; do tb_block "$a" readBack revertCodes; done | sort -u | wc -l | tr -d ' ')"
+for a in $ARMS; do
+  assert_eq "…and in $a the three reads are the three that did not revert" \
+    "$READBACK_CODES" "$(tb_block "$a" readBack revertCodes)"
+done
 
 finish

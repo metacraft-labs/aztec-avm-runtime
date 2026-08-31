@@ -315,3 +315,28 @@ static-write refusal — and the check says explicitly that it does not drive
 
 *Two aborts, three vacuous assertions, one corrected claim. The window a sweep opens is the only
 time this pass had for reading its own work, and it paid three times.*
+
+## Step 10 — the self-review finished before the third sweep, not during it
+
+Rather than abort a third time, the remaining checks were audited exhaustively for the shape both
+aborts had found: **a comparison that stands in for a value it never names.** Every
+`sort -u | wc -l` in the eight checks was read one at a time.
+
+- **Six are DISTINCTNESS assertions** — the four fees are four values, the four arms are four cases,
+  the three phase values differ, the three module codes differ, the three read-back patterns differ,
+  the four AVM diagnostics differ, the two settled indexes differ. Distinctness is the safe
+  direction: it asserts variation, and each member is separately asserted by value.
+- **Three were AGREEMENT assertions, and agreement is the unsafe direction**, because a set of
+  values that are all `MISSING` agrees too — which is exactly what an arm the accessor cannot reach
+  looks like. All three now name the value as well as the agreement:
+  - the four phase arms' read-backs must all be `{readSetup:0, readApp:0, readTeardown:0}`, not
+    merely equal (four arms whose read-backs all REVERTED satisfied the old form);
+  - the four phase arms' contract address must be an address before the four are said to share it;
+  - the five custom-bytecode blocks' seal verdict must be a real verdict before the five are said
+    to agree — five `MISSING`s would have passed.
+- And *"the setup arm is the ONLY one that did not produce a ProcessedTx"* was claimed beside a
+  single reading; it is a count over all four now.
+
+`e2e_ts_wasm_phase_revert_semantics` 39 → **46**, `test_custom_bytecode_unhappy_paths` 62 → **67**.
+
+**Final prediction: m18 498, m21 367, m22 349, m25 308 — 356 new assertions, TOTAL 12,532.**
