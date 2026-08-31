@@ -541,3 +541,35 @@ time against the summariser's own anchored pattern. None of their assertions is 
 
 **A sweep is a writer**: `carry/*.json` checksummed before and `sha256sum -c` after — **all four OK
 and unchanged.** The working tree is clean.
+
+---
+
+## THE PENDING LIST AFTER THIS PASS: 13 → 9, AND WHAT EACH OF THE NINE IS
+
+Re-derived from the milestone file by the same parse the residuals pass used
+(`- test_name:` / `status:` pairs): **237 verification entries, 9 `pending`**, `status: failing`
+zero. **M18 has no pending entry left.**
+
+| entry | why it is still open, measured 2026-08-31 | class |
+|---|---|---|
+| M11 `verify_all_five_patches_submitted` | five prepared patches, six published branches, nothing filed. The user runs `submit/pr<N>-*.sh`; until then all five read `prepared` and `verify_carry_ledger_complete` asserts the two agree rather than pretending otherwise | **human** |
+| M16 ×4 (`test_fallback_empty_note_hash_tree_root`, `..._domain_separators_from_constants`, `..._checkpoint_stack_is_o_changes`, `e2e_fallback_matches_golden_vectors`) | all three fallback triggers evaluate `not-fired`, so there is no TypeScript tree to assert about. `verify_fallback_triggers_recorded_and_evaluated` re-derives that verdict on every run — **78 assertions, 0 failures, this sweep** | **an unfired trigger** |
+| M26 `e2e_joined_trace_opens_in_codetracer` | the headless CodeTracer replay SDK is another effort's (`OUT-OF-SCOPE.md`), and there is still no built `ct` binary in the sibling checkout | **another agent's scope** |
+| M26 `e2e_form_b_single_ct_recording` | ONE missing capability, re-measured today | **capability, below** |
+| M35 `e2e_wallet_private_transfer` | the same, plus tier 2's own rung | **capability, below** |
+| M35 `e2e_joined_private_public_trace` | the same, plus tier 4 (`aztec_prv_callPrivateFunction`) still refusing | **capability, below** |
+
+**THE THREE THAT ARE NOT A HUMAN, UPSTREAM OR ANOTHER AGENT ALL REST ON ONE THING, AND IT IS
+MEASURED RATHER THAN QUOTED.** *The private executor emits no step stream.* Re-measured today:
+
+```
+grep -rc noir_tracer browser/src orchestration/src   ->  0
+grep -rc 'ct_writer|CtWriter' browser/src/wallet/*.ts ->  0
+```
+
+`browser/src/wallet/private_execution.ts` produces an oracle ledger and a solved witness and nothing
+connects either to `ct_writer`, so even a private half that completed could not be written into a
+container from the browser path. That is real work in this repository, it is ONE piece of work
+rather than three, and it was outside this pass's brief — which named four entries and these were
+not among them. **Saying so is the point: it is not blocked on a human, and calling it blocked would
+be the kind of stale reason this campaign exists to refuse.**
