@@ -1738,6 +1738,61 @@ async function armNoteDiscovery(): Promise<Record<string, unknown>> {
   const pendingSlot = (pending as unknown as { materializeSlot(f: (v: unknown) => unknown[]): { toString(): string } })
     .materializeSlot(() => []);
 
+  // ---- CONTROL 7: THE SECRET SET IS DEDUPLICATED --------------------------------------------
+  //
+  // THIS VALIDATION WAS IMPLEMENTED AND COVERED BY NOTHING. M36's review measured that three of
+  // the four upstream validations this handler was missing have a control arm and this one has
+  // none — no assertion, no mutation, `grep -rn dedup verification/` returning one unrelated hit.
+  // An uncovered validation is indistinguishable from an absent one, and its permissive version is
+  // not visibly wrong afterwards: a secret that appears twice scans the same tags twice and returns
+  // THE SAME LOG TWICE, which is the double-count the milestone's other controls are about,
+  // arriving from the secret side.
+  //
+  // THE MEASUREMENT IS WORK DONE, NOT A SELF-REPORT. The discriminating quantity is `probes`, which
+  // the handler increments once per (secret, index) pair actually examined, so it is a count of the
+  // loop's iterations rather than the handler's description of its own inputs. `secrets=` is read
+  // too, but only as the explanation; `probes` is what could not be right if the set were not
+  // deduplicated.
+  //
+  // TWO ARMS, BECAUSE ONE IS SATISFIED BY A HANDLER THAT NEVER LOOKS AT `provided` AT ALL. The
+  // duplicate arm supplies a secret equal to the one the handler derives; the distinct arm supplies
+  // a different one, and its probe count must be strictly larger. So "the duplicate arm probed 8"
+  // is a measurement by an instrument seen to produce 16.
+  //
+  // Each arm reads the ledger record its OWN call appended, sliced by the ledger length taken
+  // immediately before, so a record left by an earlier call cannot be read as this one's.
+  const dedupArm = async (provided: { secret: unknown; mode: unknown }[]) => {
+    const before = handle.calls().length;
+    const got = (await (h.getPendingTaggedLogsV2 as (...a: unknown[]) => Promise<{
+      readAll(s: unknown): unknown[];
+    }>)(mine.accounts[0]!.address, EphemeralArray.fromValues(ephemeral, provided as never[]))) as {
+      readAll(s: unknown): unknown[];
+    };
+    const rec = handle
+      .calls()
+      .slice(before)
+      .find(c => c.oracle === 'aztec_utl_getPendingTaggedLogsV2');
+    const detail = rec?.detail ?? '';
+    const num = (key: string) => {
+      const m = new RegExp(`${key}=(\\d+)`).exec(detail);
+      return m ? Number(m[1]) : -1;
+    };
+    return {
+      detail,
+      secrets: num('secrets'),
+      probes: num('probes'),
+      logs: got.readAll(ephemeral).length,
+    };
+  };
+  const mySecretObj = secret as unknown as { secret: unknown; kind: unknown };
+  const theirSecretObj = theirSecret as unknown as { secret: unknown; kind: unknown };
+  // The duplicate: the same field element and kind the handler derives for this scope, so the
+  // combined set is [provided, derived] with both members equal.
+  const dedupDuplicate = await dedupArm([{ secret: mySecretObj.secret, mode: mySecretObj.kind }]);
+  // The distinct: the OTHER wallet's secret, which the handler cannot derive here, so nothing is
+  // deduplicated and the same code path does twice the work.
+  const dedupDistinct = await dedupArm([{ secret: theirSecretObj.secret, mode: theirSecretObj.kind }]);
+
   const byTagRequests = [
     {
       contractAddress: contract,
@@ -1871,6 +1926,15 @@ async function armNoteDiscovery(): Promise<Record<string, unknown>> {
       servedWithout: ORACLE_IMPLEMENTED.length,
       refusingWithout: ORACLE_REFUSING.length,
       registry: ORACLE_NAMES.length,
+    },
+    secretDedup: {
+      duplicateSecrets: dedupDuplicate.secrets,
+      duplicateProbes: dedupDuplicate.probes,
+      duplicateLogs: dedupDuplicate.logs,
+      duplicateDetail: dedupDuplicate.detail,
+      distinctSecrets: dedupDistinct.secrets,
+      distinctProbes: dedupDistinct.probes,
+      distinctDetail: dedupDistinct.detail,
     },
     ephemeralOracles: {
       pendingCount,

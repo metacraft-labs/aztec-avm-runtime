@@ -336,6 +336,58 @@ assert_true "and the refusal names the oracle" str_has_sub "$S_REFUSAL" "aztec_p
 assert_true "and names the scope AND the list, so a reader can see which is which" \
   str_has_sub "$S_REFUSAL" "allowed scopes ["
 
+echo "== 8c. THE THIRD UPSTREAM GUARD, WHICH WAS IMPLEMENTED AND COVERED BY NOTHING"
+
+# M36's review measured that three of the four upstream validations this handler was missing have a
+# control arm and that the SECRET-SET DEDUPLICATION has none — no assertion, no mutation arm, and
+# `grep -rn dedup verification/` returning one unrelated hit. An uncovered validation is
+# indistinguishable from an absent one. Its permissive version returns the same log twice, which is
+# the double-count section 5b's control is about, arriving from the secret side instead of the
+# index side.
+#
+# THE DISCRIMINATING QUANTITY IS WORK DONE. `probes` counts (secret, index) pairs the handler
+# actually examined, so it is the loop's own iteration count rather than the handler's description
+# of its inputs — the distinction M29's review paid for when a check read an opcode histogram out
+# of the producer's report instead of out of what the producer wrote.
+#
+# TWO ARMS, because one is satisfied by a handler that never reads `provided` at all: the duplicate
+# arm supplies a secret EQUAL to the one the handler derives, the distinct arm supplies a different
+# one, and the second must do strictly more work through the same code path.
+DD_SECRETS="$(m36_arm discovery.report.secretDedup.duplicateSecrets)"
+DD_PROBES="$(m36_arm discovery.report.secretDedup.duplicateProbes)"
+DD_LOGS="$(m36_arm discovery.report.secretDedup.duplicateLogs)"
+DD_DETAIL="$(m36_arm discovery.report.secretDedup.duplicateDetail)"
+DX_SECRETS="$(m36_arm discovery.report.secretDedup.distinctSecrets)"
+DX_PROBES="$(m36_arm discovery.report.secretDedup.distinctProbes)"
+DX_DETAIL="$(m36_arm discovery.report.secretDedup.distinctDetail)"
+
+m36_absent duplicateSecrets="$DD_SECRETS" duplicateProbes="$DD_PROBES" duplicateLogs="$DD_LOGS" \
+  distinctSecrets="$DX_SECRETS" distinctProbes="$DX_PROBES"
+
+# The arms reached the handler at all — a ledger record with a `secrets=` in it, not a `-1` from a
+# regex that found nothing.
+assert_true "the duplicate arm produced a getPendingTaggedLogsV2 ledger record" \
+  str_has_sub "$DD_DETAIL" "secrets="
+assert_true "…and the distinct arm did too" str_has_sub "$DX_DETAIL" "secrets="
+# Both arms supplied ONE provided secret and the handler derived ONE, so the pre-dedup set is two
+# in both. Asserted, because "the duplicate arm saw one secret" means nothing if it was handed none.
+assert_true "the duplicate arm supplied one provided secret and the handler derived one" \
+  str_has_sub "$DD_DETAIL" "(1 provided, 1 derived)"
+assert_true "…and so did the distinct arm, so the two arms differ only in WHICH secret" \
+  str_has_sub "$DX_DETAIL" "(1 provided, 1 derived)"
+
+# The dedup itself: two sources collapse to one when they coincide, and stay two when they do not.
+assert_eq "a provided secret equal to the derived one collapses the set to ONE" "1" "$DD_SECRETS"
+assert_eq "…while a DIFFERENT provided secret leaves TWO, so the collapse is selective" "2" "$DX_SECRETS"
+# …and the consequence, which is the half a set size cannot give: the duplicate arm does half the
+# work. Strictly-less first, then the exact ratio, because "fewer probes" is also satisfied by a
+# scan that gave up early.
+assert_true "the deduplicated arm probes strictly FEWER pairs" test "$DD_PROBES" -lt "$DX_PROBES"
+assert_eq "…and exactly half as many, which is one window per surviving secret" \
+  "$DX_PROBES" "$((DD_PROBES * 2))"
+assert_true "…and the probe counts are non-zero, so the comparison is not 0 < 0" \
+  test "$DD_PROBES" -gt 0
+
 echo "== 9. THE DOCUMENT'S FIGURES, RE-DERIVED FROM THE ARTEFACTS"
 
 [ -s "$M36_DOC" ] || die "there is no $M36_DOC"
