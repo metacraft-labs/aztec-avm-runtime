@@ -461,7 +461,51 @@ async function executeArm() {
       contracts[name] = { error: String(err && err.message ? err.message : err), stack: String(err && err.stack).slice(0, 1200) };
     }
   }
-  return { available: true, avmWasm, avmWasmSha256: shaFile(avmWasm), exports: reactor.exportNames.length, contracts };
+  // ------------------------------------------------------------------------------------------
+  // THE NESTED-EFFECT PAIR — M25's `test_nested_call_reverted_contributes_no_side_effects`.
+  //
+  // The `nested_effects` fixture is the contract the pinned corpus could not express: a nested
+  // frame that MAKES a side effect and then REVERTS while the OUTER call goes on to succeed. It
+  // needs several transactions in ONE world — the subject, a read-back, and two follow-ups that
+  // re-emit each nullifier — so it does not fit `runTranspiledContract`, which runs one.
+  //
+  // It runs here rather than in a driver of its own because the bytes it executes are the ones the
+  // PAGE produced, and this is the file that has them.
+  // ------------------------------------------------------------------------------------------
+  let nestedEffects;
+  const nestedFile = path.join(WORK, 'browser-nested_effects.out.json');
+  if (!existsSync(nestedFile)) {
+    nestedEffects = { available: false, reason: `no browser output at ${nestedFile}` };
+  } else {
+    try {
+      const { runNestedEffectArms } = await import('../orchestration/src/nested_effect_driver.ts');
+      const bytes = readFileSync(nestedFile);
+      nestedEffects = {
+        available: true,
+        arms: await runNestedEffectArms(reactor, JSON.parse(bytes.toString('utf8')), {
+          artifactSha256: sha(bytes),
+          bytecodeProvenance:
+            'transpiled by avm_transpiler_wasm.wasm inside Chromium; carried out of the page as base64; '
+            + 'executed here in Node against the same avm.wasm a page would fetch',
+        }),
+      };
+    } catch (err) {
+      nestedEffects = {
+        available: false,
+        reason: `the nested-effect arms threw: ${String(err && err.message ? err.message : err)}`,
+        stack: String(err && err.stack).slice(0, 1600),
+      };
+    }
+  }
+
+  return {
+    available: true,
+    avmWasm,
+    avmWasmSha256: shaFile(avmWasm),
+    exports: reactor.exportNames.length,
+    contracts,
+    nestedEffects,
+  };
 }
 
 try {

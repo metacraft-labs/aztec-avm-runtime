@@ -75,3 +75,97 @@ artifact declares"* a measurement rather than a list — came back **EMPTY**, be
 LOADED artifact and `loadContractArtifact` does not carry `custom_attributes` through. An empty
 list makes "these four are all of them" a comparison of one empty set with another, so the check
 asserts the scan found FOUR *before* comparing the sets. Read off the raw JSON now.
+
+### Step 1.4 — the check
+
+`verification/e2e_ts_wasm_amm.sh`, **78 assertions**, wired into `just verify-ts-wasm-amm` and into
+`verify-m18` (the brief's rule that a milestone which declares a check must run it).
+
+Eight parts: the arms' provenance; four contracts with four distinct addresses and four distinct
+contract-address nullifiers; the artifact's own `abi_only_self` scan; all four entry points
+executing with four distinct instruction counts; the pool's state as deltas and as its
+constant-product invariant; the eight partial notes; and the two controls.
+
+### Step 1.5 — the mutation matrix: six arms, every one killed what it was written for
+
+| arm | mutation | result | what went red |
+|---|---|---|---|
+| A1 | the foreign-sender control is self-sent after all | 78 / **8** | the `selfSender == user` identity, all four "with a foreign sender X reverts", the payload non-emptiness, the four-distinct-payloads count, and the control's empty pool |
+| A2 | the no-minter control grants the minter anyway | 78 / **3** | `is_minter` reading 0, the control's revert, and its zero liquidity supply |
+| A3 | the exact-out note siloed under the wrong token | 78 / **3** | exactly the FOURTH entry point: its revert code and its two exact-out deltas. The other three entry points stayed green |
+| A4 | the `abi_only_self` scan drops its own predicate | 78 / **2** | exactly the two Part-2 assertions — the scan's size (4 -> 6) and the set equality |
+
+**One prediction did not hold and it is recorded rather than quietly dropped.** A3's header
+predicted the exact-out INVARIANT assertion would fall with the deltas. It did not, and the reason
+is right: with the swap reverted the reserves do not move, so `b0*b1 >= b0*b1` is satisfied by
+equality. An invariant is a `>=` and a reverted swap is the boundary case. The three that fired are
+the ones that name the exact-out swap by name.
+
+---
+
+## ENTRY 2 — M25 `test_nested_call_reverted_contributes_no_side_effects`
+
+### Step 2.1 — the corpus gap is real, and the remedy is a contract
+
+The closeout pass proved by enumeration that the pinned corpus cannot express this entry: of
+`AvmTest`'s 127 functions exactly TWO recover from a failed nested call and neither nested target
+makes a side effect. **Re-derived here** (`§6` of the check), anchored to a DEFINITION
+(`fn <name>(`) rather than a mention — because `AvmTest`'s source carries a commented-out call to
+one of the two at line 1010, which a naive grep counts.
+
+So the contract is authored: `fixtures/transpiler-contracts/nested_effects/`, compiled by the
+nargo M31 builds from the anchor's own `noir` submodule and transpiled to AVM bytecode by the
+module M31 runs **in Chromium**. That is the intended use of M30 and M31.
+
+### Step 2.2 — three defects in this pass's own work, each found by running
+
+1. **Oracle declarations inside a `contract {}` block are ENTRY POINTS.** `[Field; N]` is "Invalid
+   entry point type" and `-> Field` is "missing pub keyword on return type" — five errors before
+   the file compiled. `aztec-nr` puts the same declarations in `aztec/src/oracle/avm.nr` for that
+   reason; the fixture's `src/avm_ops.nr` is that file cut down to six opcodes, and it is the only
+   reason the fixture is multi-file.
+
+2. **THE INSTRUCTION-COUNT CONTROL WAS THE WRONG SHAPE, AND ONLY RUNNING IT SAID SO.** The control
+   for *"the effects were MADE and then discarded"* is a callee that halts BEFORE its side effects.
+   The first draft put it in its own mode (6) called by its own outer (7). Measured: the
+   early-reverting outer executed **139** instructions against the late-reverting one's **89** —
+   MORE, not fewer, because a later branch of an `if`/`else if` chain costs more dispatch
+   comparisons to reach, and that difference swamped the two opcodes the control exists to count.
+   It is an ARGUMENT now, decided inside ONE branch of ONE callee reached by ONE outer, so both arms
+   take the identical dispatch path. Re-measured: **94 against 89**, and the check asserts the two
+   arms' state read-backs are IDENTICAL so the count is the only discriminator.
+
+3. **A STALENESS PREDICATE THAT DID NOT WATCH ITS OWN PRODUCER — a live gap, pre-existing.**
+   `m31_arms_newer_inputs` watched the page, four tools and the build outputs and **not
+   `orchestration/src`** — while `arms.execute` has imported `transpiled_contract_driver.ts` since
+   M31. Measured: a field added to the nested-effect driver was still absent from the report after
+   a full check run. The symptom was the mild one only because M29's `m31_absent` sits in front of
+   every comparison and refused; a CHANGED field would have read as the old measurement. Closed.
+
+### Step 2.3 — what the arms measure
+
+| | subject (`revertsAfterEffects`) | control (`succeeds`) | control (`revertsBeforeEffects`) |
+|---|---|---|---|
+| outer transaction | rc **0** | rc 0 | rc 0 |
+| the outer frame's own reading of the call | **failed** | succeeded | failed |
+| outer slot | 4242 | 4242 | 4242 |
+| **inner slot** | **0** | **5151** | **0** |
+| `TxEffect.nullifiers` | 2 — outer's present, **inner's absent** | **3** — both present | 2 |
+| re-emit the inner nullifier | **succeeds** (still free) | **reverts** (landed) | succeeds |
+| re-emit the outer nullifier | reverts | reverts | reverts |
+| instructions | **94** | 135 | **89** |
+
+Three independent witnesses — what the transaction RECORDED, what the tree HOLDS, what the tree
+ANSWERS — each falsifiable in both directions by the succeeding arm, plus the instruction-count
+control that separates *"no side effects"* from *"no side effects were ever made"*.
+
+### Step 2.4 — one other milestone's check moved, and it is the brief's own rule
+
+`verify_transpiler_rung1_mapping_survives` pinned *"exactly two of the corpus's AVM functions carry
+a compiled procedure, and they are branches' and reverting's"* — as a `case` arm naming two
+fixtures and, six lines below, the literal `2`, with nothing keeping the two in step. The new
+fixture is a THIRD carrier: its `assert` compiles to the same procedure at Brillig index 11,
+`{"0":{"11":[129,131]}}`. Repaired the way the brief asks — ONE declaration, used at both sites,
+with the count derived from it and a floor so the pair cannot both be satisfied by an empty corpus.
+
+`test_nested_call_reverted_contributes_no_side_effects`: **83 assertions, 0 failures.**

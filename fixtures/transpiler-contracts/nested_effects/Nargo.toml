@@ -1,0 +1,6 @@
+[package]
+name = "nested_effects"
+type = "contract"
+authors = [""]
+
+[dependencies]

@@ -144,6 +144,20 @@ m31_arms_newer_inputs() {
   find "$REPO_ROOT/tools/run_transpiler_arms.mjs" "$REPO_ROOT/tools/browser_cdp.mjs" \
        "$REPO_ROOT/verification/m30/page/wasm_host.mjs" "$REPO_ROOT/ct-host/src/source_map.ts" \
     -newer "$stamp" -print -quit 2>/dev/null || true
+  # THE EXECUTE ARM'S OWN DRIVERS, AND THIS WAS A LIVE GAP BEFORE IT WAS CLOSED.
+  #
+  # `arms.execute` imports `orchestration/src/transpiled_contract_driver.ts`, and the nested-effect
+  # arms import `nested_effect_driver.ts` and `token_block_driver.ts` — none of which was in this
+  # predicate. Measured on 2026-08-31: a field ADDED to the nested-effect driver was still absent
+  # from the report after a full check run, because nothing here said the report was stale. That is
+  # "never depend on state you did not produce" with the producer edited and the consumer unaware,
+  # and the symptom is the mild one — a field reads `MISSING` and the precondition refuses — only
+  # because M29's `m31_absent` is in front of every comparison. A CHANGED field would have read as
+  # the old measurement.
+  #
+  # FILES AND NOT THE DIRECTORY: `find -newer <dir>` compares the directory's own mtime, which moves
+  # when a file is added and not when one is edited (M20's review's finding).
+  find "$REPO_ROOT/orchestration/src" -type f ! -name '.*' -newer "$stamp" -print -quit 2>/dev/null || true
   [ -n "${M31_MODULE:-}" ] && [ "$M31_MODULE" -nt "$stamp" ] && printf '%s\n' "$M31_MODULE"
   [ -n "${M31_NATIVE:-}" ] && [ "$M31_NATIVE" -nt "$stamp" ] && printf '%s\n' "$M31_NATIVE"
   if [ -n "${M31_ARTIFACTS:-}" ]; then

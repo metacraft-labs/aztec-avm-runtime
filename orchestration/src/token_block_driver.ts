@@ -72,7 +72,7 @@ import {
 import { PublicTxSimulationTester, type TestEnqueuedCall } from './vendor/public_tx_simulation_tester.ts';
 import { SimpleContractDataSource } from './vendor/simple_contract_data_source.ts';
 
-interface ReactorLike {
+export interface ReactorLike {
   createContractDb(): number;
   createMerkleDb(): number;
   destroyContractDb(handle: number): void;
@@ -101,7 +101,7 @@ function armGlobals(): GlobalVariables {
   return GlobalVariables.from({ ...empty, gasFees: new GasFees(1n, 1n) });
 }
 
-interface World {
+export interface World {
   readonly merkleDb: ResidentMerkleWriteOperations;
   readonly contractsDb: ResidentContractsDB;
   readonly seeding: ResidentMerkleDb;
@@ -125,7 +125,7 @@ interface World {
  * its first instruction reports `processed` too — that is the campaign's deepest recorded defect —
  * so every arm here reports its instruction count and its `revertCode` side by side.
  */
-function openWorld(reactor: ReactorLike, opts: { collectDebugLogs?: boolean } = {}): World {
+export function openWorld(reactor: ReactorLike, opts: { collectDebugLogs?: boolean } = {}): World {
   const contractDbHandle = reactor.createContractDb();
   const merkleDbHandle = reactor.createMerkleDb();
   const merkleDb = new ResidentMerkleWriteOperations(reactor as never, merkleDbHandle);
@@ -215,6 +215,17 @@ export interface BlockRecord {
    * is the charge.
    */
   readonly feeByTx: Readonly<Record<string, string>>;
+  /**
+   * The nullifiers each processed transaction's own `TxEffect` carries, by label.
+   *
+   * THIS IS THE TRANSACTION'S RECORD OF WHAT IT DID, not a probe of the tree afterwards, and the
+   * two are different claims. M25's "a reverted nested call contributes no side effects" is about
+   * what the transaction EMITTED: a frame that wrote a nullifier and then reverted must leave that
+   * nullifier out of this list while the outer frame's stays in it. A later transaction that
+   * re-emits the value answers the same question from the tree's side, and the two together are
+   * what distinguish "the effect was rolled back" from "nothing ever emitted anything".
+   */
+  readonly nullifiersByTx: Readonly<Record<string, readonly string[]>>;
   /** Every app-logic return value the block produced, flattened, as decimal strings. */
   readonly returnValues: readonly (readonly string[])[];
   /** What the deferred contract registrations flushed into the module for THIS block. */
@@ -256,7 +267,7 @@ export interface BlockRecord {
   readonly debugLogs: readonly { readonly message: string; readonly fields: readonly string[] }[];
 }
 
-interface TxPlan {
+export interface TxPlan {
   readonly label: string;
   readonly sender: AztecAddress;
   readonly setupCalls?: TestEnqueuedCall[];
@@ -285,7 +296,7 @@ interface TxPlan {
 }
 
 /** Run one block of transactions through upstream's processor and seal it. */
-async function runOneBlock(
+export async function runOneBlock(
   reactor: ReactorLike,
   world: World,
   tester: PublicTxSimulationTester,
@@ -405,12 +416,16 @@ async function runOneBlock(
   const l2GasByTx: Record<string, number> = {};
   const daGasByTx: Record<string, number> = {};
   const feeByTx: Record<string, string> = {};
+  const nullifiersByTx: Record<string, string[]> = {};
   for (const p of block.processed as readonly {
     hash: { toString(): string };
     revertCode: { getCode(): number };
     revertReason?: { message?: string };
     gasUsed: { totalGas: { l2Gas: bigint | number; daGas: bigint | number } };
-    txEffect: { transactionFee: { toBigInt?(): bigint; toString(): string } };
+    txEffect: {
+      transactionFee: { toBigInt?(): bigint; toString(): string };
+      nullifiers?: readonly { toString(): string }[];
+    };
   }[]) {
     const l = labels.get(p.hash.toString()) ?? p.hash.toString();
     revertCodes[l] = p.revertCode.getCode();
@@ -419,6 +434,7 @@ async function runOneBlock(
     daGasByTx[l] = Number(p.gasUsed.totalGas.daGas);
     const fee = p.txEffect.transactionFee;
     feeByTx[l] = typeof fee.toBigInt === 'function' ? fee.toBigInt().toString() : String(fee);
+    nullifiersByTx[l] = (p.txEffect.nullifiers ?? []).map(n => n.toString());
   }
 
   const seal = (await sealBlock(guarded, world.globals)) as {
@@ -437,6 +453,7 @@ async function runOneBlock(
     l2GasByTx,
     daGasByTx,
     feeByTx,
+    nullifiersByTx,
     returnValues: block.returns.map(r => (r.values ?? []).map((v: { toBigInt(): bigint }) => v.toBigInt().toString())),
     registrations: block.registrations,
     contractStoreCalls: asked,
@@ -455,7 +472,7 @@ async function runOneBlock(
 }
 
 /** Register the contract in the module directly — the route the deployment arm deliberately avoids. */
-async function registerDirectly(
+export async function registerDirectly(
   world: World,
   contractClass: unknown,
   contractInstance: { address: { toField(): Fr } },

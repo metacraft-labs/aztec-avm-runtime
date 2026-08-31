@@ -2101,6 +2101,12 @@ verify-tx-builder-closure:
     @verification/verify_transaction_builder_closure_measured.sh
 
 # Run the whole M25 verification set; every check runs even if an earlier one fails.
+# A nested frame that MAKES a side effect and then REVERTS, with the outer call succeeding.
+# The contract is this repository's own: authored, compiled by the pinned nargo, transpiled in
+# Chromium by M31's module, and executed against avm.wasm.
+verify-nested-reverted-no-side-effects:
+    @verification/test_nested_call_reverted_contributes_no_side_effects.sh
+
 verify-m25:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -2110,7 +2116,8 @@ verify-m25:
       test_fr_rendering_matches_noir_tracer \
       test_trace_metadata_declares_mapping_rung \
       verify_transaction_builder_closure_measured \
-      test_debug_log_events_surface
+      test_debug_log_events_surface \
+      test_nested_call_reverted_contributes_no_side_effects
     do
       echo "=== $check"
       verification/"$check".sh || rc=1

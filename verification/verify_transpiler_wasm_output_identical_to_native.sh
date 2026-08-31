@@ -98,7 +98,7 @@ echo "== 1. the corpus is several contracts, and they are not all the same"
 FIXTURE_NAMES="$(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["fixtures"]))' "$M31_ARMS")"
 FIXTURE_COUNT="$(printf '%s\n' "$FIXTURE_NAMES" | grep -c . || true)"
 assert_ge "the corpus is several contracts, not one" 5 "$FIXTURE_COUNT"
-for want in counter counter_variant branches memory multi private_only reverting; do
+for want in counter counter_variant branches memory multi private_only reverting nested_effects; do
   assert_true "…including $want" str_has_line "$FIXTURE_NAMES" "$want"
 done
 # The shapes differ, so "identical" is not being asserted seven times about one program.

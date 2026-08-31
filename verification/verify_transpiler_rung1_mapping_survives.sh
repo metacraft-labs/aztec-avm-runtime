@@ -251,6 +251,17 @@ PY
 )"
 PROC_ROWS="$(printf '%s\n' "$PROC" | grep -c . || true)"
 assert_ge "the procedure-map comparison has rows to judge" 6 "$PROC_ROWS"
+# THE CARRIER SET, DECLARED ONCE AND USED IN BOTH PLACES.
+#
+# It used to be a `case` arm naming two fixtures and, six lines below, the literal `2` — two typed
+# facts about the corpus with nothing keeping them in step. M25's `nested_effects` fixture (a
+# nested frame that makes a side effect and reverts, added 2026-08-31) is a THIRD carrier: its
+# `assert` compiles to the same procedure at Brillig index 11 that `branches` and `reverting` carry,
+# `{"0":{"11":[129,131]}}`. `CAMPAIGN-BRIEF.md`'s rule for a row added to a table a check
+# re-derives is to add its subject to the check's list IN THE SAME EDIT and to prefer one
+# declaration over two — so the count below is now the declared set's own size.
+PROC_CARRIERS="branches reverting nested_effects"
+PROC_CARRIER_COUNT="$(printf '%s\n' $PROC_CARRIERS | grep -c .)"
 NONEMPTY=0
 CARRIED=0
 while IFS=$'\t' read -r c fn out src same; do
@@ -269,19 +280,24 @@ while IFS=$'\t' read -r c fn out src same; do
     "1" "$same"
   if [ "$out" != "{}" ]; then
     NONEMPTY=$((NONEMPTY + 1))
-    case "$c" in
-      branches|reverting) CARRIED=$((CARRIED + 1)) ;;
-      *) assert_eq "$c/$fn carries a procedure map and only branches/reverting should" \
-           "branches-or-reverting" "$c" ;;
-    esac
+    if str_has_word "$PROC_CARRIERS" "$c"; then
+      CARRIED=$((CARRIED + 1))
+    else
+      assert_eq "$c/$fn carries a procedure map and only [$PROC_CARRIERS] should" \
+        "$PROC_CARRIERS" "$c"
+    fi
   fi
 done <<<"$PROC"
 # NON-EMPTINESS, so "unchanged" above is not seven comparisons of `{}` with `{}` — the identity
 # family this campaign has met with `assert_eq "" ""` and with a deviation field that was zero on
 # every row of the arm it was asserted over.
-assert_eq "exactly two of the corpus's AVM functions carry a compiled procedure at all" "2" \
-  "$NONEMPTY"
-assert_eq "…and they are branches' and reverting's" "2" "$CARRIED"
+assert_eq "exactly the declared fixtures' AVM functions carry a compiled procedure at all" \
+  "$PROC_CARRIER_COUNT" "$NONEMPTY"
+assert_eq "…and they are the declared ones" "$PROC_CARRIER_COUNT" "$CARRIED"
+# THE DECLARED SET IS NOT EMPTY, so the two equalities above cannot both be satisfied by a corpus in
+# which nothing carries a procedure at all — which is the shape this section exists to rule out.
+assert_ge "…and the declared set names at least the two fixtures the hole was first measured on" \
+  2 "$PROC_CARRIER_COUNT"
 # AND THE KEY IS A BRILLIG INDEX WHILE THE SIBLING MAP'S ARE AVM BYTE OFFSETS — the two key
 # spaces in one `DebugInfo`, which is what makes mixing them a silent wrong answer.
 BR_PROC="$(m31_arm arms.rung.contracts.branches.functions.public_dispatch.procedureLocs)"
