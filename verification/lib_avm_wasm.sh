@@ -134,15 +134,52 @@ export M6_BASE_REV M6_WORK M6_PATCH_DIR M6_DECOY_PREFIX
 # ---------------------------------------------------------------------------
 M6_SENTINEL=$'\001M6OUT'
 
+# THE PAYLOAD GOES THROUGH A FILE AND NOT THROUGH A PIPE, AND THAT IS D19's FIX.
+#
+# This used to be `( … ) | awk …`, so every command run in the dev shell had fd 1 attached to a
+# PIPE. For a C++ or Rust guest that is harmless — libc writes block and retry. For **node** it is
+# not: libuv adopts a pipe fd 1 as a non-blocking Socket, and the WASI guest's `fd_write` goes
+# straight to that fd rather than through `process.stdout`, so when the pipe fills and the reader
+# is not scheduled the remainder is DROPPED. The process still exits 0 and its stderr is still
+# complete, which is the recorded D19 signature exactly.
+#
+# REPRODUCED ON DEMAND ON 2026-08-31, which the entry had wanted since 2026-08-25. Same module,
+# same host, same command; the only variable is whether the pipe's reader stalls:
+#
+#   reader = `cat`                          39,200 lines, sentinel present
+#   reader = python, no sleep               39,200 lines, sentinel present
+#   fd 1 = a FILE, no pipe at all           39,200 lines, sentinel present
+#   reader = python, sleeps 10 s first      **504 lines, 53,186 bytes, NO sentinel, exit 0**
+#
+# and the truncated arm is DETERMINISTIC — 504 / 53,186 three times out of three — which is why the
+# real sightings look random: on a loaded box it is `awk` that stalls, for a length nobody controls.
+# The pipe capacity here is 65,536 bytes, and 53,186 of the transcript survived.
+#
+# That also explains everything the ledger recorded and could not join up: all eight sightings
+# inside sweeps and none alone; truncation points scattered over the whole range rather than at a
+# buffer size; sighting c stopping MID-RECORD rather than on a line boundary; sighting g truncating
+# a second transcript in the same run; and `93d8255`'s `exitAfterFlush` not helping, because that
+# drains `process.stdout` — the HOST's writer — and the loss is on the GUEST's.
+#
+# THE FIX IS PROVED BY THE SAME HARNESS: with the payload written to a file and the shell moving
+# the bytes, the 10-second-starved reader gets a result BYTE-IDENTICAL to the clean baseline.
+#
+# THE COST, STATED: output is no longer streamed as it is produced, so a long build's log appears
+# when it finishes rather than while it runs. Sweeps are `setsid`-detached and their logs are read
+# afterwards, so this buys almost nothing back, and it is the cheaper side of the trade against a
+# flake that has cost this campaign eight sweeps and a 283-assertion silent shrink each time.
+# `$TMPDIR` is repointed under `~/.cache` by `lib.sh` when it is RAM-backed, so the spill file is
+# not on the tmpfs.
 m6_in_devshell() {
   local script="$1"; shift
-  local st; st="$(mktemp)"
+  local st raw
+  st="$(mktemp)"; raw="$(mktemp)"
   ( cd "$FORK_ROOT" || exit 90
     nix develop --command bash -uo pipefail \
       -c "printf '%s\n' '$M6_SENTINEL'; $script" bash "$@"
-    echo $? >"$st" ) \
-  | awk -v s="$M6_SENTINEL" 'seen { print } $0 == s { seen = 1 }'
-  local rc; rc="$(cat "$st")"; rm -f "$st"
+    echo $? >"$st" ) >"$raw"
+  awk -v s="$M6_SENTINEL" 'seen { print } $0 == s { seen = 1 }' "$raw"
+  local rc; rc="$(cat "$st")"; rm -f "$st" "$raw"
   return "${rc:-1}"
 }
 

@@ -864,8 +864,60 @@ were absorbed silently.
 
 ## D19 — the V8/WASI guest stdout truncates, twice, on runs that exit 0 and whose stderr is complete
 
+> **CLOSED 2026-08-31. THE TRIGGER IS THE PIPE, IT WAS REPRODUCED ON DEMAND, AND IT IS FIXED.**
+> Everything below is the record of eight sightings and what each of them ruled out; this block is
+> what joined them up. The entry asked, from the day it opened, "whether the loss depends on the
+> sink being a pipe rather than a file" and nobody had looked. **It is a pipe.**
+> `m6_in_devshell` ran its dev-shell command as `( … ) | awk …`, so every guest launched through it
+> — node, in seven libraries — had fd 1 attached to a pipe whose reader was `awk`. Measured with a
+> control: under that plumbing `fstat(1)` reports `FIFO` and `process.stdout` is a `Socket`; with
+> stdout redirected straight to a file it reports `FILE` and a `SyncWriteStream`.
+>
+> **The four-arm reproduction**, same module, same host, same command, one variable — whether the
+> pipe's reader stalls:
+>
+> | arm | fd 1 | reader | stdout | sentinel | stderr | exit |
+> |---|---|---|---|---|---|---|
+> | A | pipe | `cat` | 39,200 lines | present | 21,082 B / 168 lines | 0 |
+> | B | pipe | python, **sleeps 10 s first** | **504 lines, 53,186 B** | **absent** | 21,082 B / 168 lines | **0** |
+> | C | pipe | the same python, no sleep | 39,200 lines | present | complete | 0 |
+> | D | **file, no pipe** | — | 39,200 lines | present | complete | 0 |
+>
+> Arm B is the recorded signature exactly: short stdout, **complete stderr including the output of
+> the programs whose stdout is missing**, exit 0. It is **deterministic** — 504 lines / 53,186 bytes
+> on three consecutive runs — which is precisely why the real sightings looked random: on a loaded
+> box it is `awk` that stalls, for a duration nobody controls. The pipe capacity on this host is
+> 65,536 bytes and 53,186 of the transcript survived.
+>
+> **THE MECHANISM.** libuv adopts a pipe fd 1 as a non-blocking `Socket`; the WASI guest's
+> `fd_write` goes straight to that fd rather than through `process.stdout`, so a write that cannot
+> complete is dropped instead of retried. A C++ or Rust guest is unaffected — libc blocks and
+> retries — which is why native and wasmtime produced the full records in the very runs where V8
+> did not.
+>
+> **AND IT EXPLAINS EVERY ROW OF THE LEDGER BELOW, none of which had explained the others.** All
+> eight sightings inside sweeps and none alone (a loaded box is when `awk` is descheduled).
+> Truncation points scattered over the whole range rather than clustered at a buffer size (the
+> point is wherever the reader happened to stall). Sighting **c** stopping MID-RECORD rather than on
+> a line boundary (a write boundary, not a line one). Sighting **g** truncating a second transcript
+> in the same run (same path, same pipe). And `93d8255`'s `exitAfterFlush` not helping, which this
+> entry already recorded and could not explain: that drains `process.stdout`, the HOST's writer, and
+> the loss is on the GUEST's — the host's own comment says the guest's path is not covered, and it
+> is right.
+>
+> **THE FIX, PROVED BY THE SAME HARNESS.** `m6_in_devshell` writes the payload to a file and `awk`
+> reads the file, so nothing the dev shell runs writes to a pipe. Under the same 10-second
+> starvation the result is **byte-identical to the clean baseline**. The cost is stated rather than
+> hidden: output is no longer streamed while it is produced, so a long build's log appears when it
+> finishes — which sweeps, being `setsid`-detached and read afterwards, barely notice, against a
+> flake that has cost eight sweeps and a 283-assertion silent shrink each time.
+>
+> **What is NOT claimed:** that no other path can truncate. This closes the one the ledger records,
+> with a reproduction and a control; a ninth sighting through a different sink would be a new entry.
+
+
 - id: D19
-- status: open
+- status: closed
 - opened: 2026-08-25
 - milestone: M21 (the detection made uniform; the trigger is not established)
 - design-question: —
