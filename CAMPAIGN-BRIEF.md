@@ -35,7 +35,26 @@ load).
 Each of these is a defect that shipped, not a precaution.
 
 ### An assertion must be capable of failing
-**Forty-one instances.** (**M37's review added the 40th and the 41st, and both are the same shape:
+**Forty-three instances.** (**The residuals pass added the 42nd and the 43rd on 2026-08-31, and
+both were green over a statement that was false.** The 42nd is
+`test_fr_rendering_matches_noir_tracer`'s `str_has_sub "$DOC_TEXT" '…/tracer_glue.rs:160-189'` —
+an assertion that a STRING IS IN A DOCUMENT, standing in for the claim that the citation is
+CORRECT. Measured: the `Field` arm is 148-161 at the revision the table describes, 160-197 at the
+commit after it and 162-211 today, so `160-189` was right at no revision that has ever existed, and
+the assertion could not have said so for any of them. The remedy is the one this list keeps
+reaching: the check computes the range from the checkout, reads the historical revision OUT OF THE
+DOCUMENT, and compares — and asserts the two ranges DIFFER, so the pair is two measurements rather
+than one figure compared with itself. The 43rd is
+`verify_transcript_truncation_detection_uniform`'s own needle: `reaches_shared` matched the helper's
+name after ANY non-word character while the paragraph directly above it said *"the name must begin
+a command, or be the first word of a command substitution"*, and `uncommented` strips WHOLE-LINE
+comments only. So a name in a TRAILING comment counted as a call — a citation counted as a call, in
+the file whose entire subject is that this must not happen, with a description claiming a property
+the comparison could not make. **Found by mutation, not by reading**: unwiring both refusals in
+`test_observer_fires_on_exceptional_halt` while leaving the name in a trailing comment left the
+check at 50 assertions and 0 failures. It is call-shaped now, with a trailing-comment probe and its
+positive control; the same mutation gives three failures, the third naming which check was unwired.)
+(**M37's review added the 40th and the 41st, and both are the same shape:
 an assertion whose DESCRIPTION claims a measurement its comparison cannot make.** The 40th is in
 `noir`: `assert!(last > fixture_lines)` sitting beside `assert_eq!(fixture_lines, 13)` and
 `assert_eq!(last, 142)`, so `142 > 13` was true by construction — in the test written to DECLARE a
@@ -2355,7 +2374,30 @@ changed is an assertion: the `lib.sh` `$TMPDIR` repoint, five stale counter cita
 
 ---
 
-## M9 is FLAKY, not broken — SETTLED, and the check still reports the flake as findings
+## M9 is FLAKY, not broken — SETTLED, and **the flake's CAUSE is now settled too**
+
+> **2026-08-31, THE RESIDUALS PASS: D19 IS CLOSED. THE TRIGGER IS THE PIPE.**
+> `m6_in_devshell` ran its dev-shell command as `( … ) | awk …`, so every guest launched through it
+> — node, in seven libraries — had fd 1 on a PIPE whose reader is `awk`. libuv adopts such an fd as
+> a non-blocking Socket, and the WASI guest's `fd_write` goes straight to it rather than through
+> `process.stdout`, so a write that cannot complete is DROPPED rather than retried. Reproduced on
+> demand, four arms, one variable: `cat` reader 39,200 lines; the same python reader with no sleep
+> 39,200; fd 1 a FILE 39,200; **the reader sleeping ten seconds first — 504 lines, 53,186 bytes, no
+> sentinel, exit 0**, three runs out of three. That is the recorded signature exactly, and its
+> determinism under a deterministic stall is why the eight real sightings looked random under a
+> loaded box.
+>
+> It explains every row of the ledger that had never explained the others: all eight sightings
+> inside sweeps and none alone; points scattered over the whole range rather than at a buffer size;
+> the M8 sighting stopping MID-RECORD; a second transcript truncating in one run; and `93d8255`'s
+> drain not helping, because that drains the HOST's writer and the loss is on the GUEST's.
+>
+> **Fixed in `m6_in_devshell`** — the payload goes through a file — and proved by the same harness:
+> under the same starvation the result is byte-identical to the clean baseline. The cost is that
+> output is no longer streamed while it is produced. Everything below is the record of what the
+> flake looked like for three months, and of what each sighting ruled out; **read it as history.**
+> A ninth sighting after this is a NEW path and deserves a new entry rather than re-opening D19.
+
 
 **Settled by M19's review**: run alone on a machine verified idle first, `verify-m9` is
 **804 assertions, 7/7, exit 0** in 21 minutes, every per-check number equal to the reference
@@ -2414,6 +2456,16 @@ is the right behaviour and it is what this section asked for.
    M24 recorded declining to move it for M22's own reason. **M9 is a fourth caller and a
    retrospective one: the trap would have turned this into a red milestone instead of a small one.**
 2. **The completeness precondition is wired into TWO of the FOUR checks that read that transcript.**
+   **CLOSED 2026-08-31 BY THE RESIDUALS PASS, AFTER BEING THIS FILE'S OWN OUTSTANDING ITEM SINCE
+   M24 AND COSTING THE SAME TWELVE MISATTRIBUTING RED ASSERTIONS AT EVERY SIGHTING SINCE.** Both
+   remaining checks call `require_complete_transcript` BEFORE the assertions that misattribute —
+   `test_existing_event_emitter_path_still_available` had it only as an `assert_eq`, which NAMES the
+   truncation and does not STOP the loop, and a precondition that reports without refusing is one
+   the next reader still has to argue with. And the other half went with it: M9's four transcript
+   checks install the abnormal-exit trap, so a correct refusal now reads as a RED milestone instead
+   of the 283-assertion silent shrink. The trap moved into `lib.sh` at the same time — M22 said the
+   third caller was the trigger, there were **fourteen** copies, and the fifteenth was M9. The
+   paragraph below is the record of the defect, not a live item.
    `test_observer_fires_on_exceptional_halt` produced **11 red assertions** — "[v8] oob recorded a
    step for every one of them, expected [3], got []", "[v8] burn's last record is the instruction
    that exhausted the gas" — and `test_existing_event_emitter_path_still_available` one more. Every

@@ -919,7 +919,7 @@ were absorbed silently.
 - id: D19
 - status: closed
 - opened: 2026-08-25
-- milestone: M21 (the detection made uniform; the trigger is not established)
+- milestone: M21 (the detection made uniform); the residuals pass, 2026-08-31 (the trigger established, reproduced and fixed)
 - design-question: —
 - sides: what the guest WROTE to fd 1 versus what the transcript file CONTAINS, on the same run —
   so it is a disagreement between two things that both exist, which is what makes it drift rather
@@ -947,7 +947,9 @@ were absorbed silently.
   32,788 / 39,113, WHICH IS ESSENTIALLY THE WHOLE RANGE.** Sighting j is 32,788 of 38,915 — 84% of
   the transcript — and sighting f is 10% of it, in the same repository, on the same input, the same
   module and the same host. Eight points spread over an order of magnitude is not a buffer that
-  fills at a particular size, and after eight sightings the trigger is still unestablished. Every
+  fills at a particular size, and after eight sightings the trigger was still unestablished at the
+  time this paragraph was written — see the CLOSED block at the top of this entry, which establishes
+  it, reproduces it and fixes it. Every
   one of the eight was followed by a clean re-run alone, which is the settled procedure and has
   never yet failed to reproduce the full 807.
 

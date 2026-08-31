@@ -375,14 +375,30 @@ rm -rf "$P"; trap - EXIT
 # ---------------------------------------------------------------------------
 # 5. WHAT IS STILL NOT KNOWN, RECORDED AS AN ASSERTION RATHER THAN AS A COMMENT
 #
-# The trigger is unestablished. That is written down in DRIFT.md, and this asserts the entry says
-# so — because the failure mode here is a future agent reading a uniform detection as a fix.
+# THE TRIGGER IS ESTABLISHED AS OF 2026-08-31, AND THIS BLOCK CHANGED SIDES.
+#
+# It used to assert that DRIFT.md "records the trigger as UNESTABLISHED rather than fixed",
+# because "the failure mode here is a future agent reading a uniform detection as a fix". That was
+# right for three months and it is now FALSE OF THE WORLD — a check pinning a sentence that a later
+# measurement falsified, which is the shape this campaign's residuals pass exists to find, arriving
+# in the check that guards the entry.
+#
+# What must be pinned now is the opposite and it is stricter: that the entry records the trigger, a
+# REPRODUCTION and a CONTROL — not merely the word "fixed". A fix asserted by a document that
+# states no experiment is exactly the reading the old assertion was protecting against, one step
+# along.
 # ---------------------------------------------------------------------------
 DRIFT="$(cat "$REPO_ROOT/DRIFT.md")"
 assert_true "DRIFT.md carries the truncation entry" str_has_sub "$DRIFT" "D19"
-assert_true "…and records the trigger as UNESTABLISHED rather than fixed" \
-  str_has_sub "$DRIFT" "the trigger is not established"
-assert_true "…and names both sightings, so a third is recognised as a third" \
+assert_true "…and records the trigger as ESTABLISHED, naming the pipe" \
+  str_has_sub "$DRIFT" "THE TRIGGER IS THE PIPE"
+assert_false "…and no longer says the trigger is unestablished, which was true until 2026-08-31" \
+  str_has_sub "$DRIFT" "the trigger is still unestablished"
+assert_true "…and carries the REPRODUCTION's decisive figure, not just the claim" \
+  str_has_sub "$DRIFT" "53,186"
+assert_true "…and the CONTROL that makes it a measurement: the same starve with no pipe" \
+  str_has_sub "$DRIFT" "byte-identical to the clean baseline"
+assert_true "…and names both original sightings, so a ninth is recognised as a ninth" \
   str_has_sub "$DRIFT" "16,719"
 assert_true "…including the M8 one" str_has_sub "$DRIFT" "259 lines of 1,318"
 

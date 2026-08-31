@@ -380,10 +380,16 @@ require_complete_transcript() {
   [ -z "$ref" ] || [ ! -f "$ref" ] || refnote="
      the reference $ref has $(wc -l <"$ref" | tr -d '[:space:]') line(s)."
   die "$role transcript $file is INCOMPLETE: $verdict (expected sentinel '$sentinel').$refnote
-     This is the V8/WASI stdout truncation — two sightings, M9 and M8, trigger unestablished. The
-     guest's stderr is normally COMPLETE, which is the signature; a short stdout with a complete
-     stderr is a fact about the RUN and not about the module. The comparison is refused rather
-     than reported as a divergence. Re-run this check."
+     This is the V8/WASI stdout truncation, DRIFT.md D19 — and as of 2026-08-31 its trigger is
+     KNOWN: the guest's fd 1 was a PIPE, libuv makes such an fd non-blocking, and the WASI guest's
+     fd_write is dropped rather than retried when the reader stalls. Reproduced deterministically
+     by starving the reader, and fixed in m6_in_devshell, which now moves the payload through a
+     file. The guest's stderr is normally COMPLETE, which is the signature; a short stdout with a
+     complete stderr is a fact about the RUN and not about the module. The comparison is refused
+     rather than reported as a divergence.
+     IF YOU ARE SEEING THIS AFTER THE FIX it is a NINTH sighting through a path the reproduction
+     did not cover — record the sink, what else the machine was doing, and open a new entry rather
+     than re-opening D19."
 }
 
 assert_file() { # <description> <path>
