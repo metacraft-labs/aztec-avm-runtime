@@ -1529,6 +1529,10 @@ verify-ts-config:
 verify-halves-compose:
     @verification/e2e_ts_wasm_result_decodes_as_upstream_types.sh
 
+# An Aztec.nr debug_log surfaces as a developer-facing event, compared against the contract's source.
+verify-debug-logs:
+    @verification/test_debug_log_events_surface.sh
+
 # Type-check the orchestration package against the nix-pinned tsc.
 typecheck-orchestration:
     @cd orchestration && tsc -p tsconfig.json && echo "orchestration: type-checks"
@@ -2065,7 +2069,8 @@ verify-m25:
       verify_oq5_source_mapping_verdict_recorded \
       test_fr_rendering_matches_noir_tracer \
       test_trace_metadata_declares_mapping_rung \
-      verify_transaction_builder_closure_measured
+      verify_transaction_builder_closure_measured \
+      test_debug_log_events_surface
     do
       echo "=== $check"
       verification/"$check".sh || rc=1
