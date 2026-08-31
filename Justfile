@@ -1541,6 +1541,10 @@ verify-ts-wasm-token:
 verify-ts-wasm-nested:
     @verification/e2e_ts_wasm_nested_call_fork_merge.sh
 
+# The asymmetric revert model over a REAL contract's calls in all three phases.
+verify-ts-wasm-phases:
+    @verification/e2e_ts_wasm_phase_revert_semantics.sh
+
 # Type-check the orchestration package against the nix-pinned tsc.
 typecheck-orchestration:
     @cd orchestration && tsc -p tsconfig.json && echo "orchestration: type-checks"
@@ -1557,7 +1561,8 @@ verify-m18:
       verify_ts_simulator_configuration_named_not_inverted \
       e2e_ts_wasm_result_decodes_as_upstream_types \
       e2e_ts_wasm_token_transfer \
-      e2e_ts_wasm_nested_call_fork_merge
+      e2e_ts_wasm_nested_call_fork_merge \
+      e2e_ts_wasm_phase_revert_semantics
     do
       echo "=== $check"
       verification/"$check".sh || rc=1
