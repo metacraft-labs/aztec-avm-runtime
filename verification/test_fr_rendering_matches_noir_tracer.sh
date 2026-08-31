@@ -105,8 +105,68 @@ assert_false "a needle in neither Noir file does not match" \
 # …so the Noir half could not render a full-width field before M26, and the document says so.
 assert_true "the document records that 'match it exactly' was not available, with its reason" \
   str_has_sub "$DOC_TEXT" 'could not render a full-width 254-bit field at all'
-assert_true "…and records the change M26 made, by file and line" \
-  str_has_sub "$DOC_TEXT" 'noir/tooling/tracer/src/tracer_glue.rs:160-189'
+# ===========================================================================
+# THE LINE CITATIONS ARE RE-DERIVED, NOT ASSERTED TO BE PRESENT.
+#
+# This was `str_has_sub "$DOC_TEXT" '…/tracer_glue.rs:160-189'` — an assertion that a STRING is in
+# the document, which stays green whether or not the range is right, and it was not right. Measured
+# on 2026-08-31: the `Field` arm is **148-161** at the revision §4.1's table measures, **160-197**
+# at the commit immediately after it, and **162-211** today, so `160-189` was correct at no
+# revision that has ever existed. §4.3's `"()"` at 252 / `"fn"` at 285 were the M25 numbers in a
+# present-tense sentence, fifty lines out of date.
+#
+# It is this campaign's own "a citation is the opposite of a dependency" one level up: the check
+# asked whether the document SAYS something, when the question is whether what it says is TRUE.
+# Every figure is computed from the checkout here and compared, so an edit to `tracer_glue.rs` that
+# moves the arm reddens this check instead of quietly rotting the document.
+#
+# THE HISTORICAL REVISION COMES OUT OF THE DOCUMENT, not out of this check. §4.1's table header
+# names it, and that is the pin — a table of measurements with no revision beside it is not
+# re-derivable by anybody, which is exactly how the wrong range survived three milestones.
+# ===========================================================================
+M25_REV="$(printf '%s\n' "$DOC_TEXT" \
+  | sed -n 's/^| what | where, at M25 (`noir` `\([^`]*\)`.*/\1/p' | head -1)"
+assert_true "§4.1's table names the revision its figures were measured at" test -n "$M25_REV"
+assert_true "…and that revision resolves in the Noir checkout" \
+  git -C "$NOIR" rev-parse --verify --quiet "$M25_REV^{commit}"
+
+# `<start>-<end>` of the `PrintableType::Field` match arm in a given revision of the glue.
+fr_field_arm_range() { # <text> -> "start-end", or the empty string
+  printf '%s\n' "$1" | awk '
+    /^        PrintableType::Field => \{/ && !start { start = NR }
+    start && !done && /^        PrintableType::UnsignedInteger/ { print start "-" (NR - 1); done = 1 }
+  '
+}
+fr_line_of() { # <text> <fixed needle> -> the 1-indexed line number of the first match
+  printf '%s\n' "$1" | grep -nF -- "$2" | head -1 | cut -d: -f1
+}
+
+GLUE_M25="$(git -C "$NOIR" show "$M25_REV:tooling/tracer/src/tracer_glue.rs" 2>/dev/null || true)"
+assert_ge "the M25 revision's glue reads back out of the object store" 300 \
+  "$(printf '%s\n' "$GLUE_M25" | grep -c . || true)"
+
+ARM_M25="$(fr_field_arm_range "$GLUE_M25")"
+ARM_NOW="$(fr_field_arm_range "$GLUE")"
+assert_true "the Field arm's range was located at the M25 revision" \
+  str_has_re "$ARM_M25" '^[0-9]+-[0-9]+$'
+assert_true "…and at the checkout's current tip" str_has_re "$ARM_NOW" '^[0-9]+-[0-9]+$'
+# The two must DIFFER, or the comparison below is one figure asserted twice — the rendering change
+# and this pass's clamp both moved the arm, so they do.
+assert_true "…and the two differ, so the pair below is two measurements and not one" \
+  test "$ARM_M25" != "$ARM_NOW"
+
+assert_true "…and records the change M26 made, by file and line, at the revision it names" \
+  str_has_sub "$DOC_TEXT" "noir/tooling/tracer/src/tracer_glue.rs:$ARM_M25"
+assert_true "…and §4.4 carries the arm's CURRENT range beside it" \
+  str_has_sub "$DOC_TEXT" "**$ARM_NOW**"
+# §4.3's two escape-hatch citations, present tense, so they are today's numbers.
+UNIT_LINE="$(fr_line_of "$GLUE" 'ValueRecord::Raw { r: "()".to_string(), type_id }')"
+FN_LINE="$(fr_line_of "$GLUE" 'ValueRecord::Raw { r: "fn".to_string(), type_id }')"
+assert_true "the `()` escape hatch was located in the glue" str_has_re "$UNIT_LINE" '^[0-9]+$'
+assert_true "…and the `fn` one" str_has_re "$FN_LINE" '^[0-9]+$'
+assert_true "§4.3 cites the `()` escape hatch at the line it is actually on" \
+  str_has_sub "$DOC_TEXT" "\`tracer_glue.rs:$UNIT_LINE\`"
+assert_true "…and the `fn` one" str_has_sub "$DOC_TEXT" "\`:$FN_LINE\`"
 assert_true "…and records that M26 landed it, rather than leaving §4.4 as an instruction" \
   str_has_sub "$DOC_TEXT" 'M26 LANDED OPTION 1'
 assert_true "…and records the cost, which is that a small field now reads as 0x…04 instead of 4" \

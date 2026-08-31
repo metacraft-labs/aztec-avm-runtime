@@ -192,9 +192,18 @@ than of what is.** The table below is the state M25 measured; the paragraph afte
 M26 left. `test_fr_rendering_matches_noir_tracer` asserts the NEW rendering and asserts the old one
 is GONE, in both Noir checkouts, so neither this section nor that check can go stale quietly.
 
-| what | where, at M25 |
+**THE TABLE NAMES ITS REVISION NOW, AND ONE OF ITS FOUR ROWS WAS WRONG IN EVERY ERA.** A line
+citation with no revision beside it is not re-derivable by anybody, which is how the first row
+survived: it said `tracer_glue.rs:160-189`, and the `Field` arm is **148-161** at the revision this
+table measures, **160-197** at the one immediately after it, and **162-211** today — so `160-189`
+was M26's start with an end that matches nothing, in a table about the state before M26. The other
+three rows are correct at the revision now named. Measured on 2026-08-31 against the `noir`
+checkout; `test_fr_rendering_matches_noir_tracer` §1 re-derives every figure in this table and in
+§4.3 on every run, reading the revision out of this document rather than out of the check.
+
+| what | where, at M25 (`noir` `eb8b28c27^`, 1.0.0-beta.18) |
 |---|---|
-| `Field` became an `Int` | `noir/tooling/tracer/src/tracer_glue.rs:160-189` — `ValueRecord::Int { i: field_value.to_i128() as i64, type_id }` |
+| `Field` became an `Int` | `noir/tooling/tracer/src/tracer_glue.rs:148-161` — `ValueRecord::Int { i: field_value.to_i128() as i64, type_id }` |
 | under `(TypeKind::Int, "Field")` | `tracer_glue.rs:371` |
 | and `to_i128` **panics** above 127 bits | `noir/acvm-repo/acir_field/src/field_element.rs:253-256`, gated on `fits_in_i128()` = `num_bits <= 127` |
 | then `as i64` truncates | `tracer_glue.rs:152` |
@@ -255,7 +264,10 @@ ValueRecord::String { text: "0x" + 64 lowercase big-endian hex, type_id }
 - **Readable by both pinned readers**, verified over a container the arms run produces, not
   reasoned about.
 - **`String` and not `Raw`**, because `Raw` is Noir's escape hatch for values it *cannot* represent
-  (`"()"` at `tracer_glue.rs:252`, `"fn"` at `:285`), and an address is not one of those.
+  (`"()"` at `tracer_glue.rs:302`, `"fn"` at `:335`, at the `noir` checkout's current tip), and an
+  address is not one of those. (These read 252 and 285 until 2026-08-31 — the `eb8b28c27^` numbers,
+  in a present-tense sentence, fifty lines out of date. Both are re-derived by
+  `test_fr_rendering_matches_noir_tracer` §1 now.)
 - **The same type record as the Noir half** — `(TypeKind::Int, "Field")`, reused rather than a
   second type, because the cross-half requirement is about the type table as much as the value.
 
@@ -264,7 +276,9 @@ What M24 recorded for the same address, kept so this is a delta rather than a cl
 
 ### 4.4 The cross-half work this leaves, named rather than implied
 
-**The Noir half must change to match**, at `noir/tooling/tracer/src/tracer_glue.rs:160-189`. That is
+**The Noir half must change to match**, at `noir/tooling/tracer/src/tracer_glue.rs:148-161` — the
+arm as it stood at `eb8b28c27^`, which is where this instruction was written; it is at **162-211**
+today, and both figures are re-derived by `test_fr_rendering_matches_noir_tracer` §1. That is
 a Metacraft repository and not Aztec, so it is **not** the sixth upstream contribution, and it is
 M26's to land — M26 is where the two halves become one container and where a disagreement between
 them is a defect rather than a divergence.
