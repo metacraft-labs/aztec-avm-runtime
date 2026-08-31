@@ -1296,6 +1296,63 @@ m28 353  m29 127
                                                        CAMPAIGN TOTAL 10,178
 ```
 
+**THE RESIDUALS PASS TOOK IT TO 12,176, `delta +0`, WITH ALL FIVE MOVES DECLARED BEFORE THE SWEEP
+RAN AND EVERY OTHER MILESTONE AT ITS REFERENCE VALUE TO THE ASSERTION.** Measured M0–M37 on
+2026-08-31, **after the last edit**, `setsid`-detached in this repository's own dev shell (node
+v24.19.0), one milestone at a time with nothing else running, `TMPDIR` and the log under `~/.cache`,
+**76 markers for 38 milestones, NO HOLE**, **35 of 38 exit 0**:
+
+```
+m0 156   m1 181   m2 293   m3 199   m4 218   m5 236   m6 363   m7 287   m8 516   m9 807
+m10 450  m11 287  m12 691  m13 458  m14 460  m15 537  m16 225  m17 297  m18 283
+m19 180  m20 237  m21 334  m22 265  m23 512  m24 350  m25 284  m26 340  m27 345
+m28 357  m29 127  m30 218  m31 421  m32 237  m33 248  m34 217  m35 239  m36 150
+m37 171
+                                                       CAMPAIGN TOTAL 12,176
+```
+
+`12,141 + 2 + 9 + 3 + 11 + 10 = 12,176` exactly, and every unit is one of five declared moves:
+**m16 223 -> 225** (`verify_fallback_cost_priced` 145 -> 147, the derived absent fixture id);
+**m21 325 -> 334** (`verify_transcript_truncation_detection_uniform` 44 -> 53 — the two M9 checks
+named as well as counted, the trailing-comment probe with its positive control, and D19's entry
+re-pinned to an ESTABLISHED trigger with its reproduction and control);
+**m23 509 -> 512** (`verify_sequencer_reuse_enumeration_recorded` 60 -> 63, the derived absent
+inventory id and one extractor instead of two);
+**m25 273 -> 284** (`test_fr_rendering_matches_noir_tracer` 57 -> 68, the line citations re-derived
+at two revisions instead of asserted to be present);
+**m36 140 -> 150** (`e2e_note_discovery_across_blocks` 77 -> 87, the secret-set deduplication, which
+was implemented and covered by nothing). **m2 is unchanged at 293** — the `fx = 26 + i` repair moves
+no count, which is the only way to tell a narrowing from a re-pin — and **m9 is unchanged at 807**,
+because a refusal and a trap add no assertion.
+
+**M9 DID NOT FLAKE, AND THIS IS THE FIRST SWEEP SINCE D19 WAS FIXED.** 807, rc 0, 1,324 s,
+immediately after m8's build — D19's standing condition, which did not fire — split
+**140 / 143 / 113 / 73 / 126 / 83 / 129**, the reference exactly. `grep -c 'INCOMPLETE:\|truncated-after'`
+over the whole log is **0**. M15 did not flake either (537, 384 s). One clean sweep is not proof
+that a race is gone; it is the first one taken with the cause known and removed.
+
+**THE THREE NON-ZERO EXITS ARE ALL PARALLEL TRACKS' AND ALL THREE ATTRIBUTIONS WERE RE-DERIVED
+RATHER THAN INHERITED**, by `git log --follow` on each subject file: m20's
+`verify_named_checks_exist` 9/1 on `tools/scan_reverted_transactions.mjs` is **L3's** (`a601ce7`);
+m21's `verify_no_pipeline_predicates` 69/1 on a sixth `| grep -q` at
+`verify_browser_replay_dd9_clean.sh:336` is **L4's** (`75ffd7e`); m28's
+`verify_npm_pack_no_optional_native` 54/1 on `replay/package.json` as a fifth tree is **L0's**
+(`541bf5f`). **Every count is unchanged**, which is what says a pinned list moved and not a
+structure, and none of the three files is in this pass's diff. Recorded and deliberately not fixed.
+
+**The fifteen L0–L4 check names appear ZERO times as a column-0 summary line**, grepped one at a
+time against the summariser's own anchored pattern. None of their assertions is in the 12,176.
+
+**A sweep is a writer**: `carry/*.json` checksummed before and after — **all four byte-identical,
+nothing to restore**, which is M37's committed repair holding across a second full sweep.
+
+**AND THE SWEEP WAS ABORTED ONCE, AT m1, WHICH IS THE RULE WORKING.** Closing D19 falsified four
+statements — one of them pinned by a CHECK (`verify_transcript_truncation_detection_uniform`
+asserted that `DRIFT.md` "records the trigger as UNESTABLISHED rather than fixed") and one of them
+inside the refusal MESSAGE a developer reads. Both were found by grepping for what the fix had made
+false, not by remembering. The run was killed two minutes in, all four corrected, and the sweep
+restarted after the last edit rather than finished and explained.
+
 **M37'S REVIEW TOOK IT TO 12,141 — AND SIX OF THE NINE NON-ZERO EXITS WERE M37'S OWN, WHICH IS THE
 OPPOSITE OF WHAT M37'S OWN SWEEP REPORTED.** Re-measured M0–M37 on 2026-08-31 by M37's review,
 **after the rebase onto `origin/dev` `33e8ad5` and after its last edit**, `setsid`-detached in this

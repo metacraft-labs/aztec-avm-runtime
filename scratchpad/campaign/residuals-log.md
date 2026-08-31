@@ -280,3 +280,61 @@ re-pin) and **m9 unchanged at 807** (the refusals and the trap add no assertion)
 attribution was derived from the Justfile rather than remembered.
 
 **PREDICTED TOTAL 12,173** = 12,141 + 32.
+
+## Step 8 — THE SWEEP: 12,176, `delta +0`, NO HOLE, AND M9 DID NOT FLAKE
+
+Measured M0–M37 on 2026-08-31 after the last edit, `setsid`-detached in this repository's own dev
+shell (node v24.19.0), one milestone at a time with nothing else running, `TMPDIR` and the log under
+`~/.cache`. **76 markers for 38 milestones, no hole. 35 of 38 exit 0.**
+
+```
+m0 156   m1 181   m2 293   m3 199   m4 218   m5 236   m6 363   m7 287   m8 516   m9 807
+m10 450  m11 287  m12 691  m13 458  m14 460  m15 537  m16 225  m17 297  m18 283
+m19 180  m20 237  m21 334  m22 265  m23 512  m24 350  m25 284  m26 340  m27 345
+m28 357  m29 127  m30 218  m31 421  m32 237  m33 248  m34 217  m35 239  m36 150
+m37 171
+                                                       CAMPAIGN TOTAL 12,176
+```
+
+**Every unit accounted in both directions.** `12,141 + 2 + 9 + 3 + 11 + 10 = 12,176`, and all five
+moves were named in `residuals-reference.json` *before* the run. The summariser reports
+`delta +0` against it, and it validated the reference's own `_total` first.
+
+**The +35 in the other direction — what each unit bought:**
+
+| move | assertions | what they assert that nothing did before |
+|---|---|---|
+| m16 +2 | derived-absent fixture id | that the id the control plants really is absent, and that it was derived and not typed |
+| m21 +9 | +2 the two M9 checks named, not just counted; +2 the trailing-comment probe and its positive control; +5 D19's entry re-pinned to an ESTABLISHED trigger with its reproduction figure and its control | |
+| m23 +3 | derived-absent inventory id, its freshness, and the same extractor answering for a real id | |
+| m25 +11 | the `Field` arm's range re-derived at the historical revision AND at the tip, the two asserted different, and the two escape-hatch lines | |
+| m36 +10 | the secret-set deduplication: two arms through the real handler, discriminated by probes (work done), with both arms' inputs asserted | |
+
+**m2 unchanged at 293** — the `fx = 26 + i` repair moves no count, which is the only way to tell a
+narrowing from a re-pin. **m9 unchanged at 807** — a refusal and a trap add no assertion.
+
+**M9 DID NOT FLAKE, ON THE FIRST SWEEP SINCE D19 WAS FIXED.** 807, rc 0, 1,324 s, immediately after
+m8's build — D19's standing condition, present and not firing — split
+140/143/113/73/126/83/129, the reference exactly. `INCOMPLETE:` and `truncated-after` appear **zero**
+times in the whole log. M15 did not flake (537, 384 s). *One clean sweep is not proof a race is gone.
+It is the first one taken with the cause known and removed.*
+
+**THE THREE REDS ARE ALL PARALLEL TRACKS', RE-DERIVED NOT INHERITED** (`git log --follow` per file):
+m20 `verify_named_checks_exist` 9/1 → `tools/scan_reverted_transactions.mjs` → **L3's** `a601ce7`;
+m21 `verify_no_pipeline_predicates` 69/1 → `verify_browser_replay_dd9_clean.sh:336` → **L4's**
+`75ffd7e`; m28 `verify_npm_pack_no_optional_native` 54/1 → `replay/package.json` → **L0's**
+`541bf5f`. Every count unchanged; none of the three files is in this pass's diff.
+
+**The fifteen L0–L4 check names appear ZERO times as a column-0 summary line.**
+
+**A sweep is a writer**: `carry/*.json` byte-identical before and after — nothing to restore.
+
+**AND THE SWEEP WAS ABORTED ONCE AT m1, WHICH IS THE RULE WORKING.** Closing D19 falsified four
+statements, one pinned by a CHECK and one inside the refusal MESSAGE a developer reads. Found by
+grepping for what the fix had made false. Killed two minutes in, all four corrected, restarted after
+the last edit.
+
+**The short tail times (m22 13 s, m36 7 s) are cache warmth, not skipping** — every one of those
+milestones reports its full assertion count, and a check dying at a precondition reports a smaller
+one or none. The artefacts were built by this pass's own earlier check runs and the content stamps
+matched.
