@@ -1545,6 +1545,10 @@ verify-ts-wasm-nested:
 verify-ts-wasm-phases:
     @verification/e2e_ts_wasm_phase_revert_semantics.sh
 
+# Malformed custom bytecode reverts through the combined stack rather than crashing the host.
+verify-custom-bytecode:
+    @verification/test_custom_bytecode_unhappy_paths.sh
+
 # Type-check the orchestration package against the nix-pinned tsc.
 typecheck-orchestration:
     @cd orchestration && tsc -p tsconfig.json && echo "orchestration: type-checks"
@@ -1562,7 +1566,8 @@ verify-m18:
       e2e_ts_wasm_result_decodes_as_upstream_types \
       e2e_ts_wasm_token_transfer \
       e2e_ts_wasm_nested_call_fork_merge \
-      e2e_ts_wasm_phase_revert_semantics
+      e2e_ts_wasm_phase_revert_semantics \
+      test_custom_bytecode_unhappy_paths
     do
       echo "=== $check"
       verification/"$check".sh || rc=1

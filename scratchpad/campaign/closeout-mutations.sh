@@ -56,6 +56,7 @@ FILES=(
   "verification/lib_token_blocks.sh"
   "verification/_avmtest_debug_logs.py"
   "verification/_token_blocks_shape.py"
+  "verification/_avm_enum.py"
 )
 
 if [ -f "$MARKER" ] && [ "${1:-}" != "--restore-previous" ]; then
@@ -170,7 +171,7 @@ if [ "${1:-}" = "--demo-still-there" ]; then
 fi
 
 ARMS=("$@")
-[ ${#ARMS[@]} -eq 0 ] && ARMS=(M1 M2 M3 M4 M5 M6 M7 M8 M9 M10)
+[ ${#ARMS[@]} -eq 0 ] && ARMS=(M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12)
 
 : > "$LOG"
 echo "closeout mutation matrix, $(date -Is), module $MODULE" | tee -a "$LOG"
@@ -343,6 +344,37 @@ process.stdout.write('
       still_there tools/run_token_block_arms.mjs 'ZZZ_CLOSEOUT_TRUNCATE' M10
       rm -f "$TB_WORK/token-blocks.json"
       run_check e2e_block_token_flows TB_ARMS_REFRESH=1
+      ;;
+
+    # ---------------------------------------------------------------------------------------
+    M11) # THE "INVALID" OPCODE BECOMES A VALID ONE. The byte the custom-bytecode arm calls invalid
+        # is 0xFF; make it 0, which is `ADD_8`. The one-byte program is then a TRUNCATED ADD rather
+        # than an unknown opcode, and the arm would be measuring a different unhappy path while
+        # still reporting a revert — the state this check's sentinel assertion exists for.
+        # Predicted: the "above the enum's sentinel" assertion, the opcode-named diagnostic, and
+        # the "four DIFFERENT diagnostics" count, which falls to three.
+      arm_header "M11 — the byte called an invalid opcode is a VALID one"
+      sub tools/run_token_block_arms.mjs \
+        '  invalidOpcode: 0xff,' \
+        '  invalidOpcode: 0x00,'
+      still_there tools/run_token_block_arms.mjs 'invalidOpcode: 0x00,' M11
+      run_check test_custom_bytecode_unhappy_paths
+      ;;
+
+    # ---------------------------------------------------------------------------------------
+    M12) # THE WELL-FORMED CONTROL IS MALFORMED TOO. Every custom-bytecode program then reverts,
+        # which is exactly what an AVM that refused ALL custom bytecode would produce — and every
+        # assertion about the four malformed ones stays green. This is the arm that says the
+        # control is load-bearing.
+        # Predicted: the control's revert code, its module code, its instruction floor, its return
+        # value and its byte length. Nothing else.
+      arm_header "M12 — the well-formed control is malformed, so 'everything reverts' has no meaning"
+      sub orchestration/src/token_block_driver.ts \
+        "{ label: 'wellFormed', bytes: Buffer.from(dispatch.bytecode), args: [selector.toField(), 3n, 5n] }," \
+        "{ label: 'wellFormed', bytes: Uint8Array.from([opcodes.invalidOpcode]), args: [] },"
+      still_there orchestration/src/token_block_driver.ts \
+        "{ label: 'wellFormed', bytes: Uint8Array.from([opcodes.invalidOpcode]), args: [] }," M12
+      run_check test_custom_bytecode_unhappy_paths
       ;;
 
     *) echo "unknown arm: $arm" >&2 ;;

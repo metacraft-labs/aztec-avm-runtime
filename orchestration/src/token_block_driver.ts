@@ -49,6 +49,8 @@ import { Fr } from '@aztec/foundation/curves/bn254';
 import { GasFees } from '@aztec/stdlib/gas';
 import { AztecAddress } from '@aztec/stdlib/aztec-address';
 import { loadContractArtifact } from '@aztec/stdlib/abi';
+import { PublicKeys } from '@aztec/stdlib/keys';
+import { makeContractClassPublic, makeContractInstanceFromClassId } from '@aztec/stdlib/testing';
 import { siloNullifier } from '@aztec/stdlib/hash';
 import { GlobalVariables, type Tx } from '@aztec/stdlib/tx';
 
@@ -980,9 +982,115 @@ async function runPhaseArm(
   }
 }
 
+/**
+ * THE CUSTOM-BYTECODE ARM: malformed programs, through the combined stack, as REVERTS.
+ *
+ * ===========================================================================================
+ * WHY THIS NEEDS NO ASSEMBLER, WHICH IS THE THING THE ENTRY SAID BLOCKED IT.
+ * ===========================================================================================
+ *
+ * `test_custom_bytecode_unhappy_paths`'s recorded blocker is that upstream's twelve malformed
+ * programs are built by the DELETED TypeScript AVM's `encodeToBytecode` and opcode classes, and
+ * this repository has no assembler. Re-measured 2026-08-31 and still true: no file under
+ * `orchestration/`, `browser/` or `tools/` mentions `encodeToBytecode` or the opcode modules, and
+ * `fixtures/avm-programs/programs.json`'s `bytes` field is an integer LENGTH rather than hex.
+ *
+ * But the four unhappy paths the entry names do not need an assembler, because each of them is
+ * defined by what the bytes are NOT. An invalid opcode is a byte no opcode uses; a truncated
+ * instruction is a valid opcode with its operands cut off; an invalid tag is a full-length
+ * instruction whose TAG byte is outside the tag enum; an out-of-range program counter is a program
+ * with nothing at the counter. Every one of those is three bytes or fewer, and every constant in
+ * them is DERIVED from the AVM's own headers at the pinned anchor by the tool that calls this
+ * function — `WireOpCode` for the opcode indices and `ValueTag` for the tag range — and the check
+ * re-derives both independently and compares. Nothing here is a magic number.
+ *
+ * THE WELL-FORMED CONTROL IS NOT ASSEMBLED EITHER, and it is the assertion the other four rest on.
+ * "Malformed bytecode reverts" is equally satisfied by an AVM that refuses ALL custom bytecode, so
+ * the fifth program is `AvmTest`'s own real `public_dispatch` bytecode registered as a
+ * custom-bytecode contract and called with the function selector as calldata field 0 — which is
+ * exactly what the vendored builder's custom path produces, since with no `fnName` it maps the
+ * arguments to fields and prepends nothing. If that one executes, the path works and the four
+ * reverts are about the bytes.
+ *
+ * AND "NOT HOST-SIDE CRASHES" IS ASSERTED BY THE ARM'S SHAPE. Every program runs in the SAME
+ * process, in order, and the control runs LAST — so a host that died on a malformed program could
+ * not report the control at all.
+ */
+async function runCustomBytecodeArm(
+  reactor: ReactorLike,
+  rawAvmTestArtifact: unknown,
+  opcodes: { setOpcode: number; invalidOpcode: number; invalidTag: number },
+): Promise<Record<string, unknown>> {
+  const artifact = loadContractArtifact(rawAvmTestArtifact as never);
+  const world = openWorld(reactor);
+  try {
+    const sender = await AztecAddress.fromNumber(1313);
+    const dispatch = artifact.functions.find(f => f.name === 'public_dispatch');
+    if (dispatch === undefined) {
+      throw new Error(`${artifact.name} has no public_dispatch to use as the well-formed control`);
+    }
+    const selector = await getFunctionSelector('add_args_return', artifact);
+
+    const programs: { label: string; bytes: Uint8Array; args: unknown[] }[] = [
+      // A byte no opcode uses: `LAST_OPCODE_SENTINEL` and everything above it.
+      { label: 'invalidOpcode', bytes: Uint8Array.from([opcodes.invalidOpcode]), args: [] },
+      // A VALID opcode with every one of its four operands missing.
+      { label: 'truncatedInstruction', bytes: Uint8Array.from([opcodes.setOpcode]), args: [] },
+      // The same instruction at full length, with the TAG byte outside the tag enum.
+      {
+        label: 'invalidTag',
+        bytes: Uint8Array.from([opcodes.setOpcode, 0x00, 0x00, opcodes.invalidTag, 0x00]),
+        args: [],
+      },
+      // Nothing at the program counter at all.
+      { label: 'pcOutOfRange', bytes: Uint8Array.from([]), args: [] },
+      // THE CONTROL, and it runs last so a host that died on a malformed program cannot report it.
+      { label: 'wellFormed', bytes: Buffer.from(dispatch.bytecode), args: [selector.toField(), 3n, 5n] },
+    ];
+
+    const dataSource = new SimpleContractDataSource();
+    const tripwire = new Proxy({}, { get(_t, p) { throw new Error(`builder read merkleTree.${String(p)}`); } });
+    const tester = new PublicTxSimulationTester(tripwire as never, dataSource);
+
+    const blocks: BlockRecord[] = [];
+    const registered: Record<string, { classes: number; instances: number; bytes: number }> = {};
+    let seed = 101;
+    for (const program of programs) {
+      seed += 1;
+      const contractClass = await makeContractClassPublic(seed, Buffer.from(program.bytes));
+      const contractInstance = await makeContractInstanceFromClassId(contractClass.id, seed, {
+        deployer: sender,
+        initializationHash: new Fr(0),
+        immutablesHash: new Fr(seed + 1),
+        publicKeys: PublicKeys.default(),
+      });
+      await dataSource.addNewContract(artifact, contractClass, contractInstance);
+      const r = await registerDirectly(world, contractClass, contractInstance);
+      registered[program.label] = { classes: r.classes, instances: r.instances, bytes: program.bytes.length };
+      blocks.push(
+        await runOneBlock(reactor, world, tester, program.label, [
+          {
+            label: program.label,
+            sender,
+            // NO `fnName`: the vendored builder's own custom-bytecode path. Its source says in as
+            // many words that with no function name it assumes custom bytecode with no
+            // `public_dispatch` and does not prepend a selector.
+            appCalls: [{ address: contractInstance.address, args: program.args as never[] }],
+          },
+        ]),
+      );
+    }
+
+    return { registered, opcodes, blocks };
+  } finally {
+    world.release();
+  }
+}
+
 export async function runTokenBlockArms(
   reactor: ReactorLike,
   artifacts: { token: unknown; avmTest: unknown; child: unknown },
+  opcodes: { setOpcode: number; invalidOpcode: number; invalidTag: number },
 ): Promise<Record<string, unknown>> {
   return {
     tokenFlows: await runTokenArm(reactor, artifacts.token, { expectMint: true }),
@@ -1004,5 +1112,6 @@ export async function runTokenBlockArms(
     phasesAppReverts: await runPhaseArm(reactor, artifacts.avmTest, 'appReverts'),
     phasesSetupReverts: await runPhaseArm(reactor, artifacts.avmTest, 'setupReverts'),
     phasesTeardownReverts: await runPhaseArm(reactor, artifacts.avmTest, 'teardownReverts'),
+    customBytecode: await runCustomBytecodeArm(reactor, artifacts.avmTest, opcodes),
   };
 }

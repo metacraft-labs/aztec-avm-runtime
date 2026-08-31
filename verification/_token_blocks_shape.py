@@ -29,6 +29,7 @@ EXPECTED_ARMS = [
     "phasesAppReverts",
     "phasesSetupReverts",
     "phasesTeardownReverts",
+    "customBytecode",
 ]
 
 
