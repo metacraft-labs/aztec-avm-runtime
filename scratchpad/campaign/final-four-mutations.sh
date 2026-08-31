@@ -34,11 +34,21 @@ MANIFEST="$WORK/manifest.sha256"
 LOG="$WORK/mutations.log"
 
 export TB_WORK="$WORK/tb-arms"
+# THE M31 ARM REPORT IS THE HARNESS'S OWN, so a mutated transpile never overwrites the report the
+# real checks read. The BUILD directory is deliberately left shared: it holds the rust builds and
+# the noir checkout, which cost tens of minutes and which no arm here mutates.
+export M31_WORK="$WORK/m31-arms"
+# M21's work directory too, so a mutated PXE reference never overwrites the one the real check reads.
+export M21_WORK="$WORK/m21-form-b"
 
 FILES=(
   "orchestration/src/token_block_driver.ts"
+  "orchestration/src/nested_effect_driver.ts"
   "verification/e2e_ts_wasm_amm.sh"
   "verification/_token_blocks_shape.py"
+  "fixtures/transpiler-contracts/nested_effects/src/main.nr"
+  "orchestration/src/form_b.ts"
+  "pxe-ref/src/build_reference_tx.mjs"
 )
 
 if [ -f "$MARKER" ] && [ "${1:-}" != "--restore-previous" ]; then
@@ -55,7 +65,7 @@ if [ "${1:-}" = "--restore-previous" ]; then
   echo "restored from $BACKUP"
 fi
 
-mkdir -p "$WORK" "$TB_WORK"
+mkdir -p "$WORK" "$TB_WORK" "$M31_WORK" "$M21_WORK"
 
 for f in "${FILES[@]}"; do
   [ -f "$f" ] || { echo "missing subject: $f" >&2; exit 2; }
@@ -124,7 +134,7 @@ MODULE="${AVM_WASM_PATH:-$HOME/.cache/aztec-m15-shapes/m13/barretenberg/cpp/buil
 
 run_check() { # <check> [env=val...]
   echo "--- $1" | tee -a "$LOG"
-  ( cd "$REPO" && env AVM_WASM_PATH="$MODULE" TB_WORK="$TB_WORK" "${@:2}" \
+  ( cd "$REPO" && env AVM_WASM_PATH="$MODULE" TB_WORK="$TB_WORK" M31_WORK="$M31_WORK" M21_WORK="$M21_WORK" "${@:2}" \
       direnv exec "$REPO" bash -c \
       "TMPDIR=\$HOME/.cache/aztec-verification-scratch verification/$1.sh" ) 2>&1 | tee -a "$LOG"
   echo "rc=${PIPESTATUS[0]}" | tee -a "$LOG"
@@ -148,7 +158,7 @@ if [ "${1:-}" = "--demo-still-there" ]; then
 fi
 
 ARMS=("$@")
-[ ${#ARMS[@]} -eq 0 ] && ARMS=(A1 A2 A3 A4 A5 A6)
+[ ${#ARMS[@]} -eq 0 ] && ARMS=(A1 A2 A3 A4 A5 A6 B1 B2 B3 B4 B5 D1 D2 D3 D4)
 
 : > "$LOG"
 echo "final-four mutation matrix, $(date -Is), module $MODULE" | tee -a "$LOG"
@@ -262,6 +272,158 @@ json.dump(d, open(sys.argv[1], "w"))
 PY
       touch "$TB_WORK/token-blocks.json"
       run_check e2e_ts_wasm_amm
+      ;;
+
+    # =======================================================================================
+    # ENTRY 2 — M25 `test_nested_call_reverted_contributes_no_side_effects`
+    # =======================================================================================
+
+    B1) # THE POSITIVE CONTROL'S CALLEE REVERTS TOO. The succeeding arm then measures the same thing
+        # as the subject, and "the inner side effects are absent" stops being falsifiable by
+        # anything: a nested call that never happened, an SSTORE that does not work and a reader
+        # that always answers zero all satisfy it again.
+        #
+        # RE-AIMED AFTER ITS FIRST RUN, AND THE RE-AIMING IS THE FINDING. The first form mutated
+        # `CALLEE_FOR.succeeds`, which is a REPORTED field: the callee is compiled into the outer
+        # mode's own `call_opcode` argument and the driver cannot change it. The arm reddened
+        # exactly ONE assertion — the check's comparison of two of the driver's own fields — and
+        # every behavioural assertion stayed green over an unchanged run. That is "a producer's
+        # report about itself is not its output" arriving through a mutation arm, and the check now
+        # derives the callee mapping from the CONTRACT'S SOURCE and compares it against the
+        # declaration. This form changes the OUTER mode, which is what the calldata carries and what
+        # therefore decides which callee actually runs.
+        # Predicted: the control's inner-slot value, its verdict, its nullifier membership, its
+        # list-length identity and its `reEmitInner` revert. The SUBJECT's own assertions stay
+        # green, which is what says the pair is two measurements.
+      arm_header "B1 — the positive control runs the SUBJECT's outer function"
+      sub orchestration/src/nested_effect_driver.ts \
+        '  succeeds: MODE.outerSucceedingCallee,' \
+        '  succeeds: MODE.outerRevertingCallee,'
+      still_there orchestration/src/nested_effect_driver.ts \
+        '  succeeds: MODE.outerRevertingCallee,' B1
+      run_check test_nested_call_reverted_contributes_no_side_effects
+      ;;
+
+    B2) # THE INSTRUCTION-COUNT CONTROL FORWARDS THE SUBJECT'S OWN ARGUMENT, so both arms halt after
+        # their side effects and the two counts become equal. This is the arm for the shape the
+        # first draft of the fixture actually had — a control that does not separate "no side
+        # effects" from "no side effects were ever made".
+        # Predicted, and NARROW: the two §5 comparisons that name the early-revert control, plus
+        # §2's "they differ only in the argument". Every state assertion stays green, because the
+        # two arms' state is identical either way — which is the point of the section.
+      arm_header "B2 — the early-revert control forwards the subject's argument"
+      sub orchestration/src/nested_effect_driver.ts \
+        '  revertsBeforeEffects: CALLEE_ARG.revertBeforeEffects,' \
+        '  revertsBeforeEffects: CALLEE_ARG.revertAfterEffects,'
+      still_there orchestration/src/nested_effect_driver.ts \
+        '  revertsBeforeEffects: CALLEE_ARG.revertAfterEffects,' B2
+      run_check test_nested_call_reverted_contributes_no_side_effects
+      ;;
+
+    B3) # THE MUTATION THAT REACHES THE CONTRACT. The nested callee stops failing: its assert is
+        # made TRUE, so the frame that was supposed to revert returns instead. The Noir source is
+        # recompiled by the pinned nargo and re-transpiled in Chromium, so this arm exercises the
+        # whole pipeline the entry rests on and not just the driver.
+        # Predicted: the subject's inner slot reads the inner value rather than 0, its verdict flips,
+        # its nullifier appears in the TxEffect, and `reEmitInner` starts reverting — every one of
+        # the three witnesses, which is what says they are three readings of one fact rather than
+        # three unrelated assertions.
+      arm_header "B3 — the nested callee stops reverting, in the CONTRACT"
+      sub fixtures/transpiler-contracts/nested_effects/src/main.nr \
+        '                assert(mode == 99, "nested_effects: the inner frame reverts AFTER its side effects");' \
+        '                assert(mode == 1, "nested_effects: the inner frame reverts AFTER its side effects");'
+      still_there fixtures/transpiler-contracts/nested_effects/src/main.nr \
+        'assert(mode == 1, "nested_effects: the inner frame reverts AFTER' B3
+      run_check test_nested_call_reverted_contributes_no_side_effects
+      ;;
+
+    B4) # WITNESS ONE IS UNWIRED: the transaction's own `TxEffect.nullifiers` are reported EMPTY.
+        # The state and the tree are untouched, so this arm is what says the three witnesses are
+        # independent rather than three readings of one field.
+        # Predicted: exactly §4b — the two membership assertions in the control, the subject's own
+        # membership, the non-emptiness floor and the list-length identity. §4a and §4c stay green.
+      arm_header "B4 — the transaction's own nullifier list is reported empty"
+      sub orchestration/src/token_block_driver.ts \
+        "    nullifiersByTx[l] = (p.txEffect.nullifiers ?? []).map(n => n.toString());" \
+        "    nullifiersByTx[l] = [];"
+      still_there orchestration/src/token_block_driver.ts 'nullifiersByTx[l] = [];' B4
+      run_check test_nested_call_reverted_contributes_no_side_effects
+      ;;
+
+    B5) # THE ARM RUN HANGS. A live timer inside the nested-effect driver, with M31's own arms bound
+        # cut to 40 s. rc 124 is the only shape that is a hang; rc 13 and rc 1 are die-before-summary
+        # arms wearing a hang's label.
+        # Predicted: `0 assertion(s), 1 failure(s)` with a summary line at column 0, naming the bound.
+      arm_header "B5 — the transpiler arm run HANGS and the bound must name it"
+      sub orchestration/src/nested_effect_driver.ts \
+        '  const artifact = loadContractArtifact(rawArtifact as never);' \
+        '  await new Promise((r) => setTimeout(r, 1e9)); const artifact = loadContractArtifact(rawArtifact as never);'
+      still_there orchestration/src/nested_effect_driver.ts 'setTimeout(r, 1e9)' B5
+      run_check test_nested_call_reverted_contributes_no_side_effects M31_ARMS_TIMEOUT=90
+      ;;
+
+    # =======================================================================================
+    # ENTRY 4 — M21 `test_form_b_tx_matches_pxe_bytes`
+    # =======================================================================================
+
+    D1) # THIS RUNTIME'S SEAM DROPS THE PUBLIC CALLDATA. `publicOnlyPrivateExecution` — `form_b.ts`'s
+        # own function, and the one that carries `publicFunctionCalldata` into the transaction —
+        # ignores its third parameter. PXE's side is untouched, so the two producers now disagree
+        # about a field neither of them reports.
+        # Predicted, and NARROW: the two cases that CARRY calldata lose their byte-identity, their
+        # byte count and their transaction hash; the `noCalldata` case stays green, because for it
+        # the mutation is a no-op — which is what says the failure is about the calldata and not
+        # about the seam in general. The check's own "our Tx with the calldata dropped differs from
+        # PXE's" control also collapses, because with the mutation live it no longer does.
+      arm_header "D1 — this runtime's seam drops the public calldata"
+      sub orchestration/src/form_b.ts \
+        '  return new PrivateExecutionResult(entrypoint, firstNullifier, publicFunctionCalldata);' \
+        '  return new PrivateExecutionResult(entrypoint, firstNullifier, []);'
+      still_there orchestration/src/form_b.ts \
+        'new PrivateExecutionResult(entrypoint, firstNullifier, []);' D1
+      run_check test_form_b_tx_matches_pxe_bytes
+      ;;
+
+    D2) # THE NODE STUB STOPS COUNTING. `nodeConsulted` then reads zero whether or not the node was
+        # consulted, which is a counter wired to nothing under an assertion whose whole point is
+        # that a zero means something.
+        # Predicted: exactly the paired positive — "the same stub counts when it IS called" — and
+        # nothing else. The `threw:` assertion beside it survives, which is what says the pair is
+        # two facts.
+      arm_header "D2 — the node stub stops counting, so its zero means nothing"
+      sub pxe-ref/src/build_reference_tx.mjs \
+        '    nodeConsulted += 1;' \
+        '    nodeConsulted += 0;'
+      still_there pxe-ref/src/build_reference_tx.mjs 'nodeConsulted += 0;' D2
+      run_check test_form_b_tx_matches_pxe_bytes
+      ;;
+
+    D3) # THE REFERENCE STOPS USING PXE. The tail becomes the EMPTY tail instead of the one
+        # `generateSimulatedProvingResult` produces — which is the state the whole differential
+        # exists to rule out, because both halves would then agree about nothing in particular.
+        # Predicted: §2 entirely — the tail is the empty tail, the two cases' tails stop differing,
+        # and the transactions built from them stop differing. The byte-identity assertions
+        # SURVIVE, and that is the finding the arm is for: two producers agreeing about a degenerate
+        # input is not the claim, and §2 is what makes the input non-degenerate.
+      arm_header "D3 — the reference stops running PXE's step 2"
+      sub pxe-ref/src/build_reference_tx.mjs \
+        '  const tailBuffer = proving.publicInputs.toBuffer();' \
+        '  proving.publicInputs = (await import("@aztec/stdlib/kernel")).PrivateKernelTailCircuitPublicInputs.empty();
+  const tailBuffer = proving.publicInputs.toBuffer();'
+      still_there pxe-ref/src/build_reference_tx.mjs \
+        'PrivateKernelTailCircuitPublicInputs.empty();' D3
+      run_check test_form_b_tx_matches_pxe_bytes
+      ;;
+
+    D4) # THE REFERENCE PRODUCER HANGS, with its bound cut to 20 s. rc 124 is the only shape that is
+        # a hang.
+        # Predicted: `0 assertion(s), 1 failure(s)` with a summary line at column 0, naming the bound.
+      arm_header "D4 — the reference producer HANGS and the bound must name it"
+      sub pxe-ref/src/build_reference_tx.mjs \
+        'const sha = b => createHash(' \
+        'await new Promise((r) => setTimeout(r, 1e9)); const sha = b => createHash('
+      still_there pxe-ref/src/build_reference_tx.mjs 'setTimeout(r, 1e9)' D4
+      run_check test_form_b_tx_matches_pxe_bytes M21_PXE_REF_TIMEOUT=20
       ;;
 
     *) echo "unknown arm: $arm" >&2 ;;

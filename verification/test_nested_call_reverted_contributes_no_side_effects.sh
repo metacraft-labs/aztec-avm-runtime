@@ -137,6 +137,40 @@ assert_eq "the subject and the early-revert control call the same outer function
 assert_eq "…and the same callee" "$(m31_arm "$REV.calleeMode")" "$(m31_arm "$EARLY.calleeMode")"
 assert_true "…and differ only in the argument the outer forwards" \
   test "$(m31_arm "$REV.outerArg")" != "$(m31_arm "$EARLY.outerArg")"
+# WHICH CALLEE EACH OUTER MODE CALLS, READ OUT OF THE CONTRACT AND NOT OFF THE DRIVER'S REPORT.
+#
+# `calleeMode` is a DECLARATION: the callee is compiled into the outer mode's `call_opcode`
+# argument and the driver cannot change it. Measured by this pass's own mutation arm B1 — flipping
+# the driver's `CALLEE_FOR.succeeds` and nothing else — exactly ONE assertion moved, and it was this
+# comparison of two of the driver's own fields. That is "a producer's report about itself is not its
+# output" in a small disguise. The mapping is derived from the fixture's own source now and compared
+# against the declaration, so the two are two measurements.
+FIXTURE_SRC="$FIXTURE_DIR/src/main.nr"
+FIXTURE_CODE="$(grep -v '^[[:space:]]*//' "$FIXTURE_SRC")"
+assert_ge "the comment stripper left code behind" 20 "$(printf '%s\n' "$FIXTURE_CODE" | grep -c . || true)"
+assert_true "…and removed the prose, so a citation cannot be read as a call" \
+  test "$(printf '%s\n' "$FIXTURE_CODE" | grep -c . || true)" -lt "$(grep -c . "$FIXTURE_SRC")"
+FIXTURE_CALLEES="$(printf '%s\n' "$FIXTURE_CODE" | python3 -c '
+import re, sys
+cur = None
+rows = {}
+for line in sys.stdin.read().split("\n"):
+    m = re.search(r"(?:if|else if) mode == (\d+) \{", line)
+    if m:
+        cur = m.group(1)
+    c = re.search(r"call_opcode\([^)]*\[selector, (\d+),", line)
+    if c and cur is not None:
+        rows[cur] = c.group(1)
+for k in sorted(rows, key=int):
+    print(f"{k} {rows[k]}")
+')"
+assert_eq "the contract declares exactly two outer modes that make a nested call" "2" \
+  "$(printf '%s\n' "$FIXTURE_CALLEES" | grep -c . || true)"
+for who in "$REV" "$SUC" "$EARLY"; do
+  WANT="$(printf '%s\n' "$FIXTURE_CALLEES" | sed -n "s/^$(m31_arm "$who.outerMode") //p")"
+  assert_eq "the callee the driver declares for outer mode $(m31_arm "$who.outerMode") is the one the CONTRACT calls" \
+    "$WANT" "$(m31_arm "$who.calleeMode")"
+done
 assert_true "the succeeding arm calls a DIFFERENT callee, which is what makes it a control" \
   test "$(m31_arm "$REV.calleeMode")" != "$(m31_arm "$SUC.calleeMode")"
 assert_eq "the three arms are three distinct contract instances, so no arm sees another's state" \
@@ -186,7 +220,6 @@ echo "== 4. THE VALUES COME FROM THE CONTRACT'S SOURCE, not from this check"
 
 OUTER_SLOT="$(m31_arm "$REV.slots.outer")"
 INNER_SLOT="$(m31_arm "$REV.slots.inner")"
-FIXTURE_SRC="$FIXTURE_DIR/src/main.nr"
 OUTER_VALUE="$(sed -n "s/.*storage_write_opcode($OUTER_SLOT, \([0-9]\+\));.*/\1/p" "$FIXTURE_SRC" | sort -u)"
 INNER_VALUE="$(sed -n "s/.*storage_write_opcode($INNER_SLOT, \([0-9]\+\));.*/\1/p" "$FIXTURE_SRC" | sort -u)"
 assert_eq "the fixture writes ONE value to the outer slot, and the scan found it" "1" \

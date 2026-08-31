@@ -385,6 +385,7 @@
     "drift": "current",
     "probe-mt": "deletion_era",
     "orchestration": "deletion_era",
+    "pxe-ref": "deletion_era",
     "replay": "current"
   },
   "toolchain": {

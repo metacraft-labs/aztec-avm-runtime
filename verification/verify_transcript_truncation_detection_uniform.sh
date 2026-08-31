@@ -113,7 +113,14 @@ note "$N_POP check(s) depend on a transcript having finished"
 # the reaching set 11 -> 12 and the not-reaching set unchanged at 20. That is the split that says a
 # new member did not join the backlog, and it is the reason this census is derived rather than
 # listed — the check that would otherwise have to be remembered is the one it exists to find.
-assert_eq "the derived population is exactly the recorded size, in both directions" "32" "$N_POP"
+#
+# AND THE FINAL-FOUR PASS ADDED THE THIRTY-THIRD, ON THE SAME TERMS AGAIN. M21's
+# `test_form_b_tx_matches_pxe_bytes` drives a probe with a `formB.done` sentinel — the transcript
+# whose digests it compares against upstream's own PXE — and CALLS the shared refusal, so it joins
+# the population and the reaching set together: 32 -> 33 with the reaching set 12 -> 13 and the
+# not-reaching set unchanged at 20. Its first run was RED at this line, before the call was there,
+# which is the census doing its job for the third milestone running.
+assert_eq "the derived population is exactly the recorded size, in both directions" "33" "$N_POP"
 
 # Declared exceptions, each with a reason. An exception that no longer matches a real file FAILS,
 # which is what stops this list from silently outliving what it excuses.
@@ -217,11 +224,12 @@ EOF
 # that says WHICH, rather than a number that moved by one for an unstated reason.
 note "not reaching the shared implementation:$MISSING"
 assert_eq "the set that does not reach it is exactly the recorded size" "20" "$N_MISSING"
-assert_eq "…and the twelve that DO are the six comparers, the node-host runs, M21's three probes and M9's two" \
-  "12" "$((N_POP - N_MISSING))"
+assert_eq "…and the thirteen that DO are the six comparers, the node-host runs, M21's four probes and M9's two" \
+  "13" "$((N_POP - N_MISSING))"
 for _m9_converted in test_observer_fires_on_exceptional_halt \
                      test_existing_event_emitter_path_still_available \
-                     test_settled_read_request_verification; do
+                     test_settled_read_request_verification \
+                     test_form_b_tx_matches_pxe_bytes; do
   assert_true "$_m9_converted reaches the shared refusal (open from M24 to 2026-08-31)" \
     reaches_refusal "$REPO_ROOT/verification/$_m9_converted.sh"
   # …and it is in the POPULATION, or the assertion above is about a file this census never looks

@@ -169,3 +169,104 @@ fixture is a THIRD carrier: its `assert` compiles to the same procedure at Brill
 with the count derived from it and a floor so the pair cannot both be satisfied by an empty corpus.
 
 `test_nested_call_reverted_contributes_no_side_effects`: **83 assertions, 0 failures.**
+
+### Step 2.5 — the mutation matrix for entry 2, and one arm that had to be re-aimed
+
+| arm | mutation | result | what went red |
+|---|---|---|---|
+| B1 (first form) | `CALLEE_FOR.succeeds` flipped in the DRIVER | 83 / **1** | **a finding, not a result** — see below |
+| B1 (re-aimed) | the positive control runs the SUBJECT's outer function | 89 / **7** | the callee-vs-contract derivation, the control's verdict, its inner-slot value, its nullifier membership, its list-length identity, its `reEmitInner` revert, and the succeeding-arm step ordering |
+| B2 | the early-revert control forwards the subject's argument | 89 / **3** | exactly §2's "differ only in the argument" and §5's two count comparisons. Every state assertion stayed green, which is the point of that section |
+| B3 | the nested callee stops reverting, **in the CONTRACT** (recompiled by nargo, re-transpiled in Chromium) | 83 / **6** | all three witnesses at once |
+| B4 | the transaction's own nullifier list reported empty | 83 / **5** | exactly §4b. §4a and §4c green — the three witnesses are independent |
+| B5 | the arms run HANGS (bound cut to 90 s) | **0 / 1** | the bound, named, summary at column 0 |
+
+**B1's first form is the finding.** It flipped `CALLEE_FOR.succeeds`, which is a **reported** field:
+the callee is compiled into the outer mode's own `call_opcode` argument and the driver cannot change
+it. Exactly ONE assertion moved — the check's comparison of two of the driver's own fields — and
+every behavioural assertion stayed green over a run nothing had changed. That is *"a producer's
+report about itself is not its output"* arriving through a mutation arm. The check now DERIVES the
+outer→callee mapping from the contract's own source, with the comment stripper's two halves
+asserted, and compares it against the declaration; the re-aimed arm changes the OUTER mode, which
+is what the calldata carries. `test_nested_call_reverted_contributes_no_side_effects` 83 → **89**.
+
+*(`--demo-still-there` exits 5 as designed, and every arm's restore was verified against the
+sha256 manifest. B5's rc is 137 rather than 124 because `m31_bounded` uses `timeout -s KILL`, and
+the library tests for both.)*
+
+---
+
+## ENTRY 4 — M21 `test_form_b_tx_matches_pxe_bytes`
+
+### Step 4.1 — the brief said "do not invent a PXE". The answer was to install the real one.
+
+The entry's recorded blocker had two parts, and the closeout pass re-derived both:
+
+1. `generateSimulatedProvingResult` — step 2 of §5.4's pipeline — "appears in this tree at FIVE
+   sites and every one of them is a COMMENT";
+2. "there is still no PXE-built Tx fixture to compare against".
+
+**(1) is true and stays true.** This runtime does not have step 2 and does not vendor it; §6 of the
+check asserts that over the shipped sources, with the scanner shown to be capable of finding the
+name.
+
+**(2) was a statement about what nobody had built.** Measured today rather than argued:
+
+| question | answer |
+|---|---|
+| is `@aztec/pxe` published at `npm.deletion_era`? | yes, `5.0.0-nightly.20260626` |
+| is `generateSimulatedProvingResult` EXPORTED? | yes — `@aztec/pxe/simulator` |
+| does it run without a world state? | yes: pure TypeScript, 404 packages, 39 s to install |
+| does it consult the `AztecNode` it takes? | **no**, for this input — the stub THROWS and is never called |
+| does it produce a real tail? | 38,557–82,722 bytes of `PrivateKernelTailCircuitPublicInputs` |
+
+So the entry closes **as written**, against upstream's own PXE, and RI-64/RI-65's rejection of
+`@aztec/pxe` for the SHIPPED graph is untouched — it is installed in `pxe-ref/`, a fifth harness
+tree nothing ships, on exactly the terms `diffsim/`, `spike/`, `drift/` and `probe-mt/` are. RI-102
+records the distinction those entries did not draw: *a package this runtime must not SHIP is not a
+package a CHECK may not RUN.*
+
+### Step 4.2 — what crosses, and in which direction
+
+Two processes, two `@aztec/stdlib` installs — so the INPUTS cross as VALUES (a first nullifier and
+a list of calldata fields, from which each half builds its own `PrivateExecutionResult` with its own
+install's classes) and the TAIL and the OUTPUTS cross as BYTES.
+
+Three cases. `Tx.toBuffer()` agrees to the digest, to the byte count and to the transaction hash in
+all three.
+
+### Step 4.3 — and the equality is made falsifiable four ways
+
+Both halves call the same upstream `toSimulatedTx`, so "the bytes agree" would otherwise be a
+tautology written beside a true statement:
+
+* the comparer CAN say no — our transaction from the OTHER case's tail differs from PXE's primary,
+  and EQUALS PXE's variant, so it is not merely different;
+* the tail matters — PXE's two cases' tails differ, and neither is the empty tail;
+* the calldata matters — our transaction with the calldata dropped differs from PXE's primary **and
+  from PXE's no-calldata case**, because a `Tx` is decided by its tail as well as its calldata;
+* the node was not consulted, with the same stub shown to count when it is.
+
+**One of those four went red on its first run and the red was mine.** The first draft asserted that
+the dropped-calldata transaction EQUALS PXE's no-calldata case. It does not: PXE's no-calldata case
+was built from an execution with no calldata, so its TAIL is a different tail. Corrected to the
+measurement, with the tails asserted different so the statement rests on something.
+
+`test_form_b_tx_matches_pxe_bytes`: **78 assertions, 0 failures.** m21 369 -> 449 (+78, plus +2 in
+`verify_transcript_truncation_detection_uniform`, below).
+
+### Step 4.4 — three other checks moved, and one deliberately stayed red
+
+* **`verify_transcript_truncation_detection_uniform` caught the new check on its first run**, at
+  the assertion that exists for it: the probe drives a transcript with a `formB.done` sentinel and
+  did not call the shared refusal, so the population went 32 -> 33 and the NOT-REACHING set 20 ->
+  21. It calls `require_complete_transcript` now, so the reaching set goes 12 -> 13 and the backlog
+  is unchanged — which is the split that says a new member did not join it. 55 -> 57.
+* **`verify_pinned_nightly_single_source` is unchanged at 28**, with `pxe-ref` declared in
+  `pins.json`'s `npm_consumers` at `deletion_era`. Its sandbox went red first, for the right reason:
+  the sandbox stages TRACKED files and `pxe-ref/` was not yet added.
+* **`verify_npm_pack_no_optional_native` 54 -> 55**, one assertion for the fifth harness tree — and
+  **its declared list deliberately omits `replay`**. That is L0's tree and this check has been red
+  on it since M33; adding it in the same edit would have turned another track's standing red green
+  as a side effect of this pass's work. The pin names what this campaign owns, and the one failure
+  it reports now names `replay` alone.

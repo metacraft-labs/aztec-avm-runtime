@@ -1080,6 +1080,16 @@ component is and what it costs us, and does not repeat the deletion.
 - experiment: clone `aztec-labs-eng/aztec-node` at the pinned submodule commit and answer three questions, in this order, because a NO to the first makes the other two moot. (1) Do the fifteen upstream paths `PROVENANCE.md` F9–F23 name exist there, at the same relative paths under `yarn-project/`, and how far do they differ from the `cpp` anchor's copies — the same blob comparison `verify_aztec_ts_anchor_current` already runs, pointed at a second object store? (2) Does the repository publish the `@aztec/*` npm line this runtime pins, or does the nightly line still come from `aztec-packages` — because `npm.current` and `npm.deletion_era` are what `orchestration/` and `browser/` actually install, and an anchor whose packages are published elsewhere is a second kind of split? (3) What is the licence and the stability of the submodule pointer — `update = none` means `aztec-packages` does not track it automatically, so the pin moves only when upstream moves it, which is either a stability guarantee or a staleness trap and the commit history says which
 - rejection-reason: n/a
 
+### RI-102 — `@aztec/pxe`'s own `generateSimulatedProvingResult`, INSTALLED as a reference and shipped nowhere
+- upstream: `@aztec/pxe@5.0.0-nightly.20260626` (`npm.deletion_era`), export path `@aztec/pxe/simulator`, source `yarn-project/pxe/src/contract_function_simulator/contract_function_simulator.ts`
+- covers: transaction-builder
+- decision: depend
+- milestone: M21 (`test_form_b_tx_matches_pxe_bytes`), closed 2026-08-31
+- why: **RI-64 and RI-65 enumerated `@aztec/simulator` and `@aztec/pxe` and rejected them for the SHIPPED graph, correctly, and that verdict is unchanged.** This entry is `depend` and not a re-litigation of theirs: what is depended on is a package in a tree nothing ships. `@aztec/pxe` hard-depends on `@aztec/simulator`, which hard-depends on `@aztec/native` and `@aztec/world-state`; installing any of them in `orchestration/` is what DD-9 forbids and what three checks assert against. What those entries did not distinguish is the SECOND use: a package this runtime must not SHIP is not a package a CHECK may not RUN. `diffsim/`, `spike/`, `probe-mt/` and `drift/` exist for exactly that, and `pxe-ref/` is the fifth — upstream's own PXE, installed at the same pin `orchestration/` uses, so that M21's differential has a reference half. Measured before it was declared: `generateSimulatedProvingResult` is a real export of the published package, runs in pure TypeScript over a public-only execution, and never consults the `AztecNode` it takes (the stub passed to it THROWS, and the check asserts it was not consulted, with the stub shown to count when it is). The alternative — vendoring the function — was rejected: its whole value here is that it is UPSTREAM'S, and a vendored copy would make the differential a comparison of this repository with itself.
+- confidence: high
+- experiment: n/a — the reuse is executed on every run of `test_form_b_tx_matches_pxe_bytes`, which builds the reference in `pxe-ref/` and compares it against `orchestration/src/form_b.ts`'s own seam byte for byte
+- rejection-reason: n/a
+
 ---
 
 ## Not in this inventory, and why

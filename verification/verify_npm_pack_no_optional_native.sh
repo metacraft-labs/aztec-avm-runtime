@@ -64,16 +64,27 @@ require_work_dir "$M28_WORK" 1
 
 # THE THREE PACKAGES THAT SHIP. Named here and asserted against the tree, so a fourth appearing
 # without this list moving is a failure rather than an omission: `orchestration`, `node-host` and
-# `ct-host` are the three `@aztec-avm-runtime/*` packages, and `diffsim`, `drift`, `probe-mt` and
-# `spike` are the harness trees, which DO depend on @aztec/native and are not shipped.
+# `ct-host` are the three `@aztec-avm-runtime/*` packages, and `diffsim`, `drift`, `probe-mt`,
+# `pxe-ref` and `spike` are the harness trees, which DO depend on @aztec/native and are not
+# shipped. `pxe-ref` is M21's: upstream's own PXE, installed so that
+# `test_form_b_tx_matches_pxe_bytes` can compare this runtime's `Tx` against the one PXE builds. It
+# declares `@aztec/world-state` explicitly so that its classification here rests on a declaration
+# rather than on a transitive edge.
 SHIPPED="orchestration node-host ct-host"
-HARNESS="diffsim drift probe-mt spike"
+HARNESS="diffsim drift probe-mt pxe-ref spike"
 
 echo "== 1. the shipped packages are exactly the three, measured over the tree"
 
 FOUND="$(cd "$REPO_ROOT" && git ls-files '*/package.json' | sed 's|/package.json$||' | LC_ALL=C sort | tr '\n' ' ')"
-assert_eq "the tracked package.json files are the three shipped plus the four harness trees" \
-  "ct-host diffsim drift node-host orchestration probe-mt spike " "$FOUND"
+# THE DECLARED LIST DELIBERATELY OMITS `replay`, AND THAT IS RECORDED RATHER THAN ABSORBED.
+# `replay/package.json` is the L0 track's fifth tree and this check has been red on it since M33.
+# The final-four pass added `pxe-ref` — upstream's own PXE, installed as M21's reference half and
+# shipped nowhere — and declared it here. Adding `replay` in the same edit would have turned another
+# track's standing red green as a side effect of this pass's own work, which is the collision
+# `CAMPAIGN-BRIEF.md` records this campaign paying for three times. So the pin names what this
+# campaign owns and the failure it reports is L0's, by name.
+assert_eq "the tracked package.json files are the three shipped plus the five harness trees" \
+  "ct-host diffsim drift node-host orchestration probe-mt pxe-ref spike " "$FOUND"
 for p in $SHIPPED; do
   assert_file "the shipped package $p has a manifest" "$REPO_ROOT/$p/package.json"
   assert_eq "…named under the runtime's own scope" "@aztec-avm-runtime/$p" \

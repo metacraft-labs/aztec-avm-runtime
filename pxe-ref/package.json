@@ -1,0 +1,25 @@
+{
+  "name": "@spike/pxe-reference",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "comment": [
+    "Reference harness: upstream's own PXE at the deletion_era pin, installed so that M21's",
+    "`test_form_b_tx_matches_pxe_bytes` can compare this runtime's `Tx` against the one PXE",
+    "builds. NOTHING SHIPS FROM HERE. `@aztec/pxe` hard-depends on `@aztec/simulator`, which",
+    "hard-depends on `@aztec/native` and `@aztec/world-state` — the packages DD-9 forbids the",
+    "shipped graph from reaching — which is exactly why this is a separate tree and not a",
+    "dependency of `orchestration/`.",
+    "`@aztec/world-state` is declared EXPLICITLY rather than left transitive: it is what makes",
+    "this tree a harness tree under `verify_npm_pack_no_optional_native`'s own rule, and a",
+    "classification that rested on a transitive edge would be a classification nobody could read.",
+    "The pin is `npm.deletion_era`, which is `orchestration/`'s, because a byte comparison",
+    "between two protocol versions would be a comparison of two different protocols."
+  ],
+  "dependencies": {
+    "@aztec/foundation": "5.0.0-nightly.20260626",
+    "@aztec/pxe": "5.0.0-nightly.20260626",
+    "@aztec/stdlib": "5.0.0-nightly.20260626",
+    "@aztec/world-state": "5.0.0-nightly.20260626"
+  }
+}
