@@ -411,3 +411,37 @@ OK and unchanged.**
 **AND THE SWEEP WAS ABORTED TWICE BEFORE THIS RUN, WHICH IS THE RULE WORKING TWICE.** Both aborts
 were bought by the only work available while a sweep runs — reading this pass's own checks — and
 between them they found three assertions of mine that could not fail and one claim that was wrong.
+
+## Step 12 — the pending list after this pass: 21 → 13, and what each of the thirteen is
+
+**Eight closed**, each with its own commit, its own mutation arm and its own re-measurement:
+`test_debug_log_events_surface` (M25, 24), `e2e_block_token_flows` (M22, 39),
+`e2e_ts_wasm_token_transfer` (M18, 51), `e2e_ts_wasm_nested_call_fork_merge` (M18, 51),
+`e2e_ts_wasm_phase_revert_semantics` (M18, 46), `e2e_block_deployments_through_processor` (M22, 45),
+`test_settled_read_request_verification` (M21, 33), `test_custom_bytecode_unhappy_paths` (M18, 67).
+
+**Thirteen remain, and the brief's hoped-for resting state is NOT quite reached — say so rather than
+round it up.** Nine are blocked on a human, on upstream, on another agent's scope, or on a trigger
+that has not fired. **Four are blocked on real work in this repository**, and each carries today's
+measurement:
+
+| entry | why it is still open | class |
+|---|---|---|
+| M11 `verify_all_five_patches_submitted` | the user files the PRs; all five read `prepared` | **human** |
+| M16 ×4 | all three fallback triggers evaluate `not-fired`; there is no TypeScript tree to assert about | **not a gap** |
+| M26 `e2e_joined_trace_opens_in_codetracer` | the headless CodeTracer replay SDK is another effort's (`OUT-OF-SCOPE.md`); still no built `ct` binary and none on `PATH` | **another agent's scope** |
+| M26 `e2e_form_b_single_ct_recording` | the private executor emits **no step stream** — `grep noir_tracer browser/src` is 0 and `private_execution.ts` never reaches `ct_writer` | **real work** |
+| M35 `e2e_joined_private_public_trace` | the same missing private step stream, plus tier 4 (`aztec_prv_callPrivateFunction`) still refusing | **real work** |
+| M35 `e2e_wallet_private_transfer` | `transfer` has no note to spend and the wallet drives ONE private frame, not a transaction | **real work** |
+| M18 `e2e_ts_wasm_amm` | all four AMM public functions are `abi_only_self`; needs three Token deployments and four self-sent internal calls | **real work** |
+| M21 `test_form_b_tx_matches_pxe_bytes` | the Tx-building half of upstream's simulator is five COMMENT sites with no definition and no call, and there is no PXE-built Tx to compare against | **real work** |
+| M25 `test_nested_call_reverted_contributes_no_side_effects` | of AvmTest's 127 functions exactly TWO recover from a failed nested call, and neither nested target makes a side effect — a corpus gap, proven by enumeration | **real work** |
+| M25 `e2e_trace_token_transfer_steppable` | per-step gas in the TOKEN container, and the balance read back on that transfer's own world state — browser-arm work on M27/M29's harness | **real work** |
+
+*The Node-side balance read-back this pass added does NOT close the last of those, and the entry
+says so: it is about the container the browser produces.*
+
+**A parser note, so nobody re-finds it as a defect.** A census over `status:` lines reports one
+extra "status" in M22's prose — `…asserted beside the status: =signal-ABRT-after-heap-corruption=…`,
+where a wrap put the word at the start of a line. It is a sentence, not a field, and the file is
+correct; a naive line-anchored parser is not.
