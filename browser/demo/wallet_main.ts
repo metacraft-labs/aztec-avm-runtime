@@ -785,11 +785,16 @@ async function armPrivateExecution(): Promise<Record<string, unknown>> {
   };
 
   const oracleCheckArtifact = await fetchJson(ORACLE_CHECK_ARTIFACT_URL);
+  // `recordTape` ON THIS FRAME AND ON THE REFUSING ONE, AND ON NOTHING ELSE. M38 replays this
+  // frame's oracle answers through the Noir tracer's synchronous Rust executor, which cannot call
+  // a TypeScript handler at all; the tape is what crosses that boundary. It is the wire values
+  // rather than the ledger's sentences, because a value nobody measured is a value nobody may use.
   const executes = await executePrivateFunction({
     ...common,
     artifact: oracleCheckArtifact,
     functionName: 'private_function',
     args: [],
+    recordTape: true,
   });
   say(`private_function: ${executes.outcome}, ${executes.oracleCalls.length} oracle call(s)`);
 
@@ -902,6 +907,10 @@ async function armPrivateExecution(): Promise<Record<string, unknown>> {
     // `to` and `amount`, two fields, read as the ABI declares them. The values do not matter: the
     // frame stops before the circuit reads either.
     args: [0x444n, 5n],
+    // The refusing frame is taped too, so M38's replay has a PREFIX to work from as well as a
+    // whole run — a tape that stops at a refusal is the case the replaying executor has to
+    // refuse in turn rather than pad.
+    recordTape: true,
   });
   say(`Token.transfer: ${refuses.outcome} at ${refuses.stoppedAtOracle ?? '(nothing)'}`);
 

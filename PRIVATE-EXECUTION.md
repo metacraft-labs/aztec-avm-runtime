@@ -481,8 +481,8 @@ the count.)*
 
 | | derived |
 |---|---|
-| the wallet entry's eager set | **304.3 KB** gzipped across **9** files |
-| the wallet demo page's eager set | **344.15 KB** gzipped across **13** files |
+| the wallet entry's eager set | **304.5 KB** gzipped across **9** files |
+| the wallet demo page's eager set | **344.36 KB** gzipped across **13** files |
 | `acvm_js_bg.wasm` | **3,601,516** bytes |
 | `noirc_abi_wasm_bg.wasm` | **789,053** bytes |
 | `@aztec/aztec.js` bytes in `browser.js`'s eager set | **0** |

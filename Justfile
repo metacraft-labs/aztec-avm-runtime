@@ -3501,3 +3501,61 @@ verify-m35:
       echo "verify-m35: all checks passed"
     fi
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M38. The Noir tracer serves Aztec's oracles: a private function STEPPED.
+#
+# NEEDS: the M35 arm report (`just m35-arms`) for the oracle tape, the `noir` checkout on
+# `codetracer` (clean) for the tracer, `nim` from the `codetracer-trace-format` dev shell for the
+# writer, and the pinned `ct-print` (`verification/build_ct_print.sh`, same shell).
+#
+# `M38_ARMS_REFRESH=1` forces the arm run even when nothing is newer than the report.
+# ---------------------------------------------------------------------------
+
+# Build the native probe: the real `noir_tracer` over an Aztec artifact, with an injected executor.
+m38-probe-build:
+    verification/build_m38_private_trace_probe.sh
+
+# Run the four trace arms into $M38_WORK/trace-arms.json.
+m38-arms:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    work="${M38_WORK:-$HOME/.cache/aztec-m38-private-trace}"
+    mkdir -p "$work"
+    verification/build_m38_private_trace_probe.sh >/dev/null || exit 1
+    node tools/run_m38_trace_arms.mjs "$work" > "$work/trace-arms.json"
+    echo "m38-arms: wrote $work/trace-arms.json"
+
+verify-m38-synchrony:
+    @verification/verify_private_oracle_synchrony_enumerated.sh
+
+verify-m38-injectable:
+    @verification/verify_foreign_call_executor_is_injectable.sh
+
+verify-m38-refusals:
+    @verification/test_unserved_private_oracle_refuses_by_name.sh
+
+verify-m38-container:
+    @verification/e2e_private_function_steps_into_ct_container.sh
+
+verify-m38:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_private_oracle_synchrony_enumerated \
+      verify_foreign_call_executor_is_injectable \
+      test_unserved_private_oracle_refuses_by_name \
+      e2e_private_function_steps_into_ct_container
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m38: FAILED" >&2
+    else
+      echo "verify-m38: all checks passed"
+    fi
+    # THE STATUS IS RETURNED. A recipe that summarises a status and does not exit with it can never
+    # be one of a sweep's non-zero exits — M37's review found exactly that in two recipes.
+    exit "$rc"

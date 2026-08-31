@@ -196,6 +196,37 @@ export interface PrivateExecutionRequest {
    * rather than nine empty answers — see `private_oracles.ts`.
    */
   readonly discovery?: NoteDiscoverySource;
+  /**
+   * Record every oracle call's WIRE VALUES — the fields the ACVM handed in and the fields the
+   * handler handed back — into `PrivateExecutionReport.tape`.
+   *
+   * **Why the ledger is not enough, and why this is not the ledger with more fields.**
+   * `OracleCall.detail` is a human sentence written by the handler about what it did
+   * (`counter=1 revertible=false`). The tape is what crossed the wire. A consumer that has to
+   * REPRODUCE this execution — M38's Noir tracer, which drives the same ACIR through a
+   * synchronous Rust foreign-call executor and cannot call a TypeScript handler at all — needs the
+   * second and would have to interpret the first. Deriving `[0]` from the words
+   * `revertible=false` is a guess that happens to be right, and this repository's rule is that a
+   * value nobody measured is a value nobody may use.
+   *
+   * Off by default: the tape is the raw field arrays and is much larger than the ledger.
+   */
+  readonly recordTape?: boolean;
+}
+
+/**
+ * One oracle call as it crossed the ACIR foreign-call wire.
+ *
+ * `inputs` and `outputs` are the ACVM's own `ForeignCallInput` / `ForeignCallOutput` shapes,
+ * normalised to arrays of hex strings so a non-JavaScript consumer can read them: a single field
+ * becomes a one-element array, so every entry has the same shape and a reader never has to ask
+ * which it is holding.
+ */
+export interface OracleTapeEntry {
+  readonly seq: number;
+  readonly oracle: string;
+  readonly inputs: readonly (readonly string[])[];
+  readonly outputs: readonly (readonly string[])[];
 }
 
 export interface PrivateExecutionReport {
@@ -216,6 +247,15 @@ export interface PrivateExecutionReport {
   readonly environmentOracleVersion: { major: number; minor: number };
   /** Every oracle the bytecode asked for, in order, served and refused alike. */
   readonly oracleCalls: readonly OracleCall[];
+  /**
+   * The same calls as WIRE VALUES, present only when the request asked for them. See
+   * `PrivateExecutionRequest.recordTape` for why this is not `oracleCalls` with more fields.
+   */
+  readonly tape?: readonly OracleTapeEntry[];
+  /** `[witnessIndex, hexField]` pairs, ascending by index. Present with `tape`. */
+  readonly initialWitnessEntries?: readonly (readonly [number, string])[];
+  /** The solved witness, same shape. Present with `tape` when the circuit solved. */
+  readonly solvedWitnessEntries?: readonly (readonly [number, string])[];
   readonly oraclesServed: number;
   /** Calls to oracles this wallet does not serve at all — `OracleUnimplemented`. */
   readonly oraclesRefused: number;
@@ -341,6 +381,63 @@ function fieldOf(entry: unknown, what: string): string {
 }
 
 /**
+ * Wrap every entry of upstream's `ACIRCallback` so the fields crossing it are recorded.
+ *
+ * The wrapper is built from the callback's OWN keys rather than from a list of oracle names: the
+ * callback is what the ACVM dispatches on, so an oracle upstream adds is taped on the day the
+ * registry gains it, and an oracle this table did not know about cannot be silently untaped.
+ *
+ * A throwing entry — every refusal is one — records the call it was making with NO outputs and
+ * rethrows unchanged. A tape whose last entry has an empty `outputs` is a call that was made and
+ * not answered, which is exactly the shape a replaying consumer must not mistake for an answer of
+ * length zero; `PrivateExecutionReport.stoppedAtOracle` names it, and `oracleCalls` says whether it
+ * was refused or unavailable.
+ */
+function recordingCallback(
+  callback: Record<string, (...inputs: string[][]) => Promise<string[][]>>,
+  tape: OracleTapeEntry[],
+): Record<string, (...inputs: string[][]) => Promise<string[][]>> {
+  const wrapped: Record<string, (...inputs: string[][]) => Promise<string[][]>> = {};
+  for (const [oracle, fn] of Object.entries(callback)) {
+    if (typeof fn !== 'function') {
+      // Not every property of the callback object is an oracle — `assertHandlerSupportsScope`'s
+      // markers are not — and copying a non-function through unchanged is the only safe thing.
+      wrapped[oracle] = fn;
+      continue;
+    }
+    wrapped[oracle] = async (...inputs: string[][]) => {
+      const seq = tape.length;
+      const entry = { seq, oracle, inputs: (inputs as unknown as (string | string[])[]).map(slots), outputs: [] as string[][] };
+      tape.push(entry);
+      const outputs = await fn(...inputs);
+      entry.outputs = ((outputs ?? []) as unknown as (string | string[])[]).map(slots);
+      return outputs;
+    };
+  }
+  return wrapped;
+}
+
+/**
+ * Normalise one wire slot to an array of fields.
+ *
+ * **A slot is a field OR an array of fields, and JavaScript will happily destructure the first
+ * one into characters.** The ACVM's `ForeignCallParam` is `ACVMField | ACVMField[]`, and
+ * `serializeReturn` produces a mixture: `isExecutionInRevertiblePhase` returns a single field and
+ * `getContractInstance` returns twelve. The first draft of this function was `[...slot]`, which
+ * turned the single field `0x0000…0000` into sixty-six one-character strings — a tape that is not
+ * merely wrong but wrong in a shape a reader skims past, because it is still an array of strings
+ * of the right total length. Found by reading the first tape rather than by reasoning about it.
+ */
+function slots(slot: string | string[]): string[] {
+  return typeof slot === 'string' ? [slot] : [...slot];
+}
+
+/** `[index, hex]` pairs, ascending, from an ACVM witness map. */
+function witnessEntries(witness: Map<number, string>): (readonly [number, string])[] {
+  return [...witness.entries()].map(([k, v]) => [Number(k), String(v)] as const).sort((a, b) => a[0] - b[0]);
+}
+
+/**
  * Executes one private function frame and returns a report.
  *
  * **This never throws for a refused oracle.** A refusal is the expected outcome for anything this
@@ -436,17 +533,36 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
     servedSetSize: oracles.servedSet().length,
   };
 
+  // THE TAPE IS TAKEN AT THE WIRE, NOT AT THE HANDLER, and the difference is the whole point.
+  // `buildACIRCallback` is upstream's own bridge: it deserialises the ACVM's field arrays into the
+  // handler's arguments and serialises the handler's answer back. Wrapping the CALLBACK records
+  // what the ACVM actually sent and received; wrapping the HANDLER would record the deserialised
+  // JavaScript objects, which is a different thing and not the thing a replaying consumer needs.
+  const tape: OracleTapeEntry[] = [];
+  const callback = buildACIRCallback(oracles.handler as never) as unknown as Record<
+    string,
+    (...inputs: string[][]) => Promise<string[][]>
+  >;
+  const wired = request.recordTape ? recordingCallback(callback, tape) : callback;
+
   const simulator = new WASMSimulator();
   try {
     const result = await simulator.executeUserCircuit(
       initialWitness,
       { ...(fn as object), bytecode } as never,
-      buildACIRCallback(oracles.handler as never) as never,
+      wired as never,
     );
     const publicInputs = extractPublicInputs(fields.length, result.partialWitness as Map<number, string>);
     const ledger = oracles.calls();
     return {
       ...base,
+      ...(request.recordTape
+        ? {
+            tape,
+            initialWitnessEntries: witnessEntries(initialWitness as unknown as Map<number, string>),
+            solvedWitnessEntries: witnessEntries(result.partialWitness as Map<number, string>),
+          }
+        : {}),
       solvedWitnessSize: (result.partialWitness as Map<number, string>).size,
       returnWitnessSize: (result.returnWitness as Map<number, string>).size,
       contractOracleVersion: oracles.contractVersion(),
@@ -509,6 +625,13 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
     const e = err as { message?: string; name?: string };
     return {
       ...base,
+      // The tape of what DID cross the wire before the halt, on the same terms as the success
+      // path. A frame that stopped at its fifth oracle has four answers worth having, and a
+      // consumer replaying it has to know it is holding a prefix rather than a whole run — which
+      // it does, because `stoppedAtOracle` is beside it.
+      ...(request.recordTape
+        ? { tape, initialWitnessEntries: witnessEntries(initialWitness as unknown as Map<number, string>) }
+        : {}),
       contractOracleVersion: oracles.contractVersion(),
       oracleCalls: ledger,
       oraclesServed: ledger.filter(c => c.outcome === 'served').length,

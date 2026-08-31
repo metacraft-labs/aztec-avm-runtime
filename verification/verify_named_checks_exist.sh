@@ -71,6 +71,13 @@ EXCEPTIONS = {
     "verify_line": "a local shell function in reproduce_aztec_bytecode_size_shift_32bit",
     "verify_reported": "a local shell function in reproduce_aztec_merkle_tree_lmdb_coupling",
     "verify_observer": "a local shell function in verify_execution_observer_patch_applies_to_upstream",
+    # A RUST TEST FILE IN ANOTHER REPOSITORY, NAMED BY THE CHECK THAT RUNS IT. M38's seam is
+    # established by running `noir`'s own `tooling/tracer/tests/test_foreign_call_executor.rs`
+    # rather than by grepping for the new function's name, so
+    # `verify_foreign_call_executor_is_injectable` names that FILE in the `cargo test --test`
+    # argument it passes. It is not a check of this repository and cannot resolve to one; the four
+    # tests INSIDE it are asserted present and passing, one at a time, by name.
+    "test_foreign_call_executor": "noir's tooling/tracer/tests/test_foreign_call_executor.rs, run by verify_foreign_call_executor_is_injectable",
     # HISTORICAL MENTIONS. Three of the five names this check exists because of are still
     # mentioned, by comments that record the correction. (The other two were repointed
     # outright and are NOT excepted — the dead-exception assertion below would fail if they
