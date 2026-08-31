@@ -59,21 +59,15 @@ export M23_PATCH M23_DOC
 # loop. The two copies are independent by design; if a third milestone wants it, that is the point
 # at which it moves.
 # ---------------------------------------------------------------------------
-_M23_FINISHED=0
-m23_finish() {
-  _M23_FINISHED=1
-  finish
-}
-_m23_abnormal_exit() {
-  local rc=$?
-  [ "$_M23_FINISHED" = "1" ] && return 0
-  printf '%s: %d assertion(s), %d failure(s)\n' "$TEST_NAME" "$_ASSERTIONS" "$((_FAILURES + 1))"
-  printf '%s: FAIL — exited (status %d) before finish; the summary above counts that as a failure\n' \
-    "$TEST_NAME" "$rc" >&2
-}
-m23_summary_on_abnormal_exit() {
-  trap _m23_abnormal_exit EXIT
-}
+# DELEGATED TO `lib.sh` ON 2026-08-31. These eight lines were copied into FOURTEEN
+# milestone libraries, m22..m37. M22 wrote them and said the third milestone wanting
+# them is when they move into `lib.sh`; M24 declined for M22's own reason and recorded
+# it as owed. The fifteenth caller turned out to be M9 — not a new milestone but the
+# campaign's oldest open item — so the move is made and these are wrappers. The public
+# names are unchanged, so no check needed editing, and the behaviour is identical: one
+# implementation instead of fourteen, verified by the sweep.
+m23_finish() { finish; }
+m23_summary_on_abnormal_exit() { summary_on_abnormal_exit; }
 
 # ---------------------------------------------------------------------------
 # The fork.

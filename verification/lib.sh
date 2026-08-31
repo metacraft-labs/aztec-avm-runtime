@@ -589,7 +589,42 @@ in_shell_status() { # <repo-root> <script-text> -> exit status, output on stdout
   ( cd "$root" && nix develop --command bash -c "$script" ) 2>&1
 }
 
+# ---------------------------------------------------------------------------
+# A SUMMARY LINE EVEN ON AN ABNORMAL EXIT — M22's machinery, MOVED HERE AT LAST.
+#
+# M22 wrote this trap and said a third milestone wanting it is when it moves into `lib.sh`. M24
+# declined for M22's own reason ("changing the abnormal-exit behaviour of a hundred and fifty
+# checks does not belong in a commit about a trace writer"), which was right for M24 and recorded
+# as owed. **There are now FOURTEEN independent copies of these eight lines** — `lib_m22` through
+# `lib_m37` — and the milestone that needed it fifteenth is M9, which is not a new milestone at all
+# but the campaign's oldest open item.
+#
+# WHAT IT IS FOR. `die` exits without printing a summary line, and the sweep counts summary lines.
+# So a check that correctly REFUSES to compare contributes 0 where it contributes 140, and the
+# milestone reads *smaller* rather than *red* — "a missing check reads as a smaller milestone, not
+# as a red one", which cost this campaign 283 assertions at every M9 truncation sighting since M24.
+# With the trap installed the same refusal prints `<check>: N assertion(s), M+1 failure(s)` at
+# column 0, so the sweep sees a failure instead of an absence.
+#
+# INSTALLING IT IS STILL OPT-IN. It is defined here so there is ONE implementation; it is not
+# armed by default, because arming it for every check in the repository is a behavioural change to
+# a hundred and fifty checks and belongs in a commit that measures that, not in this one. The
+# fourteen milestone wrappers now delegate here rather than each carrying the body.
+# ---------------------------------------------------------------------------
+_FINISH_CALLED=0
+_abnormal_exit_summary() {
+  local rc=$?
+  [ "$_FINISH_CALLED" = "1" ] && return 0
+  printf '%s: %d assertion(s), %d failure(s)\n' "$TEST_NAME" "$_ASSERTIONS" "$((_FAILURES + 1))"
+  printf '%s: FAIL — exited (status %d) before finish; the summary above counts that as a failure\n' \
+    "$TEST_NAME" "$rc" >&2
+}
+summary_on_abnormal_exit() {
+  trap _abnormal_exit_summary EXIT
+}
+
 finish() {
+  _FINISH_CALLED=1
   printf '%s: %d assertion(s), %d failure(s)\n' \
     "$TEST_NAME" "$_ASSERTIONS" "$_FAILURES"
   if [ "$_ASSERTIONS" -eq 0 ]; then

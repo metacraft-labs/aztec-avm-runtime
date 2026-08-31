@@ -58,21 +58,15 @@ M34_ARMS_TIMEOUT="${M34_ARMS_TIMEOUT:-1800}"
 # nothing reported as failing. M22 said a third milestone wanting it is when it moves into `lib.sh`;
 # M23, M24, M27, M32 and M33 each declined for M22's own reason, and M34 declines for the same one.
 # ---------------------------------------------------------------------------
-_M34_FINISHED=0
-m34_finish() {
-  _M34_FINISHED=1
-  finish
-}
-_m34_abnormal_exit() {
-  local rc=$?
-  [ "$_M34_FINISHED" = "1" ] && return 0
-  printf '%s: %d assertion(s), %d failure(s)\n' "$TEST_NAME" "$_ASSERTIONS" "$((_FAILURES + 1))"
-  printf '%s: FAIL — exited (status %d) before finish; the summary above counts that as a failure\n' \
-    "$TEST_NAME" "$rc" >&2
-}
-m34_summary_on_abnormal_exit() {
-  trap _m34_abnormal_exit EXIT
-}
+# DELEGATED TO `lib.sh` ON 2026-08-31. These eight lines were copied into FOURTEEN
+# milestone libraries, m22..m37. M22 wrote them and said the third milestone wanting
+# them is when they move into `lib.sh`; M24 declined for M22's own reason and recorded
+# it as owed. The fifteenth caller turned out to be M9 — not a new milestone but the
+# campaign's oldest open item — so the move is made and these are wrappers. The public
+# names are unchanged, so no check needed editing, and the behaviour is identical: one
+# implementation instead of fourteen, verified by the sweep.
+m34_finish() { finish; }
+m34_summary_on_abnormal_exit() { summary_on_abnormal_exit; }
 
 # ---------------------------------------------------------------------------
 # The arm run. Produced once, in a real browser, from the BUILT bundle; read by all four checks.

@@ -34,24 +34,11 @@
 # work — they read object stores and compare field lists — so anything near it is a
 # defect and not a slow machine.
 
-_M37_FINISHED=0
-
-m37_finish() {
-  _M37_FINISHED=1
-  finish
-}
-
-_m37_abnormal_exit() {
-  local rc=$?
-  [ "$_M37_FINISHED" = "1" ] && return 0
-  printf '%s: %d assertion(s), %d failure(s)\n' "$TEST_NAME" "$_ASSERTIONS" "$((_FAILURES + 1))"
-  printf '%s: FAIL — exited (status %d) before finish; the summary above counts that as a failure\n' \
-    "$TEST_NAME" "$rc" >&2
-}
-
-m37_summary_on_abnormal_exit() {
-  trap _m37_abnormal_exit EXIT
-}
+# DELEGATED TO `lib.sh` ON 2026-08-31 — see the note in `lib.sh` beside `finish`. Fourteen
+# milestone libraries carried a private copy of these eight lines; there is one now, and the
+# public names here are unchanged so no check needed editing.
+m37_finish() { finish; }
+m37_summary_on_abnormal_exit() { summary_on_abnormal_exit; }
 
 # m37_bounded <seconds> <command...> — run with a bound; exceeding it is a named
 # failure. Output goes to stdout as usual; the caller reads the exit status.

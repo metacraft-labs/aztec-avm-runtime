@@ -33,6 +33,16 @@ TEST_NAME=test_existing_event_emitter_path_still_available
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 . "$VERIFY_DIR/lib_m9_observer.sh"
 
+
+# THE SUMMARY LINE ON AN ABNORMAL EXIT — installed 2026-08-31, closing the other half of the
+# `m9_completeness` item that has been open since M24.
+#
+# This check can now `die` on an incomplete transcript, which is the point. A `die` prints no
+# summary line, and the sweep counts summary lines, so without this trap a correct refusal makes
+# M9 read 524 where it reads 807 — a 283-assertion silent shrink with nothing red to explain it.
+# That is exactly what M31's, M32's review's and M37's review's sweeps recorded, every time.
+summary_on_abnormal_exit
+
 m9_measured
 mkdir -p "$M9_WORK"
 
@@ -126,6 +136,20 @@ for label in native v8; do
   # The RUN's completeness, not the AVM's behaviour: a transcript missing its terminal sentinel is
   # a truncated run, and this says so with the line count rather than leaving the next reader to
   # infer it from "oob emitted no events".
+  #
+  # THE ASSERTION WAS NOT ENOUGH, AND THAT WAS OPEN SINCE M24. This is the second of the two checks
+  # `m9_completeness` was wired into only as a REPORT. An `assert_eq … complete` names the
+  # truncation, which is better than nothing — but it does not STOP the loop below, so the
+  # per-program comparisons still run against a short transcript and still emit
+  # "[v8] oob: upstream's own seam emitted one event per instruction, expected [3], got []". At
+  # every sighting since M24 this file has contributed exactly that one misattributing red beside
+  # the eleven in `test_observer_fires_on_exceptional_halt`. A precondition that reports and does
+  # not refuse is a precondition the next reader still has to argue with.
+  #
+  # The `die` comes first; the assertion is kept because the two ask different questions (see the
+  # note in `test_observer_fires_on_exceptional_halt`) and because it is the one that would notice
+  # a transcript arriving whole with the sentinel set to 0.
+  require_complete_transcript "$e" avmEvents.done "[$label] the fallback event"
   assert_eq "[$label] the fallback transcript is complete rather than truncated" \
     "complete" "$(m9_completeness "$e" avmEvents.done)"
   assert_eq "[$label] it states its coverage" \

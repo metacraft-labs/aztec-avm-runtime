@@ -35,21 +35,15 @@ M35_ARMS_TIMEOUT="${M35_ARMS_TIMEOUT:-1800}"
 # ---------------------------------------------------------------------------
 # The abnormal-exit trap.
 # ---------------------------------------------------------------------------
-_M35_FINISHED=0
-m35_finish() {
-  _M35_FINISHED=1
-  finish
-}
-_m35_abnormal_exit() {
-  local rc=$?
-  [ "$_M35_FINISHED" = "1" ] && return 0
-  printf '%s: %d assertion(s), %d failure(s)\n' "$TEST_NAME" "$_ASSERTIONS" "$((_FAILURES + 1))"
-  printf '%s: FAIL — exited (status %d) before finish; the summary above counts that as a failure\n' \
-    "$TEST_NAME" "$rc" >&2
-}
-m35_summary_on_abnormal_exit() {
-  trap _m35_abnormal_exit EXIT
-}
+# DELEGATED TO `lib.sh` ON 2026-08-31. These eight lines were copied into FOURTEEN
+# milestone libraries, m22..m37. M22 wrote them and said the third milestone wanting
+# them is when they move into `lib.sh`; M24 declined for M22's own reason and recorded
+# it as owed. The fifteenth caller turned out to be M9 — not a new milestone but the
+# campaign's oldest open item — so the move is made and these are wrappers. The public
+# names are unchanged, so no check needed editing, and the behaviour is identical: one
+# implementation instead of fourteen, verified by the sweep.
+m35_finish() { finish; }
+m35_summary_on_abnormal_exit() { summary_on_abnormal_exit; }
 
 # ---------------------------------------------------------------------------
 # The arms.

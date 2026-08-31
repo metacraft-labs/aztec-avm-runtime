@@ -48,21 +48,15 @@ export M28_GATE_RECIPE M28_WORKFLOW M28_GATE_JOB
 # `CAMPAIGN-BRIEF.md` names, and the move remains this campaign's outstanding item rather than
 # something a gate milestone should do on its way out.
 # ---------------------------------------------------------------------------
-_M28_FINISHED=0
-m28_finish() {
-  _M28_FINISHED=1
-  finish
-}
-_m28_abnormal_exit() {
-  local rc=$?
-  [ "$_M28_FINISHED" = "1" ] && return 0
-  printf '%s: %d assertion(s), %d failure(s)\n' "$TEST_NAME" "$_ASSERTIONS" "$((_FAILURES + 1))"
-  printf '%s: FAIL — exited (status %d) before finish; the summary above counts that as a failure\n' \
-    "$TEST_NAME" "$rc" >&2
-}
-m28_summary_on_abnormal_exit() {
-  trap _m28_abnormal_exit EXIT
-}
+# DELEGATED TO `lib.sh` ON 2026-08-31. These eight lines were copied into FOURTEEN
+# milestone libraries, m22..m37. M22 wrote them and said the third milestone wanting
+# them is when they move into `lib.sh`; M24 declined for M22's own reason and recorded
+# it as owed. The fifteenth caller turned out to be M9 — not a new milestone but the
+# campaign's oldest open item — so the move is made and these are wrappers. The public
+# names are unchanged, so no check needed editing, and the behaviour is identical: one
+# implementation instead of fourteen, verified by the sweep.
+m28_finish() { finish; }
+m28_summary_on_abnormal_exit() { summary_on_abnormal_exit; }
 
 # A bounded subprocess whose overrun is a NAMED failure rather than a hang. `CAMPAIGN-BRIEF.md`
 # names three states a check can be in — green, red and HUNG — and says the third is the worst,

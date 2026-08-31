@@ -26,6 +26,16 @@ TEST_NAME=verify_observation_hook_step_records_identical
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 . "$VERIFY_DIR/lib_m9_observer.sh"
 
+
+# THE SUMMARY LINE ON AN ABNORMAL EXIT — installed 2026-08-31, closing the other half of the
+# `m9_completeness` item that has been open since M24.
+#
+# This check can now `die` on an incomplete transcript, which is the point. A `die` prints no
+# summary line, and the sweep counts summary lines, so without this trap a correct refusal makes
+# M9 read 524 where it reads 807 — a 283-assertion silent shrink with nothing red to explain it.
+# That is exactly what M31's, M32's review's and M37's review's sweeps recorded, every time.
+summary_on_abnormal_exit
+
 mkdir -p "$M9_WORK"
 
 # ---------------------------------------------------------------------------

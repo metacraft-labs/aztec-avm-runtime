@@ -29,6 +29,16 @@ TEST_NAME=test_observer_fires_on_exceptional_halt
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 . "$VERIFY_DIR/lib_m9_observer.sh"
 
+
+# THE SUMMARY LINE ON AN ABNORMAL EXIT — installed 2026-08-31, closing the other half of the
+# `m9_completeness` item that has been open since M24.
+#
+# This check can now `die` on an incomplete transcript, which is the point. A `die` prints no
+# summary line, and the sweep counts summary lines, so without this trap a correct refusal makes
+# M9 read 524 where it reads 807 — a 283-assertion silent shrink with nothing red to explain it.
+# That is exactly what M31's, M32's review's and M37's review's sweeps recorded, every time.
+summary_on_abnormal_exit
+
 m9_measured
 m8_require_artifacts "$(m9_steps_native)" "$(m9_steps_v8)" "$(m9_steps_native_err)" "$(m9_steps_v8_err)"
 
@@ -106,6 +116,26 @@ for label in native v8; do
     native) t="$(m9_steps_native)"; e="$verbose_err" ;;
     v8)     t="$(m9_steps_v8)";     e="$(m9_steps_v8_err)" ;;
   esac
+  # THE COMPLETENESS PRECONDITION, WIRED IN ON 2026-08-31 — OPEN SINCE M24.
+  #
+  # This is one of the two checks `m9_completeness` was never wired into, and it is the expensive
+  # one: when the V8/WASI stdout truncation fires, this loop emits **eleven** red assertions with
+  # names like "[v8] oob recorded a step for every one of them, expected [3], got []" and "[v8]
+  # burn's last record is the instruction that exhausted the gas". Every one of them reads like a
+  # discovery about the interpreter and none of them is — it is a fact about the RUN. That
+  # misattribution is the precise thing `require_complete_transcript` exists to prevent, and it
+  # has been happening in this file at every sighting since M24: M31's sweep, M32's review's,
+  # M37's review's (eleven here plus one in
+  # `test_existing_event_emitter_path_still_available`, the other unwired check).
+  #
+  # It goes BEFORE the eleven, not beside them, because a refusal that arrives after the
+  # misattributing assertions have already printed has not prevented anything.
+  #
+  # `assert_eq … avmSteps.done` is KEPT below rather than replaced. The two say different things:
+  # the refusal says the transcript is incomplete (a fact about the run), and the assertion says
+  # the recorded run reported completion (a fact about the module). A transcript that arrives
+  # whole with `avmSteps.done 0` is a real failure and only the assertion sees it.
+  require_complete_transcript "$t" avmSteps.done "[$label] the step"
   assert_eq "[$label] the run completed" "1" "$(m9_field "$t" avmSteps.done)"
 
   # burn: out of gas, opcode known.
@@ -185,6 +215,10 @@ m8_require_artifacts "$control_bin"
 m9_run_native "$control_bin" "$(m9_nohoist_steps)" "$M9_WORK/nohoist.steps.err" steps
 assert_eq "the control run exited 0" "0" "$?"
 m8_require_artifacts "$(m9_nohoist_steps)"
+# The same precondition on the control's own transcript. Without it a truncated control run makes
+# the `lost_total` loop below report that the no-hoist build lost records — which is this check's
+# headline claim, arrived at from a short pipe rather than from the build.
+require_complete_transcript "$(m9_nohoist_steps)" avmSteps.done "the control's step"
 assert_eq "the control run completed" "1" "$(m9_field "$(m9_nohoist_steps)" avmSteps.done)"
 assert_eq "the control still carries the observer patch" "1" \
   "$(m9_field "$(m9_nohoist_steps)" avmSteps.observerCompiledIn)"

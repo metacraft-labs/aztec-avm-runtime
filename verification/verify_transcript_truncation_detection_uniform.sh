@@ -145,11 +145,29 @@ EOF
 uncommented() { # <file> -> its lines with whole-line comments removed
   grep -vE '^[[:space:]]*#' "$1" || true
 }
+# THE PREFIX THAT MAKES THIS CALL-SHAPED, AND IT DID NOT USED TO.
+#
+# Until 2026-08-31 both predicates matched the name after ANY non-word character —
+# `(^|[^A-Za-z0-9_])NAME` — while the paragraph above them said, in as many words, "the name must
+# begin a command, or be the first word of a command substitution". It did not: a name in a
+# TRAILING comment satisfied it, because `uncommented` strips WHOLE-LINE comments only. So
+# `: # unwired: require_complete_transcript "$t"` counted as a call.
+#
+# That is this file's own subject — a citation counted as a call — surviving in the file that
+# records it, and it is also the campaign's commonest shape: a description claiming a property the
+# comparison cannot make. FOUND BY MUTATION, not by reading: unwiring both refusals in
+# `test_observer_fires_on_exceptional_halt` while leaving the name in a trailing comment left this
+# check at 48 assertions, 0 failures. Section 2's `mention_in_trailing_comment` probe is the
+# control that would have caught it and is now here.
+#
+# Command position: start of line, or after a separator (`;` `&&` `||` `|` `(` `{` `}`), or the
+# first word of a `$(…)` or a backtick substitution.
+CALL_PREFIX='(^[[:space:]]*|[;&|(){}][[:space:]]*|\$\(|`)'
 reaches_shared() { # <file> -> true if it CALLS transcript_completeness or require_complete_transcript
-  str_has_line_re "$(uncommented "$1")" "(^|[^A-Za-z0-9_])($REFUSAL|$SHARED)([[:space:]\"']|\$)"
+  str_has_line_re "$(uncommented "$1")" "$CALL_PREFIX($REFUSAL|$SHARED)([[:space:]\"']|\$)"
 }
 reaches_refusal() { # <file> -> true if it CALLS require_complete_transcript
-  str_has_line_re "$(uncommented "$1")" "(^|[^A-Za-z0-9_])$REFUSAL([[:space:]\"']|\$)"
+  str_has_line_re "$(uncommented "$1")" "$CALL_PREFIX$REFUSAL([[:space:]\"']|\$)"
 }
 
 MISSING=""
@@ -164,21 +182,45 @@ $POP
 EOF
 # THIS IS A CENSUS PINNED AS A NUMBER, NOT A CLAIM THAT THE TREE IS CLEAN.
 #
-# 22 of the 30 do not reach the shared implementation. They are not all defects — several read one
+# 20 of the 30 do not reach the shared implementation. They are not all defects — several read one
 # field from a driver's output and never compare anything, so a truncation there produces one
 # missing value rather than a page of false divergences — but several DO read thirty fields after a
 # sentinel assertion of their own spelling, and those are the eighth, ninth and tenth spellings of
 # the question this milestone set out to unify. Converting them touches ten milestones' assertion
 # counts and is recorded as an Outstanding Task rather than half-done here.
 #
+# **22 -> 20 ON 2026-08-31, AND THE TWO THAT MOVED ARE THE CAMPAIGN'S OLDEST OPEN ITEM.**
+# `test_observer_fires_on_exceptional_halt` and `test_existing_event_emitter_path_still_available`
+# are the two checks `m9_completeness` was never wired into, open since M24 and named in the brief
+# at every truncation sighting since — they contributed eleven and one misattributing red
+# assertions, with names like "[v8] oob recorded a step for every one of them, expected [3],
+# got []", every time the V8/WASI flake fired. They call `require_complete_transcript` now, before
+# the assertions that misattribute rather than beside them, and M9's four transcript checks install
+# the abnormal-exit trap so the refusal reads as a RED milestone instead of a 283-assertion
+# silent shrink. This check going red is what it is FOR: the count could not drift without somebody
+# looking, and it did not.
+#
 # What IS pinned is the NUMBER, exactly, in both directions: a new check written without the shared
-# helper makes this fail, and converting one of the 22 makes it fail too, so the count cannot drift
-# in either direction without somebody looking. A census that is only printed is what M20's review
-# found and named.
+# helper makes this fail, and converting one of the 20 makes it fail too. A census that is only
+# printed is what M20's review found and named.
+#
+# AND THE TWO CONVERTED ARE NAMED AS WELL AS COUNTED, because a size is not a composition — this
+# campaign's own rule, from M28's review, where replacing one row of a table with a different check
+# that exists also passed a size comparison. Naming them means unwiring one of the two is a failure
+# that says WHICH, rather than a number that moved by one for an unstated reason.
 note "not reaching the shared implementation:$MISSING"
-assert_eq "the set that does not reach it is exactly the recorded size" "22" "$N_MISSING"
-assert_eq "…and the nine that DO are the six comparers, the node-host runs and M21's two probes" \
-  "9" "$((N_POP - N_MISSING))"
+assert_eq "the set that does not reach it is exactly the recorded size" "20" "$N_MISSING"
+assert_eq "…and the eleven that DO are the six comparers, the node-host runs, M21's two probes and M9's two" \
+  "11" "$((N_POP - N_MISSING))"
+for _m9_converted in test_observer_fires_on_exceptional_halt \
+                     test_existing_event_emitter_path_still_available; do
+  assert_true "$_m9_converted reaches the shared refusal (open from M24 to 2026-08-31)" \
+    reaches_refusal "$REPO_ROOT/verification/$_m9_converted.sh"
+  # …and it is in the POPULATION, or the assertion above is about a file this census never looks
+  # at — the "an absence asked of a tree that excludes the subject" shape, inverted.
+  assert_true "…and it is in this census's own population" \
+    str_has_line "$POP" "$REPO_ROOT/verification/$_m9_converted.sh"
+done
 
 # THE NEEDLE IS A THING UNDER TEST, in both directions. A file that only MENTIONS the name must not
 # count as reaching it, and a file that CALLS it must. Without the first of these, the census above
@@ -197,6 +239,19 @@ trap 'rm -rf "$NEEDLE_PROBE"' EXIT
   printf '%s\n' "${REFUSAL}_disabled \"\$OUT\" avmSteps.done"; } >"$NEEDLE_PROBE/renamed_away.sh"
 assert_false "a file that only MENTIONS the refusal in a comment does NOT count as reaching it" \
   reaches_shared "$NEEDLE_PROBE/mention_only.sh"
+# …AND THE SAME MENTION IN A **TRAILING** COMMENT, which is the case that was open until
+# 2026-08-31 and the one a mutation actually produces. `uncommented` removes whole-line comments,
+# so this file's code survives stripping and only the call-shape prefix can reject it.
+{ printf '%s\n' '#!/usr/bin/env bash'
+  printf '%s\n' ": # unwired: $REFUSAL \"\$OUT\" avmSteps.done"; } >"$NEEDLE_PROBE/trailing_comment.sh"
+assert_false "…and a mention in a TRAILING comment does not count either" \
+  reaches_shared "$NEEDLE_PROBE/trailing_comment.sh"
+# The positive control for that negative: the same line WITHOUT the comment does count, so the
+# rejection is about the comment and not about the spelling.
+{ printf '%s\n' '#!/usr/bin/env bash'
+  printf '%s\n' "$REFUSAL \"\$OUT\" avmSteps.done"; } >"$NEEDLE_PROBE/trailing_control.sh"
+assert_true "…while the identical call with the comment removed DOES count" \
+  reaches_shared "$NEEDLE_PROBE/trailing_control.sh"
 assert_true "…while one that CALLS it does" reaches_shared "$NEEDLE_PROBE/calls_it.sh"
 assert_true "…and so does one that calls the shared implementation directly" \
   reaches_shared "$NEEDLE_PROBE/calls_shared.sh"
