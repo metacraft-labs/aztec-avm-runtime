@@ -144,3 +144,104 @@ All six 0 failures against the arms measured at
   SUCCEED**, so a reverted nested frame's write is provably not in the tree.
 - Deployment: the 2×2 is complete — same-block and later-block calls both succeed with the
   deployment and both revert at **instruction one** with *"is not deployed"* without it.
+
+## Step 4 — an eighth entry, which the audit had called blocked
+
+`test_custom_bytecode_unhappy_paths` (M18) was left `pending` by the residuals pass on the ground
+that the malformed programs need the bytecode ASSEMBLER, which this repository does not have. That
+is **still true and is asserted rather than quoted** — but it is not in the way, because each of the
+four unhappy paths is defined by what the bytes are **not**:
+
+| path | program |
+|---|---|
+| an invalid opcode | a byte no opcode uses — **1 byte** |
+| a truncated instruction | a VALID opcode with its operands cut off — **1 byte** |
+| an invalid tag | that instruction at full length, tag byte out of range — **5 bytes** |
+| an out-of-range program counter | nothing at the counter — **0 bytes** |
+
+Every constant is derived from the AVM's own headers at the `cpp` anchor, **twice**: the tool reads
+`WireOpCode` and `ValueTag` in JavaScript, the check re-derives them with its own Python parser, and
+the two are asserted equal. The AVM answers all four with **four different diagnostics**, and the
+truncation one names `instruction size: 5`, which is `SET_8`'s wire length computed from upstream's
+own operand table.
+
+**The well-formed control is a real contract's own dispatch bytecode through the same custom path** —
+179 instructions, returning the function's answer — because "malformed bytecode reverts" is equally
+satisfied by an AVM that refuses all of it. And "not host-side crashes" is a **positive** claim: all
+five run in one process with the control last.
+
+`test_custom_bytecode_unhappy_paths`: **62 assertions, 0 failures.**
+
+## Step 5 — the mutation matrix: twelve arms, and three of them had to be re-aimed
+
+| arm | subject | result | what it killed |
+|---|---|---|---|
+| M1 | `collectDebugLogs` forced on | 24 / **1** | the flag control, and only it |
+| M2 | one surfaced message rewritten | 24 / **1** | the message-vs-contract-source comparison |
+| M3 | the mint never submitted | 37/**11**, 49/**12** | every balance, revert-code and per-tx gas assertion |
+| M4 | the deployment not attached | 38 / **5** | the two calls, their values, the identity — control green |
+| M5 | the teardown call dropped | 39 / **6** | the teardown read-backs and the TEARDOWN module code |
+| M6 | both gas arms allocate the same | 38 / **1** | exactly the non-degeneracy guard |
+| M7 | the note-hash index answers for everything | 33 / **3** | the note-hash half; the nullifier half green |
+| M8 | the arm run HANGS | **0 / 1, rc 124** | the bound, named, with a summary line at column 0 |
+| M9 | one block renamed | 37 / **17** | the block LABEL first, then every field as `MISSING` |
+| M10 | the arms file truncated | **0 / 1** | the precondition, refusing by name |
+| M11 | the "invalid" opcode is valid | 62 / **3** | the sentinel guard, the diagnostic, the distinct count |
+| M12 | the well-formed control is malformed | 62 / **5** | exactly the control's assertions |
+
+**Three arms had to be re-aimed, and each re-aiming is a finding.**
+
+1. **M4's first form crashed the arm run** — it emptied the class loop and left the instance loop,
+   so the transaction carried an instance whose class nothing knew, the run exited 1 and the check
+   died at its precondition with `0 assertion(s), 1 failure(s)`. The die-before-summary path worked
+   and **not one assertion of the section the arm was written for ever ran.**
+2. **M6 went GREEN and that was a defect in the driver, not in the arm.** The gas allocations were
+   declared twice — once in the call and once in the report — so mutating the call left the report
+   still claiming they differed and the check's non-degeneracy guard passed over an equality that
+   had become a tautology. One declaration now. *This is the arm that earned its keep.*
+3. **M11's first form was refused by the TOOL's own guard**, which will not produce an arm run whose
+   "invalid" byte is below the sentinel — so the check died before reaching its own guard. Two
+   substitutions now, and having both guards is the point: one refuses to MAKE the bad arm, the
+   other refuses to BELIEVE it.
+
+And **M9 was split from M10** after M10's first run reported *thirty-five* failures over a truncated
+arms file: loud, but a broken-check shape rather than a run-did-not-happen one, and the two have
+different remedies. `tb_require_arms_shape` turns it into one named refusal; M9 now exercises the
+accessor's `MISSING` path over a well-formed file instead.
+
+`--demo-still-there` exits **5** as designed, and every arm's restore was verified against the
+sha256 manifest.
+
+## Step 6 — eight entries closed, each with its own commit
+
+| commit | entry | milestone | assertions |
+|---|---|---|---|
+| `2e045f5` | `test_debug_log_events_surface` | M25 | 24 |
+| `aba0966` | `e2e_block_token_flows` | M22 | 37 |
+| `bf155c9` | `e2e_ts_wasm_token_transfer` | M18 | 49 |
+| `899b56b` | `e2e_ts_wasm_nested_call_fork_merge` | M18 | 38 |
+| `ca50cad` | `e2e_ts_wasm_phase_revert_semantics` | M18 | 39 |
+| `fc92da1` | `e2e_block_deployments_through_processor` | M22 | 38 |
+| `9d9e21a` | `test_settled_read_request_verification` | M21 | 33 |
+| `6a78c3a` | `test_custom_bytecode_unhappy_paths` | M18 | 62 |
+
+**320 new assertions.** Every check is wired into its milestone's own `verify-m<N>` recipe — the
+brief's rule that a milestone that declares a check must run it — and each has a standalone recipe.
+
+**The pending list is 21 → 14**, and four of the fourteen carry today's measurement rather than
+yesterday's (see the specs commit `d12d4c31`).
+
+## Step 7 — the sweep reference, declared before the run
+
+| milestone | from | to | delta | what buys it |
+|---|---|---|---|---|
+| m18 | 283 | **471** | +188 | 49 + 38 + 39 + 62 |
+| m21 | 334 | **367** | +33 | `test_settled_read_request_verification` |
+| m22 | 265 | **340** | +75 | 37 + 38 |
+| m25 | 284 | **308** | +24 | `test_debug_log_events_surface` |
+
+**PREDICTED TOTAL 12,496** = 12,176 + 320. Nothing else may move: measured before the sweep,
+`verify_named_checks_exist` is **9**, `verify_no_pipeline_predicates` **69**,
+`just check-repo-hygiene` **28** and `verify_reuse_inventory_complete` **19** — all unchanged, and
+the two failures in that set are the parallel tracks' known reds (L3's
+`tools/scan_reverted_transactions.mjs`, L4's sixth `| grep -q`), with their counts unmoved.

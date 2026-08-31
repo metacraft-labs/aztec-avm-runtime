@@ -1,0 +1,68 @@
+{
+ "_total": 12496,
+ "_baseline": 12176,
+ "_declared_moves": {
+  "m18": {
+   "from": 283,
+   "to": 471,
+   "delta": 188,
+   "checks": "e2e_ts_wasm_token_transfer 49 + e2e_ts_wasm_nested_call_fork_merge 38 + e2e_ts_wasm_phase_revert_semantics 39 + test_custom_bytecode_unhappy_paths 62"
+  },
+  "m21": {
+   "from": 334,
+   "to": 367,
+   "delta": 33,
+   "checks": "test_settled_read_request_verification 33"
+  },
+  "m22": {
+   "from": 265,
+   "to": 340,
+   "delta": 75,
+   "checks": "e2e_block_token_flows 37 + e2e_block_deployments_through_processor 38"
+  },
+  "m25": {
+   "from": 284,
+   "to": 308,
+   "delta": 24,
+   "checks": "test_debug_log_events_surface 24"
+  }
+ },
+ "m0": 156,
+ "m1": 181,
+ "m2": 293,
+ "m3": 199,
+ "m4": 218,
+ "m5": 236,
+ "m6": 363,
+ "m7": 287,
+ "m8": 516,
+ "m9": 807,
+ "m10": 450,
+ "m11": 287,
+ "m12": 691,
+ "m13": 458,
+ "m14": 460,
+ "m15": 537,
+ "m16": 225,
+ "m17": 297,
+ "m18": 471,
+ "m19": 180,
+ "m20": 237,
+ "m21": 367,
+ "m22": 340,
+ "m23": 512,
+ "m24": 350,
+ "m25": 308,
+ "m26": 340,
+ "m27": 345,
+ "m28": 357,
+ "m29": 127,
+ "m30": 218,
+ "m31": 421,
+ "m32": 237,
+ "m33": 248,
+ "m34": 217,
+ "m35": 239,
+ "m36": 150,
+ "m37": 171
+}
