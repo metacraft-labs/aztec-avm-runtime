@@ -192,13 +192,17 @@ assert_true "…and at least one is a rejection with the tag the inventory requi
 echo "== the inventory entries this enumeration was due to settle are settled"
 
 INV="$REPO_ROOT/REUSE-INVENTORY.md"
-for pair in "RI-39 replace" "RI-40 replace" "RI-41 build"; do
-  id="${pair%% *}"; want="${pair#* }"
-  got="$(awk -v id="$id" '
+# ONE EXTRACTOR, used by the subject below and by the control at the bottom of this section.
+_ri_decision() { # <id> -> that entry's `decision:` value, or nothing
+  awk -v id="$1" '
     $0 ~ "^### " id " — " {inside=1; next}
     inside && /^### RI-/ {inside=0}
     inside && /^- decision:/ {sub(/^- decision:[ ]*/,""); print; inside=0}
-  ' "$INV")"
+  ' "$INV"
+}
+for pair in "RI-39 replace" "RI-40 replace" "RI-41 build"; do
+  id="${pair%% *}"; want="${pair#* }"
+  got="$(_ri_decision "$id")"
   assert_eq "$id's decision is $want" "$want" "$got"
   conf="$(awk -v id="$id" '
     $0 ~ "^### " id " — " {inside=1; next}
@@ -208,10 +212,31 @@ for pair in "RI-39 replace" "RI-40 replace" "RI-41 build"; do
   assert_eq "…and its confidence is measured" "measured" "$conf"
 done
 # THE CONTROL for that extractor: an id the inventory does not have yields nothing.
-MISSING="$(awk -v id="RI-999" '
-  $0 ~ "^### " id " — " {inside=1; next}
-  inside && /^- decision:/ {sub(/^- decision:[ ]*/,""); print; inside=0}
-' "$INV")"
+#
+# TWO THINGS WERE WRONG WITH THIS CONTROL AND BOTH ARE THIS CAMPAIGN'S OWN RECORDED SHAPES.
+#
+#   1. The id was TYPED (`RI-999`). `REUSE-INVENTORY.md` is at RI-101 and grows every milestone;
+#      M36 created RI-98 and RI-99 and thereby silently retired a `RI-99` control in a check it
+#      never touched, which had been catching a real defect since M2. Derived from the inventory
+#      now, one past its highest id, with the derived value ASSERTED absent — the assertion that
+#      goes red on the day the namespace reaches it.
+#   2. It was a SECOND, SHORTER awk than the extractor it controls: the subject has three rules and
+#      this had two, missing `inside && /^### RI-/ {inside=0}`. "A control has to run through the
+#      instrument, not beside it" — the same defect M34's review found in `test_wallet_keys_
+#      deterministic`. The extractor is one function now, called for the real ids above and for the
+#      derived absent one here, so an extractor that stopped extracting fails both.
+ABSENT_RI="RI-$(awk 'match($0, /^### RI-([0-9]+)[^0-9]/, m) { if (m[1]+0 > hi) hi = m[1]+0 } END { print hi + 1 }' "$INV")"
+assert_true "the derived absent inventory id was computed from the inventory rather than typed" \
+  str_has_re "$ABSENT_RI" '^RI-[0-9]+$'
+if grep -q "^### $ABSENT_RI — " "$INV"; then
+  fail "the derived id $ABSENT_RI is PRESENT in the inventory, so the control below would be vacuous"
+else
+  pass "the derived id $ABSENT_RI really is absent, so the control can fail  [$ABSENT_RI]"
+fi
+MISSING="$(_ri_decision "$ABSENT_RI")"
 assert_eq "…and an id the inventory does not define yields nothing" "" "$MISSING"
+# …and the same extractor, on a real id, still answers — so the empty result above is a reading
+# rather than an extractor that has stopped extracting.
+assert_eq "…while the same extractor still answers for a real id" "replace" "$(_ri_decision RI-39)"
 
 m23_finish

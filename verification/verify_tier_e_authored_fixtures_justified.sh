@@ -248,14 +248,36 @@ fi
 #
 #     (b) alone is deliberately weaker than (a): with A=4, B=4, C=5, D=6 and H=4 it would tolerate
 #         Tier E reaching 3. Saying so here rather than letting the pair look stronger than it is.
+#
+# THE SYNTHESISED IDS ARE DERIVED FROM THE MANIFEST, NOT COUNTED FROM A BASE.
+#
+# This read `fx = 26 + i`. `fixtures/MANIFEST.md` reached FX-29 while nobody was looking, so the
+# control was injecting entries whose ids the manifest ALREADY HAS — duplicates, where the whole
+# point is fresh ones. M36's review recorded it as fragility rather than a hole because the
+# tier-size rule it exists for still fired; that is true and it is not a reason to keep it, because
+# an arm that passes has to pass for its own reason. A duplicate id is a different defect from a
+# tier that grew, and the parser is entitled to report it as one.
+#
+# It is "an inventory that grows turns a typed absent id into a present one" — this campaign's own
+# rule, whose remedy it names: derive the value from the namespace, and ASSERT the derived value
+# really is absent, which is the assertion that would have gone red the day the manifest reached
+# 26.
 grow_tier_e() { # <n> -> writes $SCRATCH/grown.md with n extra Tier E entries
   python3 - "$MANIFEST" "$SCRATCH/grown.md" "$1" <<'PY'
-import sys
+import re, sys
 src, dst, n = sys.argv[1], sys.argv[2], int(sys.argv[3])
 t = open(src).read()
+# One past the highest id the manifest declares, in the digit-tolerant form — `FX-\d{2}` is what
+# made `FX-100` invisible to `_manifest_parser.py` in three places at once.
+present = {int(m) for m in re.findall(r"^### FX-(\d{2,})(?!\d) ", t, re.M)}
+if not present:
+    raise SystemExit("no FX- entries parsed out of the manifest; the base below would be a guess")
+base = max(present) + 1
 blocks = []
 for i in range(n):
-    fx = 26 + i
+    fx = base + i
+    if fx in present:
+        raise SystemExit(f"synthesised id FX-{fx} already exists in the manifest")
     blocks.append(f"""
 ### FX-{fx} — An extra authored family
 - tier: E

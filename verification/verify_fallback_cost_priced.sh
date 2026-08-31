@@ -439,7 +439,25 @@ for fx in FX-14 FX-15 FX-16 FX-17 FX-18 FX-19; do
   fi
 done
 # The manifest lookup must be able to fail, or six green rows say nothing.
-if grep -q "^### FX-99 — " "$MANIFEST"; then
+#
+# THE ABSENT ID IS DERIVED, NOT TYPED. This read `FX-99`. `fixtures/MANIFEST.md` is at FX-29 today,
+# so the control still worked — but that is a fact about how fast the corpus grows, not a property
+# of the check, and this campaign has already had the same control expire once: M36 created RI-98
+# and RI-99, and `verify_fixture_corpus_manifest_complete`'s planted `RI-99` silently stopped
+# controlling after catching a real defect since M2. "An inventory that grows turns a typed absent
+# id into a present one" is the rule, and its remedy is this: derive the needle one past the
+# highest id the document declares, and ASSERT that the derived value really is absent — which is
+# the assertion that goes red on the day the namespace reaches it, instead of the control going
+# quiet.
+ABSENT_FX="FX-$(awk 'match($0, /^### FX-([0-9][0-9]+)[^0-9]/, m) { if (m[1]+0 > hi) hi = m[1]+0 } END { print hi + 1 }' "$MANIFEST")"
+assert_true "the derived absent fixture id was computed from the manifest rather than typed" \
+  str_has_re "$ABSENT_FX" '^FX-[0-9][0-9]+$'
+if grep -q "^### $ABSENT_FX — " "$MANIFEST"; then
+  fail "the derived id $ABSENT_FX is PRESENT in the manifest, so the lookup control below would be vacuous"
+else
+  pass "the derived id $ABSENT_FX really is absent, so the lookup control can fail  [$ABSENT_FX]"
+fi
+if grep -q "^### $ABSENT_FX — " "$MANIFEST"; then
   fail "the manifest lookup found a fixture id that does not exist"
 else
   pass "the manifest lookup returns nothing for a fixture id that does not exist"
