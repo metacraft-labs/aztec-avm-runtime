@@ -451,3 +451,38 @@ asserted NUMERIC first.
 `e2e_ts_wasm_amm` 78 → **80**, `test_nested_call_reverted_contributes_no_side_effects` 89 → **90**.
 
 **Revised prediction: m18 578, m21 451, m25 454, m28 358, m31 450 — TOTAL 12,872.**
+
+---
+
+## THE MUTATION MATRIX, RE-TAKEN AGAINST THE TREE THAT SHIPS
+
+The arithmetic guards moved three checks' counts, so the matrix was re-run after the last edit —
+*"a matrix taken before the last edit is not a measurement of the tree that ships"*. **Every arm
+reproduced its failure SET exactly, at the new counts.**
+
+| arm | subject | result | what it killed |
+|---|---|---|---|
+| A1 | the foreign-sender control is self-sent after all | 80 / **8** | the sender identity, all four `only_self` refusals, the payload non-emptiness, the four-distinct count, the control's empty pool |
+| A2 | the no-minter control grants the minter anyway | 80 / **3** | `is_minter`, the control's revert, its zero supply |
+| A3 | the exact-out note siloed under the wrong token | 80 / **3** | exactly the FOURTH entry point and its two deltas |
+| A4 | the `abi_only_self` scan drops its predicate | 80 / **2** | exactly the two Part-2 assertions (4 → 6) |
+| A5 | the arm run HANGS | **0 / 1, rc 124** | the bound, named, summary at column 0 |
+| A6 | the arms file truncated | **0 / 1** | one named refusal, listing the three missing arms |
+| B1 | the positive control runs the SUBJECT's outer function | 90 / **7** | the contract-derived callee mapping and the whole positive control |
+| B2 | the early-revert control forwards the subject's argument | 90 / **3** | the argument identity and §5's two count comparisons |
+| B3 | the nested callee stops reverting, **in the CONTRACT** | 90 / **6** | all three witnesses at once |
+| B4 | the transaction's nullifier list reported empty | 90 / **5** | exactly §4b; §4a and §4c green |
+| B5 | the transpiler arm run HANGS | **0 / 1** | the bound, named (rc 137 — `m31_bounded` uses `timeout -s KILL` and tests 124 and 137) |
+| C1 | **the container's l2Gas fabricated at the WRITE site** | 56 / **7** | the whole l2Gas sequence and the 516-record differential |
+| C2 | the balance read-back taken before the block | 56 / **5** | the three after-assertions and the arrival test |
+| C3 | the recipient's leaf derived for the SENDER | 56 / **4** | the leaf identity, the `EMPTY`-before, the after value, the conservation sum |
+| C4 | the parser's variable-id mapping off by one | 56 / **23** | the id map by name, the completeness census, everything downstream |
+| D1 | this runtime's seam drops the public calldata | 80 / **8** | the two calldata-carrying cases; `noCalldata` green |
+| D2 | the node stub stops counting | 80 / **1** | exactly the paired positive |
+| D3 | the reference stops running PXE's step 2 | 80 / **6** | §2 entirely; the byte-identity assertions SURVIVE, which is the arm's finding |
+| D4 | the reference producer HANGS | **13 / 1, rc 124** | the bound, named |
+
+`--demo-still-there` exits **5** as designed; every arm's restore was verified against the sha256
+manifest; `HARNESS` reports no `MUTATION MISS`, no `ABORTED` and no `DID NOT HOLD`; and the tree is
+clean afterwards, with the browser bundle rebuilt from the restored sources and verified back at its
+shipped figures.
