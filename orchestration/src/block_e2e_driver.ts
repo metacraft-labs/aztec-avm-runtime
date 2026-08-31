@@ -276,7 +276,16 @@ async function runGuardArm(reactor: ReactorLike): Promise<Record<string, unknown
     const exportNames = moduleExportNames(reactor);
     return {
       beforeSeal,
-      seal: JSON.parse(JSON.stringify(seal)),
+      // THE REPLACER IS NOT OPTIONAL, AND `runBlockArm` ALREADY HAD IT. `seal` carries a `bigint`,
+      // and a bare `JSON.stringify` THROWS on one — "Do not know how to serialize a BigInt" — which
+      // killed the whole arm run, not just this field. So `test_failed_tx_leaves_no_state`,
+      // `test_block_limits_respected` and `test_guarded_merkle_tree_blocks_post_seal_access` all
+      // refused with "the block arm run failed", and M22 read 76 assertions against a reference of
+      // 260. One unguarded `stringify` in the guard arm cost the milestone 184.
+      //
+      // The identical line 50 lines above is already written this way. This is the same call with
+      // the same argument in the same file, and only one of the two had been fixed.
+      seal: JSON.parse(JSON.stringify(seal, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))),
       afterSealGuarded,
       afterSealUnguarded,
       afterSealWriteGuarded,
