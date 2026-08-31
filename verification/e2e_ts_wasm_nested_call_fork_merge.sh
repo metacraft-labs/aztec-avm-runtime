@@ -22,9 +22,12 @@
 #   1. CALL AND STATICCALL FORK, AND THE FORK MERGES.
 #      `nested_call_to_add(3,5)` and `nested_static_call_to_add(3,5)` both return 8 and both cost
 #      MORE INSTRUCTIONS than the flat `add_args_return(3,5)` — which is what says a second context
-#      was entered rather than the call being inlined away. The merge is the checkpoint depth: both
-#      the contract store's and the transaction's are back at zero after every block, so a fork that
-#      opened and never closed would be visible as a non-zero depth.
+#      was entered rather than the call being inlined away. The merge is a CONSERVATION LAW over the
+#      contract store's checkpoints — some created, and every one closed exactly once — and Part 3
+#      records the correction that counting them forced: the store sees exactly ONE checkpoint per
+#      transaction, the same for a flat call as for a nested one, so the PER-FRAME fork is the
+#      module's and does not reach this side. The first version of that section asserted a depth of
+#      zero and called it the merge, which a store that never forked satisfies just as well.
 #      *The discriminator for the STATIC half* is `nested_static_call_to_set_storage`, which tries
 #      to WRITE inside the static frame: the AVM refuses it by name. A "staticcall" that forked like
 #      an ordinary call would let that write through, so the refusal is what distinguishes the two.
@@ -123,13 +126,43 @@ assert_ge "the refusal came after a real dispatch, not at instruction one" 100 \
   "$(tb_block nested nestedStaticWrite instructionsPerSimulation.0)"
 
 # ---------------------------------------------------------------------------
-# PART 3 — THE FORK MERGES: every checkpoint the block opened is closed
+# PART 3 — THE MERGE, AS A CONSERVATION LAW, AND A CORRECTION TO WHAT IT MEASURES
 # ---------------------------------------------------------------------------
+#
+# THE FIRST VERSION OF THIS SECTION ASSERTED A DEPTH OF ZERO AND CALLED IT THE MERGE. A store that
+# never forked reads zero too, so that assertion was satisfied by the ABSENCE of the thing it was
+# about. Counting the calls turns it into a conservation law — some checkpoints were created, and
+# every one of them was closed exactly once — and the depth becomes the consequence.
+#
+# AND THE COUNTS CORRECT THE SENTENCE. Measured: the contract store sees EXACTLY ONE checkpoint per
+# transaction, created and committed, and the FLAT call sees the same one. So the per-frame
+# fork/merge of a nested call happens INSIDE the module and does not reach the TypeScript store;
+# what this section measures is the transaction-level checkpoint balancing, which is a real property
+# and a different one. The nested fork's own evidence is Part 1's instruction delta and Part 2's
+# refusal, and it is stated that way rather than borrowed from here.
 
 for b in nestedCall nestedStaticCall nestedStaticWrite nestedRecovers flatCall; do
-  assert_eq "the contract store's checkpoint depth is zero after $b" \
+  CREATED="$(tb_block nested "$b" checkpoints.created)"
+  assert_ge "the contract store really was checkpointed during $b" 1 "$CREATED"
+  assert_eq "…and every checkpoint it opened was closed exactly once" \
+    "$CREATED" "$(( $(tb_block nested "$b" checkpoints.committed) + $(tb_block nested "$b" checkpoints.reverted) ))"
+  assert_eq "…leaving the depth at zero, which is the consequence and not the claim" \
     "0" "$(tb_block nested "$b" checkpointDepthAfter.contracts)"
 done
+
+# THE CORRECTION, ASSERTED SO IT CANNOT DRIFT BACK: the nested call and the flat call produce the
+# SAME contract-store checkpoint count. If they ever differed, the sentence above would be wrong and
+# this assertion is what would say so.
+assert_eq "a nested call and a flat one checkpoint the contract store identically" \
+  "$(tb_block nested flatCall checkpoints)" "$(tb_block nested nestedCall checkpoints)"
+assert_eq "…which is one per transaction, committed" \
+  '{"created":1,"committed":1,"reverted":0}' "$(tb_block nested flatCall checkpoints)"
+# So the per-frame fork is the MODULE's. The module carries the coordinator's own lockstep
+# assertion, asserted present in Part 0; M13's `avm_contract_db_host.mjs` is what drives it, and
+# this check does not claim to.
+assert_eq "and a transaction that REVERTED still balanced its checkpoint" \
+  "$(tb_block nested nestedStaticWrite checkpoints.created)" \
+  "$(( $(tb_block nested nestedStaticWrite checkpoints.committed) + $(tb_block nested nestedStaticWrite checkpoints.reverted) ))"
 
 # ---------------------------------------------------------------------------
 # PART 4 — A REVERTED NESTED CALL CONTRIBUTES NO SIDE EFFECTS

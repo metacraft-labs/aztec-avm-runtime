@@ -283,3 +283,35 @@ the counter — which is the whole content of the finding.
 `e2e_block_deployments_through_processor` 38 → **45**.
 
 **Revised prediction: m18 473, m21 367, m22 349, m25 308 — 331 new assertions, TOTAL 12,507.**
+
+## Step 9 — A SECOND ABORT, AND A THIRD ASSERTION OF MINE THAT COULD NOT FAIL
+
+The restarted sweep was killed at m1, for the same reason and by the same instrument: reading my own
+checks in the window the sweep provides.
+
+`e2e_ts_wasm_nested_call_fork_merge` asserted **"the fork merges"** as
+`checkpointDepthAfter.contracts == 0`, five times. **A store that never forked reads zero too** — so
+the assertion was satisfied by the ABSENCE of the thing it was about, and nothing in the arm said a
+checkpoint had ever been taken.
+
+Counting the calls turns it into a **conservation law**: some checkpoints were created, and every
+one of them was closed exactly once, by a commit or a revert; the depth is then the consequence.
+
+**AND THE COUNT CORRECTED THE SENTENCE, WHICH IS THE MORE VALUABLE HALF.** Measured: the contract
+store sees **exactly one checkpoint per transaction — created and committed — and the FLAT call sees
+the same one.** So the per-frame fork and merge of a nested call happens **inside the module** and
+does not reach the TypeScript store at all. The section had been claiming the store's depth as
+evidence for a property of the AVM's frames.
+
+The claim is now stated as what it is, and the correction is **asserted** so it cannot drift back:
+the flat call's and the nested call's checkpoint records must be identical, and both `1/1/0`. The
+nested fork's own evidence stays where it belongs — Part 1's instruction delta and Part 2's
+static-write refusal — and the check says explicitly that it does not drive
+`avm_coordinator_assert_lockstep`, which is M13's host's job.
+
+`e2e_ts_wasm_nested_call_fork_merge` 38 → **51**.
+
+**Revised prediction: m18 486, m21 367, m22 349, m25 308 — 344 new assertions, TOTAL 12,520.**
+
+*Two aborts, three vacuous assertions, one corrected claim. The window a sweep opens is the only
+time this pass had for reading its own work, and it paid three times.*

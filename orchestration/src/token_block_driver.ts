@@ -241,8 +241,16 @@ export interface BlockRecord {
   readonly instructionsPerSimulation: readonly (number | null)[];
   /** The module's own four-valued revert code per simulation, before upstream's type narrows it. */
   readonly rawRevertCodes: readonly (number | null)[];
-  /** Both checkpoint depths after the block. Nested calls that merged leave these at zero. */
+  /**
+   * The checkpoint depth after the block — which is a CONSEQUENCE and not the claim.
+   *
+   * A store that never forked reads zero here too, so the depth on its own is satisfied by the
+   * absence of the thing it is about. `checkpoints` below is the conservation law that makes it a
+   * measurement: some were created, and every one was closed exactly once.
+   */
   readonly checkpointDepthAfter: { readonly contracts: number };
+  /** Every checkpoint call the block made on the contract store, counted at the store. */
+  readonly checkpoints: { readonly created: number; readonly committed: number; readonly reverted: number };
   /** Upstream's `DebugLog[]`, rendered. Empty unless the arm asked for them. */
   readonly debugLogs: readonly { readonly message: string; readonly fields: readonly string[] }[];
 }
@@ -333,11 +341,23 @@ async function runOneBlock(
   // deployment from one that never looked. The three counters are observation only: each
   // delegates to the method it replaces and is restored when the block is over.
   const asked = { addNewContracts: 0, registerClass: 0, registerInstance: 0 };
+  // AND THE CHECKPOINTS, COUNTED, BECAUSE A DEPTH OF ZERO IS NOT A MERGE.
+  //
+  // "The fork merged" was asserted as `checkpointDepth == 0` after the block — and a store that
+  // never forked reads zero too, so the assertion was satisfied by the absence of the thing it was
+  // about. Found by self-review inside the sweep's own window, which is this pass's third such
+  // finding and its second sweep abort. Counting the three calls turns it into a CONSERVATION LAW:
+  // some checkpoints were created, and every one of them was closed exactly once, by a commit or a
+  // revert. A depth of zero is then the consequence rather than the claim.
+  const checkpoints = { created: 0, committed: 0, reverted: 0 };
   const db = world.contractsDb as unknown as Record<string, (...a: never[]) => unknown>;
   const originals = {
     addNewContracts: db.addNewContracts,
     registerClass: db.registerClass,
     registerInstance: db.registerInstance,
+    createCheckpoint: db.createCheckpoint,
+    commitCheckpoint: db.commitCheckpoint,
+    revertCheckpoint: db.revertCheckpoint,
   };
   db.addNewContracts = (...a: never[]) => {
     asked.addNewContracts += 1;
@@ -351,6 +371,18 @@ async function runOneBlock(
     asked.registerInstance += 1;
     return originals.registerInstance.apply(world.contractsDb, a);
   };
+  db.createCheckpoint = (...a: never[]) => {
+    checkpoints.created += 1;
+    return originals.createCheckpoint.apply(world.contractsDb, a);
+  };
+  db.commitCheckpoint = (...a: never[]) => {
+    checkpoints.committed += 1;
+    return originals.commitCheckpoint.apply(world.contractsDb, a);
+  };
+  db.revertCheckpoint = (...a: never[]) => {
+    checkpoints.reverted += 1;
+    return originals.revertCheckpoint.apply(world.contractsDb, a);
+  };
 
   const simulationsBefore = world.simulations.length;
   let block;
@@ -360,6 +392,9 @@ async function runOneBlock(
     db.addNewContracts = originals.addNewContracts;
     db.registerClass = originals.registerClass;
     db.registerInstance = originals.registerInstance;
+    db.createCheckpoint = originals.createCheckpoint;
+    db.commitCheckpoint = originals.commitCheckpoint;
+    db.revertCheckpoint = originals.revertCheckpoint;
   }
   const madeThisBlock = world.simulations.slice(simulationsBefore);
 
@@ -410,6 +445,7 @@ async function runOneBlock(
     instructionsPerSimulation: madeThisBlock.map(s => s.steps),
     rawRevertCodes: madeThisBlock.map(s => (s.rawRevertCode === undefined ? null : s.rawRevertCode)),
     checkpointDepthAfter: { contracts: world.contractsDb.checkpointDepth },
+    checkpoints,
     debugLogs: (block.debugLogs as readonly { message?: string; fields?: { toString(): string }[] }[]).map(d => ({
       message: String(d.message ?? ''),
       fields: (d.fields ?? []).map(f => f.toString()),
