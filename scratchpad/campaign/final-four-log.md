@@ -347,3 +347,49 @@ contexts 1:314, 2:202                        sender leaf 1000 → 995, receiver 
   together still hold what was seeded, which is the conservation law neither reading gives alone.
 * **the parser can come back empty**: a 512-byte stub is refused by the reader and the parser then
   reports zero steps, so the 516 is a measurement.
+
+### Step 3.5 — the mutation matrix for entry 3, and it found a defect in the check itself
+
+| arm | mutation | result | what went red |
+|---|---|---|---|
+| C1 | **the container's `l2Gas` is fabricated at the WRITE site** (`ct_download.ts`) | 56 / **7** | every §2 assertion about the l2Gas sequence — strictly increasing, distinct per step, several distinct costs, the dearest above the cheapest — AND §3's differential at 516 mismatches. The drained records are untouched, so a check that read the gas out of the arm's report would have stayed green: this is M29's exact shape and this is the arm for it |
+| C2 | the balance read-back is taken before the block | 56 / **5** | the three after-assertions and "the receiver's leaf came into existence". The BEFORE assertions stay green |
+| C3 | the recipient's leaf is derived for the SENDER | 56 / **4** | "the receiver's is a different leaf", its `EMPTY`-before, its after value and the conservation sum |
+| C4 | the parser's variable-id mapping is off by one | 56 / **23** | the VARIDS assertion by name, the completeness census, and everything downstream of a gas value that is no longer an integer |
+
+**And the first run of C2 and C4 found a defect in the check rather than in the subject.**
+`lib.sh` runs with `set -u`, and bash's `$(( ))` treats a bare word as a VARIABLE — so
+`$(( 1000 + EMPTY ))` over a balance leaf the tree does not hold is an unbound-variable error that
+**kills the check**. C2 reported `46 assertion(s), 4 failure(s)` where the check has 53: a
+seven-assertion shrink, visible only because M22's abnormal-exit trap prints a summary at all. That
+is the silent-shrink family arriving through an arithmetic expansion. Every site that does
+arithmetic over a value the subject produced goes through a numeric guard now, and each asserts
+numericness first — 53 → **56**, and C2 and C4 re-run at the full count.
+
+**And the first C run had a second finding, in the harness rather than in the check.** All four arms
+came back `0 assertion(s), 1 failure(s)`: the harness exports `AVM_WASM_PATH` pointing at M15's
+module, which has no `avm_poseidon2_*` or `avm_grumpkin_*` exports, and M27's checks refuse it BY
+NAME. The die-before-summary path worked perfectly over a mutation none of the four had exercised —
+*"a mutation that crashes has not exercised the assertion it was written for"*, arriving through the
+harness's own environment. The C arms name M27's own module now.
+
+---
+
+## THE SWEEP
+
+### The reference, declared before the run
+
+| milestone | from | to | delta | what buys it |
+|---|---|---|---|---|
+| m18 | 498 | **576** | +78 | `e2e_ts_wasm_amm` |
+| m21 | 369 | **449** | +80 | `test_form_b_tx_matches_pxe_bytes` 78, and `verify_transcript_truncation_detection_uniform` 55 → 57 — the census's own population 32 → 33 and reaching set 12 → 13, which the new probe-driving check joins |
+| m25 | 308 | **453** | +145 | `test_nested_call_reverted_contributes_no_side_effects` 89 + `e2e_trace_token_transfer_steppable` 56 |
+| m28 | 357 | **358** | +1 | `verify_npm_pack_no_optional_native` 54 → 55, one assertion for the fifth harness tree. Its ONE failure is L0's `replay/` and is unchanged |
+| m31 | 421 | **450** | +29 | the eighth transpiler fixture joins three per-fixture loops: 130 → 138, 135 → 150, 97 → 103 |
+
+**PREDICTED TOTAL 12,867** = 12,534 + 78 + 80 + 145 + 1 + 29. Nothing else may move.
+
+Pre-sweep state: `dev` clean and one commit ahead of `origin/dev` (the arithmetic guard), no
+`verify-m`/`verify-l` process, load average 0.49, `carry/*.json` checksummed, the browser bundle
+rebuilt from the RESTORED sources after the mutation matrix and verified back at its shipped
+figures (8,230.78 KB total, `browser.js` 265.79 KB).

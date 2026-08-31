@@ -1,5 +1,5 @@
 {
- "_total": 12864,
+ "_total": 12867,
  "_baseline": 12534,
  "_declared_moves": {
   "m18": {
@@ -16,9 +16,9 @@
   },
   "m25": {
    "from": 308,
-   "to": 450,
-   "delta": 142,
-   "checks": "test_nested_call_reverted_contributes_no_side_effects 89 + e2e_trace_token_transfer_steppable 53"
+   "to": 453,
+   "delta": 145,
+   "checks": "test_nested_call_reverted_contributes_no_side_effects 89 + e2e_trace_token_transfer_steppable 56"
   },
   "m28": {
    "from": 357,
@@ -58,7 +58,7 @@
  "m22": 349,
  "m23": 512,
  "m24": 350,
- "m25": 450,
+ "m25": 453,
  "m26": 340,
  "m27": 345,
  "m28": 358,
