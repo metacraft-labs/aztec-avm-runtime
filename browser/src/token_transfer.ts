@@ -111,6 +111,23 @@ export interface TokenTransferReport {
   readonly txHash: string;
   readonly feePayer: string;
   readonly fundedLeafSlot: string;
+  /**
+   * The two public balance leaves this transfer moves, read off the page's own world state.
+   *
+   * `before` is taken after the seeding and before the transaction; `after` once the block has been
+   * produced. Both ends are reported because a single after-reading is satisfied by a seeding
+   * nobody spent, and the recipient's absence before is what says the amount ARRIVED. See the
+   * derivation at the read site.
+   */
+  readonly balances: {
+    readonly senderLeaf: string;
+    readonly receiverLeaf: string;
+    readonly seeded: string;
+    readonly transferred: string;
+    /** `EMPTY` when the leaf is not in the tree; never `null` — see the read site. */
+    readonly before: { readonly sender: string; readonly receiver: string };
+    readonly after: { readonly sender: string; readonly receiver: string };
+  };
   /** The contract-address nullifier that makes the instance CALLABLE. M29; see below. */
   readonly deploymentNullifier: string;
   readonly enqueuedPublicCalls: number;
@@ -359,6 +376,19 @@ export async function runTokenTransfer(
   const senderBalanceSlot = await deriveStorageSlotInMap(publicBalancesSlot, sender);
   const senderBalanceLeaf = await computePublicDataTreeLeafSlot(contractInstance.address, senderBalanceSlot);
   opened.publicDataTree.insertPublicDataLeaf(senderBalanceLeaf, new Fr(DEMO_TOKEN_BALANCE));
+  // AND THE RECIPIENT'S LEAF, WHICH IS NOT SEEDED. It is derived by the same two upstream
+  // functions so that the read-back below has both ends of the transfer, and it is deliberately
+  // left EMPTY before the transaction: a recipient balance that existed beforehand would make
+  // "the receiver holds the transferred amount" satisfiable by the seeding.
+  const receiverBalanceSlot = await deriveStorageSlotInMap(publicBalancesSlot, deployer);
+  const receiverBalanceLeaf = await computePublicDataTreeLeafSlot(contractInstance.address, receiverBalanceSlot);
+  // `EMPTY` RATHER THAN `null`, AND THE REASON IS THE ACCESSOR. `m27_arm` prints `MISSING` for a
+  // JSON `null`, which is the same word it prints for a field that is not in the report at all —
+  // so a leaf that is genuinely absent from the tree would be indistinguishable from a driver that
+  // forgot to report it. That is `CAMPAIGN-BRIEF.md`'s "two missing keys agreeing", and the remedy
+  // is a value the tree can produce and the reporter cannot.
+  const leaf = (slot: Fr) => opened.publicDataTree.readPublicDataLeaf(slot) ?? 'EMPTY';
+  const balancesBefore = { sender: leaf(senderBalanceLeaf), receiver: leaf(receiverBalanceLeaf) };
 
   // The fee payer is the transaction's own, read off the transaction rather than assumed: funding
   // a different address is how a transaction comes to fail for insufficient funds with the funding
@@ -389,6 +419,28 @@ export async function runTokenTransfer(
     }[] } | null)?.processed ?? []
   ).find(p => p.hash.toString() === receipt.txHash);
 
+  // ===========================================================================================
+  // THE BALANCE LEAVES, READ BACK OFF THIS TRANSFER'S OWN WORLD STATE.
+  // ===========================================================================================
+  //
+  // M25's `e2e_trace_token_transfer_steppable` names two missing pieces, and this is the second:
+  // "the sender's balance leaf read back after the transfer". A Node-side read-back through the
+  // contract's own `balance_of_public` exists (`e2e_ts_wasm_token_transfer`) and does NOT answer
+  // it — that is a different world state, in a different process, over a different transaction.
+  // This one is the tree the page's own block wrote into.
+  //
+  // It is the LEAF and not a view call, deliberately. `balance_of_public` would be a second
+  // enqueued call and therefore a second thing that can fail; the leaf is what the transfer
+  // actually moved, addressed by upstream's own `computePublicDataTreeLeafSlot` over upstream's
+  // own `deriveStorageSlotInMap`, and read through M34's `readPublicDataLeaf`, which compares the
+  // decoded slot against the requested one so that a misspelled msgpack key cannot read as
+  // "the slot is empty".
+  //
+  // BEFORE and AFTER are both reported. A single after-reading is satisfied by a seeding nobody
+  // spent, and the recipient's absence BEFORE is what says the amount arrived rather than having
+  // been there all along.
+  const balancesAfter = { sender: leaf(senderBalanceLeaf), receiver: leaf(receiverBalanceLeaf) };
+
   return {
     artifactName: artifact.name,
     contractAddress: contractInstance.address.toString(),
@@ -406,6 +458,14 @@ export async function runTokenTransfer(
     txHash: receipt.txHash,
     feePayer: feePayer.toString(),
     fundedLeafSlot: fundedLeafSlot.toString(),
+    balances: {
+      senderLeaf: senderBalanceLeaf.toString(),
+      receiverLeaf: receiverBalanceLeaf.toString(),
+      seeded: DEMO_TOKEN_BALANCE.toString(),
+      transferred: DEMO_TRANSFER_AMOUNT.toString(),
+      before: balancesBefore,
+      after: balancesAfter,
+    },
     deploymentNullifier: deploymentNullifier.toString(),
     enqueuedPublicCalls: calldataAll.length,
     // The word, and the record beside it. `String(record)` is `[object Object]`, which is what the

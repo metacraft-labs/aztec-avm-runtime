@@ -270,3 +270,80 @@ measurement, with the tails asserted different so the statement rests on somethi
   on it since M33; adding it in the same edit would have turned another track's standing red green
   as a side effect of this pass's work. The pin names what this campaign owns, and the one failure
   it reports now names `replay` alone.
+
+### Step 4.5 — the mutation matrix for entry 4: four arms, four precise kills
+
+| arm | mutation | result | what went red |
+|---|---|---|---|
+| D1 | this runtime's seam drops the public calldata (`publicOnlyPrivateExecution` ignores its third parameter) | 78 / **8** | the two calldata-carrying cases' byte-identity, byte count and calldata count, plus the two derived controls. **The `noCalldata` case stayed green**, which is what says the failure is about the calldata |
+| D2 | the node stub stops counting | 78 / **1** | exactly the paired positive. The `threw:` assertion beside it survives, so the pair is two facts |
+| D3 | the reference stops running PXE's step 2 (the tail becomes the EMPTY tail) | 78 / **6** | §2 entirely, and the two derived controls. **The byte-identity assertions SURVIVED** — which is the finding the arm was written for: two producers agreeing about a degenerate input is not the claim, and §2 is what makes the input non-degenerate |
+| D4 | the reference producer HANGS (bound cut to 20 s) | **13 / 1**, **rc 124** | the bound, named, summary at column 0 |
+
+---
+
+## ENTRY 3 — M25 `e2e_trace_token_transfer_steppable`
+
+### Step 3.1 — the two pieces, and which one needed a source change
+
+The entry names exactly two missing pieces. **One needed no change at all.**
+
+**Piece 1 — per-step `l2Gas`/`daGas` in the TOKEN container.** Measured: they are already written.
+`ct-print --full` over the container the browser downloaded interns five variable names —
+`contractAddress`, `opcode`, `contextId`, `l2Gas`, `daGas` — and emits 2,582 `Value` events for 516
+`Step` records. So the piece was a READING nobody had taken, and it is taken through the pinned
+reader rather than off the arm's report, which is M29's *"a producer's report about itself is not
+its output"* applied to gas.
+
+**Piece 2 — the sender's balance leaf, on that transfer's own world state.** That needed the page's
+own driver to read it. `readPublicDataLeaf` is M34's and already exists; the change is a leaf read
+before and after, for BOTH ends of the transfer, and a report field.
+
+### Step 3.2 — the bundle moved, and the blast radius was measured rather than feared
+
+Baseline captured, source changed, rebuilt, diffed:
+
+| entry point | before | after |
+|---|---|---|
+| `browser.js` (the DD-5 reference) | 265.79 KB | **265.79 KB — unchanged** |
+| `testing.js` | 291.08 KB | 291.18 KB |
+| `demo.js` | 292.30 KB | 292.39 KB |
+| `node/node.js` | 225.48 KB | **unchanged** |
+| `worker.js` / `worker-demo.js` / `wallet-demo.js` | | +0.09–0.10 KB each |
+| `wallet.js` | 304.30 KB | **unchanged** |
+| total | 8,230.68 KB | 8,230.78 KB |
+
+`verify_browser_chunk_budget` re-derives every one of those from the
+build's own report, so it named the three `BROWSER-PACKAGING.md` figures that had rotted and nothing
+else. Corrected to the CHECK's value, which is this campaign's settled rule for the rounding family.
+**m27 345/0 after, unchanged in count.**
+
+### Step 3.3 — one defect in this pass's own work, found before it shipped
+
+`m27_arm` prints `MISSING` for a JSON `null` — the same word it prints for a field that is not in
+the report at all. So a balance leaf that is genuinely absent from the tree would have been
+indistinguishable from a driver that forgot to report it: *"two missing keys agreeing"*. The driver
+maps an absent leaf to `EMPTY`, a value the tree can produce and the reporter cannot, and the check
+asserts the recipient's leaf is `EMPTY` before and a number after.
+
+### Step 3.4 — what the check measures
+
+`e2e_trace_token_transfer_steppable`, **53 assertions, 0 failures**, first run.
+
+```
+l2Gas 540,027 → 627,352 over 516 steps      daGas 96 → 224
+contexts 1:314, 2:202                        sender leaf 1000 → 995, receiver leaf EMPTY → 5
+```
+
+* **gas**: strictly increasing l2Gas (0 non-positive deltas, so 516 distinct readings), 15 distinct
+  per-step costs with the dearest more than ten times the cheapest — an opcode table rather than a
+  counter; daGas non-decreasing, moving, and ZERO for most steps, which is the opposite shape and
+  is why it is asserted separately.
+* **the differential across the writer**: all 516 container steps compared field by field against
+  the records the page DRAINED out of the module — 0 mismatches — with the same comparer shown to
+  report disagreements when the pairing is shifted by one.
+* **the balance leaves**: the sender's holds the seeded amount before and seeded-minus-transferred
+  after; the receiver's is `EMPTY` before and exactly the transferred amount after; and the two
+  together still hold what was seeded, which is the conservation law neither reading gives alone.
+* **the parser can come back empty**: a 512-byte stub is refused by the reader and the parser then
+  reports zero steps, so the 516 is a measurement.

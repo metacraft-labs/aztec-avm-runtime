@@ -49,6 +49,9 @@ FILES=(
   "fixtures/transpiler-contracts/nested_effects/src/main.nr"
   "orchestration/src/form_b.ts"
   "pxe-ref/src/build_reference_tx.mjs"
+  "browser/src/token_transfer.ts"
+  "browser/src/ct_download.ts"
+  "verification/_m25_container_steps.py"
 )
 
 if [ -f "$MARKER" ] && [ "${1:-}" != "--restore-previous" ]; then
@@ -158,7 +161,7 @@ if [ "${1:-}" = "--demo-still-there" ]; then
 fi
 
 ARMS=("$@")
-[ ${#ARMS[@]} -eq 0 ] && ARMS=(A1 A2 A3 A4 A5 A6 B1 B2 B3 B4 B5 D1 D2 D3 D4)
+[ ${#ARMS[@]} -eq 0 ] && ARMS=(A1 A2 A3 A4 A5 A6 B1 B2 B3 B4 B5 C1 C2 C3 C4 D1 D2 D3 D4)
 
 : > "$LOG"
 echo "final-four mutation matrix, $(date -Is), module $MODULE" | tee -a "$LOG"
@@ -360,6 +363,76 @@ PY
         '  await new Promise((r) => setTimeout(r, 1e9)); const artifact = loadContractArtifact(rawArtifact as never);'
       still_there orchestration/src/nested_effect_driver.ts 'setTimeout(r, 1e9)' B5
       run_check test_nested_call_reverted_contributes_no_side_effects M31_ARMS_TIMEOUT=90
+      ;;
+
+    # =======================================================================================
+    # ENTRY 3 — M25 `e2e_trace_token_transfer_steppable`
+    #
+    # C1..C3 mutate BROWSER SOURCES, so each rebuilds the bundle and re-runs the Chromium arms —
+    # which is the point: the mutation has to reach the writer and the page, not just the report.
+    # They share `browser/dist` and `~/.cache/aztec-m27-browser` with the real checks; after the
+    # matrix the harness's restore makes the sources newer than the bundle again, so the next real
+    # run rebuilds and re-measures. Verify that rather than assume it.
+    # =======================================================================================
+
+    C1) # THE WRITER FABRICATES THE GAS. `ct_download.ts` is where the drained step's `gasUsed`
+        # becomes the container's `l2Gas`, and it writes a CONSTANT instead. The drained records are
+        # untouched, so this is M29's exact shape: what is WRITTEN changes and what was DRAINED does
+        # not, and a check that read the gas out of the arm's report would stay green.
+        # Predicted: every §2 assertion about the l2Gas sequence — strictly increasing, distinct per
+        # step, several distinct per-step costs, the dearest far above the cheapest — and the whole
+        # of §3's differential, which is the section that exists for this.
+      arm_header "C1 — the container's l2Gas is fabricated at the WRITE site"
+      sub browser/src/ct_download.ts \
+        '      l2Gas: BigInt(step.gasUsed.l2Gas),' \
+        '      l2Gas: 1n,'
+      still_there browser/src/ct_download.ts '      l2Gas: 1n,' C1
+      run_check e2e_trace_token_transfer_steppable
+      ;;
+
+    C2) # THE AFTER-READING IS TAKEN BEFORE THE BLOCK. The page reports the pre-transaction leaves
+        # as the post-transaction ones, which is what a read-back placed one line too early looks
+        # like — and it is the state in which "the balance moved" is satisfied by the seeding.
+        # Predicted: §4's three after-assertions, the conservation sum, and "the sender's reading
+        # actually moved". The BEFORE assertions stay green, which is what says the two readings are
+        # two.
+      arm_header "C2 — the balance read-back is taken before the block instead of after"
+      sub browser/src/token_transfer.ts \
+        '  const balancesAfter = { sender: leaf(senderBalanceLeaf), receiver: leaf(receiverBalanceLeaf) };' \
+        '  const balancesAfter = balancesBefore;'
+      still_there browser/src/token_transfer.ts 'const balancesAfter = balancesBefore;' C2
+      run_check e2e_trace_token_transfer_steppable
+      ;;
+
+    C3) # THE RECIPIENT'S LEAF IS THE SENDER'S. One address substituted in the slot derivation, so
+        # both ends of the transfer address the same leaf — which is the shape in which a
+        # conservation law becomes a tautology and "the receiver holds the transferred amount"
+        # becomes a second reading of the sender's.
+        # Predicted: "the receiver's is a different leaf", its EMPTY-before, its after value and the
+        # conservation sum. The sender's own readings stay green.
+      arm_header "C3 — the recipient's balance leaf is derived for the SENDER"
+      sub browser/src/token_transfer.ts \
+        '  const receiverBalanceSlot = await deriveStorageSlotInMap(publicBalancesSlot, deployer);' \
+        '  const receiverBalanceSlot = await deriveStorageSlotInMap(publicBalancesSlot, sender);'
+      # ONE LINE: `grep -F` reads a needle containing a newline as two ALTERNATIVE fixed strings,
+      # so a multi-line `still_there` would match either half and stop guarding.
+      still_there browser/src/token_transfer.ts \
+        '  const receiverBalanceSlot = await deriveStorageSlotInMap(publicBalancesSlot, sender);' C3
+      run_check e2e_trace_token_transfer_steppable
+      ;;
+
+    C4) # THE PARSER'S VARIABLE-ID MAPPING IS OFF BY ONE. Ids are assigned by order of first
+        # appearance; starting at one attributes every value to the wrong name and produces
+        # plausible integers — which is what the first draft of that parser actually did, reading
+        # `contractAddress` where `opcode` belongs.
+        # Predicted: the VARIDS assertion by name, and the completeness/gas-kind assertions with it,
+        # because the fifth name then has no id and every step loses a variable. It needs no rebuild.
+      arm_header "C4 — the parser's variable-id mapping is off by one"
+      sub verification/_m25_container_steps.py \
+        '    nid = 0' \
+        '    nid = 1'
+      still_there verification/_m25_container_steps.py '    nid = 1' C4
+      run_check e2e_trace_token_transfer_steppable
       ;;
 
     # =======================================================================================

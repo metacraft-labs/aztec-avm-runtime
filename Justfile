@@ -2113,6 +2113,12 @@ verify-tx-builder-closure:
 verify-nested-reverted-no-side-effects:
     @verification/test_nested_call_reverted_contributes_no_side_effects.sh
 
+# The browser's own token container: per-step l2Gas/daGas read back through the pinned reader, and
+# the balance leaves read off that transfer's own world state. NEEDS a built browser bundle and
+# M27's arms.
+verify-trace-token-steppable:
+    @verification/e2e_trace_token_transfer_steppable.sh
+
 verify-m25:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -2123,7 +2129,8 @@ verify-m25:
       test_trace_metadata_declares_mapping_rung \
       verify_transaction_builder_closure_measured \
       test_debug_log_events_surface \
-      test_nested_call_reverted_contributes_no_side_effects
+      test_nested_call_reverted_contributes_no_side_effects \
+      e2e_trace_token_transfer_steppable
     do
       echo "=== $check"
       verification/"$check".sh || rc=1
