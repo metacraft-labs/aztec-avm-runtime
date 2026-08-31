@@ -1,0 +1,74 @@
+{
+ "_total": 12864,
+ "_baseline": 12534,
+ "_declared_moves": {
+  "m18": {
+   "from": 498,
+   "to": 576,
+   "delta": 78,
+   "checks": "e2e_ts_wasm_amm 78 \u2014 three Tokens, the AMM, and all four of its abi_only_self entry points, with a foreign-sender control and a no-minter control"
+  },
+  "m21": {
+   "from": 369,
+   "to": 449,
+   "delta": 80,
+   "checks": "test_form_b_tx_matches_pxe_bytes 78 + verify_transcript_truncation_detection_uniform 55 -> 57 (the census's population 32 -> 33 and reaching set 12 -> 13, which the new probe-driving check joins)"
+  },
+  "m25": {
+   "from": 308,
+   "to": 450,
+   "delta": 142,
+   "checks": "test_nested_call_reverted_contributes_no_side_effects 89 + e2e_trace_token_transfer_steppable 53"
+  },
+  "m28": {
+   "from": 357,
+   "to": 358,
+   "delta": 1,
+   "checks": "verify_npm_pack_no_optional_native 54 -> 55, one assertion for the fifth harness tree (pxe-ref). Its one FAILURE is L0's replay/ tree and is unchanged"
+  },
+  "m31": {
+   "from": 421,
+   "to": 450,
+   "delta": 29,
+   "checks": "the eighth transpiler fixture (nested_effects) joins three per-fixture loops: verify_transpiler_wasm_output_identical_to_native 130 -> 138, verify_transpiler_rung1_mapping_survives 135 -> 150 (+1 of which is the repaired procedure-carrier pin's non-emptiness floor), verify_transpiler_native_build_unaffected 97 -> 103"
+  }
+ },
+ "m0": 156,
+ "m1": 181,
+ "m2": 293,
+ "m3": 199,
+ "m4": 218,
+ "m5": 236,
+ "m6": 363,
+ "m7": 287,
+ "m8": 516,
+ "m9": 807,
+ "m10": 450,
+ "m11": 287,
+ "m12": 691,
+ "m13": 458,
+ "m14": 460,
+ "m15": 537,
+ "m16": 225,
+ "m17": 297,
+ "m18": 576,
+ "m19": 180,
+ "m20": 237,
+ "m21": 449,
+ "m22": 349,
+ "m23": 512,
+ "m24": 350,
+ "m25": 450,
+ "m26": 340,
+ "m27": 345,
+ "m28": 358,
+ "m29": 127,
+ "m30": 218,
+ "m31": 450,
+ "m32": 237,
+ "m33": 248,
+ "m34": 217,
+ "m35": 239,
+ "m36": 150,
+ "m37": 171
+}

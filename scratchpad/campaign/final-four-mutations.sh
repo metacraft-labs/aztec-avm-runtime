@@ -134,6 +134,13 @@ still_there() { # <file> <needle> <arm>
 }
 
 MODULE="${AVM_WASM_PATH:-$HOME/.cache/aztec-m15-shapes/m13/barretenberg/cpp/build-wasm-avm/bin/avm.wasm}"
+# M27's OWN MODULE, WHICH IS A DIFFERENT ONE, and getting this wrong cost four arms a run.
+# The M15/M13 module above has no `avm_poseidon2_*` or `avm_grumpkin_*` exports; M27's checks refuse
+# it by name, so the C arms below died at their precondition with `0 assertion(s), 1 failure(s)` —
+# the die-before-summary path working perfectly over a mutation none of them had exercised. That is
+# `CAMPAIGN-BRIEF.md`'s "a mutation that crashes has not exercised the assertion it was written for",
+# arriving through the harness's own environment rather than through the mutation.
+M27_MODULE="${M27_MODULE:-$HOME/.cache/aztec-m27-browser/m27/barretenberg/cpp/build-wasm-avm/bin/avm.wasm}"
 
 run_check() { # <check> [env=val...]
   echo "--- $1" | tee -a "$LOG"
@@ -387,7 +394,7 @@ PY
         '      l2Gas: BigInt(step.gasUsed.l2Gas),' \
         '      l2Gas: 1n,'
       still_there browser/src/ct_download.ts '      l2Gas: 1n,' C1
-      run_check e2e_trace_token_transfer_steppable
+      run_check e2e_trace_token_transfer_steppable AVM_WASM_PATH="$M27_MODULE"
       ;;
 
     C2) # THE AFTER-READING IS TAKEN BEFORE THE BLOCK. The page reports the pre-transaction leaves
@@ -401,7 +408,7 @@ PY
         '  const balancesAfter = { sender: leaf(senderBalanceLeaf), receiver: leaf(receiverBalanceLeaf) };' \
         '  const balancesAfter = balancesBefore;'
       still_there browser/src/token_transfer.ts 'const balancesAfter = balancesBefore;' C2
-      run_check e2e_trace_token_transfer_steppable
+      run_check e2e_trace_token_transfer_steppable AVM_WASM_PATH="$M27_MODULE"
       ;;
 
     C3) # THE RECIPIENT'S LEAF IS THE SENDER'S. One address substituted in the slot derivation, so
@@ -418,7 +425,7 @@ PY
       # so a multi-line `still_there` would match either half and stop guarding.
       still_there browser/src/token_transfer.ts \
         '  const receiverBalanceSlot = await deriveStorageSlotInMap(publicBalancesSlot, sender);' C3
-      run_check e2e_trace_token_transfer_steppable
+      run_check e2e_trace_token_transfer_steppable AVM_WASM_PATH="$M27_MODULE"
       ;;
 
     C4) # THE PARSER'S VARIABLE-ID MAPPING IS OFF BY ONE. Ids are assigned by order of first
@@ -432,7 +439,7 @@ PY
         '    nid = 0' \
         '    nid = 1'
       still_there verification/_m25_container_steps.py '    nid = 1' C4
-      run_check e2e_trace_token_transfer_steppable
+      run_check e2e_trace_token_transfer_steppable AVM_WASM_PATH="$M27_MODULE"
       ;;
 
     # =======================================================================================

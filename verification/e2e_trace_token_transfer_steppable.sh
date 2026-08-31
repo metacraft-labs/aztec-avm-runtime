@@ -98,6 +98,16 @@ assert_ge "the arm's drained records were extracted" 100 "$(grep -c . "$WORK/dra
 
 STEPS="$(python3 "$VERIFY_DIR/_m25_container_steps.py" "$WORK/full.json" "$WORK/drained.txt")"
 st() { printf '%s\n' "$STEPS" | awk -F'\t' -v k="$1" '$1 == k { print $2; exit }'; }
+
+# ARITHMETIC OVER A VALUE THE SUBJECT PRODUCED NEEDS A GUARD, AND THIS ONE WAS BOUGHT BY A MUTATION
+# ARM. `lib.sh` runs with `set -u`, and bash's `$(( ))` treats a bare word as a VARIABLE — so
+# `$(( 1000 + EMPTY ))` over a leaf the tree does not hold is an "unbound variable" error that KILLS
+# the check. Measured: arm C2 reported `46 assertion(s), 4 failure(s)` where the check has 53, a
+# seven-assertion shrink caught only because M22's abnormal-exit trap printed a summary at all. That
+# is `CAMPAIGN-BRIEF.md`'s silent-shrink family arriving through an arithmetic expansion. `num`
+# substitutes a sentinel for anything that is not a number, and every site that uses it asserts
+# NUMERICNESS first, so a non-numeric reading is a named failure rather than a smaller check.
+num() { case "${1:-}" in ('' | *[!0-9]*) printf '%s' "${2:--1}" ;; (*) printf '%s' "$1" ;; esac; }
 assert_eq "the container parsed" "ok" "$(st PARSE)"
 
 # THE PARSER CAN COME BACK EMPTY, shown rather than assumed. A 512-byte stub is not a container;
@@ -142,8 +152,10 @@ assert_eq "l2Gas never goes down or stands still — every instruction cost some
 assert_eq "…so every step's reading is distinct" "$(st STEPS)" "$(st L2_DISTINCT)"
 assert_ge "…and the per-step costs are not one number repeated" 5 "$(st L2_DELTA_DISTINCT)"
 assert_ge "…the cheapest instruction costing at least a unit" 1 "$(st L2_DELTA_MIN)"
-assert_true "…and the dearest costing far more than the cheapest, which is what an opcode table means" \
-  test "$(st L2_DELTA_MAX)" -gt "$(( $(st L2_DELTA_MIN) * 10 ))"
+assert_true "the per-step cost readings are numbers" \
+  test "$(num "$(st L2_DELTA_MIN)" no)" != "no" -a "$(num "$(st L2_DELTA_MAX)" no)" != "no"
+assert_true "…and the dearest costs far more than the cheapest, which is what an opcode table means" \
+  test "$(num "$(st L2_DELTA_MAX)" 0)" -gt "$(( $(num "$(st L2_DELTA_MIN)" 0) * 10 ))"
 
 # DA GAS IS THE OTHER DIMENSION AND IT BEHAVES DIFFERENTLY, which is why asserting it separately is
 # not a repetition: most instructions cost no DA gas at all, so the sequence is non-decreasing with
@@ -224,14 +236,19 @@ assert_eq "BEFORE the transfer the sender's leaf holds exactly what was seeded" 
 # the reporter cannot produce, so "the tree has no such leaf" and "the field is not in the report"
 # are two different words.
 assert_eq "…and the receiver has no leaf at all" "EMPTY" "$BEFORE_R"
+assert_true "both after-readings are numbers, so the arithmetic below is over values and not words" \
+  test "$(num "$AFTER_S" no)" != "no"
 assert_eq "AFTER the transfer the sender's leaf holds seeded minus transferred" \
-  "$((SEEDED - MOVED))" "$AFTER_S"
+  "$(( $(num "$SEEDED" 0) - $(num "$MOVED" 0) ))" "$AFTER_S"
 assert_eq "…and the receiver's holds exactly the transferred amount" "$MOVED" "$AFTER_R"
 assert_true "…so the receiver's leaf came into existence, which the before-reading is what shows" \
   test "$AFTER_R" != "EMPTY"
 # THE CONSERVATION LAW. Two leaves and one amount: a runtime that credited without debiting, or
 # debited twice, satisfies neither of the two assertions above on its own but is caught by the sum.
-assert_eq "…and the two leaves together still hold what was seeded" "$SEEDED" "$((AFTER_S + AFTER_R))"
+assert_true "…and so is the receiver's, which is what makes the conservation law an addition" \
+  test "$(num "$AFTER_R" no)" != "no"
+assert_eq "…and the two leaves together still hold what was seeded" "$SEEDED" \
+  "$(( $(num "$AFTER_S" 0) + $(num "$AFTER_R" 0) ))"
 assert_true "…while the sender's reading actually moved" test "$AFTER_S" != "$BEFORE_S"
 
 # ---------------------------------------------------------------------------
@@ -240,7 +257,8 @@ echo "== 5. …and it is a recording, at SOURCE level, of what the page produced
 
 POS="$(m27_arm download recording.stepsPositioned)"
 UNPOS="$(m27_arm download recording.stepsUnpositioned)"
-assert_eq "positioned and unpositioned account for every step" "$EVENTS" "$((POS + UNPOS))"
+assert_eq "positioned and unpositioned account for every step" "$EVENTS" \
+  "$(( $(num "$POS" 0) + $(num "$UNPOS" 0) ))"
 assert_ge "…and a real number of them carry a source position" 1 "$POS"
 assert_eq "the artifact itself earns rung 1, the source rung" "1" "$(m27_arm download recording.rung)"
 assert_true "the reader names the AVM dispatch macro's own source" \
