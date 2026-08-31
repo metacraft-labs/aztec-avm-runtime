@@ -340,3 +340,74 @@ aborts had found: **a comparison that stands in for a value it never names.** Ev
 `e2e_ts_wasm_phase_revert_semantics` 39 → **46**, `test_custom_bytecode_unhappy_paths` 62 → **67**.
 
 **Final prediction: m18 498, m21 367, m22 349, m25 308 — 356 new assertions, TOTAL 12,532.**
+
+## Step 11 — THE SWEEP: 12,532, `delta +0`, NO HOLE, AND M9 DID NOT FLAKE
+
+Measured M0–M37 on 2026-08-31 **after the last edit**, `setsid`-detached in this repository's own
+dev shell (node v24.19.0), one milestone at a time with nothing else running, `TMPDIR` and the log
+under `~/.cache`. **76 markers for 38 milestones, no hole.**
+
+```
+m0 156   m1 181   m2 293   m3 199   m4 218   m5 236   m6 363   m7 287   m8 516   m9 807
+m10 450  m11 287  m12 691  m13 458  m14 460  m15 537  m16 225  m17 297  m18 498
+m19 180  m20 237  m21 367  m22 349  m23 512  m24 350  m25 308  m26 340  m27 345
+m28 357  m29 127  m30 218  m31 421  m32 237  m33 248  m34 217  m35 239  m36 150
+m37 171
+                                                       CAMPAIGN TOTAL 12,532
+```
+
+The summariser validated the reference's own `_total` first and then reported **`delta +0`**: every
+one of the thirty-eight came out at its declared value, and all four moves were named in
+`closeout-reference.json` before the run. `12,176 + 215 + 33 + 84 + 24 = 12,532` exactly.
+
+**Per-check splits, from the run's own summary lines rather than from arithmetic:**
+
+| milestone | split |
+|---|---|
+| m18 | 66 / 28 / 38 / 28 / 123 / **51 / 51 / 46 / 67** |
+| m21 | 35 / 37 / 24 / 26 / 38 / 52 / **33** / 69 / 53 |
+| m22 | 76 / 44 / 89 / 56 / **39 / 45** |
+| m25 | 71 / 68 / 92 / 53 / **24** |
+
+**M9 DID NOT FLAKE, ON THE SECOND SWEEP SINCE D19 WAS CLOSED.** 807, rc 0, **1,294 s**, immediately
+after m8's 184 s build — D19's standing condition, present and not firing. The three hits for
+`INCOMPLETE:` / `truncated-after` in the whole log are all M21's own census asserting about the
+token; **zero real truncations.** M15 did not flake either (537, 384 s).
+
+**FOUR NON-ZERO EXITS, AND TWO OF THEM WERE OURS.**
+
+- **m20** `verify_named_checks_exist` 9/1 → L3's `tools/scan_reverted_transactions.mjs`. Count
+  unchanged. Not ours.
+- **m28** `verify_npm_pack_no_optional_native` 54/1 → L0's `replay/package.json` as a fifth tree.
+  Count unchanged. Not ours.
+- **m21** `verify_no_pipeline_predicates` 69/1 → L4's sixth `| grep -q` in
+  `verify_browser_replay_dd9_clean.sh`. Count unchanged. Not ours.
+- **m11 `verify_submission_is_a_manual_step` 95/1 — OURS, AND IT WAS A LATENT RED THE PREVIOUS PASS
+  SHIPPED.** *"Exactly one file in this repository can open a pull request"* found two: `submit/_lib.sh`
+  and **`scratchpad/campaign/aztec-residuals-sweep.log`**, a 1.0 MB sweep log the residuals pass
+  committed. A sweep log quotes every line its checks print, including the command M11's check greps
+  for. **That sweep could not have seen it** — the log was copied into the tree *after* the run
+  finished, which is how a check goes red for work that had already been declared green. The log is
+  untracked and the pattern ignored; sweep logs live under `~/.cache`, where the summariser reads
+  them. *And the first version of that ignore rule spelled the command in its own comment and the
+  check counted IT* — "a citation is the opposite of a dependency", inside the remedy for it, caught
+  on the next run. **m11 re-run: 287, rc 0, GREEN.**
+- **m21's census grew by one, which is what it is for.**
+  `verify_transcript_truncation_detection_uniform` derives its population rather than listing it, and
+  `test_settled_read_request_verification` drives a probe with a `.done` sentinel and CALLS the
+  shared refusal — so it joins the population and the reaching set together: **31 → 32, reaching
+  11 → 12, not-reaching unchanged at 20**, which is the split that says a new member did not join
+  the backlog. The new member is NAMED as well as counted. 53 → 55. **m21 re-run: 369, and its one
+  remaining failure is L4's.**
+
+**FINAL TOTAL 12,534** = 12,532 + 2, with m21 at 369.
+
+**The fourteen L0–L4 check names appear ZERO times as a column-0 summary line**, grepped one at a
+time against the summariser's own anchored pattern. None of their assertions is in the total.
+
+**A sweep is a writer**: `carry/*.json` checksummed before and `sha256sum -c` after — **all four
+OK and unchanged.**
+
+**AND THE SWEEP WAS ABORTED TWICE BEFORE THIS RUN, WHICH IS THE RULE WORKING TWICE.** Both aborts
+were bought by the only work available while a sweep runs — reading this pass's own checks — and
+between them they found three assertions of mine that could not fail and one claim that was wrong.
