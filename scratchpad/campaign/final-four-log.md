@@ -486,3 +486,58 @@ reproduced its failure SET exactly, at the new counts.**
 manifest; `HARNESS` reports no `MUTATION MISS`, no `ABORTED` and no `DID NOT HOLD`; and the tree is
 clean afterwards, with the browser bundle rebuilt from the restored sources and verified back at its
 shipped figures.
+
+### THE SWEEP: **12,872**, `delta +0`, NO HOLE, AND M9 DID NOT FLAKE
+
+Measured M0–M37 on 2026-08-31 **after the last edit**, `setsid`-detached in this repository's own
+dev shell (node v24.19.0), one milestone at a time with nothing else running, `TMPDIR` and the log
+under `~/.cache`. **76 markers for 38 milestones, no hole. 35 of 38 exit 0.**
+
+```
+m0 156   m1 181   m2 293   m3 199   m4 218   m5 236   m6 363   m7 287   m8 516   m9 807
+m10 450  m11 287  m12 691  m13 458  m14 460  m15 537  m16 225  m17 297  m18 578
+m19 180  m20 237  m21 451  m22 349  m23 512  m24 350  m25 454  m26 340  m27 345
+m28 358  m29 127  m30 218  m31 450  m32 237  m33 248  m34 217  m35 239  m36 150
+m37 171
+                                                       CAMPAIGN TOTAL 12,872
+```
+
+The summariser validated the reference's own `_total` first and then reported **`delta +0`**: every
+one of the thirty-eight came out at its declared value, and all five moves were named in
+`final-four-reference.json` before the run. **12,534 + 80 + 82 + 146 + 1 + 29 = 12,872 exactly.**
+
+**Per-check splits, from the run's own summary lines rather than from arithmetic:**
+
+| milestone | split |
+|---|---|
+| m18 | 66 / 28 / 38 / 28 / 123 / 51 / **80** / 51 / 46 / 67 |
+| m21 | 35 / 37 / 24 / 26 / 38 / 52 / **80** / 33 / 69 / **57** |
+| m25 | 71 / 68 / 92 / 53 / 24 / **90** / **56** |
+| m28 | 104 / 67 / 45 / **55** / 37 / 50 |
+| m31 | **138** / 59 / **150** / **103** |
+
+**M9 DID NOT FLAKE, ON THE THIRD SWEEP SINCE D19 WAS CLOSED.** 807, rc 0, **1,286 s**, immediately
+after m8's 179 s build — D19's standing condition, present and not firing. The three hits for
+`INCOMPLETE:` / `truncated-after` in the whole log are all M21's own census asserting about the
+token; **zero real truncations.** M15 did not flake either (537, 386 s). **M11 is 287, rc 0** — the
+campaign's old standing red, closed by M37 and still closed.
+
+**THREE NON-ZERO EXITS, ALL THREE PARALLEL TRACKS', ALL THREE RE-DERIVED RATHER THAN INHERITED**
+(`git log --follow` on the offending path, and `git diff e0d45b6..HEAD` over all three paths is
+EMPTY, so none is in this pass's diff):
+
+| milestone | check | offending path | whose |
+|---|---|---|---|
+| m20 | `verify_named_checks_exist` 9/1 | `tools/scan_reverted_transactions.mjs` | **L3's** (`a601ce7`) |
+| m21 | `verify_no_pipeline_predicates` 69/1 | `verify_browser_replay_dd9_clean.sh` | **L4's** (`75ffd7e`) |
+| m28 | `verify_npm_pack_no_optional_native` 55/1 | `replay/package.json` | **L0's** (`541bf5f`) |
+
+Every count is unchanged from its declared value, which is what says a pinned list moved and not a
+structure. m28's is 54 → 55 by this pass's own declared +1 for the fifth harness tree, and its ONE
+failure names `replay` alone — deliberately, see above.
+
+**The fourteen L0–L4 check names appear ZERO times as a column-0 summary line**, grepped one at a
+time against the summariser's own anchored pattern. None of their assertions is in the 12,872.
+
+**A sweep is a writer**: `carry/*.json` checksummed before and `sha256sum -c` after — **all four OK
+and unchanged.** The working tree is clean.
