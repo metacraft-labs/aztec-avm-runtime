@@ -1809,6 +1809,10 @@ verify-block-guard:
 verify-block-token-flows:
     @verification/e2e_block_token_flows.sh
 
+# A contract published BY A TRANSACTION, called in the same block and in a later one.
+verify-block-deployments:
+    @verification/e2e_block_deployments_through_processor.sh
+
 # Run the whole M22 verification set; every check runs even if an earlier one fails.
 verify-m22:
     #!/usr/bin/env bash
@@ -1819,7 +1823,8 @@ verify-m22:
       test_failed_tx_leaves_no_state \
       test_block_limits_respected \
       test_guarded_merkle_tree_blocks_post_seal_access \
-      e2e_block_token_flows
+      e2e_block_token_flows \
+      e2e_block_deployments_through_processor
     do
       echo "=== $check"
       verification/"$check".sh || rc=1
