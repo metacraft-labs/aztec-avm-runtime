@@ -481,7 +481,7 @@ the count.)*
 
 | | derived |
 |---|---|
-| the wallet entry's eager set | **306.91 KB** gzipped across **9** files |
+| the wallet entry's eager set | **306.92 KB** gzipped across **9** files |
 | the wallet demo page's eager set | **347.58 KB** gzipped across **13** files |
 | `acvm_js_bg.wasm` | **3,601,516** bytes |
 | `noirc_abi_wasm_bg.wasm` | **789,053** bytes |
