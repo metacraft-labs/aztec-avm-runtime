@@ -259,6 +259,9 @@ struct Session {
     call_depth: u32,
     /// Frames opened over the whole session. Does not go down.
     calls_opened: u32,
+    /// Steps written through `ct_source_step`. Counted separately from `events` so a recording
+    /// can be asked which KIND of step it is made of rather than only how many it has.
+    source_steps: u64,
     /// The `None` type, needed for a frame's return value. Interned at open, like `type_id`.
     none_type_id: TypeId,
 }
@@ -452,6 +455,7 @@ pub unsafe extern "C" fn ct_writer_open(
             log_events: 0,
             call_depth: 0,
             calls_opened: 0,
+            source_steps: 0,
             none_type_id,
         });
     }
@@ -828,6 +832,76 @@ pub unsafe extern "C" fn ct_intern_path(
 pub extern "C" fn ct_path_count() -> u32 {
     match session() {
         Some(s) => s.paths.len() as u32,
+        None => 0,
+    }
+}
+
+/// Record one SOURCE step — a position and nothing else.
+///
+/// # Why this exists beside `ct_step` rather than as an argument to it
+///
+/// `emit()` — the one place both OQ-6 arms write a step — records five variables per step:
+/// `opcode`, `contextId`, `l2Gas`, `daGas` and `contractAddress`. Those are upstream's
+/// `ExecutionStep`, and they are the right shape for the AVM.
+///
+/// **A Noir PRIVATE frame has none of them.** The tracer steps ACIR and Brillig opcodes and hands
+/// its sink a `(path, line, column)`; there is no AVM context, no gas meter and no contract
+/// executing bytecode. Writing a private half through `ct_step` would mean the host inventing four
+/// counters per step and a contract address for a frame that is not a contract call — a container
+/// full of numbers with nothing behind them, which is exactly the failure M29 found in M27's
+/// synthesised opcodes and the reason `ct_download.ts` refuses to fabricate a step stream.
+///
+/// So the position arrives directly rather than through the FIFO `ct_positions` fills: there is no
+/// paired AVM record for it to be paired WITH, and a step that carried a queued position while
+/// writing no AVM record would desynchronise every later AVM step in the same session.
+///
+/// `line` is 1-based and 0 is refused: a step with no line is not a source step, and accepting one
+/// would put `Line(0)` in a container where every reader expects a real line. `column` 0 means
+/// "line only", which is what `register_step_with_column` reads a `None` as.
+///
+/// Positioned/unpositioned tallies: every accepted call is POSITIONED by construction, because the
+/// position is the argument. The per-contract rung table is deliberately NOT touched — that table
+/// is M25's pc-to-source ladder, a statement about resolving an AVM program counter, and a
+/// source-level step neither needs it nor can violate it.
+///
+/// # Safety
+/// This is `extern "C"` for the ABI's sake; it dereferences nothing.
+#[unsafe(no_mangle)]
+pub extern "C" fn ct_source_step(path_id: u32, line: u32, column: u32) -> i32 {
+    let s = match session() {
+        Some(s) => s,
+        None => {
+            set_error("ct_source_step: no writer is open");
+            return CT_ERR_NO_SESSION;
+        }
+    };
+    if path_id as usize >= s.paths.len() {
+        set_error("ct_source_step: path id is not one this session interned");
+        return CT_ERR_BAD_PATH_ID;
+    }
+    if line == 0 {
+        set_error("ct_source_step: line is 1-based and 0 is not a source position");
+        return CT_ERR_BAD_LENGTH;
+    }
+    let path = s.paths[path_id as usize].clone();
+    let col = if column == 0 { None } else { Some(Line(column as i64)) };
+    TraceWriter::register_step_with_column(&mut s.writer, &path, Line(line as i64), col);
+    s.positioned += 1;
+    s.events += 1;
+    s.source_steps += 1;
+    set_error("");
+    CT_OK
+}
+
+/// Steps written through [`ct_source_step`] this session.
+///
+/// Separate from `ct_events_written()` on purpose: a recording made of source steps and one made
+/// of AVM steps are different recordings, and a host that meant to write one and wrote the other
+/// would otherwise agree with itself on every count.
+#[unsafe(no_mangle)]
+pub extern "C" fn ct_source_steps_written() -> u64 {
+    match session() {
+        Some(s) => s.source_steps,
         None => 0,
     }
 }

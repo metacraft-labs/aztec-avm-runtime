@@ -164,6 +164,9 @@ export interface CtWriterExports {
   ct_return(): number;
   ct_call_depth(): number;
   ct_calls_opened(): number;
+  // -- M40's source-step surface. Listed separately below; see SOURCE_STEP_EXPORTS. --
+  ct_source_step(pathId: number, line: number, column: number): number;
+  ct_source_steps_written(): bigint;
 }
 
 /** Every export name the host requires, so a missing one is one named failure and not a `TypeError`. */
@@ -234,11 +237,26 @@ export const JOIN_EXPORTS: readonly string[] = [
   'ct_calls_opened',
 ];
 
+/**
+ * M40's source-step exports, kept in their OWN list for {@link SOURCE_MAPPING_EXPORTS}' reason.
+ *
+ * `verify_ct_writer_wasm_zero_imports` enumerates M24's nineteen BY NAME and asserts the count is
+ * exactly nineteen; appending here would move a count for a change that is not M24's. So M24 goes
+ * on measuring its nineteen, M25 its eleven, M26 its six, M40 its TWO, and the union is what the
+ * host requires.
+ *
+ * The pair exists because a Noir private frame's step is a `(path, line, column)` and nothing else
+ * — no opcode, no context, no gas, no contract address. See `ct_source_step`'s own documentation
+ * for why writing one through `ct_step` would mean fabricating four counters per step.
+ */
+export const SOURCE_STEP_EXPORTS: readonly string[] = ['ct_source_step', 'ct_source_steps_written'];
+
 /** Every export the host requires. The constructor checks this, not any one list alone. */
 export const ALL_REQUIRED_EXPORTS: readonly string[] = [
   ...REQUIRED_EXPORTS,
   ...SOURCE_MAPPING_EXPORTS,
   ...JOIN_EXPORTS,
+  ...SOURCE_STEP_EXPORTS,
 ];
 
 /**

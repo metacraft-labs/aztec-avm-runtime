@@ -46,6 +46,7 @@ import {
   getFunctionSelector,
   runTokenTransfer,
   runEnqueuedPublicCalls,
+  recordPrivateHalf,
   storageSlotOf,
   type EnqueuedPublicCall,
   type OpenedRuntime,
@@ -209,6 +210,18 @@ const RECORDING_ID = '01949fcc-7d92-7e9c-8000-000000003401';
  * is the inference `JOIN-SHAPE.md` §4 exists to refuse.
  */
 const PUBLIC_HALF_RECORDING_ID = '01949fcc-7d92-7e9c-8000-000000004001';
+
+/** M40's private-half recording id. Distinct from the public half's, for that constant's reason. */
+const PRIVATE_HALF_RECORDING_ID = '01949fcc-7d92-7e9c-8000-000000004002';
+
+/**
+ * The Noir tracer, built for wasm32 from the PUBLISHED `noir`.
+ *
+ * Fetched only by the arm that steps a private half — 7 MB a page that never asks for one does not
+ * pay, which is the same DD-11 posture `acvm_js_bg.wasm` and `noirc_abi_wasm_bg.wasm` are under and
+ * is measured on the network log rather than asserted here.
+ */
+const PRIVATE_TRACER_URL = './assets/m40_private_trace.wasm';
 
 /** The application identifier the session is bound to. */
 const APP_ID = 'm34-wallet-demo';
@@ -1467,6 +1480,10 @@ async function armTransactionBothHalvesExecuted(
     corruptCalldata?: boolean;
     /** CONTROL: M29's one-instruction shape. See `runEnqueuedPublicCalls`'s option of this name. */
     skipDeploymentNullifier?: boolean;
+    /** Off for the arms whose subject is the public half, so they do not pay a 7 MB fetch. */
+    privateHalf?: boolean;
+    /** CONTROL: write the private half's steps with no column. See `recordPrivateHalf`'s option. */
+    dropColumns?: boolean;
   } = {},
 ): Promise<Record<string, unknown>> {
   const priv = await runNestedPrivateCall({ entry: 'enqueue_calls_to_child_with_nested_first' });
@@ -1578,6 +1595,58 @@ async function armTransactionBothHalvesExecuted(
     });
     say(`[both halves] wrote ${recording.bytes} container bytes with the join record`);
 
+    // =========================================================================================
+    // AND THE PRIVATE HALF, STEPPED AND WRITTEN IN THIS SAME PAGE.
+    // =========================================================================================
+    //
+    // The tape the browser recorded, the artifact the browser fetched, the Noir tracer built for
+    // wasm32 from the published `noir`, and the page's own `ct_writer.wasm`. Two containers out of
+    // one page and one transaction, carrying the same join identity — which is what makes
+    // `joinRecordings` a comparison of two halves rather than of two runs that agree.
+    //
+    // BOTH FRAMES ARE THE PARENT: `enqueue_calls_to_child_with_nested_first` calls `self.address`,
+    // so the nested frame's artifact and address are the caller's, and the frame list says so
+    // rather than the module inferring it.
+    let privateHalf: Awaited<ReturnType<typeof recordPrivateHalf>> | undefined;
+    let refusedToStepPrivateHalf: string | undefined;
+    if (options.privateHalf !== false) {
+      const tracerBytes = new Uint8Array(await (await fetch(PRIVATE_TRACER_URL)).arrayBuffer());
+      say(`[both halves] the Noir tracer module is ${tracerBytes.length} bytes`);
+      const frameOf = (r: Awaited<ReturnType<typeof executePrivateFunction>>, depth: number) => ({
+        artifact: 'Parent',
+        function: r.functionName,
+        depth,
+        contractAddress: priv.parentInstance.address.toString(),
+        tape: r.tape ?? [],
+        servedCalls: r.oraclesServed,
+        initialWitnessEntries: r.initialWitnessEntries ?? [],
+      });
+      try {
+        privateHalf = await recordPrivateHalf({
+          tracerBytes,
+          writerBytes,
+          recordingId: PRIVATE_HALF_RECORDING_ID,
+          program: `${priv.run.contractName}.${priv.run.functionName}`,
+          download: options.download !== false,
+          filename: `aztec-private-half-${PRIVATE_HALF_RECORDING_ID}.ct`,
+          ...(options.dropColumns === true ? { dropColumns: true } : {}),
+          request: {
+            program: `${priv.run.contractName}.${priv.run.functionName}`,
+            artifacts: { Parent: priv.parentArtifact },
+            frames: [frameOf(priv.run, 0), frameOf(priv.run.nested[0]!, 1)],
+            join: { id: joinId, half: 'private', halves: 2, arm: 'split' },
+          },
+        });
+        say(
+          `[both halves] private: ${privateHalf.report.steps} step(s), ` +
+            `${privateHalf.report.stepsWithColumn} with a column, ${privateHalf.bytes} container bytes`,
+        );
+      } catch (e) {
+        refusedToStepPrivateHalf = String((e as Error)?.message ?? e);
+        say(`[both halves] the private half was not stepped: ${refusedToStepPrivateHalf}`);
+      }
+    }
+
     return jsonSafe({
       ...priv.report,
       joinId,
@@ -1592,6 +1661,19 @@ async function armTransactionBothHalvesExecuted(
         joinRecord: record,
         filename: `aztec-avm-public-half-${PUBLIC_HALF_RECORDING_ID}.ct`,
       },
+      refusedToStepPrivateHalf: refusedToStepPrivateHalf ?? null,
+      privateContainer:
+        privateHalf === undefined
+          ? null
+          : {
+              ...privateHalf,
+              container: undefined,
+              containerBytes: privateHalf.bytes,
+              // The op list is thousands of entries and a check reads its COUNTS; carrying it
+              // across `Runtime.evaluate` would make the arm report megabytes for nothing.
+              report: { ...privateHalf.report, encode: { ...privateHalf.report.encode, ops: undefined } },
+              joinRecord: formatJoinRecord(joinRecord(joinId, 'private', 2, 'split')),
+            },
     }) as Record<string, unknown>;
   } finally {
     await o.close();

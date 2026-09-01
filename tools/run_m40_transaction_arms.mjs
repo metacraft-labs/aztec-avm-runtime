@@ -72,6 +72,15 @@ for (const needed of ['wallet-demo.js', 'wallet.html', 'wallet.js']) {
 const CT_WRITER = path.join(REPO, 'ct-writer/target/wasm32-unknown-unknown/release/aztec_ct_writer.wasm');
 if (!existsSync(CT_WRITER)) fail(`no ct_writer.wasm at ${CT_WRITER}. Remedy: verification/build_ct_writer_wasm.sh`);
 
+// THE NOIR TRACER, BUILT FOR wasm32 FROM THE PUBLISHED `noir`. The module the page steps the
+// PRIVATE half with; `verification/build_m40_private_trace_wasm.sh` is what produces it and refuses
+// to build from a dirty or unpublished checkout.
+const TRACER_WASM =
+  process.env.M40_TRACER_WASM ?? path.join(process.env.HOME, '.cache', 'aztec-m40-tracer', 'm40_private_trace.wasm');
+if (!existsSync(TRACER_WASM)) {
+  fail(`no m40_private_trace.wasm at ${TRACER_WASM}. Remedy: verification/build_m40_private_trace_wasm.sh`);
+}
+
 const SEARCH_ROOTS = ['orchestration', 'diffsim', 'spike', 'drift', 'probe-mt'];
 function findUnder(rel, roots = SEARCH_ROOTS) {
   const hit = roots.map((r) => ({ root: r, file: path.join(REPO, r, rel) })).find((t) => existsSync(t.file));
@@ -117,6 +126,7 @@ copyFileSync(parentAnchorLine.file, path.join(SITE, 'assets/anchorline-parent_co
 copyFileSync(childAnchorLine.file, path.join(SITE, 'assets/anchorline-child_contract-Child.json'));
 copyFileSync(acvmWasm.file, path.join(SITE, 'assets/acvm_js_bg.wasm'));
 copyFileSync(noircAbiWasm.file, path.join(SITE, 'assets/noirc_abi_wasm_bg.wasm'));
+copyFileSync(TRACER_WASM, path.join(SITE, 'assets/m40_private_trace.wasm'));
 
 const DOWNLOADS = path.join(WORK, 'downloads');
 rmSync(DOWNLOADS, { recursive: true, force: true });
@@ -152,21 +162,31 @@ async function walletPage(options = {}) {
   return page;
 }
 
-/** Wait for a `.ct` to appear in a download directory, bounded and named. */
-async function waitForDownload(dir, boundMs) {
+/**
+ * Wait for `count` settled `.ct` files in a download directory, bounded and named.
+ *
+ * **COUNT RATHER THAN "ANY".** The subject arm downloads TWO containers — one per half — and a
+ * waiter that returned on the first would race the second and report `null` for it, which reads as
+ * a half the page did not write. Settled means two identical sizes a beat apart.
+ */
+async function waitForDownloads(dir, count, boundMs) {
   const until = Date.now() + boundMs;
   while (Date.now() < until) {
-    const hit = readdirSync(dir).filter((n) => n.endsWith('.ct'));
-    if (hit.length > 0) {
-      const f = path.join(dir, hit[0]);
-      // Two identical sizes a beat apart: the file is complete rather than mid-write.
-      const a = statSync(f).size;
+    const names = readdirSync(dir).filter((n) => n.endsWith('.ct')).sort();
+    if (names.length >= count) {
+      const files = names.map((n) => path.join(dir, n));
+      const before = files.map((f) => statSync(f).size);
       await new Promise((r) => setTimeout(r, 250));
-      if (a > 0 && statSync(f).size === a) return f;
+      const after = files.map((f) => statSync(f).size);
+      if (before.every((b, i) => b > 0 && b === after[i])) return files;
     }
     await new Promise((r) => setTimeout(r, 250));
   }
-  return null;
+  // ON THE BOUND, RETURN WHAT IS THERE RATHER THAN NOTHING. "One container arrived and the other
+  // did not" and "the page downloaded nothing" are different failures, and a waiter that answered
+  // `null` for both would report the first as the second — which is exactly the direction that
+  // makes a half look absent when it is merely late.
+  return readdirSync(dir).filter((n) => n.endsWith('.ct')).sort().map((n) => path.join(dir, n));
 }
 
 try {
@@ -175,14 +195,22 @@ try {
     const dl = path.join(DOWNLOADS, 'bothHalves');
     mkdirSync(dl, { recursive: true });
     const page = await walletPage({ downloadPath: dl });
-    const report = await page.eval('window.walletDemo.armTransactionBothHalvesExecuted()', 900_000);
-    const file = await waitForDownload(dl, 120_000);
+    const report = await page.eval('window.walletDemo.armTransactionBothHalvesExecuted()', 1_800_000);
+    const files = await waitForDownloads(dl, 2, 180_000);
+    const named = (needle) => files.find((f) => path.basename(f).includes(needle)) ?? null;
+    const describe = (f) =>
+      f === null
+        ? null
+        : { file: path.relative(WORK, f), bytes: statSync(f).size, sha256: sha(f) };
     arms.bothHalves = {
       ...pageFacts(page),
       report,
-      downloadedFile: file === null ? null : path.relative(WORK, file),
-      downloadedBytes: file === null ? null : statSync(file).size,
-      downloadedSha256: file === null ? null : sha(file),
+      downloadedCount: files.length,
+      // NAMED RATHER THAN ORDERED. Two containers land in one directory and which one arrives
+      // first is the browser's business; matching by the filename the PAGE chose is what makes
+      // "this is the public half" a fact about the file rather than about the sort order.
+      publicDownload: describe(named('public-half')),
+      privateDownload: describe(named('private-half')),
     };
     await page.close();
   }
@@ -191,7 +219,7 @@ try {
   {
     const page = await walletPage();
     const report = await page.eval(
-      'window.walletDemo.armTransactionBothHalvesExecuted({ corruptCalldata: true, download: false })',
+      'window.walletDemo.armTransactionBothHalvesExecuted({ corruptCalldata: true, download: false, privateHalf: false })',
       900_000,
     );
     arms.corruptCalldata = { ...pageFacts(page), report };
@@ -202,10 +230,26 @@ try {
   {
     const page = await walletPage();
     const report = await page.eval(
-      'window.walletDemo.armTransactionBothHalvesExecuted({ skipDeploymentNullifier: true, download: false })',
+      'window.walletDemo.armTransactionBothHalvesExecuted({ skipDeploymentNullifier: true, download: false, privateHalf: false })',
       900_000,
     );
     arms.noDeploymentNullifier = { ...pageFacts(page), report };
+    await page.close();
+  }
+  // ---- ARM 4: THE COLUMN, SHOWN TO REACH THE CONTAINER --------------------------------------
+  //
+  // The pinned reader renders a Path A container through its legacy `events.log` path, whose `Step`
+  // record is `(path_id, line)` — so no column appears there, and reading that absence as "the
+  // browser's container has no columns" would be a fact about the READER stated as one about the
+  // container. This arm writes the SAME transaction with every step's column set to 0 and changes
+  // nothing else; two digests that differ is the column reaching the container.
+  {
+    const page = await walletPage();
+    const report = await page.eval(
+      'window.walletDemo.armTransactionBothHalvesExecuted({ dropColumns: true, download: false })',
+      1_800_000,
+    );
+    arms.columnsDropped = { ...pageFacts(page), report };
     await page.close();
   }
 } catch (e) {
@@ -224,6 +268,7 @@ const out = {
   dist: path.relative(REPO, DIST),
   module: { path: AVM_WASM, sha256: sha(AVM_WASM), bytes: statSync(AVM_WASM).size },
   ctWriter: { path: path.relative(REPO, CT_WRITER), sha256: sha(CT_WRITER), bytes: statSync(CT_WRITER).size },
+  tracer: { path: TRACER_WASM, sha256: sha(TRACER_WASM), bytes: statSync(TRACER_WASM).size },
   assets: {
     parent: {
       root: parentArtifact.root,

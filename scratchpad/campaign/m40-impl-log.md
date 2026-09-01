@@ -176,3 +176,90 @@ Measured instead, by writing the same four steps twice and changing **one step's
 
 Same size, three different digests. The column reaches the container (a delta-column opcode, which
 is why the size does not move) and asking for columns at all changes the encoding.
+
+## Step 3 — GAP 2 IS CLOSED: THE PRIVATE HALF STEPS IN CHROMIUM TOO
+
+Two wasm modules in one page and **no third writer**:
+
+| | what it is |
+|---|---|
+| `m40_private_trace.wasm` | `noir_tracer` built for `wasm32-unknown-unknown` from the PUBLISHED `noir` (`e78dc9935`), with M38's executor seam and a tape-replaying foreign-call executor. **7,281,067 bytes.** It stops at the CodeTracer low-level event stream and emits it as an ordered op list. |
+| `ct_writer.wasm` | the page's own Path A writer, already there, already used by the public half. It gains **one export pair** for this: `ct_source_step` / `ct_source_steps_written`. |
+
+**The Noir tracer links no container writer on this path at all**, so `JOIN-SHAPE.md` §2's facts 6
+and 7 are untouched and `wasm/webpage` stays unpublished. This is a different answer to the same
+need rather than the answer OQ-7 ruled out.
+
+### 3a. Why `ct_source_step` had to exist
+
+`ct-writer`'s `emit()` — the one place both OQ-6 arms write a step — records five variables per
+step: `opcode`, `contextId`, `l2Gas`, `daGas`, `contractAddress`. **A Noir private frame's step has
+none of them.** Writing the private half through `ct_step` would mean the host inventing four
+counters per step, which is the exact shape M29 found in M27's synthesised opcodes.
+
+`ct_writer.wasm` goes **262,693 -> 263,211 bytes**, sha256 `e94bacebd…`. Still zero imports.
+
+### 3b. THE RESULT, MEASURED IN CHROMIUM
+
+| | measured |
+|---|---|
+| steps the tracer produced | **66** |
+| …carrying a COLUMN | **64** (the two without are the frame-entry steps, one per frame) |
+| frames | **2** |
+| `Call` / `Return` written | **1 / 1** |
+| ops replayed into the writer | **147** |
+| paths interned | **78** |
+| container bytes | **208,896** |
+| the module's DECLARED imports | 4 |
+| the module's REACHED imports | **0** |
+| `ct-print --full` over it | **exit 0**, 66 Step records, the nested `Call` carrying the caller's address, the join record |
+
+`reachedImports: []` is a measurement rather than a build flag: every declared import is satisfied
+with a function that records the call and then throws, so nothing in the tracer crossed back into
+JavaScript.
+
+### 3c. THE DIFFERENTIAL: TWO INDEPENDENT IMPLEMENTATIONS, POSITION FOR POSITION
+
+The native probe (M38's, Nim writer, `std::fs`) and this module (wasm, `MemorySink`, Path A) are
+two implementations of the tape executor, deliberately — one is native and read by two milestones'
+checks, and moving its executor into a library would move their figures. What ties them together is
+a measurement:
+
+| | native container, through the pinned reader | the wasm module |
+|---|---|---|
+| steps | **66** | **66** |
+| `(path, line)` sequence | — | **identical, all 66** |
+| column differences | — | **2** |
+
+and the two differences are at step **0** and step **38** — the frame-entry steps, one per frame —
+where the tracer emits NO column and a column-aware container's decoder answers 1. Everywhere the
+tracer produced a column, the two agree.
+
+### 3d. THE COLUMN REACHES THE CONTAINER, AND THAT IS A DIGEST PAIR
+
+The pinned reader renders a Path A container through its legacy `events.log` path, whose `Step`
+record is `(path_id, line)`. Reading the absence of a column THERE as "the browser's container has
+no columns" would be a fact about the reader stated as one about the container.
+
+Measured instead, by writing the same transaction twice with one field changed:
+
+| arm | container bytes | sha256 |
+|---|---|---|
+| `bothHalves` (the real columns) | 208,896 | `d53fc677…` |
+| `columnsDropped` (every step column 0) | 208,896 | `d7da2342…` |
+
+Same ops, same steps, same paths, same size — different digest.
+
+## Step 4 — THE JOIN CLOSES
+
+Both containers are written **in one Chromium page, from one execution of one transaction**, and
+`joinRecordings` accepts the pair:
+
+```
+JOINED  joinId=0x0330099ccfa1701224ce448435ee4c05056c78d43802126cf581af8567a9b1b5
+        arm=split  order=[private, public]
+ONE HALF ALONE -> refused, ground=count-mismatch
+```
+
+The identity is the outer frame's own `argsHash` — a value the circuit committed to — so two runs
+of one transaction agree and two transactions cannot collide.

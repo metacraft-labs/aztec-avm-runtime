@@ -97,6 +97,14 @@ export interface CtRecording {
   readonly callsOpened: number;
   /** Frames still open at close. Non-zero is legitimate — an entry frame need not return. */
   readonly callDepthAtClose: number;
+  /**
+   * Steps written through `ct_source_step` — M40's path, for a recording whose steps are source
+   * positions rather than AVM records.
+   *
+   * `0` for an AVM recording and `events` for a private-half one, which is what makes "which kind
+   * of recording is this" a reading rather than an inference from the paths it happens to carry.
+   */
+  readonly sourceSteps: number;
 }
 
 export class CtWriterError extends Error {
@@ -126,6 +134,8 @@ export class CtWriter {
   private readonly posPtr: number;
   private posFilled = 0;
   private pathsInterned = 0;
+  /** Steps written through {@link CtWriter.sourceStep}. */
+  private sourceSteps = 0;
   private view: DataView;
   private bytes: Uint8Array;
   private seenBuffer: ArrayBuffer;
@@ -281,6 +291,34 @@ export class CtWriter {
     }
     this.filled += 1;
     if (this.filled === this.batchRecords) this.flush();
+  }
+
+  /**
+   * Record one SOURCE step — a position, and no AVM record beside it.
+   *
+   * The step a Noir private frame produces is a `(path, line, column)`: there is no opcode, no
+   * context id, no gas and no contract address to put in a `StepEvent`, and `push` would write
+   * five variables per step out of values a host had invented. `ct_source_step` is the module's
+   * export for exactly that, and this is the whole host side of it.
+   *
+   * ANY BUFFERED AVM STEPS ARE FLUSHED FIRST. The two paths are ordered by the order the module
+   * sees them, and a batch still sitting in the host's buffer would land in the container AFTER a
+   * source step that was recorded before it. Callers do not have to know that, for the same reason
+   * `call` flushes.
+   *
+   * `column` is 1-based; `0` means "line only". `line` is 1-based and the module refuses `0`.
+   */
+  sourceStep(pathId: number, line: number, column = 0): void {
+    this.assertOpen();
+    this.flush();
+    const status = this.ex.ct_source_step(pathId, line, column);
+    if (status !== CT_OK) throw new CtWriterError('ct_source_step', status, this.lastError());
+    this.sourceSteps += 1;
+  }
+
+  /** Source steps this host has written. Compared against the module's own count at close. */
+  get sourceStepsWritten(): number {
+    return this.sourceSteps;
   }
 
   /** Hand whatever is buffered to the module. One crossing; a no-op when nothing is pending. */
@@ -513,6 +551,12 @@ export class CtWriter {
     const logEvents = this.ex.ct_log_event_count();
     const callsOpened = this.ex.ct_calls_opened();
     const callDepthAtClose = this.ex.ct_call_depth();
+    // READ BEFORE `ct_writer_close`, WITH THE OTHER SESSION COUNTERS, AND THAT IS NOT ARBITRARY:
+    // closing TAKES the session, and every accessor that reads through it answers 0 afterwards.
+    // Reading this one after the close reported `0` over a container with sixty-six steps in it —
+    // a producer's counter that had stopped counting, which the comparison below turned into a
+    // named failure instead of a silently smaller number.
+    const moduleSourceSteps = Number(this.ex.ct_source_steps_written());
     const positionsLeft = this.ex.ct_positions_pending();
     if (positionsLeft !== 0) {
       // More positions than steps. Not a degradation — a desynchronisation, and the steps that
@@ -537,6 +581,16 @@ export class CtWriter {
     const violationPc = this.ex.ct_rung_violation_pc();
     const stepsPositioned = Number(this.ex.ct_steps_positioned());
     const stepsUnpositioned = Number(this.ex.ct_steps_unpositioned());
+    // TWO PRODUCERS OF ONE COUNT, COMPARED. The host counts its own `sourceStep` calls and the
+    // module counts the ones it accepted; they can only differ if a call was refused and the
+    // refusal was swallowed, which is the shape a `try` around a write produces. Reading only the
+    // module's would be reading a producer's report about itself.
+    if (moduleSourceSteps !== this.sourceSteps) {
+      throw new Error(
+        `the host wrote ${this.sourceSteps} source step(s) and the module recorded `
+          + `${moduleSourceSteps}; a container whose step count is in doubt is not closed here.`,
+      );
+    }
     this.closed = true;
     if (columnsRequested && dropped) {
       throw new ColumnAwarenessDropped(this.config.writerPath, writerKind);
@@ -569,6 +623,7 @@ export class CtWriter {
       logEvents,
       callsOpened,
       callDepthAtClose,
+      sourceSteps: moduleSourceSteps,
     };
   }
 }

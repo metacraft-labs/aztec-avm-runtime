@@ -47,6 +47,20 @@ export {
   type PublicHalfReport,
 } from './transaction_public_half.ts';
 
+// ---- the PRIVATE half, stepped and written into a container BY THE PAGE ------------------------
+//
+// Two wasm modules and no third writer: `m40_private_trace.wasm` steps the transaction with the
+// real Noir tracer and stops at the event stream, and the page's own `ct_writer.wasm` writes the
+// container. See the file header for why this is not `recordAndDownload`.
+export {
+  PrivateTraceRefused,
+  recordPrivateHalf,
+  stepPrivateHalf,
+  type PrivateHalfRecording,
+  type TraceOp,
+  type TracerReport,
+} from './private_half_container.ts';
+
 // ---- upstream's own builder, vendored ---------------------------------------------------------
 export {
   createContractClassAndInstance,
