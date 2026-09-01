@@ -280,18 +280,81 @@ assert_true "and it is NOT what the raw parameter list derives, so the strip is 
 assert_true "the derivation is exported once and used by both consumers" \
   str_has_sub "$(cat "$EXEC_SRC")" "export async function privateFunctionSelector"
 
-echo "== 9. THE NESTED-CALL ORACLE REFUSES ON FIVE DISTINGUISHABLE GROUNDS, EACH BY NAME"
+echo "== 9. FOUR OF THE FIVE REFUSAL GROUNDS ARE PRODUCED BY A REAL CIRCUIT, NOT GREPPED"
+# ===========================================================================================
+# THE FIRST VERSION OF THIS SECTION WAS SIX TAUTOLOGIES, AND THIS FILE IS WHERE IT WAS CAUGHT.
+# ===========================================================================================
+#
+# It asserted `str_has_sub "$(cat private_oracles.ts)" "'unregistered-contract'"` for each of the
+# five grounds — a name GREPPED IN THE FILE THAT DECLARES THAT NAME, which is this campaign's own
+# catalogued form and cannot be less than true. Found by re-reading the check while a sweep ran,
+# which is the only work a sweep leaves and is where this campaign's aborts keep finding things.
+#
+# Each arm below removes exactly ONE thing the oracle needs from the WORKING transaction and leaves
+# everything else alone, so the ground the ACVM reports back is attributable to that one thing. The
+# transaction is otherwise the arm section 2 asserts executes, which is what makes each of these a
+# difference rather than a run that failed for its own reasons.
 ORACLES_TEXT="$(cat "$ORACLES_SRC")"
-for ground in unregistered-contract unknown-selector not-private no-args-preimage depth-exceeded; do
-  assert_true "the oracle can refuse on '$ground'" \
-    str_has_sub "$ORACLES_TEXT" "'$ground'"
+GROUNDS_EXERCISED=0
+for ground in unregistered-contract unknown-selector not-private depth-exceeded; do
+  outcome="$(m39_arm "refusals.report.$ground.run.outcome")"
+  stopped="$(m39_arm "refusals.report.$ground.run.stoppedAtOracle")"
+  chain="$(m39_arm "refusals.report.$ground.run.errorChain")"
+  ledger="$(m39_arm "refusals.report.$ground.run.oracleCalls")"
+  m38_absent "${ground}Outcome=$outcome" "${ground}Stopped=$stopped" "${ground}Chain=$chain" \
+    "${ground}Ledger=$ledger"
+  assert_eq "$ground: the transaction is refused" "refused" "$outcome"
+  assert_eq "$ground: at the nested-call oracle and no other" "aztec_prv_callPrivateFunction" "$stopped"
+  # THE GROUND IS NAMED IN THE ERROR THE ACVM CARRIED OUT, not in the source. `NestedCallRefused`
+  # is not `OracleUnimplemented` and the distinction is the point: the oracle IS served, and this
+  # particular call cannot be.
+  assert_true "$ground: the error names NestedCallRefused and this ground" \
+    str_has_sub "$chain" "NestedCallRefused: $ground:"
+  # AND THE LEDGER RECORDS `unavailable`, WHICH IS THE THIRD OUTCOME AND NOT `refused`. A fact about
+  # the DATA written as a fact about the PARTITION is what makes one oracle appear in both the
+  # served and the refused sets of a single run — M35's own finding, and the reason `unavailable`
+  # exists at all.
+  # PARSED, NOT GREPPED, AND TIED TO THE LAST ENTRY. A substring search for an outcome anywhere in
+  # the ledger would be satisfied by any entry having it, and the key ORDER is the reader's
+  # (`sort_keys`) rather than the producer's — a needle that assumed `outcome` follows `reason` was
+  # the first spelling here and matched nothing.
+  last="$(printf '%s' "$ledger" | python3 -c '
+import json, sys
+calls = json.load(sys.stdin)
+last = calls[-1]
+print("%s|%s|%s" % (last["oracle"], last["outcome"], last["detail"].split(" ")[0]))')"
+  m38_absent "${ground}Last=$last"
+  assert_eq "$ground: the ledger's last entry is the nested call, unavailable, on this ground" \
+    "aztec_prv_callPrivateFunction|unavailable|$ground" "$last"
+  # AND `unavailable` IS THE THIRD OUTCOME AND NOT `refused`. A fact about the DATA written as a
+  # fact about the PARTITION is what makes one oracle appear in both the served and the refused sets
+  # of one run — M35's own finding, and the reason the third outcome exists at all.
+  assert_eq "$ground: and nothing in this run was recorded as refused" "0" \
+    "$(printf '%s' "$ledger" | python3 -c '
+import json, sys
+print(sum(1 for c in json.load(sys.stdin) if c["outcome"] == "refused"))')"
+  GROUNDS_EXERCISED=$(( GROUNDS_EXERCISED + 1 ))
 done
-# AND ONE OF THEM WAS EXERCISED BY A REAL RUN RATHER THAN GREPPED. The both-halves fixture passes a
-# selector the raw-parameter derivation could not find, so `unknown-selector` fired on real data
-# before the derivation was fixed; what is asserted here is that the SHAPE of that refusal names
-# both the requested selector and the ones the artifact derives, which is what made it diagnosable.
-assert_true "and unknown-selector names the artifact's own derivations back" \
-  str_has_sub "$ORACLES_TEXT" 'The artifact derives'
+assert_eq "four grounds were exercised through a real circuit" "4" "$GROUNDS_EXERCISED"
+# EACH ARM STOPS FOR ITS OWN REASON AND NOT FOR A SHARED ONE. Four refusals that all named the same
+# ground would satisfy every assertion above; the SET is what says they are four.
+DISTINCT_GROUNDS="$(for g in unregistered-contract unknown-selector not-private depth-exceeded; do
+    m39_arm "refusals.report.$g.run.errorChain" | grep -o 'NestedCallRefused: [a-z-]*:' | head -1
+  done | sort -u | grep -c .)"
+assert_eq "and the four grounds they reported are four DIFFERENT grounds" "4" "$DISTINCT_GROUNDS"
+# THE DIAGNOSTIC'S SHAPE IS WHAT MADE THE SELECTOR DEFECT FINDABLE: `unknown-selector` names the
+# requested selector AND every selector the artifact derives. Read out of the RUN.
+US_CHAIN="$(m39_arm refusals.report.unknown-selector.run.errorChain)"
+assert_true "unknown-selector names the artifact's own derivations back" \
+  str_has_sub "$US_CHAIN" "The artifact derives"
+assert_true "and it names the selector that was asked for" \
+  str_has_sub "$US_CHAIN" "0xdeadbeef"
+# `no-args-preimage` IS DECLARED AND NOT EXERCISED, AND THE CHECK SAYS WHICH IS WHICH. Producing it
+# needs a contract that calls the oracle WITHOUT storing its arguments first, and every `#[aztec]`
+# contract stores them one opcode earlier — so there is no fixture for it here. A section that
+# quietly grepped all five would make four measurements and one claim look like five measurements.
+assert_true "the fifth ground is declared, and this check does not pretend to exercise it" \
+  str_has_sub "$ORACLES_TEXT" "'no-args-preimage'"
 
 echo "== 10. THE PARTITION RECONCILIATION COVERS ALL FOUR COMBINATIONS OF THE TWO SOURCES"
 assert_true "the served set is a function of what the handler was given" \
@@ -417,6 +480,8 @@ m38_assert_doc "NESTED-CALLS.md sections 1, 3 and 5" "$M39_DOC" \
   "oracle calls the callee made|0|$C_CALLS" \
   "\`Child.value\` bytecode|0|$C_BYTES" \
   "the served set with a nested-call source attached|0|$SERVED_N" \
+  "refusal grounds exercised through a real circuit|0|$GROUNDS_EXERCISED" \
+  "refusal grounds declared and NOT exercised|0|1" \
   "times the call-private wire regrouping fired|0|$COMPAT_N" \
   "oracle calls the outer frame made|0|$BH_CALLS" \
   "public calls the outer frame enqueued|0|$BH_OUT_N" \

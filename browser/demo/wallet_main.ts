@@ -1185,6 +1185,16 @@ async function armNestedPrivateCall(options?: {
    * BOTH-HALVES shape — a nested private call AND two enqueued public calls in one transaction.
    */
   entry?: 'entry_point' | 'enqueue_calls_to_child_with_nested_first';
+  /**
+   * Make the nested call REFUSABLE on a named ground, through the real circuit.
+   *
+   * **A refusal ground asserted by grepping the file that declares it is a tautology** — this
+   * campaign's own "a name grepped in the file that declares that name", and the first version of
+   * the check that reads this arm was six of them. Each option below removes exactly one thing the
+   * oracle needs and leaves everything else alone, so the ground the ACVM reports back is a
+   * measurement of the oracle's own decision rather than of a string in a source file.
+   */
+  refuse?: 'unregistered-contract' | 'unknown-selector' | 'not-private' | 'depth-exceeded';
 }): Promise<Record<string, unknown>> {
   // Same reason as `armPrivateExecution`: a function SELECTOR is a poseidon hash of the ABI
   // signature, and under this build's DD-11 redirect table poseidon2 is `avm.wasm`'s.
@@ -1220,8 +1230,17 @@ async function armNestedPrivateCall(options?: {
   //   call to a function that is not public, which the sequencer would refuse later rather than the
   //   circuit refusing now, and this arm would look green.
   const entry = options?.entry ?? 'entry_point';
-  const childFunction = entry === 'entry_point' ? 'value' : 'pub_set_value';
-  const childSelector = await privateFunctionSelector(childArtifact, childFunction);
+  const refuse = options?.refuse;
+  // `not-private` HANDS `entry_point` A PUBLIC FUNCTION'S SELECTOR. The selector space is shared
+  // across function kinds, so the callee IS found — and must then be refused for being public,
+  // which is a different ground from "no function derives this" and sends a reader somewhere else.
+  const childFunction =
+    entry === 'entry_point' && refuse !== 'not-private' ? 'value' : 'pub_set_value';
+  const derivedSelector = await privateFunctionSelector(childArtifact, childFunction);
+  // `unknown-selector` PASSES A FIELD NO FUNCTION OF THE ARTIFACT DERIVES. Not a corrupted one —
+  // a value chosen so the refusal must enumerate what the artifact DOES derive, which is the half
+  // that made the selector defect diagnosable.
+  const childSelector = refuse === 'unknown-selector' ? new Fr(0xdeadbeefn) : derivedSelector.toField();
 
   const say1 = (text: string) => say(text);
   const request = {
@@ -1236,16 +1255,25 @@ async function armNestedPrivateCall(options?: {
     artifact: parentArtifact,
     functionName: entry,
     // `target_contract` and `target_selector`, one field each, in the order the ABI declares.
-    args: [childInstance.address.toField(), childSelector.toField()],
+    args: [childInstance.address.toField(), childSelector],
     // TIER 4's SOURCE. Both contracts, because a directory holding only the callee would leave
     // "the caller is registered" untested and a directory holding only the caller is the refusal
     // this arm's control exercises. The PARENT is in it for a second reason worth stating: a
     // contract may call itself, and a directory that omitted the executing contract would refuse
     // that with `unregistered-contract` over an address the page is plainly running.
-    contracts: [
-      { address: parentInstance.address, artifact: parentArtifact },
-      { address: childInstance.address, artifact: childArtifact },
-    ],
+    // `unregistered-contract` LEAVES THE CALLEE OUT OF THE DIRECTORY and nothing else. The callee
+    // still has an INSTANCE — tier 2's directory is a different one — so the refusal is about the
+    // artifact directory rather than about the address being unknown to the wallet.
+    contracts:
+      refuse === 'unregistered-contract'
+        ? [{ address: parentInstance.address, artifact: parentArtifact }]
+        : [
+            { address: parentInstance.address, artifact: parentArtifact },
+            { address: childInstance.address, artifact: childArtifact },
+          ],
+    // `depth-exceeded` SETS THE BOUND TO ZERO, so the FIRST nested call exceeds it. Everything else
+    // — the directory, the selector, the arguments — is exactly the working arm's.
+    ...(refuse === 'depth-exceeded' ? { nestedMaxDepth: 0 } : {}),
     // Taped for the same reason M35's two frames are: the Noir tracer's executor is synchronous
     // Rust and replays the wire values. A nested transaction tapes PER FRAME — the parent's tape
     // carries the `callPrivateFunction` entry with the child's two returned fields as its outputs,
@@ -1278,7 +1306,9 @@ async function armNestedPrivateCall(options?: {
     line,
     wireCompat,
     entry,
+    refuse: refuse ?? null,
     childFunction,
+    requestedSelector: childSelector.toString(),
     aztecVersion: String((parentArtifact as { aztec_version?: string }).aztec_version ?? '?'),
     // THE CONTEXT WIDTH THE ARTIFACT ITSELF DECLARES, beside the one this environment builds. The
     // 37-against-38 fact is the whole reason the anchor line cannot run here, and reading it off
@@ -1293,8 +1323,8 @@ async function armNestedPrivateCall(options?: {
     child: {
       address: childInstance.address.toString(),
       classId: childInstance.originalContractClassId.toString(),
-      selector: childSelector.toString(),
-      selectorField: childSelector.toField().toString(),
+      selector: derivedSelector.toString(),
+      selectorField: derivedSelector.toField().toString(),
     },
     chain: { chainId: String(PRIVATE_CHAIN_ID), version: String(PRIVATE_CHAIN_VERSION) },
     run: nested ? jsonSafe(nested) : null,
@@ -2269,6 +2299,18 @@ const api = {
   armPrivateExecution,
   armNestedPrivateCall,
   armNestedPrivateCallNoCompat: () => armNestedPrivateCall({ wireCompat: 'off' }),
+  armNestedPrivateCallRefusals: async () => {
+    // ONE PAGE, FOUR GROUNDS. Each is the SAME transaction with exactly one thing removed, so the
+    // ground the ACVM reports is attributable to that one thing. `no-args-preimage` is not here:
+    // it needs a contract that calls the oracle WITHOUT storing its arguments first, and every
+    // `#[aztec]` contract stores them one opcode earlier — so it stays declared rather than
+    // exercised, and the check says which of the five are which.
+    const out: Record<string, unknown> = {};
+    for (const ground of ['unregistered-contract', 'unknown-selector', 'not-private', 'depth-exceeded'] as const) {
+      out[ground] = await armNestedPrivateCall({ refuse: ground });
+    }
+    return out;
+  },
   armNestedPrivateCallBothHalves: () =>
     armNestedPrivateCall({ entry: 'enqueue_calls_to_child_with_nested_first' }),
   armNestedPrivateCallAnchorLine: () => armNestedPrivateCall({ line: 'anchor' }),

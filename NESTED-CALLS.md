@@ -135,6 +135,28 @@ CHILD (counters 1 -> 2, depth 1)
    rather than typed, with all four combinations of the two optional sources reconciled at
    construction rather than the two that used to exist.
 
+### The refusals, produced rather than declared
+
+| | derived |
+|---|---|
+| refusal grounds exercised through a real circuit | **4** |
+| refusal grounds declared and NOT exercised | **1** |
+
+Each of the four is the SAME transaction with exactly one thing removed — the callee left out of the
+artifact directory, a selector no function derives, a PUBLIC function's selector handed to a private
+call, and the depth bound set to zero — so the ground the ACVM reports back is attributable to that
+one thing. Each is recorded in the ledger as `unavailable` rather than `refused`, which is M35's
+third outcome and the distinction that keeps a fact about the DATA out of the set that describes the
+PARTITION.
+
+The fifth, `no-args-preimage`, is declared and not exercised, and the check says which is which:
+producing it needs a contract that calls the oracle WITHOUT storing its arguments first, and every
+`#[aztec]` contract stores them one opcode earlier.
+
+**The first version of the check that reads this asserted all five by grepping the file that
+declares them** — a name grepped in the file that declares that name, which cannot be less than
+true. Found by re-reading the check while a sweep ran, which is the only work a sweep leaves.
+
 ### Both halves of a transaction, on the fixture that has them
 
 `Parent.enqueue_calls_to_child_with_nested_first` calls ITSELF privately — through

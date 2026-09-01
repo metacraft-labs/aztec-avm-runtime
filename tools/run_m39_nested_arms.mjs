@@ -207,7 +207,21 @@ try {
     await page.close();
   }
 
-  // ---- ARM 4: THE ANCHOR LINE, WHICH THIS RUNTIME CANNOT ASSEMBLE A FRAME FOR --------------------
+  // ---- ARM 4: THE REFUSAL GROUNDS, EACH EXERCISED THROUGH THE REAL CIRCUIT ----------------------
+  //
+  // Four of the oracle's five named grounds, each produced by removing exactly ONE thing the oracle
+  // needs from the working transaction and leaving everything else alone. A ground asserted by
+  // grepping the file that declares it is a tautology — this campaign's own "a name grepped in the
+  // file that declares that name" — and the first version of the check that reads this arm was six
+  // of them.
+  {
+    const page = await walletPage();
+    const report = await page.eval('window.walletDemo.armNestedPrivateCallRefusals()', 900_000);
+    arms.refusals = { ...pageFacts(page), report };
+    await page.close();
+  }
+
+  // ---- ARM 5: THE ANCHOR LINE, WHICH THIS RUNTIME CANNOT ASSEMBLE A FRAME FOR --------------------
   //
   // A claim that a corpus cannot run here is a claim. This runs it: the artifact's own `inputs`
   // parameter is 38 fields wide, the installed `@aztec/constants` declares 37, and the frame is
