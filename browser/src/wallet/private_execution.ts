@@ -13,10 +13,13 @@
 // the ACVM reports `Cannot satisfy constraint` — which reads as a defect in the circuit and is a
 // defect in the harness. That cost an hour, so it is written down here rather than remembered.
 //
-// WHAT IS NOT HERE. Nested calls. `aztec_prv_callPrivateFunction` is the milestone's fourth tier and
-// it refuses by name, so this executes ONE frame. A contract that makes a nested private call fails
-// at the oracle that would have made it, naming itself — which is the correct failure and not a
-// silent single-frame result.
+// NESTED CALLS. `aztec_prv_callPrivateFunction` is served when — and only when — the request carries
+// a `contracts` directory. With one, a transaction is a TREE of frames: this function recurses into
+// itself through the oracle, every frame shares the transaction's execution cache, note cache,
+// capsule store, transient arrays, revertible-phase state and public-calldata accumulator, and each
+// frame keeps its own oracle ledger, its own tape and its own ephemeral-array service. Without one,
+// the oracle refuses by name and this executes ONE frame — which is what every caller written before
+// tier 4 gets, by construction rather than by remembering.
 
 import { Fr } from '@aztec/foundation/curves/bn254';
 import { AztecAddress } from '@aztec/stdlib/aztec-address';
@@ -33,12 +36,17 @@ import { toACVMWitness } from '../vendor/simulator/private/acvm/serialize.ts';
 import { buildACIRCallback } from '../vendor/pxe/contract_function_simulator/oracle/acir_callback.ts';
 import {
   type HeldAccountKeys,
+  type HeldContractArtifact,
   type HeldContractInstance,
+  type NestedFrameRequest,
+  type NestedFrameResult,
   type NoteDiscoverySource,
   type OracleCall,
+  type PrivateFrameState,
   ORACLE_ENVIRONMENT_VERSION,
   assertHeldAccountKeysAreSelfConsistent,
   assertHeldInstancesAreSelfConsistent,
+  createPrivateFrameState,
   createPrivateOracleHandler,
 } from './private_oracles.ts';
 
@@ -212,6 +220,35 @@ export interface PrivateExecutionRequest {
    * Off by default: the tape is the raw field arrays and is much larger than the ledger.
    */
   readonly recordTape?: boolean;
+  /**
+   * TIER 4's source: the contracts this wallet can EXECUTE, by address.
+   *
+   * **Absent by default, and its absence is one named refusal rather than a frame this runtime
+   * invented** — the same shape, and for the same reason, as `discovery`. Supplying it is what
+   * makes `aztec_prv_callPrivateFunction` served: a handler with no artifact directory cannot find
+   * a callee's bytecode, and one that answered anyway would have to fabricate the child's result.
+   *
+   * It is a DIFFERENT directory from `contractInstances`. An instance is the six-field preimage a
+   * circuit constrains against an address and carries no bytecode; registering an address for the
+   * instance oracle does not make it callable.
+   */
+  readonly contracts?: readonly HeldContractArtifact[];
+  /** The bound on nested-call depth. `DEFAULT_NESTED_CALL_MAX_DEPTH` when omitted. */
+  readonly nestedMaxDepth?: number;
+  /**
+   * Whether to regroup `aztec_prv_callPrivateFunction`'s return for a contract compiled against an
+   * older minor of this major. `'auto'` (the default) applies it on that condition and on no other;
+   * `'off'` disables it entirely, which is what makes the gap it closes a measurement rather than a
+   * paragraph. See `wireCompatCallback`.
+   */
+  readonly nestedCallWireCompat?: 'auto' | 'off';
+  /**
+   * The TRANSACTION's shared state and this frame's depth. **Set by the nested-call oracle and by
+   * nothing else** — a caller that supplies them is claiming to be a frame inside a transaction
+   * somebody else started, which is a claim only that oracle can make truthfully.
+   */
+  readonly shared?: PrivateFrameState;
+  readonly depth?: number;
 }
 
 /**
@@ -227,6 +264,33 @@ export interface OracleTapeEntry {
   readonly oracle: string;
   readonly inputs: readonly (readonly string[])[];
   readonly outputs: readonly (readonly string[])[];
+  /**
+   * Whether each input slot crossed the wire as a SINGLE field or as an ARRAY of fields.
+   *
+   * ===========================================================================================
+   * A ONE-ELEMENT ARRAY AND A SINGLE FIELD ARE THE SAME THING ON A NORMALISED TAPE, AND THEY ARE
+   * NOT THE SAME THING TO THE ACVM
+   * ===========================================================================================
+   *
+   * `ForeignCallParam` is `Single(f) | Array(fs)`, and Brillig's destination for an array return is
+   * a HEAP ARRAY of a declared width. A replaying executor handed a normalised slot of length one
+   * has to choose, and choosing by length is right for every SINGLE and wrong for every
+   * one-element ARRAY.
+   *
+   * **Measured, and it cost a real halt.** `aztec_prv_getHashPreimage` returns `[Field; N]` — the
+   * oracle behind `execution_cache::load` — and for a function returning one `Field` that is an
+   * array of ONE. Replaying it as a `Single` made `Parent.entry_point` fail inside Brillig with a
+   * bare `Failed assertion` (an out-of-bounds read of a one-slot array that had received a scalar),
+   * 167 opcodes into 903, five of its seven recorded oracle calls in. Every oracle M38's four arms
+   * exercised happened to be a genuine `Single` or a multi-field array, so the guess was right
+   * every time it had been tried.
+   *
+   * The kinds are recorded rather than inferred for exactly the reason the tape exists at all:
+   * *a value nobody measured is a value nobody may use.*
+   */
+  readonly inputKinds: readonly ('single' | 'array')[];
+  /** The same, for the fields the handler handed back. */
+  readonly outputKinds: readonly ('single' | 'array')[];
 }
 
 export interface PrivateExecutionReport {
@@ -242,6 +306,16 @@ export interface PrivateExecutionReport {
   /** Present only when the circuit solved. */
   readonly solvedWitnessSize?: number;
   readonly returnWitnessSize?: number;
+  /**
+   * The frame's own declared return values, ascending by witness index. Present when it solved.
+   *
+   * **This is what makes a nested call's RESULT checkable rather than only its shape.**
+   * `Parent.entry_point` returns whatever `Child.value` returned, and `Child.value` is
+   * `input + chain_id + version` — so a child that was handed the wrong chain fields, or whose
+   * return preimage came back from the wrong frame, produces a different field here while every
+   * count in the report stays identical. A step count and an oracle ledger cannot see that.
+   */
+  readonly returnFields?: readonly string[];
   /** The oracle version the BYTECODE declared, against the environment's own. */
   readonly contractOracleVersion?: { major: number; minor: number };
   readonly environmentOracleVersion: { major: number; minor: number };
@@ -272,6 +346,29 @@ export interface PrivateExecutionReport {
   /** The whole `cause` chain, outermost first. The ACVM's wrapper is never the useful one. */
   readonly errorChain?: readonly string[];
   readonly outcome: 'executed' | 'refused' | 'failed';
+  /** 0 for the transaction's entry frame; one more per nesting level. */
+  readonly depth: number;
+  /** Whether a nested-call source was in force, so a report says which partition it ran under. */
+  readonly hasNested: boolean;
+  /**
+   * How many times the call-private wire regrouping fired in THIS frame.
+   *
+   * Reported rather than inferred, because "the transaction completed" is equally true of a run in
+   * which the shim was never needed. A zero here on the `deletion_era` line would mean the
+   * predicate stopped firing, and a non-zero on the anchor line would mean it fires where it must
+   * not.
+   */
+  readonly wireCompatApplied: number;
+  /**
+   * The frames THIS frame called, in order, each a whole report of its own.
+   *
+   * **A TREE AND NOT A FLATTENED LIST, because the tape is per frame and so is the circuit.** The
+   * Noir tracer steps one circuit at a time; a transaction of N frames is N traces, and which tape
+   * belongs to which circuit is exactly what a flattened list throws away. Upstream keeps the same
+   * shape (`nestedExecutionResults`) for the same reason one layer up, where the private kernel
+   * consumes it.
+   */
+  readonly nested: readonly PrivateExecutionReport[];
   readonly effects: ReturnType<ReturnType<typeof createPrivateOracleHandler>['effects']>;
   /** A handful of the circuit's own public inputs, when it solved. */
   readonly publicInputs?: {
@@ -292,6 +389,17 @@ export interface PrivateExecutionReport {
     readonly noteHashes: readonly string[];
     readonly nullifiers: readonly string[];
     readonly privateLogs: readonly { readonly fields: readonly string[]; readonly length: number }[];
+    /**
+     * The two remaining claimed lengths upstream's `#checkValidStaticCall` reads, as COUNTS.
+     *
+     * They are counts and not contents deliberately. The static-call rule is a count — *"a static
+     * call cannot update the state, emit L2->L1 messages or generate logs"* — and rendering
+     * `CountedL2ToL1Message` or `CountedLogHash` would be the `String(entry)` mistake this file
+     * already records for `NoteHash`, whose `toString()` is `value=0x… counter=1`. A count needs no
+     * field accessor and cannot render a struct as a field.
+     */
+    readonly l2ToL1MsgCount: number;
+    readonly contractClassLogHashCount: number;
   };
 }
 
@@ -309,6 +417,24 @@ function findFunction(artifact: unknown, name: string) {
     );
   }
   return fn;
+}
+
+/**
+ * The selector a function of a RAW artifact derives, by upstream's own
+ * `FunctionSelector.fromNameAndParameters` over the ABI the artifact declares.
+ *
+ * **It is exported because a nested call has two consumers of this one value and they must not
+ * derive it twice.** The caller of `Parent.entry_point` passes the callee's selector IN as an
+ * argument field; the nested-call oracle then looks the callee up BY that selector. Two
+ * derivations of one value is how a lookup silently misses — and the campaign's own rule is that
+ * a number a check needs which also exists in the subject is taken FROM the subject.
+ */
+export async function privateFunctionSelector(artifact: unknown, functionName: string): Promise<FunctionSelector> {
+  const fn = findFunction(artifact, functionName);
+  return FunctionSelector.fromNameAndParameters({
+    name: functionName,
+    parameters: ((fn.abi as { parameters?: unknown[] } | undefined)?.parameters ?? []) as never,
+  });
 }
 
 /** `abi_private` / `abi_public` / `abi_utility` — read from the artifact, never assumed. */
@@ -407,10 +533,20 @@ function recordingCallback(
     }
     wrapped[oracle] = async (...inputs: string[][]) => {
       const seq = tape.length;
-      const entry = { seq, oracle, inputs: (inputs as unknown as (string | string[])[]).map(slots), outputs: [] as string[][] };
+      const raw = inputs as unknown as (string | string[])[];
+      const entry = {
+        seq,
+        oracle,
+        inputs: raw.map(slots),
+        inputKinds: raw.map(slotKind),
+        outputs: [] as string[][],
+        outputKinds: [] as ('single' | 'array')[],
+      };
       tape.push(entry);
       const outputs = await fn(...inputs);
-      entry.outputs = ((outputs ?? []) as unknown as (string | string[])[]).map(slots);
+      const rawOut = (outputs ?? []) as unknown as (string | string[])[];
+      entry.outputs = rawOut.map(slots);
+      entry.outputKinds = rawOut.map(slotKind);
       return outputs;
     };
   }
@@ -430,6 +566,174 @@ function recordingCallback(
  */
 function slots(slot: string | string[]): string[] {
   return typeof slot === 'string' ? [slot] : [...slot];
+}
+
+/**
+ * Which of the ACVM's two slot shapes this one is — the half `slots` normalises away.
+ *
+ * `slots` exists so a reader never has to ask whether it is holding a field or an array; this
+ * exists so a REPLAYER does not have to guess. They are two answers to the same normalisation and
+ * both are needed: without the first the tape is not machine-readable, without the second a
+ * one-element array replays as a scalar. See `OracleTapeEntry.inputKinds`.
+ */
+function slotKind(slot: string | string[]): 'single' | 'array' {
+  return typeof slot === 'string' ? 'single' : 'array';
+}
+
+/**
+ * THE ONE WIRE REGROUPING THIS RUNTIME CARRIES, AND IT IS A SHIM FOR A GAP M37 OWNS.
+ *
+ * ===========================================================================================
+ * WHAT MOVED, READ FROM SOURCE AT BOTH ENDS
+ * ===========================================================================================
+ *
+ * `aztec_prv_callPrivateFunction` hands back an end-side-effect counter and a returns hash. The
+ * two FIELD VALUES are the same on both nightly lines this tree has installed; how many
+ * destination slots they arrive in is not:
+ *
+ * | line | `call_private_function_oracle`'s declared return | slots |
+ * |---|---|---|
+ * | `deletion_era` (`upstream/tsavm/.../oracle/call_private_function.nr`) | `-> [Field; 2]` | **1** |
+ * | the `cpp` anchor (`aztec-packages/.../labs/aztec-nr/.../call_private_function.nr`) | `-> (u32, Field)` | **2** |
+ *
+ * The vendored registry is the anchor's — `CALL_PRIVATE_RESULT = STRUCT([{endSideEffectCounter:
+ * FIELD}, {returnsHash: FIELD}])` — so `serializeReturn` produces two slots, and a `deletion_era`
+ * artifact halts with `Assertion failed: 2 output values were provided as a foreign call result for
+ * 1 destination slots`.
+ *
+ * **`assertCompatibleOracleVersion` PASSES over that pair.** The artifact declares 30.0, this
+ * environment implements 30.8; same MAJOR and environment minor >= contract minor, which is
+ * upstream's own rule for "not breaking". `PRIVATE-EXECUTION.md` §3b measured the identical shape
+ * on `aztec_utl_getPublicKeysAndPartialAddress` and closed by predicting that any refused oracle
+ * whose shape had moved carried the same latent gap. This is that prediction met on the next one
+ * served.
+ *
+ * ===========================================================================================
+ * UPSTREAM HAS A MECHANISM FOR EXACTLY THIS, AND IT CANNOT EXPRESS THIS CASE
+ * ===========================================================================================
+ *
+ * **This shim is not an invention.** `legacy_oracle_registry.ts` — vendored here, RI-97 — exists
+ * for precisely this problem, and says so in its own words: *"Wire shapes that already-deployed
+ * contracts still call by their original oracle name … so versioning an oracle's wire (e.g. adding
+ * return fields) stops being a breaking change."* `buildACIRCallback` installs those entries beside
+ * the live ones and each *"reuses the current handler of its `modernOracle` and reshapes the wire
+ * (params and/or return) back to what the old bytecode expects"* — which is, to the word, what
+ * happens below.
+ *
+ * **But every entry in it is keyed by a RETIRED NAME, and there are three:**
+ * `aztec_utl_getL1ToL2MembershipWitness`, `aztec_utl_getLogsByTag` and
+ * `aztec_utl_getPendingTaggedLogs`, each superseded by a `…V2`. Upstream's own rule for changing a
+ * wire is therefore to change the NAME and serve the old name from that table.
+ *
+ * `aztec_prv_callPrivateFunction` changed shape and **kept its name**, so no legacy entry can be
+ * written for it: the key would collide with the live oracle, and `buildACIRCallback` throws on
+ * exactly that (*"Legacy oracle X collides with a live oracle of the same name"*). The same is true
+ * of `aztec_utl_getPublicKeysAndPartialAddress`, which `PRIVATE-EXECUTION.md` §3b measured. **So
+ * there are two same-name wire changes and upstream's compatibility table can hold neither.** That
+ * is the finding; this function is what a legacy entry would have been, keyed on the contract's
+ * declared VERSION because the name it would otherwise key on was never retired.
+ *
+ * ===========================================================================================
+ * WHY NOT A CORPUS CHANGE, AND WHY IT IS THIS NARROW
+ * ===========================================================================================
+ *
+ * The corpus change is the durable fix and it is M37's: running the anchor-line artifacts needs a
+ * 38-field `PrivateContextInputs` and the installed `@aztec/constants` declares **37**, so it is a
+ * whole-runtime reconciliation rather than an artifact swap. §3b assigned exactly that pairing to
+ * M37 and this does not take it.
+ *
+ * What this does is regroup two field values that are already correct, for ONE oracle, and only
+ * when the executing bytecode has said it was compiled against an older minor of the same major.
+ * It fabricates nothing: both fields come from a child frame that really executed. The wider class
+ * is `PRIVATE-EXECUTION.md` §2's anchor-versus-pin gap, which cost three shims in
+ * `browser/src/shims/` — an installed pin that is not the anchor the wire was read from.
+ *
+ * **It is measured in both directions on every run.** With it off, the same transaction halts at
+ * the slot count and names 2-against-1; with it on, the transaction completes. A shim nobody has
+ * seen the absence of is a shim whose necessity is a paragraph.
+ *
+ * **AND THE PREDICATE IS THE CONTRACT'S OWN DECLARATION, NOT A FILE PATH OR A ROOT NAME.** It reads
+ * the version the BYTECODE passed to `assertCompatibleOracleVersion` — call zero of every
+ * `#[aztec]` contract — through the handler that recorded it. An artifact compiled against this
+ * environment's own minor is untouched, which is the case that must not be shimmed.
+ */
+/**
+ * The oracle whose wire this shim regroups, spelled once.
+ *
+ * A `const` rather than a literal at the use site because the same name has to appear in the lookup
+ * and in the diagnostic, and the defect this shim's own first draft shipped was a key that did not
+ * match the callback's.
+ */
+const CALL_PRIVATE_ORACLE = 'aztec_prv_callPrivateFunction';
+
+/**
+ * The names in upstream's own legacy-wire table, sorted — read from the table rather than listed.
+ *
+ * Exported so a check can assert that the two same-name wire changes this runtime has MEASURED are
+ * NOT among them, which is the whole reason this shim exists instead of a legacy entry.
+ */
+export function legacyWireOracleNames(registry: Record<string, unknown>): readonly string[] {
+  return Object.freeze(Object.keys(registry).sort());
+}
+
+function regroupedCallPrivateResult(outputs: unknown): string[][] {
+  const slotted = ((outputs ?? []) as (string | string[])[]).map(slots);
+  const fields = slotted.flat();
+  if (slotted.length !== 2 || fields.length !== 2) {
+    // A REFUSAL RATHER THAN A BEST-EFFORT REGROUPING. If the anchor's mapping ever stops producing
+    // exactly two one-field slots, this shim's whole premise is gone and flattening whatever
+    // arrived would hand the circuit a plausible answer of the wrong shape — the one failure mode
+    // this runtime refuses. The count that surprised it is in the message.
+    throw new Error(
+      `the call-private wire shim expected two one-field slots from the anchor's ` +
+        `CALL_PRIVATE_RESULT and got ${slotted.length} slot(s) holding ${fields.length} field(s). ` +
+        `The regrouping this shim performs is only correct for the pair it was measured on.`,
+    );
+  }
+  return [fields];
+}
+
+/**
+ * Wraps the ACIR callback so `aztec_prv_callPrivateFunction`'s return is regrouped for a contract
+ * compiled against an older minor of this major. Every other oracle is passed through unchanged,
+ * and so is the same oracle for a contract whose minor matches.
+ */
+function wireCompatCallback(
+  callback: Record<string, (...inputs: string[][]) => Promise<string[][]>>,
+  contractVersion: () => { major: number; minor: number } | undefined,
+  applied: { count: number },
+): Record<string, (...inputs: string[][]) => Promise<string[][]>> {
+  // THE KEY IS THE ORACLE NAME AND NOT THE METHOD NAME, AND THE FIRST VERSION OF THIS HAD IT WRONG.
+  // `buildACIRCallback` keys its object by `oracleKey` — `aztec_prv_callPrivateFunction` — and
+  // resolves the HANDLER method from it by upstream's `aztec_{scope}_{methodName}` convention. A
+  // wrapper keyed by `callPrivateFunction` wraps nothing, returns the callback unchanged, and
+  // reports `wireCompatApplied: 0` over a run that needed it — which is exactly what the first
+  // measurement showed, and it is the shape this repository calls a guard that cannot guard.
+  const oracle = CALL_PRIVATE_ORACLE;
+  const inner = callback[oracle];
+  if (typeof inner !== 'function') {
+    // A MISSING KEY IS A FAILURE, NOT A PASS-THROUGH. If the registry ever stops declaring this
+    // oracle, silently returning the callback would leave the shim installed, inert and green.
+    throw new Error(
+      `the call-private wire shim found no '${oracle}' entry in the ACIR callback; the callback ` +
+        `declares ${Object.keys(callback).length} oracle(s)`,
+    );
+  }
+  const wrapped: Record<string, (...inputs: string[][]) => Promise<string[][]>> = { ...callback };
+  wrapped[oracle] = async (...inputs: string[][]) => {
+    const outputs = await inner(...inputs);
+    const declared = contractVersion();
+    const older =
+      declared !== undefined &&
+      declared.major === ORACLE_ENVIRONMENT_VERSION.major &&
+      declared.minor < ORACLE_ENVIRONMENT_VERSION.minor;
+    if (!older) {
+      return outputs;
+    }
+    applied.count += 1;
+    return regroupedCallPrivateResult(outputs);
+  };
+  return wrapped;
 }
 
 /** `[index, hex]` pairs, ascending, from an ACVM witness map. */
@@ -456,10 +760,7 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
   const functionType = functionTypeOf(fn);
   const bytecode = Buffer.from(fn.bytecode, 'base64');
 
-  const selector = await FunctionSelector.fromNameAndParameters({
-    name: request.functionName,
-    parameters: ((fn.abi as { parameters?: unknown[] } | undefined)?.parameters ?? []) as never,
-  });
+  const selector = await privateFunctionSelector(request.artifact, request.functionName);
 
   const contractAddress = toAddressValue(request.contractAddress, 'contractAddress');
   const msgSender = toAddressValue(request.msgSender, 'msgSender');
@@ -507,13 +808,89 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
   const accountKeys = request.accountKeys ?? [];
   await assertHeldAccountKeysAreSelfConsistent(accountKeys);
 
+  // THE TRANSACTION'S STATE. A top-level call creates it; the nested-call oracle hands its own
+  // frame's down. `depth` travels with it because a bound that is not carried is not a bound.
+  const shared = request.shared ?? createPrivateFrameState();
+  const depth = request.depth ?? 0;
+
+  // TIER 4's SOURCE, ASSEMBLED HERE BECAUSE THIS IS THE ONLY THING THAT CAN BUILD A FRAME.
+  // `private_oracles.ts` owns the directory lookup, the five named refusals and the static-call
+  // rule; it cannot own the recursion, because it is the module this one imports. So the recursion
+  // and the selector derivation are INJECTED, which is also what keeps the oracle's refusals in the
+  // file that declares the oracle.
+  //
+  // The child frames' reports are collected HERE rather than read back off the handle, so a report
+  // is a tree even when the parent later throws: a frame that made two nested calls and then failed
+  // has two completed children worth having, and losing them would make a failure look like a frame
+  // that never called anything.
+  const nestedReports: PrivateExecutionReport[] = [];
+  const contracts = request.contracts ?? [];
+  const nestedSource =
+    contracts.length > 0
+      ? {
+          contracts,
+          maxDepth: request.nestedMaxDepth ?? undefined,
+          selectorOf: privateFunctionSelector,
+          execute: async (child: NestedFrameRequest): Promise<NestedFrameResult> => {
+            const report = await executePrivateFunction({
+              artifact: child.artifact,
+              functionName: child.functionName,
+              contractAddress: child.contractAddress,
+              msgSender: child.msgSender,
+              chainId: request.chainId,
+              version: request.version,
+              // THE ARGUMENTS ARE ALREADY FIELDS, because they came out of the shared execution
+              // cache as the preimage the PARENT stored. Nothing here re-encodes them.
+              args: child.args,
+              // THE CHILD CARRIES THE PARENT'S SEED, and the entropy INDEX is the transaction's.
+              // There is no second source of entropy to give a child — this wallet's third design
+              // property forbids drawing one — so the two must not collide, and a shared counter is
+              // what makes them not.
+              entropySeed: request.entropySeed,
+              ...(request.anchorBlockHeader ? { anchorBlockHeader: request.anchorBlockHeader } : {}),
+              startSideEffectCounter: child.startSideEffectCounter,
+              isStaticCall: child.isStaticCall,
+              writeLine: request.writeLine,
+              contractInstances,
+              accountKeys,
+              ...(request.discovery ? { discovery: request.discovery } : {}),
+              contracts,
+              ...(request.nestedMaxDepth !== undefined ? { nestedMaxDepth: request.nestedMaxDepth } : {}),
+              recordTape: request.recordTape === true,
+              ...(request.nestedCallWireCompat ? { nestedCallWireCompat: request.nestedCallWireCompat } : {}),
+              shared,
+              depth: child.depth,
+            });
+            nestedReports.push(report);
+            const pi = report.publicInputs;
+            return {
+              endSideEffectCounter: pi ? pi.endSideEffectCounter : child.startSideEffectCounter,
+              returnsHash: pi ? Fr.fromString(pi.returnsHash) : Fr.ZERO,
+              claimed: {
+                noteHashes: pi ? pi.noteHashes.length : 0,
+                nullifiers: pi ? pi.nullifiers.length : 0,
+                l2ToL1Msgs: pi ? pi.l2ToL1MsgCount : 0,
+                privateLogs: pi ? pi.privateLogs.length : 0,
+                contractClassLogsHashes: pi ? pi.contractClassLogHashCount : 0,
+              },
+              solved: report.outcome === 'executed',
+              report,
+            };
+          },
+        }
+      : undefined;
+
   const oracles = createPrivateOracleHandler({
     contractAddress,
     entropySeed: toFieldValue(request.entropySeed, 'entropySeed'),
     writeLine: request.writeLine,
     contractInstances,
     accountKeys,
+    shared,
+    depth,
+    isStaticCall: request.isStaticCall === true,
     ...(request.discovery ? { discovery: request.discovery } : {}),
+    ...(nestedSource ? { nested: nestedSource } : {}),
   });
 
   const fields = [...contextFields, ...args];
@@ -530,6 +907,8 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
     initialWitnessSize: initialWitness.size,
     environmentOracleVersion: { ...ORACLE_ENVIRONMENT_VERSION },
     hasDiscovery: oracles.hasDiscovery(),
+    hasNested: oracles.hasNested(),
+    depth,
     servedSetSize: oracles.servedSet().length,
   };
 
@@ -543,7 +922,17 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
     string,
     (...inputs: string[][]) => Promise<string[][]>
   >;
-  const wired = request.recordTape ? recordingCallback(callback, tape) : callback;
+  // THE SHIM SITS BETWEEN THE HANDLER AND THE TAPE, DELIBERATELY, so the TAPE records what the
+  // CIRCUIT received rather than what the handler returned. M38's replaying executor drives the
+  // same ACIR through a synchronous Rust executor and has to hand back the same slots the ACVM
+  // accepted here; a tape taken on the other side of the shim would be a recording of a wire the
+  // circuit never saw.
+  const wireCompatApplied = { count: 0 };
+  const compatible =
+    request.nestedCallWireCompat === 'off'
+      ? callback
+      : wireCompatCallback(callback, () => oracles.contractVersion(), wireCompatApplied);
+  const wired = request.recordTape ? recordingCallback(compatible, tape) : compatible;
 
   const simulator = new WASMSimulator();
   try {
@@ -565,6 +954,9 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
         : {}),
       solvedWitnessSize: (result.partialWitness as Map<number, string>).size,
       returnWitnessSize: (result.returnWitness as Map<number, string>).size,
+      returnFields: [...(result.returnWitness as Map<number, string>).entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([, v]) => v),
       contractOracleVersion: oracles.contractVersion(),
       oracleCalls: ledger,
       oraclesServed: ledger.filter(c => c.outcome === 'served').length,
@@ -599,7 +991,11 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
           const length = typeof log?.length === 'number' ? log.length : fields.length;
           return { fields: fields.map(f => f.toString()), length };
         }),
+        l2ToL1MsgCount: claimed(publicInputs.l2ToL1Msgs).length,
+        contractClassLogHashCount: claimed(publicInputs.contractClassLogsHashes).length,
       },
+      nested: nestedReports,
+      wireCompatApplied: wireCompatApplied.count,
     };
   } catch (err) {
     // WALK THE CAUSE CHAIN. The ACVM reports every foreign-call failure as the same eleven words —
@@ -643,6 +1039,11 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
       errorChain: chain,
       outcome: halted.length > 0 ? 'refused' : 'failed',
       effects: oracles.effects(),
+      // THE CHILDREN A FAILED FRAME ALREADY MADE. A frame that made two nested calls and then
+      // failed has two completed children, and dropping them here would make "the transaction is a
+      // tree" a property of the success path only — which is the half a reader needs least.
+      nested: nestedReports,
+      wireCompatApplied: wireCompatApplied.count,
     };
   }
 }

@@ -42,6 +42,7 @@
 
 import { Fr } from '@aztec/foundation/curves/bn254';
 import { AztecAddress } from '@aztec/stdlib/aztec-address';
+import type { FunctionSelector } from '@aztec/stdlib/abi';
 import { MAX_FR_CALLDATA_TO_ALL_ENQUEUED_CALLS, PRIVATE_LOG_CIPHERTEXT_LEN } from '@aztec/constants';
 import { siloNullifier } from '@aztec/stdlib/hash';
 import { poseidon2HashWithSeparator } from '@aztec/foundation/crypto/poseidon';
@@ -184,10 +185,51 @@ export const ORACLE_DISCOVERY: readonly string[] = Object.freeze(
   ].sort(),
 );
 
+/**
+ * TIER 4 — the oracles served only when a NESTED-CALL source is attached.
+ *
+ * The same shape as `ORACLE_DISCOVERY` and for the same reason: a handler that was given no way to
+ * find a callee's bytecode cannot serve `aztec_prv_callPrivateFunction`, and a handler that
+ * answered it anyway would have to invent a frame. So the partition is a function of what the
+ * handler was GIVEN, not a list of what this milestone got round to.
+ *
+ * It is one oracle and not four. `aztec_utl_callUtilityFunction`, `aztec_utl_getUtilityContext`
+ * and `aztec_prv_resolveCustomRequest` share tier 4's label and none of them shares its
+ * requirement: a utility call is a different execution mode with a different context struct, and a
+ * custom request needs a registry of contract-defined resolvers that does not exist. Putting them
+ * in this list because they carry the same tier word would make "nested calls are served" mean
+ * three things that are not true.
+ */
+export const ORACLE_NESTED: readonly string[] = Object.freeze(['aztec_prv_callPrivateFunction']);
+
 /** The served set when a discovery source IS attached. Derived from the two lists above. */
 export const ORACLE_IMPLEMENTED_WITH_DISCOVERY: readonly string[] = Object.freeze(
   [...ORACLE_IMPLEMENTED, ...ORACLE_DISCOVERY].sort(),
 );
+
+/**
+ * The served set for a given pair of attached sources, DERIVED.
+ *
+ * Four combinations exist and all four are exercised by
+ * `assertOracleSurfaceMatchesDeclaration` — a partition checked only in the combination that
+ * happens to be in force is a partition whose arithmetic is wrong on the day somebody attaches the
+ * other source, which is exactly the reason M36 gave for checking both of its two.
+ */
+export function oraclesServedFor(sources: { discovery?: boolean; nested?: boolean }): readonly string[] {
+  return Object.freeze(
+    [
+      ...ORACLE_IMPLEMENTED,
+      ...(sources.discovery ? ORACLE_DISCOVERY : []),
+      ...(sources.nested ? ORACLE_NESTED : []),
+    ].sort(),
+  );
+}
+
+/** Everything else, on the same terms. A sixty-ninth upstream oracle lands here with no edit. */
+export function oraclesRefusingFor(sources: { discovery?: boolean; nested?: boolean }): readonly string[] {
+  const served = oraclesServedFor(sources);
+  return Object.freeze(ORACLE_NAMES.filter(n => !served.includes(n)));
+}
 
 /** Everything else, DERIVED. A new upstream oracle lands here without an edit. */
 export const ORACLE_REFUSING: readonly string[] = Object.freeze(
@@ -381,6 +423,54 @@ export class ContractInstanceNotHeld extends Error {
   }
 }
 
+/**
+ * Raised when a nested private call cannot be made, naming which of five reasons it is.
+ *
+ * **THIS IS NOT `OracleUnimplemented` EITHER, AND THE SAME SENTENCE APPLIES.** The oracle is
+ * served; this particular call cannot be. The five grounds are distinguishable because they send a
+ * reader to five different places: `unregistered-contract` says register the callee,
+ * `unknown-selector` says the selector the CALLER passed is not one the callee's artifact derives,
+ * `not-private` says the target is a public or utility function, `no-args-preimage` says the
+ * parent did not store its arguments (which would be a defect in the execution cache rather than in
+ * the directory), and `depth-exceeded` says the bound was hit.
+ *
+ * `unknown-selector` carries BOTH the requested selector and the ones the artifact derives,
+ * because the interesting failure here is a selector derived twice and the two derivations are
+ * exactly what a reader needs to compare.
+ */
+export class NestedCallRefused extends Error {
+  constructor(
+    readonly ground:
+      | 'unregistered-contract'
+      | 'unknown-selector'
+      | 'not-private'
+      | 'no-args-preimage'
+      | 'depth-exceeded',
+    detail: string,
+  ) {
+    super(`NestedCallRefused: ${ground}: ${detail}`);
+    this.name = 'NestedCallRefused';
+  }
+}
+
+/**
+ * Raised when a STATIC nested call's child wrote state, emitted a message or produced a log.
+ *
+ * Upstream's `#checkValidStaticCall`, over the same five claimed lengths and in the same order.
+ * The circuit ORs the static flag down into the child too, so this is a second reading of a
+ * property the protocol already has; upstream keeps both and so does this, because the circuit's
+ * failure is an unsatisfied constraint and this one names the field that was non-empty.
+ */
+export class StaticCallWroteState extends Error {
+  constructor(readonly nonEmpty: readonly string[]) {
+    super(
+      `StaticCallWroteState: a static call cannot update the state, emit L2->L1 messages or ` +
+        `generate logs, and its child claimed [${nonEmpty.join(', ')}]`,
+    );
+    this.name = 'StaticCallWroteState';
+  }
+}
+
 /** Raised when the executing bytecode's oracle version is not compatible with this environment. */
 export class OracleVersionIncompatible extends Error {
   constructor(
@@ -462,6 +552,121 @@ export interface PrivateOracleOptions {
    * what it derives rather than a new source of keys.
    */
   readonly accountKeys?: readonly HeldAccountKeys[];
+  /**
+   * TIER 4's source: the artifacts this wallet can execute, and the recursion back into the
+   * simulator. **Absent by default, and its absence is one named refusal rather than a frame this
+   * handler invented.**
+   */
+  readonly nested?: NestedPrivateCallSource;
+  /**
+   * The TRANSACTION's state. Omitted means this frame is the transaction and gets a fresh one,
+   * which is what every caller before tier 4 did and still does.
+   */
+  readonly shared?: PrivateFrameState;
+  /**
+   * Whether the frame this handler serves is itself a static call. Upstream ORs it into every
+   * nested call's own flag (`isStaticCall || this.callContext.isStaticCall`), so a static frame
+   * cannot make a non-static child.
+   */
+  readonly isStaticCall?: boolean;
+  /** How deep this frame is. 0 is the transaction's entry frame; the nested-call oracle bounds it. */
+  readonly depth?: number;
+}
+
+/**
+ * One contract this wallet can EXECUTE: an address and the raw artifact JSON.
+ *
+ * **This is a different directory from `HeldContractInstance` and the difference is the point.**
+ * An instance is the six-field preimage a circuit constrains against an address; it carries no
+ * bytecode and cannot answer "what runs at this address". A nested call needs the bytecode, so it
+ * needs a second directory — and keeping them apart means an address can be registered for the
+ * instance oracle without silently becoming callable.
+ */
+export interface HeldContractArtifact {
+  readonly address: AztecAddress;
+  /** The already-parsed contract artifact JSON, in the shape `executePrivateFunction` takes. */
+  readonly artifact: unknown;
+}
+
+/** What a nested frame is asked to run, in the shape the caller's executor takes. */
+export interface NestedFrameRequest {
+  readonly artifact: unknown;
+  readonly functionName: string;
+  readonly contractAddress: AztecAddress;
+  /** The PARENT's contract address — upstream's `deriveCallContext` msgSender, not the tx origin. */
+  readonly msgSender: AztecAddress;
+  readonly args: readonly Fr[];
+  readonly startSideEffectCounter: number;
+  readonly isStaticCall: boolean;
+  readonly depth: number;
+}
+
+/** What a nested frame gives back. Two fields are the ORACLE's return; the rest are the guard's. */
+export interface NestedFrameResult {
+  readonly endSideEffectCounter: number;
+  readonly returnsHash: Fr;
+  /**
+   * The five claimed lengths upstream's `#checkValidStaticCall` reads. They are counts rather than
+   * contents because the check is a count, and a result carrying the contents would invite a
+   * second, weaker copy of the note bookkeeping the shared state already owns.
+   */
+  readonly claimed: {
+    readonly noteHashes: number;
+    readonly nullifiers: number;
+    readonly l2ToL1Msgs: number;
+    readonly privateLogs: number;
+    readonly contractClassLogsHashes: number;
+  };
+  /** Whether the child's own circuit solved. A frame that did not solve has no result to hand up. */
+  readonly solved: boolean;
+  /** The child's own report, so a transaction is a TREE rather than a flattened list. */
+  readonly report: unknown;
+}
+
+/**
+ * Everything tier 4 needs, supplied by the caller.
+ *
+ * IT IS AN INTERFACE AND NOT AN IMPORT, and here that is structural rather than stylistic:
+ * `private_execution.ts` imports `createPrivateOracleHandler` from this file, so this file
+ * importing `executePrivateFunction` back would be a cycle. The recursion is INJECTED. (This file
+ * has already paid for a subtler ordering bug of the same family — see the temporal-dead-zone note
+ * beside `nonOracleFunctionGetContractOracleVersion`.)
+ */
+/**
+ * How deep a nested call stack this wallet follows unless told otherwise.
+ *
+ * Three is not a protocol constant and does not pretend to be one; it is a BOUND, and the number
+ * is chosen so that upstream's own deepest nested-call fixture — `Parent.private_nested_static_call`,
+ * which is two levels — fits with one to spare. A bound that a real fixture cannot reach is a bound
+ * nothing exercises.
+ */
+export const DEFAULT_NESTED_CALL_MAX_DEPTH = 3;
+
+export interface NestedPrivateCallSource {
+  /** The contracts whose bytecode this wallet can run, by address. */
+  readonly contracts: readonly HeldContractArtifact[];
+  /**
+   * Runs one nested frame. Supplied by `private_execution.ts`, which is the only thing that knows
+   * how to build a `PrivateContextInputs` and drive the ACVM.
+   */
+  readonly execute: (request: NestedFrameRequest) => Promise<NestedFrameResult>;
+  /**
+   * The selector a function of an artifact derives — `private_execution.ts`'s
+   * `privateFunctionSelector`, injected for the same cycle reason as `execute`.
+   *
+   * **It is injected rather than re-implemented because the caller of a nested call passes the
+   * callee's selector IN as an argument field, and this oracle looks the callee up BY it.** Two
+   * derivations of one value is how a lookup misses for a reason that reads like a missing
+   * contract, and the campaign's own rule is that a value a check needs which also exists in the
+   * subject is taken FROM the subject.
+   */
+  readonly selectorOf: (artifact: unknown, functionName: string) => Promise<FunctionSelector>;
+  /**
+   * How deep a call stack this wallet will follow. **A bound, not a policy**: the oracle is
+   * recursion and an artifact that calls itself would otherwise recurse until the JS stack ends,
+   * which reports as a `RangeError` naming nothing. Exceeding it refuses BY NAME.
+   */
+  readonly maxDepth?: number;
 }
 
 /**
@@ -605,6 +810,13 @@ export interface PrivateOracleHandle {
   };
   /** Whether a discovery source was attached, so a report says which partition was in force. */
   hasDiscovery(): boolean;
+  /** Whether a nested-call source was attached — the same question for tier 4's partition. */
+  hasNested(): boolean;
+  /**
+   * The nested frames THIS frame made, in order. Empty for a frame that made none, which is not
+   * the same thing as a frame that could not make one — `hasNested()` is that question.
+   */
+  nestedFrames(): readonly NestedFrameResult[];
   /** The served set that was actually in force, as a set a check can compare. */
   servedSet(): readonly string[];
 }
@@ -617,6 +829,7 @@ export interface PrivateOracleHandle {
 export function assertOracleSurfaceMatchesDeclaration(
   methodNames: readonly string[],
   withDiscovery = false,
+  withNested = false,
 ): void {
   const carried = new Set(methodNames);
   const wanted = ORACLE_NAMES.map(oracleMethodName);
@@ -632,10 +845,27 @@ export function assertOracleSurfaceMatchesDeclaration(
   // source would otherwise never exercise the with-discovery partition's arithmetic, and a
   // ninth-oracle typo in `ORACLE_DISCOVERY` would sit undetected until a page happened to attach a
   // note database.
-  for (const [label, implemented, refusing] of [
-    ['without discovery', ORACLE_IMPLEMENTED, ORACLE_REFUSING],
-    ['with discovery', ORACLE_IMPLEMENTED_WITH_DISCOVERY, ORACLE_REFUSING_WITH_DISCOVERY],
-  ] as const) {
+  //
+  // **ALL FOUR COMBINATIONS, NOT THE TWO THAT USED TO EXIST.** Tier 4 makes the surface a function
+  // of two independent sources, and this campaign's own rule is that *a claim quantified over a set
+  // is only as strong as the members the instrument touched*. Checking `{discovery}` and
+  // `{discovery, nested}` and calling that "both partitions" would leave the pair a page most
+  // often builds — a nested-call source and no note database — outside every assertion.
+  for (const [label, implemented, refusing] of (
+    [
+      [false, false],
+      [true, false],
+      [false, true],
+      [true, true],
+    ] as const
+  ).map(
+    ([d, n]) =>
+      [
+        `discovery=${d} nested=${n}`,
+        oraclesServedFor({ discovery: d, nested: n }),
+        oraclesRefusingFor({ discovery: d, nested: n }),
+      ] as const,
+  )) {
     const overlap = implemented.filter(n => refusing.includes(n));
     if (overlap.length > 0) {
       throw new Error(`the implemented and refusing sets are not disjoint ${label}: [${overlap.join(', ')}]`);
@@ -658,9 +888,20 @@ export function assertOracleSurfaceMatchesDeclaration(
   if (inBoth.length > 0) {
     throw new Error(`ORACLE_DISCOVERY overlaps the always-served set: [${inBoth.join(', ')}]`);
   }
+  // AND THE SAME TWO QUESTIONS OF TIER 4'S LIST, for the same reason: it is typed, so it is the
+  // second place in this file a name could be invented, and `oraclesRefusingFor` would absorb a
+  // misspelling as one more refusal while every sum above still held.
+  const inventedNested = ORACLE_NESTED.filter(n => !ORACLE_NAMES.includes(n));
+  if (inventedNested.length > 0) {
+    throw new Error(`ORACLE_NESTED names oracles the registry does not declare: [${inventedNested.join(', ')}]`);
+  }
+  const nestedInBoth = ORACLE_NESTED.filter(n => ORACLE_IMPLEMENTED.includes(n) || ORACLE_DISCOVERY.includes(n));
+  if (nestedInBoth.length > 0) {
+    throw new Error(`ORACLE_NESTED overlaps another partition: [${nestedInBoth.join(', ')}]`);
+  }
   // The reasons are checked against the partition IN FORCE, because a discovery oracle that is
   // served needs no reason and one that is refused does.
-  const refusingNow = withDiscovery ? ORACLE_REFUSING_WITH_DISCOVERY : ORACLE_REFUSING;
+  const refusingNow = oraclesRefusingFor({ discovery: withDiscovery, nested: withNested });
   const unexplained = refusingNow.filter(n => !ORACLE_REFUSAL_REASONS[n]);
   if (unexplained.length > 0) {
     throw new Error(`refused oracles with no declared reason: [${unexplained.join(', ')}]`);
@@ -802,6 +1043,97 @@ const CAPSULE_KEY = (contract: AztecAddress, slot: Fr, scope: AztecAddress) =>
  * visible" — `DEV-WALLET.md` section 1's first design property — covers refusals too, which is the
  * half that matters when a private execution stops.
  */
+/**
+ * The state a TRANSACTION owns, as opposed to the state a FRAME owns.
+ *
+ * **Every field here was a `const` or a `let` inside `createPrivateOracleHandler` until nested
+ * private calls existed, and every one of them was therefore per-frame by construction.** That was
+ * correct while a transaction WAS a frame. It stops being correct the moment
+ * `aztec_prv_callPrivateFunction` is served, and the failures it produces are not all loud:
+ *
+ *   * **`executionCache` fails in BOTH directions, and the second one is the surprise.** The
+ *     child's arguments were stored by the PARENT — `aztec-nr`'s `private_context.nr` does
+ *     `execution_cache::store(args, args_hash)` immediately before the oracle call — and the parent
+ *     reads the CHILD's return value back, because `ReturnsHash::get_preimage` is
+ *     `execution_cache::load(self.hash)` run in the parent's frame over a hash the child stored. So
+ *     a per-frame cache does not fail AT the nested call; it fails on the opcode after it.
+ *   * **`pendingNullifiers` fails silently.** The duplicate-siloed-nullifier refusal is the only
+ *     layer that can see a double-spend WITHIN one transaction, and a per-frame set makes a
+ *     second frame spending the first frame's note look exactly like a first spend.
+ *   * **`calldata.total` makes a protocol cap unenforceable.** Upstream propagates it into a child
+ *     and reads it back out afterwards, with its own comment saying why; per-frame counters mean a
+ *     transaction can enqueue `MAX_FR_CALLDATA_TO_ALL_ENQUEUED_CALLS` fields per frame.
+ *   * **`revertible` makes a child answer `isExecutionInRevertiblePhase` `false`** for a counter
+ *     the parent has already moved past.
+ *
+ * **AND ONE THING DELIBERATELY IS NOT HERE, WHICH IS THE HALF THAT POINTS THE OTHER WAY.** The
+ * ephemeral-array service is PER FRAME. Upstream constructs it fresh in every oracle
+ * (`utility_execution_oracle.ts`'s `private readonly ephemeralArrayService = new
+ * EphemeralArrayService()`) and does NOT pass it to a child, and
+ * `EphemeralParent.test_isolation` is upstream's own contract test that a child must not see the
+ * parent's slots. Sharing everything would have been the easy edit and would have broken a rule
+ * nothing here measures.
+ */
+export interface PrivateFrameState {
+  /** Argument and return preimages, by hash. Shared: see the note above. */
+  readonly executionCache: Map<string, Fr[]>;
+  /** Siloed nullifiers this TRANSACTION has emitted. */
+  readonly pendingNullifiers: Set<string>;
+  /** Notes this TRANSACTION has created and not yet nullified. */
+  readonly pendingNotes: { noteHash: Fr; counter: number }[];
+  /** The capsule store, keyed by `(contract, slot, scope)` — so sharing it cannot cross contracts. */
+  readonly capsules: Map<string, Fr[]>;
+  /** Upstream threads ONE of these into every child; it is `transientArrayService` there. */
+  readonly transient: TransientArrayService;
+  /** The revertible-phase state, which upstream keeps in the shared note cache. */
+  readonly revertible: { inPhase: boolean; minCounter: number };
+  /** The whole-transaction public calldata accumulator. */
+  readonly calldata: { total: number };
+  /**
+   * The deterministic entropy stream's position.
+   *
+   * **It is the TRANSACTION's and not the frame's, and that is a correctness property rather than
+   * tidiness.** `getRandomField` is `poseidon2(seed, index)`; a nested frame carries its parent's
+   * seed (there is no second source of entropy to give it), so a per-frame index would make the
+   * child's first draw byte-identical to the parent's first draw. One counter across the
+   * transaction is what makes "the same seed draws the same fields in the same order" true of a
+   * transaction rather than only of a frame. For a single-frame transaction it counts exactly as
+   * it did before nesting existed.
+   */
+  readonly random: { counter: number };
+  readonly createdNotes: {
+    owner: string;
+    storageSlot: string;
+    noteHash: string;
+    counter: number;
+    randomness: string;
+    content: string[];
+  }[];
+  readonly createdNullifiers: string[];
+  readonly nullifiedNotes: { innerNullifier: string; noteHash: string; counter: number }[];
+  readonly contractClassLogs: { contractAddress: string; emittedLength: number; counter: number }[];
+  readonly offchainEffects: string[][];
+}
+
+/** A transaction's own state, empty. One per top-level frame; every nested frame shares it. */
+export function createPrivateFrameState(): PrivateFrameState {
+  return {
+    executionCache: new Map<string, Fr[]>(),
+    pendingNullifiers: new Set<string>(),
+    pendingNotes: [],
+    capsules: new Map<string, Fr[]>(),
+    transient: new TransientArrayService(),
+    revertible: { inPhase: false, minCounter: 0 },
+    calldata: { total: 0 },
+    random: { counter: 0 },
+    createdNotes: [],
+    createdNullifiers: [],
+    nullifiedNotes: [],
+    contractClassLogs: [],
+    offchainEffects: [],
+  };
+}
+
 export function createPrivateOracleHandler(options: PrivateOracleOptions): PrivateOracleHandle {
   const contract = options.contractAddress;
   // The instance directory, keyed by address string. Built from the option rather than mutated, so
@@ -815,34 +1147,31 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
     (options.accountKeys ?? []).map(a => [a.address.toString(), a]),
   );
   const discovery = options.discovery;
-  const capsules = new Map<string, Fr[]>();
+  const nested = options.nested;
+  // THE TRANSACTION'S STATE, WHICH IS THIS FRAME'S OWN WHEN NOBODY SUPPLIED ONE. A top-level frame
+  // creates it; a nested frame is handed its parent's. Defaulting to a fresh one is what makes
+  // every existing caller — and every check written against one — unchanged by construction rather
+  // than by remembering.
+  const shared = options.shared ?? createPrivateFrameState();
+  const capsules = shared.capsules;
+  const executionCache = shared.executionCache;
+  const pendingNullifiers = shared.pendingNullifiers;
+  const pendingNotes = shared.pendingNotes;
+  const createdNotes = shared.createdNotes;
+  const createdNullifiers = shared.createdNullifiers;
+  const nullifiedNotes = shared.nullifiedNotes;
+  const contractClassLogs = shared.contractClassLogs;
+  const offchainEffects = shared.offchainEffects;
+  const transient = shared.transient;
   // ONE SERVICE PER FRAME, AND IT IS THE CALLER'S WHEN THERE IS ONE. `EphemeralArray.fromSlot`
   // resolves a slot against whatever service `readAll` is given, so a handler that used a second
   // service for its returns would hand back slots the bookkeeping oracles cannot see.
   const ephemeral: EphemeralArrayService = discovery?.ephemeral ?? new EphemeralArrayService();
-  const transient = new TransientArrayService();
-  const executionCache = new Map<string, Fr[]>();
-  const pendingNullifiers = new Set<string>();
-  const pendingNotes: { noteHash: Fr; counter: number }[] = [];
-  let totalPublicCalldata = 0;
-  const createdNotes: {
-    owner: string;
-    storageSlot: string;
-    noteHash: string;
-    counter: number;
-    randomness: string;
-    content: string[];
-  }[] = [];
-  const createdNullifiers: string[] = [];
-  const nullifiedNotes: { innerNullifier: string; noteHash: string; counter: number }[] = [];
-  const contractClassLogs: { contractAddress: string; emittedLength: number; counter: number }[] = [];
-  const offchainEffects: string[][] = [];
   const calls: OracleCall[] = [];
+  /** Every nested frame this handler's own frame made, in the order it made them. */
+  const nestedResults: NestedFrameResult[] = [];
   let seq = 0;
   let contractVersion: { major: number; minor: number } | undefined;
-  let inRevertiblePhase = false;
-  let minRevertibleSideEffectCounter = 0;
-  let randomCounter = 0;
 
   const record = (oracle: string, outcome: 'served' | 'refused' | 'unavailable', detail: string) => {
     calls.push({ seq: seq++, oracle, outcome, detail });
@@ -896,7 +1225,7 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
     // exactly what `DEV-WALLET.md` section 1 forbids: the seed is an argument and the stream is a
     // counter hashed with it, so the same seed produces the same fields in the same order, twice.
     async getRandomField(): Promise<Fr> {
-      const index = randomCounter++;
+      const index = shared.random.counter++;
       const field = await poseidon2HashWithSeparator([options.entropySeed, new Fr(BigInt(index))], 0);
       record('aztec_misc_getRandomField', 'served', `index=${index}`);
       return field;
@@ -1175,17 +1504,17 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
       // THE CAP IS UPSTREAM'S AND IS ENFORCED HERE, from `@aztec/constants` rather than typed. The
       // oracle's NAME is `assertValid…`; a handler that looked the calldata up and asserted nothing
       // about it would be a validator that validates nothing, which is this file's own first form.
-      totalPublicCalldata += calldata.length;
-      if (totalPublicCalldata > MAX_FR_CALLDATA_TO_ALL_ENQUEUED_CALLS) {
+      shared.calldata.total += calldata.length;
+      if (shared.calldata.total > MAX_FR_CALLDATA_TO_ALL_ENQUEUED_CALLS) {
         throw new Error(
           `aztec_prv_assertValidPublicCalldata: too many total args to all enqueued public calls ` +
-            `(${totalPublicCalldata} > ${MAX_FR_CALLDATA_TO_ALL_ENQUEUED_CALLS})`,
+            `(${shared.calldata.total} > ${MAX_FR_CALLDATA_TO_ALL_ENQUEUED_CALLS})`,
         );
       }
       record(
         'aztec_prv_assertValidPublicCalldata',
         'served',
-        `fields=${calldata.length} total=${totalPublicCalldata}`,
+        `fields=${calldata.length} total=${shared.calldata.total}`,
       );
     },
 
@@ -1235,7 +1564,7 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
         }
         const [note] = pendingNotes.splice(index, 1);
         // A note created BEFORE the revertible phase and nullified INSIDE it emits both.
-        if (inRevertiblePhase && note.counter < minRevertibleSideEffectCounter) {
+        if (shared.revertible.inPhase && note.counter < shared.revertible.minCounter) {
           recordNullifier(siloed, 'aztec_prv_notifyNullifiedNote');
         }
       } else {
@@ -1268,14 +1597,14 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
       record('aztec_prv_notifyCreatedContractClassLog', 'served', `length=${length} counter=${counter}`);
     },
     notifyRevertiblePhaseStart(minCounter: number): void {
-      if (inRevertiblePhase) {
+      if (shared.revertible.inPhase) {
         throw new Error(
           `aztec_prv_notifyRevertiblePhaseStart: cannot enter the revertible phase twice ` +
-            `(previous counter ${minRevertibleSideEffectCounter}, new ${minCounter})`,
+            `(previous counter ${shared.revertible.minCounter}, new ${minCounter})`,
         );
       }
-      inRevertiblePhase = true;
-      minRevertibleSideEffectCounter = minCounter;
+      shared.revertible.inPhase = true;
+      shared.revertible.minCounter = minCounter;
       record('aztec_prv_notifyRevertiblePhaseStart', 'served', `min=${minCounter}`);
     },
     async isNullifierPending(innerNullifier: Fr, contractAddress: AztecAddress): Promise<boolean> {
@@ -1285,7 +1614,7 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
       return pending;
     },
     isExecutionInRevertiblePhase(sideEffectCounter: number): boolean {
-      const revertible = inRevertiblePhase && sideEffectCounter >= minRevertibleSideEffectCounter;
+      const revertible = shared.revertible.inPhase && sideEffectCounter >= shared.revertible.minCounter;
       record(
         'aztec_prv_isExecutionInRevertiblePhase',
         'served',
@@ -1325,6 +1654,181 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
     blockNumber: log.blockNumber as never,
     blockHash: log.blockHash,
   });
+
+  /**
+   * TIER 4 — the nested private call, served only when a source is attached.
+   *
+   * ===========================================================================================
+   * WHAT THIS DOES AND, MORE USEFULLY, WHAT IT REFUSES TO DO
+   * ===========================================================================================
+   *
+   * Upstream's `callPrivateFunction` (`private_execution_oracle.ts`) is ~90 lines of which the
+   * substance is: resolve the callee's artifact, derive a child call context whose `msgSender` is
+   * THIS frame's contract, construct a second oracle carrying the parent's shared stores, execute,
+   * check the static-call rule, and return two fields. Every one of those is here. What is NOT
+   * here is `contractSyncService.ensureContractSynced`, which invokes the callee's `sync_state`
+   * utility function — `aztec_utl_callUtilityFunction` is a different execution mode and is still
+   * refused, so serving half of it would be inventing the other half.
+   *
+   * FIVE THINGS MAKE IT REFUSE AND EACH NAMES ITSELF, because a nested call that fails for the
+   * wrong reason sends a reader to the wrong directory. See `NestedCallRefused`.
+   *
+   * THE ARGUMENTS COME OUT OF THE SHARED EXECUTION CACHE AND NOT OFF THE WIRE. The oracle is handed
+   * an `argsHash`, and `aztec-nr` stored the preimage under that hash in the caller's own frame one
+   * opcode earlier. Reading it here is what makes the child's arguments the parent's, rather than
+   * something this handler reconstructed; a miss is `no-args-preimage` and is a defect in the cache
+   * rather than in the directory, which is why it is its own ground.
+   *
+   * IT DOES NOT GO THROUGH `getHashPreimage`. That method RECORDS a ledger entry, and a nested call
+   * that produced a phantom `aztec_prv_getHashPreimage` in the parent's ledger would make the
+   * ledger a record of what the handler did rather than of what the bytecode asked for.
+   */
+  const nestedServed: Record<string, (...args: never[]) => unknown> = nested
+    ? {
+        async callPrivateFunction(
+          contractAddress: AztecAddress,
+          functionSelector: FunctionSelector,
+          argsHash: Fr,
+          sideEffectCounter: number,
+          isStaticCall: boolean,
+        ): Promise<{ endSideEffectCounter: Fr; returnsHash: Fr }> {
+          const oracle = 'aztec_prv_callPrivateFunction';
+          const target = contractAddress.toString();
+          const wanted = functionSelector.toString();
+
+          // THE STATIC FLAG IS OR'd DOWN, which is upstream's line and the circuit's own rule
+          // (`private_context.nr` ORs it too). A static frame cannot make a non-static child.
+          const staticCall = isStaticCall || options.isStaticCall === true;
+          const depth = (options.depth ?? 0) + 1;
+          const maxDepth = nested.maxDepth ?? DEFAULT_NESTED_CALL_MAX_DEPTH;
+
+          const refuse = (ground: ConstructorParameters<typeof NestedCallRefused>[0], detail: string) => {
+            record(oracle, 'unavailable', `${ground} target=${target} selector=${wanted}`);
+            throw new NestedCallRefused(ground, detail);
+          };
+
+          if (depth > maxDepth) {
+            refuse(
+              'depth-exceeded',
+              `a nested call at depth ${depth} exceeds this wallet's bound of ${maxDepth}. The bound ` +
+                `exists because this oracle is recursion: a contract that calls itself would ` +
+                `otherwise run out of JavaScript stack and report a RangeError naming nothing.`,
+            );
+          }
+
+          const held = nested.contracts.find(c => c.address.equals(contractAddress));
+          if (!held) {
+            refuse(
+              'unregistered-contract',
+              `this wallet can execute ${nested.contracts.length} contract(s) and none of them is at ` +
+                `${target}: [${nested.contracts.map(c => c.address.toString()).join(', ')}]. The ` +
+                `instance directory and the artifact directory are different things — an address ` +
+                `may be registered for aztec_utl_getContractInstance and still not be callable.`,
+            );
+          }
+
+          // THE SELECTOR IS DERIVED BY THE SAME FUNCTION THE CALLER USED. `selectorOf` is
+          // `private_execution.ts`'s `privateFunctionSelector`, injected for the module-cycle
+          // reason `NestedPrivateCallSource` records. Two derivations of one value is how a lookup
+          // misses for a reason that reads like a missing contract.
+          const doc = held!.artifact as {
+            name?: string;
+            functions?: { name: string; custom_attributes?: string[] }[];
+          };
+          const candidates = doc.functions ?? [];
+          let chosen: { name: string; custom_attributes?: string[] } | undefined;
+          const derived: string[] = [];
+          for (const candidate of candidates) {
+            const selector = await nested.selectorOf(held!.artifact, candidate.name);
+            derived.push(`${candidate.name}=${selector.toString()}`);
+            if (selector.toString() === wanted) {
+              chosen = candidate;
+              break;
+            }
+          }
+          if (!chosen) {
+            refuse(
+              'unknown-selector',
+              `no function of '${doc.name ?? '?'}' derives selector ${wanted}. The artifact derives ` +
+                `[${derived.join(', ')}].`,
+            );
+          }
+          // A PUBLIC OR UTILITY TARGET IS ITS OWN GROUND. The selector space is shared across
+          // function kinds, so a selector that matches is not a selector that may be called
+          // privately, and refusing it as `unknown-selector` would send a reader to look for a
+          // function that is right there.
+          const targetType = (chosen!.custom_attributes ?? []).includes('abi_private') ? 'abi_private' : 'other';
+          if (targetType !== 'abi_private') {
+            refuse(
+              'not-private',
+              `'${doc.name ?? '?'}.${chosen!.name}' matches selector ${wanted} and is not an ` +
+                `abi_private function (it declares [${(chosen!.custom_attributes ?? []).join(', ')}]).`,
+            );
+          }
+
+          const args = executionCache.get(argsHash.toString());
+          if (!args) {
+            refuse(
+              'no-args-preimage',
+              `the caller did not store an argument preimage under ${argsHash.toString()}. ` +
+                `aztec-nr's call_private_function stores it through aztec_prv_setHashPreimage one ` +
+                `opcode before this call, so a miss here is a fact about the execution cache.`,
+            );
+          }
+
+          const result = await nested.execute({
+            artifact: held!.artifact,
+            functionName: chosen!.name,
+            contractAddress,
+            // UPSTREAM'S `deriveCallContext`: the child's `msgSender` is THIS frame's contract,
+            // not the transaction's origin. A child that saw the origin would let any contract
+            // impersonate the caller of the frame above it.
+            msgSender: contract,
+            args: args!,
+            startSideEffectCounter: sideEffectCounter,
+            isStaticCall: staticCall,
+            depth,
+          });
+
+          if (staticCall) {
+            const nonEmpty = (
+              [
+                ['noteHashes', result.claimed.noteHashes],
+                ['nullifiers', result.claimed.nullifiers],
+                ['l2ToL1Msgs', result.claimed.l2ToL1Msgs],
+                ['privateLogs', result.claimed.privateLogs],
+                ['contractClassLogsHashes', result.claimed.contractClassLogsHashes],
+              ] as const
+            )
+              .filter(([, n]) => n > 0)
+              .map(([name, n]) => `${name}=${n}`);
+            if (nonEmpty.length > 0) {
+              record(oracle, 'refused', `static-call-wrote-state ${nonEmpty.join(' ')}`);
+              throw new StaticCallWroteState(nonEmpty);
+            }
+          }
+
+          record(
+            oracle,
+            'served',
+            `target=${target} fn=${doc.name ?? '?'}.${chosen!.name} depth=${depth} ` +
+              `static=${staticCall} args=${args!.length} counter=${sideEffectCounter}->` +
+              `${result.endSideEffectCounter} returnsHash=${result.returnsHash.toString()}`,
+          );
+          nestedResults.push(result);
+
+          // BOTH MEMBERS ARE FIELDS. `CALL_PRIVATE_RESULT` is `STRUCT([{endSideEffectCounter:
+          // FIELD}, {returnsHash: FIELD}])`, so returning a JavaScript number for the counter
+          // serialises through `FIELD`'s `v => [v]` and hands the ACVM something that is not an
+          // `Fr`. The counter is a `number` everywhere else in this file, which is exactly why the
+          // conversion is here and not left to a caller.
+          return {
+            endSideEffectCounter: new Fr(BigInt(result.endSideEffectCounter)),
+            returnsHash: result.returnsHash,
+          };
+        },
+      }
+    : {};
 
   const discoveryServed: Record<string, (...args: never[]) => unknown> = discovery
     ? {
@@ -1643,7 +2147,13 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
   for (const [method, fn] of Object.entries(discoveryServed)) {
     handler[method] = fn;
   }
-  for (const oracle of discovery ? ORACLE_REFUSING_WITH_DISCOVERY : ORACLE_REFUSING) {
+  for (const [method, fn] of Object.entries(nestedServed)) {
+    handler[method] = fn;
+  }
+  // THE REFUSING SET IS DERIVED FROM WHAT THIS HANDLER WAS GIVEN, over both optional sources. A
+  // literal per combination would be four literals to keep in step; `oraclesRefusingFor` is one
+  // derivation and its four combinations are all exercised by the reconciliation below.
+  for (const oracle of oraclesRefusingFor({ discovery: discovery !== undefined, nested: nested !== undefined })) {
     const method = oracleMethodName(oracle);
     const reason = ORACLE_REFUSAL_REASONS[oracle] ?? 'no reason declared, which is itself a defect';
     handler[method] = () => {
@@ -1664,6 +2174,7 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
       k => !['isMisc', 'isUtility', 'isPrivate', ...NON_ORACLE_METHODS].includes(k),
     ),
     discovery !== undefined,
+    nested !== undefined,
   );
 
   return {
@@ -1671,14 +2182,16 @@ export function createPrivateOracleHandler(options: PrivateOracleOptions): Priva
     calls: () => calls,
     contractVersion: () => contractVersion,
     hasDiscovery: () => discovery !== undefined,
-    servedSet: () => (discovery ? ORACLE_IMPLEMENTED_WITH_DISCOVERY : ORACLE_IMPLEMENTED),
+    hasNested: () => nested !== undefined,
+    nestedFrames: () => nestedResults,
+    servedSet: () => oraclesServedFor({ discovery: discovery !== undefined, nested: nested !== undefined }),
     effects: () => ({
       createdNotes,
       createdNullifiers,
       nullifiedNotes,
       contractClassLogs,
       offchainEffects,
-      randomFields: randomCounter,
+      randomFields: shared.random.counter,
     }),
   };
 }

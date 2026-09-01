@@ -69,6 +69,7 @@ use noir_tracer::sink::NimWriterSink;
 use noir_tracer::tracer_glue::{begin_trace, finish_trace};
 use noir_tracer::{TraceForeignCallExecutor, TraceOptions, TraceSink, trace_circuit_with_executor};
 use noirc_artifacts::debug::{DebugArtifact, DebugFile, ProgramDebugInfo, StackFrame};
+use codetracer_trace_types::{Line, NONE_TYPE_ID, TypeKind, ValueRecord};
 
 // ---------------------------------------------------------------------------
 // The spec the driver hands over.
@@ -79,16 +80,49 @@ struct Spec {
     /// `replay` — answer from the tape. `refuse-all` — an empty tape, so the first oracle refuses.
     /// `truncate` — drop the last tape entry, so the frame runs out mid-way.
     arm: String,
-    /// The Aztec contract artifact, as installed.
+    /// The Aztec contract artifact, as installed. The SINGLE-FRAME form; see `frames`.
+    #[serde(default)]
     artifact: String,
-    /// The private function inside it.
+    /// The private function inside it. The SINGLE-FRAME form; see `frames`.
+    #[serde(default)]
     function: String,
     /// The M35 arm report to take the tape and the initial witness from.
     tape_source: String,
-    /// A JSON path into that report, `a.b.c`, naming the frame.
+    /// A JSON path into that report, `a.b.c`, naming the frame. The SINGLE-FRAME form.
+    #[serde(default)]
     tape_frame: String,
     /// Where the `.ct` container goes.
     out_dir: String,
+    /// The container's program name. Defaults to the first frame's function, which is what the
+    /// single-frame form always produced.
+    #[serde(default)]
+    program: String,
+    /// **A TRANSACTION'S FRAMES, IN PRE-ORDER, WHEN THERE IS MORE THAN ONE.**
+    ///
+    /// Empty means the three fields above describe one frame, which is exactly what every spec
+    /// written before nested private calls existed says — so those specs deserialise unchanged and
+    /// produce a byte-identical container. The same discipline `trace_circuit` used when it grew an
+    /// executor parameter: the old entry point keeps its meaning and delegates.
+    #[serde(default)]
+    frames: Vec<FrameSpec>,
+}
+
+/// One frame of a transaction: which bytecode ran, whose tape answers it, and how deep it sat.
+#[derive(Clone, serde::Deserialize)]
+struct FrameSpec {
+    artifact: String,
+    function: String,
+    /// A JSON path into `tape_source` naming THIS frame's own tape. A transaction's tape is per
+    /// frame because a CIRCUIT is per frame: the tracer steps one circuit at a time, and which tape
+    /// belongs to which circuit is what a flattened tape throws away.
+    tape_frame: String,
+    /// 0 for the transaction's entry frame; one more per nesting level.
+    #[serde(default)]
+    depth: usize,
+    /// The contract this frame ran at. Written as the frame's ONE call argument, which is M26's own
+    /// rule for the public half: it is what makes a frame attributable without reading its steps.
+    #[serde(default)]
+    contract_address: String,
 }
 
 #[derive(Clone, serde::Deserialize)]
@@ -97,6 +131,18 @@ struct TapeEntry {
     oracle: String,
     inputs: Vec<Vec<String>>,
     outputs: Vec<Vec<String>>,
+    /// Whether each output slot crossed the wire as a `Single` field or as an `Array` of fields.
+    ///
+    /// **A ONE-ELEMENT ARRAY AND A SINGLE FIELD ARE INDISTINGUISHABLE ON A NORMALISED TAPE, AND
+    /// THE ACVM TELLS THEM APART.** `ForeignCallParam` is `Single(f) | Array(fs)`, and a Brillig
+    /// destination for an array return is a heap array of a declared width; handing it a scalar is
+    /// an out-of-bounds read reported as a bare `Failed assertion`.
+    ///
+    /// Absent on a tape recorded before the kinds were written down. The fallback below is the
+    /// length guess this field exists to remove, and it is REPORTED per call rather than applied
+    /// silently — a replay that had to guess is a replay whose result carries an assumption.
+    #[serde(default, rename = "outputKinds")]
+    output_kinds: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -233,6 +279,7 @@ impl<D: TraceForeignCallExecutor> ForeignCallExecutor<FieldElement> for TapeExec
         }
 
         let mut values: Vec<acvm::acir::brillig::ForeignCallParam<FieldElement>> = Vec::new();
+        let mut guessed_kinds = 0usize;
         for (slot_index, slot) in entry.outputs.iter().enumerate() {
             let mut fields = Vec::with_capacity(slot.len());
             for hex in slot {
@@ -241,10 +288,27 @@ impl<D: TraceForeignCallExecutor> ForeignCallExecutor<FieldElement> for TapeExec
                     Err(reason) => return Err(self.refuse(&name, reason)),
                 }
             }
-            values.push(if fields.len() == 1 {
-                acvm::acir::brillig::ForeignCallParam::Single(fields[0])
-            } else {
-                acvm::acir::brillig::ForeignCallParam::Array(fields)
+            // THE RECORDED KIND WHEN THERE IS ONE, AND THE LENGTH GUESS ONLY WHEN THERE IS NOT.
+            // `aztec_prv_getHashPreimage` returns `[Field; 1]` for a function returning one field,
+            // and the guess made that a `Single` — which halted `Parent.entry_point` inside Brillig
+            // 167 opcodes in, with five of its seven recorded calls replayed. Every oracle M38's
+            // arms exercised happened to be a real `Single` or a multi-field array, which is why a
+            // wrong rule looked like a right one.
+            let recorded_kind = entry.output_kinds.get(slot_index).map(String::as_str);
+            if recorded_kind.is_none() {
+                guessed_kinds += 1;
+            }
+            values.push(match recorded_kind {
+                Some("single") => acvm::acir::brillig::ForeignCallParam::Single(fields[0]),
+                Some("array") => acvm::acir::brillig::ForeignCallParam::Array(fields),
+                Some(other) => {
+                    return Err(self.refuse(
+                        &name,
+                        format!("output slot {slot_index} declares an unknown wire kind `{other}`"),
+                    ));
+                }
+                None if fields.len() == 1 => acvm::acir::brillig::ForeignCallParam::Single(fields[0]),
+                None => acvm::acir::brillig::ForeignCallParam::Array(fields),
             });
         }
 
@@ -252,7 +316,14 @@ impl<D: TraceForeignCallExecutor> ForeignCallExecutor<FieldElement> for TapeExec
             seq: self.cursor,
             oracle: name.clone(),
             outcome: "replayed",
-            reason: format!("{} output slot(s) from the tape", entry.outputs.len()),
+            reason: if guessed_kinds == 0 {
+                format!("{} output slot(s) from the tape", entry.outputs.len())
+            } else {
+                format!(
+                    "{} output slot(s) from the tape, {guessed_kinds} of them with the wire kind GUESSED from the slot length",
+                    entry.outputs.len()
+                )
+            },
         });
         self.cursor += 1;
         Ok(ForeignCallResult { values })
@@ -432,6 +503,14 @@ impl<'a> TraceSink for CountingSink<'a> {
 struct Loaded {
     program: Program<FieldElement>,
     debug: DebugArtifact,
+    /// The ABI's own error selectors, so an assertion renders as the sentence the contract wrote.
+    ///
+    /// **It was an empty map, and that made every assertion message blank.** The ACVM reports a
+    /// failed constraint by SELECTOR and the renderer looks the sentence up here; handing it
+    /// nothing produced `Failed assertion` with a leading space over an artifact that declares
+    /// `Preimage mismatch` by name. A diagnostic that names nothing is the expensive kind, and this
+    /// one was costing a real halt its explanation.
+    error_types: BTreeMap<acvm::acir::circuit::ErrorSelector, noirc_abi::AbiErrorType>,
     acir_opcodes: usize,
     brillig_functions: usize,
     bytecode_bytes: usize,
@@ -488,8 +567,24 @@ fn load(artifact_path: &str, function: &str) -> Result<Loaded, String> {
             serde_json::from_value(value.clone()).map_err(|e| format!("file_map[{key}]: {e}"))?;
         file_map.insert(id, file);
     }
+    // The ABI's error types are keyed by a decimal selector STRING in JSON and by `ErrorSelector`
+    // in the struct, so they are rebuilt entry by entry for the same reason `file_map` is.
+    let mut error_types: BTreeMap<acvm::acir::circuit::ErrorSelector, noirc_abi::AbiErrorType> =
+        BTreeMap::new();
+    if let Some(map) = f["abi"]["error_types"].as_object() {
+        for (key, value) in map {
+            let selector: acvm::acir::circuit::ErrorSelector = key
+                .parse::<u64>()
+                .map(acvm::acir::circuit::ErrorSelector::new)
+                .map_err(|e| format!("error_types key `{key}` is not a selector: {e}"))?;
+            let kind: noirc_abi::AbiErrorType = serde_json::from_value(value.clone())
+                .map_err(|e| format!("error_types[{key}]: {e}"))?;
+            error_types.insert(selector, kind);
+        }
+    }
     let acir_opcodes = program.functions.iter().map(|c| c.opcodes.len()).sum();
     Ok(Loaded {
+        error_types,
         acir_opcodes,
         brillig_functions: program.unconstrained_functions.len(),
         bytecode_bytes: raw.len(),
@@ -500,6 +595,35 @@ fn load(artifact_path: &str, function: &str) -> Result<Loaded, String> {
         },
         program,
     })
+}
+
+/// Where a nested frame's `Call` is anchored: the callee's own contract source, and line 1.
+///
+/// **A `Call` needs a `(path, line)` BEFORE the callee has stepped**, because `register_call` has
+/// to precede the steps it brackets — so the position cannot be the callee's first STEP, which is
+/// only known afterwards. It is the callee's own declaration file instead, taken from the
+/// artifact's `file_map`.
+///
+/// The choice is the shortest path ending in `/src/main.nr`, which is where an `#[aztec]` contract
+/// is declared, and the fallback is the lexicographically first entry. **The chosen path is
+/// REPORTED per frame**, so a container whose frames all opened in the same wrong file is visible
+/// rather than plausible; a helper that silently picked one of sixty files would be a position
+/// nobody could check.
+fn declaration_site(loaded: &Loaded) -> (String, i64) {
+    let mut candidates: Vec<String> = loaded
+        .debug
+        .file_map
+        .values()
+        .map(|f| f.path.display().to_string())
+        .collect();
+    candidates.sort();
+    let main = candidates
+        .iter()
+        .filter(|p| p.ends_with("/src/main.nr"))
+        .min_by_key(|p| p.len())
+        .cloned();
+    let path = main.or_else(|| candidates.first().cloned()).unwrap_or_else(|| "<no source>".into());
+    (path, 1)
 }
 
 // ---------------------------------------------------------------------------
@@ -520,10 +644,19 @@ fn step_paths(steps: &[(String, i64, Option<i64>)]) -> Vec<String> {
     p
 }
 
+/// A dotted path into a JSON document, where a NUMERIC segment indexes an array.
+///
+/// A transaction's report is a TREE — a frame's children hang off `nested` — so naming the second
+/// frame means walking through an array, and `Value::get(&str)` answers `None` for one. Object keys
+/// are still tried first, so a document whose object really has a key `"0"` is unaffected; nothing
+/// in this repository's reports does, and preferring the object keeps the change additive.
 fn json_at<'a>(v: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
     let mut cur = v;
     for part in path.split('.') {
-        cur = cur.get(part)?;
+        cur = match cur.get(part) {
+            Some(next) => next,
+            None => cur.get(part.parse::<usize>().ok()?)?,
+        };
     }
     Some(cur)
 }
@@ -534,82 +667,56 @@ fn main() {
         .expect("usage: m38probe <spec.json>");
     let spec: Spec = serde_json::from_reader(std::fs::File::open(&spec_path).unwrap()).unwrap();
 
-    let loaded = match load(&spec.artifact, &spec.function) {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("m38probe: {e}");
+    // THE FRAME LIST, WHICH IS ONE FRAME WHEN NOBODY SAID OTHERWISE. A spec written before nested
+    // private calls existed carries `artifact` / `function` / `tape_frame` and no `frames`; it
+    // becomes a one-element list here and everything below runs once, which is what those specs
+    // have always done.
+    let frames: Vec<FrameSpec> = if spec.frames.is_empty() {
+        vec![FrameSpec {
+            artifact: spec.artifact.clone(),
+            function: spec.function.clone(),
+            tape_frame: spec.tape_frame.clone(),
+            depth: 0,
+            contract_address: String::new(),
+        }]
+    } else {
+        spec.frames.clone()
+    };
+    if frames.iter().any(|f| f.artifact.is_empty() || f.function.is_empty() || f.tape_frame.is_empty()) {
+        eprintln!("m38probe: every frame needs an artifact, a function and a tape_frame");
+        std::process::exit(2);
+    }
+    // A FRAME LIST IN PRE-ORDER CANNOT SKIP A LEVEL. `depth` decides which frame a `Call` nests
+    // inside, so a list that jumped 0 -> 2 would open a frame under a parent that is not there and
+    // the container's depths would be a fiction. Refused rather than repaired.
+    for (i, f) in frames.iter().enumerate() {
+        let previous = if i == 0 { 0 } else { frames[i - 1].depth };
+        if i == 0 && f.depth != 0 {
+            eprintln!("m38probe: the first frame must be at depth 0, not {}", f.depth);
             std::process::exit(2);
         }
-    };
+        if i > 0 && f.depth > previous + 1 {
+            eprintln!(
+                "m38probe: frame {} is at depth {} after a frame at depth {}; a pre-order list cannot skip a level",
+                i, f.depth, previous
+            );
+            std::process::exit(2);
+        }
+    }
 
     let report: serde_json::Value =
         serde_json::from_reader(std::fs::File::open(&spec.tape_source).unwrap()).unwrap();
-    let frame = json_at(&report, &spec.tape_frame)
-        .unwrap_or_else(|| panic!("no frame at `{}` in {}", spec.tape_frame, spec.tape_source));
-
-    let mut tape: Vec<TapeEntry> =
-        serde_json::from_value(frame["tape"].clone()).expect("the frame carries no `tape`");
-    let served_calls: usize = frame["oraclesServed"]
-        .as_u64()
-        .expect("the frame carries no `oraclesServed`") as usize;
-    let witness_entries: Vec<(u32, String)> =
-        serde_json::from_value(frame["initialWitnessEntries"].clone())
-            .expect("the frame carries no `initialWitnessEntries`");
-
-    // THE ARMS ARE MUTATIONS OF THE TAPE, NOT OF THE CODE. Each is a case the executor must refuse,
-    // and each is produced by removing something rather than by adding a flag to the executor —
-    // so the refusal path under test is the shipped one.
-    let tape_len_before = tape.len();
-    match spec.arm.as_str() {
-        "replay" => {}
-        "refuse-all" => tape.clear(),
-        "truncate" => {
-            tape.pop();
-        }
-        // ONE FIELD OF ONE RECORDED INPUT IS CHANGED, AND NOTHING ELSE. The oracle name, the
-        // sequence and the outputs stay as they were, so the only thing that can refuse this is
-        // the INPUT comparison. Without an arm that reaches it, that comparison is a branch nothing
-        // executes — a replay is faithful by construction, so removing the comparison altogether
-        // changes no other arm's result. Measured: it did not, and this arm is why it now does.
-        "permute-inputs" => {
-            let mut done = false;
-            for entry in tape.iter_mut() {
-                if let Some(slot) = entry.inputs.first_mut() {
-                    if let Some(first) = slot.first_mut() {
-                        *first = "0x00000000000000000000000000000000000000000000000000000000deadbeef"
-                            .to_string();
-                        done = true;
-                        break;
-                    }
-                }
-            }
-            if !done {
-                eprintln!("m38probe: the tape has no input field to permute");
-                std::process::exit(2);
-            }
-        }
-        other => {
-            eprintln!("m38probe: unknown arm `{other}`");
-            std::process::exit(2);
-        }
-    }
-
-    let tape_for_second_pass = tape.clone();
-
-    let mut initial_witness = WitnessMap::<FieldElement>::new();
-    for (index, hex) in &witness_entries {
-        initial_witness.insert(
-            Witness(*index),
-            field_of(hex, "initial witness").expect("witness field"),
-        );
-    }
 
     std::fs::create_dir_all(&spec.out_dir).expect("out dir");
 
-    let error_types: BTreeMap<acvm::acir::circuit::ErrorSelector, noirc_abi::AbiErrorType> =
-        BTreeMap::new();
+    // THE CONTAINER'S PROGRAM NAME. `spec.program` when the driver named one; the FIRST FRAME's
+    // function otherwise, which is exactly what the single-frame form always produced.
+    let program_name = if spec.program.is_empty() { frames[0].function.clone() } else { spec.program.clone() };
 
-    let mut writer = create_trace_writer(&spec.function, &[], TraceEventsFileFormat::Ctfs);
+    // ONE WRITER FOR THE WHOLE TRANSACTION. Two writers would be two containers, and a transaction
+    // whose frames sit in different files is the thing `JOIN-SHAPE.md` refuses to let a reader
+    // infer. `create_trace_writer` is `nargo trace`'s own, unchanged.
+    let mut writer = create_trace_writer(&program_name, &[], TraceEventsFileFormat::Ctfs);
     let mut sink = CountingSink {
         inner: NimWriterSink::new(&mut *writer),
         steps: vec![],
@@ -622,128 +729,300 @@ fn main() {
     // The workdir is `None` so the artifact's own paths are registered verbatim. There is no
     // package on disk to be relative to: the sources come out of the artifact's `file_map`.
     let options = TraceOptions::with_workdir(None::<PathBuf>);
-    begin_trace(&mut sink, &spec.out_dir, &spec.function, None);
+    begin_trace(&mut sink, &spec.out_dir, &program_name, None);
 
-    let inner = DefaultDebugForeignCallExecutor::from_artifact(
-        std::io::sink(),
-        None,
-        &loaded.debug,
-        None,
-        String::new(),
-    );
-    let executor = Box::new(TapeExecutor {
-        inner,
-        tape,
-        served_calls,
-        cursor: 0,
-        ledger: vec![],
-        refused: vec![],
-    });
-    // The executor is moved into the tracer, so its ledger comes back out through a shared handle
-    // rather than by reading it afterwards.
+    // THE OPEN FRAME STACK. A frame at depth d nests inside the last frame at depth d-1, so the
+    // list is walked in pre-order and every deeper frame is closed before a shallower one opens.
+    //
+    // **THE CHILD'S FRAME OPENS AFTER THE PARENT'S STEP STREAM, NOT AT THE PARENT'S CALL
+    // INSTRUCTION, AND THAT IS STATED RATHER THAN GLOSSED.** `trace_circuit_with_executor` steps a
+    // whole circuit in one pass; there is no point inside that pass at which this program can
+    // interleave a second circuit's steps. So the nesting expresses the CALL RELATIONSHIP and not
+    // the instruction order. That is `JOIN-SHAPE.md` §3's own shape one level down — its public
+    // frames open at depth 2 inside `main` after the private half has stepped, for the same reason
+    // — and it is why a reader sees the parent's frame with the child's inside it rather than the
+    // child's steps spliced into the parent's.
+    let mut open_frames: Vec<String> = vec![];
+    let mut frame_reports: Vec<serde_json::Value> = vec![];
+    let mut all_tape_entries = 0usize;
+    let mut all_served = 0usize;
+    let mut all_opcodes_stepped = 0usize;
+    let mut all_opcodes_positioned = 0usize;
+    let mut all_positions_distinct = 0usize;
+    let mut all_call_stack_positioned = 0usize;
+    let mut all_witness_entries = 0usize;
+    let mut acir_opcodes_total = 0usize;
+    let mut brillig_total = 0usize;
+    let mut bytecode_total = 0usize;
+    let mut file_map_total = 0usize;
+    let mut trace_results: Vec<String> = vec![];
     let ledger = std::rc::Rc::new(std::cell::RefCell::new(Vec::<Answered>::new()));
     let refused = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
-    let executor = Box::new(Reporting {
-        inner: *executor,
-        ledger: std::rc::Rc::clone(&ledger),
-        refused: std::rc::Rc::clone(&refused),
-    });
 
-    let solver = Bn254BlackBoxSolver::default();
-    let result = trace_circuit_with_executor(
-        &solver,
-        &loaded.program.functions,
-        &loaded.debug,
-        initial_witness,
-        &loaded.program.unconstrained_functions,
-        &error_types,
-        &options,
-        &mut sink,
-        Some(executor),
-    );
-
-    let finish = finish_trace(&mut sink);
-
-    // THE SECOND PASS: THE ACVM'S OWN OPCODE COUNT, over the same circuit and the same tape.
-    //
-    // A step record is emitted when the SOURCE LOCATION changes, not when an opcode is solved, so
-    // "the tracer produced N steps" and "the circuit is N opcodes long" are different numbers and
-    // comparing them directly would be comparing two things nobody said were equal. What CAN be
-    // compared is a step count against the number of opcodes that carry a source location at all —
-    // and taking that number needs the same stepper the tracer drives, run over the same
-    // execution. `DebugContext` is public and `step_into_opcode` is its own loop body, so this is
-    // the tracer's inner loop with the recording removed.
-    let (opcodes_stepped, opcodes_positioned, positions_distinct, call_stack_positioned) = {
-        let mut witness2 = WitnessMap::<FieldElement>::new();
-        for (index, hex) in &witness_entries {
-            witness2.insert(Witness(*index), field_of(hex, "initial witness").expect("witness"));
+    for frame_spec in &frames {
+        let loaded = match load(&frame_spec.artifact, &frame_spec.function) {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("m38probe: {e}");
+                std::process::exit(2);
+            }
+        };
+        let frame = json_at(&report, &frame_spec.tape_frame).unwrap_or_else(|| {
+            panic!("no frame at `{}` in {}", frame_spec.tape_frame, spec.tape_source)
+        });
+        let mut tape: Vec<TapeEntry> =
+            serde_json::from_value(frame["tape"].clone()).expect("the frame carries no `tape`");
+        let served_calls: usize = frame["oraclesServed"]
+            .as_u64()
+            .expect("the frame carries no `oraclesServed`") as usize;
+        let witness_entries: Vec<(u32, String)> =
+            serde_json::from_value(frame["initialWitnessEntries"].clone())
+                .expect("the frame carries no `initialWitnessEntries`");
+        // THE ARMS ARE MUTATIONS OF THE TAPE, NOT OF THE CODE. Each is a case the executor must refuse,
+        // and each is produced by removing something rather than by adding a flag to the executor —
+        // so the refusal path under test is the shipped one.
+        let tape_len_before = tape.len();
+        match spec.arm.as_str() {
+            "replay" => {}
+            "refuse-all" => tape.clear(),
+            "truncate" => {
+                tape.pop();
+            }
+            // ONE FIELD OF ONE RECORDED INPUT IS CHANGED, AND NOTHING ELSE. The oracle name, the
+            // sequence and the outputs stay as they were, so the only thing that can refuse this is
+            // the INPUT comparison. Without an arm that reaches it, that comparison is a branch nothing
+            // executes — a replay is faithful by construction, so removing the comparison altogether
+            // changes no other arm's result. Measured: it did not, and this arm is why it now does.
+            "permute-inputs" => {
+                let mut done = false;
+                for entry in tape.iter_mut() {
+                    if let Some(slot) = entry.inputs.first_mut() {
+                        if let Some(first) = slot.first_mut() {
+                            *first = "0x00000000000000000000000000000000000000000000000000000000deadbeef"
+                                .to_string();
+                            done = true;
+                            break;
+                        }
+                    }
+                }
+                if !done {
+                    eprintln!("m38probe: the tape has no input field to permute");
+                    std::process::exit(2);
+                }
+            }
+            other => {
+                eprintln!("m38probe: unknown arm `{other}`");
+                std::process::exit(2);
+            }
         }
-        let inner2 = DefaultDebugForeignCallExecutor::from_artifact(
+
+        let tape_for_second_pass = tape.clone();
+
+        let mut initial_witness = WitnessMap::<FieldElement>::new();
+        for (index, hex) in &witness_entries {
+            initial_witness.insert(
+                Witness(*index),
+                field_of(hex, "initial witness").expect("witness field"),
+            );
+        }
+
+        // THE FRAME BRACKET. Deeper frames close before a shallower one opens, and a frame at depth
+        // zero is the tracer's own toplevel and is not bracketed at all — which is why a single-frame
+        // run emits no Call and no Return, exactly as it did before this loop existed.
+        while open_frames.len() >= frame_spec.depth && frame_spec.depth > 0 {
+            TraceSink::register_return(&mut sink, ValueRecord::None { type_id: NONE_TYPE_ID });
+            open_frames.pop();
+        }
+        if frame_spec.depth > 0 {
+            let (site_path, site_line) = declaration_site(&loaded);
+            let function_id = TraceSink::ensure_function_id(
+                &mut sink,
+                &frame_spec.function,
+                std::path::Path::new(&site_path),
+                Line(site_line),
+            );
+            // ONE CALL ARGUMENT, AND IT IS THE CONTRACT ADDRESS. M26's rule for the public half, for
+            // its reason: it is what makes a frame attributable in a reader without stepping into it.
+            let type_id = TraceSink::ensure_type_id(&mut sink, TypeKind::String, "AztecAddress");
+            let arg = TraceSink::arg(
+                &mut sink,
+                "contractAddress",
+                ValueRecord::String { text: frame_spec.contract_address.clone(), type_id },
+            );
+            TraceSink::register_call(&mut sink, function_id, vec![arg]);
+            open_frames.push(frame_spec.function.clone());
+        }
+
+        let steps_before = sink.steps.len();
+
+        let inner = DefaultDebugForeignCallExecutor::from_artifact(
             std::io::sink(),
             None,
             &loaded.debug,
             None,
             String::new(),
         );
-        let exec2 = Box::new(TapeExecutor {
-            inner: inner2,
-            tape: tape_for_second_pass,
+        let executor = Box::new(TapeExecutor {
+            inner,
+            tape,
             served_calls,
             cursor: 0,
             ledger: vec![],
             refused: vec![],
         });
-        let solver2 = Bn254BlackBoxSolver::default();
-        let mut ctx = DebugContext::new(
-            &solver2,
+        // The executor is moved into the tracer, so its ledger comes back out through a shared handle
+        // rather than by reading it afterwards. The handles are the TRANSACTION's: a per-frame ledger
+        // would make "which oracle stopped this transaction" a question with one answer per frame.
+        let executor = Box::new(Reporting {
+            inner: *executor,
+            ledger: std::rc::Rc::clone(&ledger),
+            refused: std::rc::Rc::clone(&refused),
+        });
+
+        let solver = Bn254BlackBoxSolver::default();
+        let result = trace_circuit_with_executor(
+            &solver,
             &loaded.program.functions,
             &loaded.debug,
-            witness2,
-            exec2,
+            initial_witness,
             &loaded.program.unconstrained_functions,
+            &loaded.error_types,
+            &options,
+            &mut sink,
+            Some(executor),
         );
-        let mut stepped = 0usize;
-        let mut positioned = 0usize;
-        let mut call_stack_positioned = 0usize;
-        let mut seen: Vec<String> = vec![];
-        loop {
-            if ctx.get_current_debug_location().is_none() {
-                break;
+
+        // THE SECOND PASS: THE ACVM'S OWN OPCODE COUNT, over the same circuit and the same tape.
+        //
+        // A step record is emitted when the SOURCE LOCATION changes, not when an opcode is solved, so
+        // "the tracer produced N steps" and "the circuit is N opcodes long" are different numbers and
+        // comparing them directly would be comparing two things nobody said were equal. What CAN be
+        // compared is a step count against the number of opcodes that carry a source location at all —
+        // and taking that number needs the same stepper the tracer drives, run over the same
+        // execution. `DebugContext` is public and `step_into_opcode` is its own loop body, so this is
+        // the tracer's inner loop with the recording removed.
+        let (opcodes_stepped, opcodes_positioned, positions_distinct, call_stack_positioned) = {
+            let mut witness2 = WitnessMap::<FieldElement>::new();
+            for (index, hex) in &witness_entries {
+                witness2.insert(Witness(*index), field_of(hex, "initial witness").expect("witness"));
             }
-            if let Some(locations) = ctx.get_current_source_location() {
-                positioned += 1;
-                if let Some(last) = locations.last() {
-                    seen.push(format!("{:?}:{}", last.file, last.span.start()));
+            let inner2 = DefaultDebugForeignCallExecutor::from_artifact(
+                std::io::sink(),
+                None,
+                &loaded.debug,
+                None,
+                String::new(),
+            );
+            let exec2 = Box::new(TapeExecutor {
+                inner: inner2,
+                tape: tape_for_second_pass,
+                served_calls,
+                cursor: 0,
+                ledger: vec![],
+                refused: vec![],
+            });
+            let solver2 = Bn254BlackBoxSolver::default();
+            let mut ctx = DebugContext::new(
+                &solver2,
+                &loaded.program.functions,
+                &loaded.debug,
+                witness2,
+                exec2,
+                &loaded.program.unconstrained_functions,
+            );
+            let mut stepped = 0usize;
+            let mut positioned = 0usize;
+            let mut call_stack_positioned = 0usize;
+            let mut seen: Vec<String> = vec![];
+            loop {
+                if ctx.get_current_debug_location().is_none() {
+                    break;
                 }
-            }
-            // THE TRACER READS THE CALL STACK, NOT THE CURRENT LOCATION, and the two can
-            // disagree — `TracingContext::step_debugger` proceeds on
-            // `get_current_source_location()` and then records what
-            // `get_call_stack()` resolves to, skipping the step when that is empty. Both are
-            // counted so a step count of zero over a positioned execution names which of the two
-            // was empty rather than leaving a reader to guess.
-            if ctx
-                .get_call_stack()
-                .iter()
-                .any(|l| !ctx.get_source_location_for_debug_location(l).is_empty())
-            {
-                call_stack_positioned += 1;
-            }
-            match ctx.step_into_opcode() {
-                DebugCommandResult::Ok => stepped += 1,
-                _ => {
-                    stepped += 1;
+                if let Some(locations) = ctx.get_current_source_location() {
+                    positioned += 1;
+                    if let Some(last) = locations.last() {
+                        seen.push(format!("{:?}:{}", last.file, last.span.start()));
+                    }
+                }
+                // THE TRACER READS THE CALL STACK, NOT THE CURRENT LOCATION, and the two can
+                // disagree — `TracingContext::step_debugger` proceeds on
+                // `get_current_source_location()` and then records what
+                // `get_call_stack()` resolves to, skipping the step when that is empty. Both are
+                // counted so a step count of zero over a positioned execution names which of the two
+                // was empty rather than leaving a reader to guess.
+                if ctx
+                    .get_call_stack()
+                    .iter()
+                    .any(|l| !ctx.get_source_location_for_debug_location(l).is_empty())
+                {
+                    call_stack_positioned += 1;
+                }
+                match ctx.step_into_opcode() {
+                    DebugCommandResult::Ok => stepped += 1,
+                    _ => {
+                        stepped += 1;
+                        break;
+                    }
+                }
+                if stepped > 5_000_000 {
                     break;
                 }
             }
-            if stepped > 5_000_000 {
-                break;
-            }
-        }
-        seen.sort();
-        seen.dedup();
-        (stepped, positioned, seen.len(), call_stack_positioned)
-    };
+            seen.sort();
+            seen.dedup();
+            (stepped, positioned, seen.len(), call_stack_positioned)
+        };
+
+
+        all_tape_entries += tape_len_before;
+        all_served += served_calls;
+        all_opcodes_stepped += opcodes_stepped;
+        all_opcodes_positioned += opcodes_positioned;
+        all_positions_distinct += positions_distinct;
+        all_call_stack_positioned += call_stack_positioned;
+        all_witness_entries += witness_entries.len();
+        acir_opcodes_total += loaded.acir_opcodes;
+        brillig_total += loaded.brillig_functions;
+        bytecode_total += loaded.bytecode_bytes;
+        file_map_total += loaded.file_map_entries;
+        trace_results.push(match &result { Ok(()) => "ok".to_string(), Err(e) => e.to_string() });
+
+        let frame_steps: Vec<(String, i64, Option<i64>)> = sink.steps[steps_before..].to_vec();
+        frame_reports.push(serde_json::json!({
+            "artifact": frame_spec.artifact,
+            "function": frame_spec.function,
+            "depth": frame_spec.depth,
+            "contractAddress": frame_spec.contract_address,
+            "tapeFrame": frame_spec.tape_frame,
+            "callSite": if frame_spec.depth > 0 { serde_json::json!(declaration_site(&loaded).0) } else { serde_json::Value::Null },
+            "tapeEntriesRecorded": tape_len_before,
+            "servedCallsInRecording": served_calls,
+            "acirOpcodes": loaded.acir_opcodes,
+            "brilligFunctions": loaded.brillig_functions,
+            "bytecodeBytes": loaded.bytecode_bytes,
+            "fileMapEntries": loaded.file_map_entries,
+            "initialWitnessEntries": witness_entries.len(),
+            "traceResult": match &result { Ok(()) => "ok".to_string(), Err(e) => e.to_string() },
+            "steps": frame_steps.len(),
+            "opcodesStepped": opcodes_stepped,
+            "opcodesPositioned": opcodes_positioned,
+            "distinctPositions": positions_distinct,
+            "opcodesWithPositionedCallStack": call_stack_positioned,
+            "distinctLines": distinct_lines(&frame_steps),
+            "stepPaths": step_paths(&frame_steps),
+            "firstSteps": frame_steps.iter().take(5).map(|(p, l, c)| format!("{p}:{l}:{}", c.map(|c| c.to_string()).unwrap_or_else(|| "-".into()))).collect::<Vec<_>>(),
+            "stepsWithColumn": frame_steps.iter().filter(|(_, _, c)| c.is_some()).count(),
+        }));
+    }
+
+    // EVERY FRAME THE LIST OPENED IS CLOSED, in reverse. A container whose frames never return ends
+    // at a non-zero depth, and `ct_call_depth` / `ct_calls_opened` exist because a recording with no
+    // frames and one whose frames all closed both end at depth 0 — so both are asserted, not one.
+    while open_frames.pop().is_some() {
+        TraceSink::register_return(&mut sink, ValueRecord::None { type_id: NONE_TYPE_ID });
+    }
+
+    let finish = finish_trace(&mut sink);
 
     let container = std::fs::read_dir(&spec.out_dir)
         .ok()
@@ -754,24 +1033,32 @@ fn main() {
         })
         .map(|p| p.display().to_string());
 
+    // THE TOP-LEVEL FIGURES ARE THE TRANSACTION'S, AND FOR ONE FRAME THEY ARE THAT FRAME'S. Every
+    // one is a sum or a whole-container reading, so a single-frame run reports exactly the numbers
+    // it reported before this loop existed — which is what keeps M38's own checks unmoved.
     let out = serde_json::json!({
         "arm": spec.arm,
-        "artifact": spec.artifact,
-        "function": spec.function,
-        "tapeEntriesRecorded": tape_len_before,
-        "servedCallsInRecording": served_calls,
-        "acirOpcodes": loaded.acir_opcodes,
-        "brilligFunctions": loaded.brillig_functions,
-        "bytecodeBytes": loaded.bytecode_bytes,
-        "fileMapEntries": loaded.file_map_entries,
-        "initialWitnessEntries": witness_entries.len(),
-        "traceResult": match &result { Ok(()) => "ok".to_string(), Err(e) => e.to_string() },
+        "artifact": frames[0].artifact,
+        "function": frames[0].function,
+        "program": program_name,
+        "frameCount": frames.len(),
+        "maxDepth": frames.iter().map(|f| f.depth).max().unwrap_or(0),
+        "frames": frame_reports,
+        "tapeEntriesRecorded": all_tape_entries,
+        "servedCallsInRecording": all_served,
+        "acirOpcodes": acir_opcodes_total,
+        "brilligFunctions": brillig_total,
+        "bytecodeBytes": bytecode_total,
+        "fileMapEntries": file_map_total,
+        "initialWitnessEntries": all_witness_entries,
+        "traceResult": if trace_results.iter().all(|r| r == "ok") { "ok".to_string() } else { trace_results.join(" | ") },
         "finish": match &finish { Ok(()) => "ok".to_string(), Err(e) => e.to_string() },
         "steps": sink.steps.len(),
-        "opcodesStepped": opcodes_stepped,
-        "opcodesPositioned": opcodes_positioned,
-        "distinctPositions": positions_distinct,
-        "opcodesWithPositionedCallStack": call_stack_positioned,
+        "stepsWithColumn": sink.steps.iter().filter(|(_, _, c)| c.is_some()).count(),
+        "opcodesStepped": all_opcodes_stepped,
+        "opcodesPositioned": all_opcodes_positioned,
+        "distinctPositions": all_positions_distinct,
+        "opcodesWithPositionedCallStack": all_call_stack_positioned,
         "distinctLines": distinct_lines(&sink.steps),
         "stepPaths": step_paths(&sink.steps),
         "firstSteps": sink.steps.iter().take(5).map(|(p, l, c)| format!("{p}:{l}:{}", c.map(|c| c.to_string()).unwrap_or_else(|| "-".into()))).collect::<Vec<_>>(),

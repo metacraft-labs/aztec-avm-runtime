@@ -186,6 +186,7 @@ export {
   functionTypeOf,
   initPrivateExecution,
   privateExecutionAssets,
+  privateFunctionSelector,
   toAddressValue,
   toFieldValue,
 } from './wallet/private_execution.ts';
@@ -272,6 +273,7 @@ export const WALLET_ENTRY_OPS: readonly string[] = Object.freeze(
     'toAddressValue',
     'initPrivateExecution',
     'privateExecutionAssets',
+    'privateFunctionSelector',
     'PrivateExecutionNotInitialised',
     // M36: note discovery and tagging, over the dev node's own history.
     'ORACLE_DISCOVERY',

@@ -83,6 +83,7 @@ import {
   createPrivateOracleHandler,
   deriveDevAccounts,
   executePrivateFunction,
+  privateFunctionSelector,
   initPrivateExecution,
   oracleMethodName,
   privateExecutionAssets,
@@ -108,6 +109,7 @@ import {
   CONTRACT_INSTANCE_REGISTRY_CONTRACT_ADDRESS,
   DomainSeparator,
   MAX_FR_CALLDATA_TO_ALL_ENQUEUED_CALLS,
+  PRIVATE_CONTEXT_INPUTS_LENGTH,
 } from '@aztec/constants';
 import { AztecAddress } from '@aztec/stdlib/aztec-address';
 // STATIC, NOT DYNAMIC, and the reason is a build failure rather than a preference: the first draft
@@ -144,6 +146,28 @@ const VOTING_ARTIFACT_URL = './assets/private_voting_contract-PrivateVoting.json
 // and NO note hash; `TestLog.emit_raw_private_log` emits a log at a tag the caller chose, which
 // would make the discovery a lookup of something this page placed.
 const NOTE_GETTER_ARTIFACT_URL = './assets/note_getter_contract-NoteGetter.json';
+// M39's fixture, and it is UPSTREAM'S OWN nested-call pair rather than one written here.
+// `parent_contract/src/main.nr:10-14` is three lines — `self.context.call_private_function(
+// target_contract, target_selector, [0]).get_preimage()` — and `child_contract/src/main.nr:25-28`
+// is `input + self.context.chain_id() + self.context.version()`.
+//
+// THE CHILD IS CHOSEN FOR WHAT IT DOES NOT TOUCH. It reads no note, derives no tag, writes no
+// storage and asks for no contract instance of its own, so a nested frame that fails here fails on
+// the NESTING and not on an oracle the callee happened to need. It is also the control for the
+// two chain fields: a child that did not receive the PARENT's `chainId` and `version` returns a
+// different field, and the parent asserts nothing about it — so the returned value is the only
+// place that disagreement is visible.
+// TWO PAIRS, AND THE SECOND ONE IS A MEASUREMENT RATHER THAN A SPARE. The first is compiled
+// against the line that matches the `cpp` anchor this runtime's oracle WIRE is vendored from; the
+// second against the `deletion_era` line, whose `call_private_function_oracle` declares
+// `-> [Field; 2]` (ONE destination slot) where the anchor's declares `-> (u32, Field)` (TWO). The
+// version check cannot see the difference — same major, environment minor >= contract minor — so
+// the only thing that can is a run. See PRIVATE-EXECUTION.md section 3b, whose closing sentence
+// this pair is the second instance of.
+const PARENT_ARTIFACT_URL = './assets/parent_contract-Parent.json';
+const CHILD_ARTIFACT_URL = './assets/child_contract-Child.json';
+const PARENT_ANCHOR_URL = './assets/anchorline-parent_contract-Parent.json';
+const CHILD_ANCHOR_URL = './assets/anchorline-child_contract-Child.json';
 
 /** The second wallet's seed — control 1. An argument, never generated, exactly like the first. */
 const OTHER_WALLET_SEED = '0x0000000000000000000000000000000000000000000000000000000000c0de36';
@@ -762,6 +786,97 @@ async function fetchJson(url: string): Promise<unknown> {
   return response.json();
 }
 
+/**
+ * A real contract instance for a raw artifact, at an address DERIVED from its own preimage.
+ *
+ * Used by M35's ladder and by M39's nested-call arm, which is why it is here rather than inside
+ * one arm: two arms deriving an address two ways would make "the frame ran at its own address" a
+ * property of whichever arm you read.
+ *
+ * THE INITIALIZATION HASH IS UPSTREAM'S OWN ENCODING OF "NO INITIALIZER", DELIBERATELY, AND
+ * THE TWO REJECTED ALTERNATIVES ARE WORTH RECORDING BECAUSE BOTH FAILED IN THE PAGE.
+ *
+ * What this measures is that the address a frame runs at is DERIVED from the preimage the wallet
+ * hands back — the relation `aztec-nr`'s `get_contract_instance` asserts. That relation holds for
+ * ANY consistent initialization hash, so the honest choice is the one that invents nothing.
+ *
+ *   * Reading the constructor ABI off the RAW artifact json gives a function record with no
+ *     `.parameters`, and the failure lands four frames away inside
+ *     `FunctionSelector.fromNameAndParameters` as `Cannot read properties of undefined
+ *     (reading 'map')` — measured, on PrivateVoting.
+ *   * Reading it off the LOADED artifact works, and then Token's four constructor arguments are
+ *     handed to PrivateVoting's one-argument constructor: `Function 'constructor' expects 1
+ *     argument(s) but received 4`. Also measured.
+ *
+ * Both were attempts to make the hash "real", and a real hash of arguments nobody passed is not
+ * more true than zero — it is a fiction with more steps.
+ */
+async function privateContractInstance(doc: unknown, salt: number) {
+  const parsedDoc = doc as { name: string; functions: { name: string; bytecode: string }[] };
+  const classId = await classIdOf(parsedDoc);
+  const initializationHash = await computeInitializationHash(undefined, []);
+  return makeContractInstanceFromClassId(classId, salt, {
+    deployer: await AztecAddress.fromNumber(4242),
+    initializationHash,
+    immutablesHash: new Fr(28),
+    publicKeys: PublicKeys.default(),
+  });
+}
+
+/**
+ * How many FIELDS the artifact says its `PrivateContextInputs` parameter is, walked off the ABI.
+ *
+ * **The number this environment BUILDS is `PRIVATE_CONTEXT_INPUTS_LENGTH` from the installed
+ * `@aztec/constants`, and the number an ARTIFACT declares is this.** They are equal for the corpus
+ * this runtime executes and differ by one on the `cpp` anchor line, which is the whole reason an
+ * anchor-line artifact cannot even be assembled into a frame here. Reading it off the artifact is
+ * what makes that a measurement rather than an error message: `entry_point declares 3 argument
+ * field(s) … and 2 were supplied` is the SYMPTOM of a 38-against-37 context, and nothing in that
+ * sentence says so.
+ */
+function contextWidthOf(artifact: unknown, functionName: string): number {
+  type AbiType = { kind?: string; fields?: { type: AbiType }[]; length?: number; type?: AbiType };
+  const width = (t: AbiType): number => {
+    switch (t.kind) {
+      case 'field':
+      case 'integer':
+      case 'boolean':
+        return 1;
+      case 'string':
+        return t.length ?? 0;
+      case 'array':
+        return (t.length ?? 0) * width(t.type as AbiType);
+      case 'struct':
+      case 'tuple':
+        return (t.fields ?? []).reduce((n, f) => n + width(f.type), 0);
+      default:
+        // A KIND THIS WALKER CANNOT PLACE IS A FAILURE, NOT A ZERO. A silent zero here would make a
+        // 38-field context read as 37 and the comparison would agree with itself.
+        throw new Error(`contextWidthOf: unknown ABI kind '${String(t.kind)}'`);
+    }
+  };
+  const doc = artifact as { functions?: { name: string; abi?: { parameters?: { name: string; type: AbiType }[] } }[] };
+  const fn = (doc.functions ?? []).find(f => f.name === functionName);
+  const inputs = (fn?.abi?.parameters ?? []).find(p => p.name === 'inputs');
+  if (!inputs) {
+    throw new Error(`contextWidthOf: '${functionName}' declares no \`inputs\` parameter`);
+  }
+  return width(inputs.type);
+}
+
+/** The six preimage fields plus the address, in the shape the oracle's directory takes. */
+function heldInstanceOf(i: Awaited<ReturnType<typeof privateContractInstance>>) {
+  return {
+    address: i.address,
+    salt: i.salt,
+    deployer: i.deployer,
+    originalContractClassId: i.originalContractClassId,
+    initializationHash: i.initializationHash,
+    immutablesHash: i.immutablesHash,
+    publicKeys: i.publicKeys,
+  };
+}
+
 /** ARM: two real private circuits — one that completes, one that refuses by name. */
 async function armPrivateExecution(): Promise<Record<string, unknown>> {
   // THE RUNTIME FIRST, AND IT IS NOT INCIDENTAL. Under this build's DD-11 redirect table every
@@ -830,36 +945,7 @@ async function armPrivateExecution(): Promise<Record<string, unknown>> {
   // the class id derived from that artifact's own `public_dispatch` — and the frame runs at
   // `instance.address`, which that function derived rather than anybody typed. Nothing here is a
   // fabricated preimage: the address is a function OF the preimage, computed by upstream's code.
-  const deployerForPrivate = await AztecAddress.fromNumber(4242);
-  const instanceFor = async (doc: unknown, salt: number) => {
-    const parsedDoc = doc as { name: string; functions: { name: string; bytecode: string }[] };
-    const classId = await classIdOf(parsedDoc);
-    // THE INITIALIZATION HASH IS UPSTREAM'S OWN ENCODING OF "NO INITIALIZER", DELIBERATELY, AND
-    // THE TWO REJECTED ALTERNATIVES ARE WORTH RECORDING BECAUSE BOTH FAILED IN THE PAGE.
-    //
-    // What this rung measures is that the address a frame runs at is DERIVED from the preimage the
-    // wallet hands back — the relation `aztec-nr`'s `get_contract_instance` asserts. That relation
-    // holds for ANY consistent initialization hash, so the honest choice is the one that invents
-    // nothing.
-    //
-    //   * Reading the constructor ABI off the RAW artifact json gives a function record with no
-    //     `.parameters`, and the failure lands four frames away inside
-    //     `FunctionSelector.fromNameAndParameters` as `Cannot read properties of undefined
-    //     (reading 'map')` — measured, on PrivateVoting.
-    //   * Reading it off the LOADED artifact works, and then Token's four constructor arguments are
-    //     handed to PrivateVoting's one-argument constructor: `Function 'constructor' expects 1
-    //     argument(s) but received 4`. Also measured.
-    //
-    // Both were attempts to make the hash "real", and a real hash of arguments nobody passed is not
-    // more true than zero — it is a fiction with more steps.
-    const initializationHash = await computeInitializationHash(undefined, []);
-    return makeContractInstanceFromClassId(classId, salt, {
-      deployer: deployerForPrivate,
-      initializationHash,
-      immutablesHash: new Fr(28),
-      publicKeys: PublicKeys.default(),
-    });
-  };
+  const instanceFor = privateContractInstance;
   const tokenInstance = await instanceFor(tokenArtifact, 27);
   const votingInstance = await instanceFor(votingArtifact, 29);
   const heldInstances = [tokenInstance, votingInstance].map(i => ({
@@ -1069,6 +1155,134 @@ async function armPrivateExecution(): Promise<Record<string, unknown>> {
   };
   lastRun = report;
   return report;
+}
+
+// =============================================================================================
+// M39 — ONE TRANSACTION, TWO PRIVATE FRAMES.
+// =============================================================================================
+//
+// `armNestedPrivateCall` executes `Parent.entry_point`, which does exactly one interesting thing:
+// `self.context.call_private_function(target_contract, target_selector, [0]).get_preimage()`.
+// That is `aztec_prv_callPrivateFunction` — tier 4, the last capability gap — followed by a read of
+// the CHILD's return value out of the execution cache, in the PARENT's frame.
+//
+// WHY THE SECOND HALF OF THAT SENTENCE IS THE ONE THAT DECIDES THE DESIGN. `ReturnsHash::get_preimage`
+// (`aztec-nr/aztec/src/context/returns_hash.nr:22-33`) is `execution_cache::load(self.hash)`, run in
+// the parent's frame over a hash the CHILD stored. So a per-frame execution cache does not fail at
+// the nested call — it fails on the opcode AFTER it, as `no preimage stored for hash …`, which reads
+// like a defect in the cache rather than in the frame model.
+//
+// The fixture is upstream's own and the callee is deliberately the emptiest one it has:
+// `Child.value(input) = input + chain_id + version` touches no note, no tag, no storage and no
+// contract instance, so a failure here is a failure of the NESTING.
+async function armNestedPrivateCall(options?: {
+  /** `deletion_era` is the corpus this runtime executes; `anchor` is the one it cannot. */
+  line?: 'deletion_era' | 'anchor';
+  /** `off` disables the call-private wire regrouping, which is how its necessity is measured. */
+  wireCompat?: 'auto' | 'off';
+}): Promise<Record<string, unknown>> {
+  // Same reason as `armPrivateExecution`: a function SELECTOR is a poseidon hash of the ABI
+  // signature, and under this build's DD-11 redirect table poseidon2 is `avm.wasm`'s.
+  await open();
+  await requirePrivateAssets();
+
+  const line = options?.line ?? 'deletion_era';
+  const wireCompat = options?.wireCompat ?? 'auto';
+  const anchorLine = line === 'anchor';
+  const parentArtifact = await fetchJson(anchorLine ? PARENT_ANCHOR_URL : PARENT_ARTIFACT_URL);
+  const childArtifact = await fetchJson(anchorLine ? CHILD_ANCHOR_URL : CHILD_ARTIFACT_URL);
+
+  const parentInstance = await privateContractInstance(parentArtifact, 31);
+  const childInstance = await privateContractInstance(childArtifact, 33);
+  const heldInstances = [parentInstance, childInstance].map(heldInstanceOf);
+  const keyAccounts = await deriveDevAccounts(DEFAULT_DEV_WALLET_SEED, 3);
+  const heldAccountKeys = keyAccounts.map(a => ({
+    address: a.address,
+    publicKeys: a.publicKeys,
+    partialAddress: a.partialAddress,
+  }));
+
+  // THE SELECTOR THE PARENT PASSES AND THE SELECTOR THE ORACLE LOOKS UP ARE ONE VALUE.
+  // `privateFunctionSelector` is exported from `private_execution.ts` for exactly this: deriving it
+  // twice is how a lookup misses for a reason that looks like a missing contract.
+  const childSelector = await privateFunctionSelector(childArtifact, 'value');
+
+  const say1 = (text: string) => say(text);
+  const request = {
+    contractAddress: parentInstance.address,
+    msgSender: toAddressValue(0x333n, 'demo sender'),
+    chainId: PRIVATE_CHAIN_ID,
+    version: PRIVATE_CHAIN_VERSION,
+    entropySeed: PRIVATE_ENTROPY_SEED,
+    writeLine: say1,
+    contractInstances: heldInstances,
+    accountKeys: heldAccountKeys,
+    artifact: parentArtifact,
+    functionName: 'entry_point',
+    // `target_contract` and `target_selector`, one field each, in the order the ABI declares.
+    args: [childInstance.address.toField(), childSelector.toField()],
+    // TIER 4's SOURCE. Both contracts, because a directory holding only the callee would leave
+    // "the caller is registered" untested and a directory holding only the caller is the refusal
+    // this arm's control exercises. The PARENT is in it for a second reason worth stating: a
+    // contract may call itself, and a directory that omitted the executing contract would refuse
+    // that with `unregistered-contract` over an address the page is plainly running.
+    contracts: [
+      { address: parentInstance.address, artifact: parentArtifact },
+      { address: childInstance.address, artifact: childArtifact },
+    ],
+    // Taped for the same reason M35's two frames are: the Noir tracer's executor is synchronous
+    // Rust and replays the wire values. A nested transaction tapes PER FRAME — the parent's tape
+    // carries the `callPrivateFunction` entry with the child's two returned fields as its outputs,
+    // and the child's own tape is the child's.
+    recordTape: true,
+    nestedCallWireCompat: wireCompat,
+  } as const;
+
+  // THE ANCHOR-LINE ARM IS EXPECTED TO BE REFUSED BEFORE A SINGLE OPCODE, so the throw is caught
+  // and REPORTED rather than allowed to kill the run. `executePrivateFunction` never throws for a
+  // refused ORACLE — a refusal is a report — but it does throw for a frame it cannot even assemble,
+  // and a 38-field context against a 37-field environment is exactly that. Keeping the two apart is
+  // the point: `refusedToAssemble` is a fact about the CORPUS, `stoppedAtOracle` is a fact about
+  // the HANDLER, and a run that conflated them would report an anchor/pin gap as a missing oracle.
+  let nested: Awaited<ReturnType<typeof executePrivateFunction>> | undefined;
+  let refusedToAssemble: string | undefined;
+  try {
+    nested = await executePrivateFunction(request);
+  } catch (e) {
+    refusedToAssemble = String((e as Error)?.message ?? e);
+  }
+  say(
+    nested
+      ? `Parent.entry_point: ${nested.outcome} at ${nested.stoppedAtOracle ?? '(nothing)'}, ` +
+          `${nested.oracleCalls.length} oracle call(s)`
+      : `Parent.entry_point: refused to assemble — ${refusedToAssemble}`,
+  );
+
+  const report = {
+    line,
+    wireCompat,
+    aztecVersion: String((parentArtifact as { aztec_version?: string }).aztec_version ?? '?'),
+    // THE CONTEXT WIDTH THE ARTIFACT ITSELF DECLARES, beside the one this environment builds. The
+    // 37-against-38 fact is the whole reason the anchor line cannot run here, and reading it off
+    // the artifact's own ABI is what makes it a measurement rather than a message.
+    contextInputFieldsDeclared: contextWidthOf(parentArtifact, 'entry_point'),
+    contextInputFieldsBuilt: PRIVATE_CONTEXT_INPUTS_LENGTH,
+    refusedToAssemble: refusedToAssemble ?? null,
+    parent: {
+      address: parentInstance.address.toString(),
+      classId: parentInstance.originalContractClassId.toString(),
+    },
+    child: {
+      address: childInstance.address.toString(),
+      classId: childInstance.originalContractClassId.toString(),
+      selector: childSelector.toString(),
+      selectorField: childSelector.toField().toString(),
+    },
+    chain: { chainId: String(PRIVATE_CHAIN_ID), version: String(PRIVATE_CHAIN_VERSION) },
+    run: nested ? jsonSafe(nested) : null,
+  };
+  lastRun = report as never;
+  return jsonSafe(report) as Record<string, unknown>;
 }
 
 /**
@@ -2035,6 +2249,9 @@ const api = {
   armRecord,
   armDirectShortcut,
   armPrivateExecution,
+  armNestedPrivateCall,
+  armNestedPrivateCallNoCompat: () => armNestedPrivateCall({ wireCompat: 'off' }),
+  armNestedPrivateCallAnchorLine: () => armNestedPrivateCall({ line: 'anchor' }),
   armOracleSurface,
   armNoteDiscovery,
   status: () => ({
