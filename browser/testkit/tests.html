@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>aztec-avm-runtime — contract tests, in this tab</title>
+    <style>
+      body { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2rem; max-width: 70rem; }
+      h1 { font-size: 1.05rem; }
+      #report { background: #f5f5f5; padding: 1rem; white-space: pre-wrap; min-height: 10rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Aztec contract test suite — executing against the in-tab runtime</h1>
+    <p>
+      The suite runs against <code>testing.js</code> as <code>browser/build.mjs</code> emitted it.
+      Nothing runs on load; the driver calls <code>avmTestkit.run()</code>.
+    </p>
+    <pre id="report">loading…</pre>
+    <script type="module" src="./tests_page.js"></script>
+  </body>
+</html>
