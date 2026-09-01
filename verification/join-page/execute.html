@@ -1,0 +1,24 @@
+<!doctype html>
+<!--
+  Register, execute and trace a contract THIS BROWSER compiled and transpiled.
+
+  The runtime has registered and executed in a page since M27; what it had never done is run a
+  contract the tab itself compiled. The artifact served beside this page is stage 1's output.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Register, execute and trace, in this tab</title>
+    <style>
+      body { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2rem; }
+      #status { color: #444; }
+      pre { background: #f6f6f6; padding: 1rem; overflow-x: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>Register &rarr; execute &rarr; trace, in this tab</h1>
+    <p id="status">loading&hellip;</p>
+    <pre id="out"></pre>
+    <script type="module" src="./execute_page.mjs"></script>
+  </body>
+</html>
