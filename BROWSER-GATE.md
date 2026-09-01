@@ -188,10 +188,38 @@ status and reports a green job. That is a recorded defect in this campaign, not 
 Stated here because a gate that is believed to cover more than it does is worse than one that is
 known to be narrow.
 
-- **It has never run in CI.** Every job in `avm-wasm.yml`, this one included, aborts at
-  `Generate CI token`; the remaining blocker is a repository-level secret only the user can set.
-  Every check the gate names has been executed locally, in this repository's own dev shell, and
-  each was demonstrated against a planted violation. The gate is wired; it has not yet gated.
+- **It has never run in CI, and the reason has MOVED.** Every check the gate names has been
+  executed locally, in this repository's own dev shell, and each was demonstrated against a
+  planted violation. The gate is wired; it has not yet gated.
+
+  The blocker this paragraph named for eight milestones — `Generate CI token` failing on
+  `Input required and not supplied` — **is gone**. The repository secret THE CI TOKEN, DIAGNOSED
+  asked for was set, and in run 33489777448 (`dev`, `29bd9cf`, 2026-09-01) that step is green
+  for the first time and this job reaches step 7.
+
+  It fails there, at `Setup Dev Environment`, and the cause is one omitted line rather than
+  anything about the gate:
+
+  ```
+  configure-git-auth.sh: line 88: GH_TOKEN: configure-git-auth: GH_TOKEN is required
+  ```
+
+  with the runner's own `env:` echo above it reading `GH_TOKEN:` — empty. Three of this file's
+  twelve jobs — `browser-gate`, `form-a-external-transactions` and `differential-oracle`, the
+  three most recently added — omitted `gh-token:` from their `setup-dev-env` step; the other
+  nine pass it. `setup-dev-env`'s `action.yml` declares that input `required: false` while its
+  description says it is required for `env-flavor: nix`, so nothing refuses the omission until a
+  runner reaches `configure-git-auth.sh`.
+
+  **The three gate steps after it were `skipped`, and the job's reporting step printed
+  "no gate run to report" and exited 0.** A gate that is composed correctly, unskippable by a
+  flag, and never reached is the campaign's own most-repeated defect wearing a new hat, which is
+  why the line is now restored to all three jobs and why `ci_browser_gate.sh` §4b asserts it
+  over EVERY job in the file, with the count of steps asserted beside the residue and the
+  historical defect itself as the control.
+
+  A run in which this job gets past step 7 has not happened yet; what is fixed is the reason it
+  could not.
 - **It is a check on the artefact this repository builds**, not on a published npm package: nothing
   here is published, and all three packed packages are `private: true`.
 - **It says nothing about a Web Worker**, because there is none — the design document says main

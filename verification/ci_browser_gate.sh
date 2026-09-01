@@ -256,6 +256,139 @@ assert_true "the gate step uses shell: bash, because the default has no pipefail
   str_has_sub "$JOB" "shell: bash"
 assert_true "…and it does pipe to tee, which is why that matters" str_has_sub "$JOB" "tee ci-browser-gate.log"
 
+echo "== 4b. the job can REACH the gate: every dev-shell step is given the token it needs"
+
+# ==============================================================================================
+# WHY THIS SECTION EXISTS, AND WHAT IT IS NOT.
+# ==============================================================================================
+#
+# Section 4 asserts that nothing can SKIP the gate. It says nothing about whether the job ever
+# gets to it, and on 2026-09-01 that distinction cost this repository its first real run.
+#
+# Run 33489777448 was the first in which `Generate CI token` succeeded — the repository secret
+# THE CI TOKEN, DIAGNOSED asked for had been set, and the comment at the top of this workflow
+# (and §8 of `BROWSER-GATE.md`) was stale the moment it was. Three jobs then failed one step
+# later, at `Setup Dev Environment`, with
+#
+#     configure-git-auth.sh: line 88: GH_TOKEN: configure-git-auth: GH_TOKEN is required
+#
+# and the runner's own `env:` echo above it read `GH_TOKEN:` — empty. `browser-gate`,
+# `form-a-external-transactions` and `differential-oracle` are the three most recently added
+# jobs in this file and each omitted `gh-token:` from its `setup-dev-env` step; the other nine
+# pass it. `setup-dev-env`'s own `action.yml` declares the input `required: false` while its
+# description says "Required for `env-flavor: nix`", so nothing upstream of here refuses it —
+# the omission is silent until a runner reaches `configure-git-auth.sh`.
+#
+# THE GATE STEPS THAT FOLLOWED WERE `skipped`, AND THE JOB'S REPORTING STEP PRINTED
+# "no gate run to report" AND EXITED 0. So the shape this section forbids is the campaign's
+# most-repeated one wearing yet another hat: a gate that is wired, unskippable, correctly
+# composed, and never reached.
+#
+# It is asserted over EVERY job rather than only `browser-gate`, because the defect is a
+# copy-paste omission in a new job and the next new job is the one that will carry it.
+
+STEP_TOKENS="$(python3 - "$M28_WORKFLOW" <<'PY'
+import re
+import sys
+
+# One line per `setup-dev-env` step: "<job> <line> <env-flavor> <yes|no>".
+# A step is a `- ` block at the six-space indent Actions uses inside `steps:`; it ends at the
+# next `      - ` or at the next job header. `gh-token` counts only when it has a VALUE, so a
+# key present and empty is reported as missing — which is exactly what the runner saw.
+lines = open(sys.argv[1], encoding="utf-8").read().split("\n")
+job, out, i = "<none>", [], 0
+while i < len(lines):
+    line = lines[i]
+    m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+    if m:
+        job = m.group(1)
+    if re.match(r"^      - ", line):
+        start, block, j = i, [line], i + 1
+        while j < len(lines) and not re.match(r"^      - ", lines[j]) and not re.match(r"^  \S", lines[j]):
+            block.append(lines[j])
+            j += 1
+        text = "\n".join(block)
+        if "setup-dev-env@" in text:
+            fm = re.search(r"^\s+env-flavor:\s*(\S+)\s*$", text, re.M)
+            tm = re.search(r"^\s+gh-token:\s*(\S.*?)\s*$", text, re.M)
+            out.append("%s %d %s %s" % (job, start + 1, fm.group(1) if fm else "none",
+                                        "yes" if tm and tm.group(1) else "no"))
+        i = j
+        continue
+    i += 1
+print("\n".join(out))
+PY
+)"
+
+# THE COUNT IS ASSERTED, because every predicate below is universally quantified over this set
+# and a scanner that matched nothing would satisfy all of them.
+assert_eq "the workflow declares one setup-dev-env step per job" "12" \
+  "$(printf '%s\n' "$STEP_TOKENS" | grep -c . || true)"
+assert_eq "…every one of them asks for the nix dev shell" "12" \
+  "$(printf '%s\n' "$STEP_TOKENS" | awk '$3 == "nix"' | grep -c . || true)"
+# THE RESIDUE, NOT THE COUNT: the failing rows are printed, so a failure names the job.
+assert_eq "…and every one of them is handed the CI token, which env-flavor: nix requires" "" \
+  "$(printf '%s\n' "$STEP_TOKENS" | awk '$4 != "yes" { print $1 " (line " $2 ")" }' | tr '\n' ' ' | sed 's/ *$//')"
+assert_true "the browser-gate job's own dev-shell step is among them" \
+  str_has_sub "$STEP_TOKENS" "$M28_GATE_JOB "
+assert_eq "…and it is one of the rows that carries a token" "1" \
+  "$(printf '%s\n' "$STEP_TOKENS" | awk -v j="$M28_GATE_JOB" '$1 == j && $4 == "yes"' | grep -c . || true)"
+
+# THE CONTROL IS THE HISTORICAL DEFECT ITSELF, not a plausible one. The three steps are put
+# back the way run 33489777448 found them, in a scratch copy, and the same scanner is required
+# to name all three. An absence check whose instrument has never reported a presence is not a
+# measurement — and this one has a real presence to report.
+WF_BROKEN="$(mktemp)"
+python3 - "$M28_WORKFLOW" "$WF_BROKEN" <<'PY'
+import sys
+src = open(sys.argv[1], encoding="utf-8").read()
+fixed = ("      - name: Setup Dev Environment\n"
+         "        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev\n"
+         "        with:\n"
+         "          env-flavor: nix\n"
+         "          gh-token: ${{ steps.app-token.outputs.token }}\n")
+broken = fixed.replace("          gh-token: ${{ steps.app-token.outputs.token }}\n", "")
+# The last three occurrences are differential-oracle, form-a-external-transactions and
+# browser-gate, in file order — the three jobs the run failed in.
+parts = src.split(fixed)
+if len(parts) >= 4:
+    src = fixed.join(parts[:-3]) + broken.join([parts[-4]] + list(parts[-3:]))
+open(sys.argv[2], "w", encoding="utf-8").write(src)
+PY
+STEP_TOKENS_BROKEN="$(python3 - "$WF_BROKEN" <<'PY'
+import re
+import sys
+lines = open(sys.argv[1], encoding="utf-8").read().split("\n")
+job, out, i = "<none>", [], 0
+while i < len(lines):
+    line = lines[i]
+    m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+    if m:
+        job = m.group(1)
+    if re.match(r"^      - ", line):
+        start, block, j = i, [line], i + 1
+        while j < len(lines) and not re.match(r"^      - ", lines[j]) and not re.match(r"^  \S", lines[j]):
+            block.append(lines[j])
+            j += 1
+        text = "\n".join(block)
+        if "setup-dev-env@" in text:
+            fm = re.search(r"^\s+env-flavor:\s*(\S+)\s*$", text, re.M)
+            tm = re.search(r"^\s+gh-token:\s*(\S.*?)\s*$", text, re.M)
+            out.append("%s %d %s %s" % (job, start + 1, fm.group(1) if fm else "none",
+                                        "yes" if tm and tm.group(1) else "no"))
+        i = j
+        continue
+    i += 1
+print("\n".join(out))
+PY
+)"
+rm -f "$WF_BROKEN"
+assert_eq "the same scanner still sees twelve steps in the reverted copy" "12" \
+  "$(printf '%s\n' "$STEP_TOKENS_BROKEN" | grep -c . || true)"
+assert_eq "…and reports exactly the three jobs run 33489777448 failed in" \
+  "browser-gate differential-oracle form-a-external-transactions" \
+  "$(printf '%s\n' "$STEP_TOKENS_BROKEN" | awk '$4 != "yes" { print $1 }' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ *$//')"
+
 echo "== 5. no check in the gate can report success without having run"
 
 # `lib.sh`'s first design rule: "a check that cannot run in this environment FAILS. It never prints
