@@ -243,12 +243,31 @@ assert_eq "no output slot's wire kind was guessed from its length" "0" "$GUESSED
 # THE GUESS PATH STILL EXISTS AND IS STILL REACHABLE — the assertion above is about this tape, not
 # about a code path that was deleted. A tape recorded before the kinds were written down replays
 # through the fallback, and the probe says so per call rather than silently.
-assert_true "and the fallback that would have guessed is still present and still reports" \
-  str_has_sub "$(cat "$VERIFY_DIR/m38_private_trace_probe.rs")" "wire kind GUESSED from the slot length"
-assert_true "the tape records a kind per input slot" \
-  str_has_sub "$(cat "$BROWSER_SRC/wallet/private_execution.ts")" "readonly inputKinds:"
-assert_true "and per output slot" \
-  str_has_sub "$(cat "$BROWSER_SRC/wallet/private_execution.ts")" "readonly outputKinds:"
+# THE TAPE ITSELF IS ASKED WHETHER EVERY SLOT CARRIES A KIND, rather than the source being grepped
+# for the field's declaration. Three assertions here were `str_has_sub` over the very files that
+# declare `inputKinds`, `outputKinds` and the fallback's diagnostic — names grepped in the files that
+# declare those names, which cannot be less than true and which sit beside a real measurement
+# reading as if they were one.
+COVERAGE="$(m39_arm nested.report.run.tape | python3 -c '
+import json, sys
+d = sys.stdin.read().strip()
+if not d.startswith("["):
+    print("MISSING"); raise SystemExit(0)
+slots = kinds = 0
+for e in json.loads(d):
+    for side in ("inputs", "outputs"):
+        slots += len(e.get(side, []))
+        kinds += len(e.get(side[:-1] + "Kinds", []))
+print("%d %d" % (slots, kinds))')"
+m38_absent kindCoverage="$COVERAGE"
+TAPE_SLOTS="${COVERAGE%% *}"; TAPE_KINDS="${COVERAGE##* }"
+m38_require_num tapeSlots="$TAPE_SLOTS" tapeKinds="$TAPE_KINDS"
+assert_ge "the tape carries slots at all, so the coverage is over something" 10 "$TAPE_SLOTS"
+assert_eq "and every one of them carries a recorded wire kind" "$TAPE_SLOTS" "$TAPE_KINDS"
+# THE FALLBACK IS EXERCISED BY THE MUTATION MATRIX AND NOT BY THIS CHECK, and saying so is the point:
+# `m39-mutations.sh` arm N5 makes the probe ignore the recorded kind, and the guessed count above
+# goes 0 -> 5 with six document rows behind it. A check that greps for the fallback's diagnostic
+# proves only that the diagnostic is spelled that way.
 KINDS_SEEN="$(m39_arm nested.report.run.tape | python3 -c '
 import json, sys
 d = sys.stdin.read().strip()

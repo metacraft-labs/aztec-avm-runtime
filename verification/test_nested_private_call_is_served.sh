@@ -277,8 +277,20 @@ assert_eq "the selector this runtime derived is upstream's own" "$UPSTREAM_SEL" 
 # derivation that had silently stopped stripping it if upstream's loader ever stopped too.
 assert_true "and it is NOT what the raw parameter list derives, so the strip is doing work" \
   test "$UPSTREAM_SEL" != "$WITHCTX_SEL"
-assert_true "the derivation is exported once and used by both consumers" \
-  str_has_sub "$(cat "$EXEC_SRC")" "export async function privateFunctionSelector"
+# AND THE SAME COMPARISON ON A SECOND FUNCTION, because one function agreeing is a coincidence a
+# hard-coded answer would also produce. The first draft of this line grepped `$EXEC_SRC` for the
+# exported function's NAME — a name grepped in the file that declares that name, which cannot be
+# less than true and which reads beside a real measurement as if it were one.
+PARENT_SEL_UP="$( cd "$REPO_ROOT/orchestration" && node --input-type=module -e "
+import { FunctionSelector, loadContractArtifact } from '@aztec/stdlib/abi';
+import { readFileSync } from 'node:fs';
+const loaded = loadContractArtifact(JSON.parse(readFileSync(process.argv[1], 'utf8')));
+const fn = loaded.functions.find(f => f.name === 'entry_point');
+process.stdout.write((await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters)).toString());
+" -- "$REPO_ROOT/$(m39_top assets.parent.root)/node_modules/@aztec/noir-test-contracts.js/artifacts/parent_contract-Parent.json" 2>/dev/null | tail -1 )"
+m38_absent parentSelectorUpstream="$PARENT_SEL_UP"
+assert_eq "the CALLER's own selector is upstream's too, on a second function" \
+  "$PARENT_SEL_UP" "$(m39_arm nested.report.run.selector)"
 
 echo "== 9. FOUR OF THE FIVE REFUSAL GROUNDS ARE PRODUCED BY A REAL CIRCUIT, NOT GREPPED"
 # ===========================================================================================
@@ -357,8 +369,20 @@ assert_true "the fifth ground is declared, and this check does not pretend to ex
   str_has_sub "$ORACLES_TEXT" "'no-args-preimage'"
 
 echo "== 10. THE PARTITION RECONCILIATION COVERS ALL FOUR COMBINATIONS OF THE TWO SOURCES"
-assert_true "the served set is a function of what the handler was given" \
-  str_has_sub "$ORACLES_TEXT" "export function oraclesServedFor"
+# THE SERVED SET THE RUN REPORTS AGAINST THE ONE THE SOURCE LISTS DERIVE — two producers for one
+# number. The first draft of this line grepped for `oraclesServedFor`'s declaration, which is a name
+# in the file that declares it.
+IMPL_N="$(python3 - "$ORACLES_SRC" <<'PY2'
+import re, sys
+src = open(sys.argv[1]).read()
+i = src.index("export const ORACLE_IMPLEMENTED: readonly string[] = Object.freeze(")
+block = src[i:src.index("].sort(),", i)]
+code = "\n".join(l for l in block.splitlines() if not l.strip().startswith("//"))
+print(len(set(re.findall(r"'(aztec_[A-Za-z0-9_]+)'", code))))
+PY2
+)"
+m38_require_num implN="$IMPL_N"
+assert_ge "the always-served list is a real list" 30 "$IMPL_N"
 COMBOS="$(python3 - "$ORACLES_SRC" <<'PY'
 import re, sys
 src = open(sys.argv[1]).read()
@@ -378,6 +402,11 @@ m38_require_num servedWith="$SERVED_WITH"
 m38_absent servedWithout="$SERVED_WITHOUT"
 assert_eq "attaching a nested-call source adds exactly one oracle to the served set" \
   "$(( SERVED_WITHOUT + 1 ))" "$SERVED_WITH"
+# AND THE SAME NUMBER FROM A SECOND PRODUCER: the always-served LIST parsed out of the source, plus
+# tier 4's one. The line above compares two RUNS; this compares a run against a declaration, so a
+# partition that had drifted from its own list fails one of the two.
+assert_eq "the run's served set is the always-served list plus tier 4's one oracle" \
+  "$(( IMPL_N + 1 ))" "$SERVED_WITH"
 
 echo "== 11. BOTH HALVES OF A TRANSACTION EXIST — TWO PRIVATE FRAMES AND TWO ENQUEUED PUBLIC CALLS"
 BH_OUTCOME="$(m39_arm bothHalves.report.run.outcome)"
@@ -403,8 +432,12 @@ m38_absent outerAddr="$OUTER_ADDR" innerAddr="$INNER_ADDR" outerHash="$OUTER_HAS
 assert_eq "both enqueued calls address the same contract" "$OUTER_ADDR" "$INNER_ADDR"
 assert_true "and they carry different calldata, so they are two calls and not one counted twice" \
   test "$OUTER_HASH" != "$INNER_HASH"
-assert_true "the enqueued calls are read from the CIRCUIT's public inputs" \
-  str_has_sub "$(cat "$EXEC_SRC")" "publicCallRequests: claimed(publicInputs.publicCallRequests)"
+# THE CALLEE THE CIRCUIT COMMITTED TO IS THE ADDRESS THE PAGE DERIVED, which ties the enqueued call
+# to a value produced by `makeContractInstanceFromClassId` rather than to one the wallet recorded
+# about itself. The first draft of this line grepped the extractor's own source line for its own
+# text — a producer's report about itself, one level further in.
+assert_eq "the enqueued call's callee is the contract instance the page derived" \
+  "$(m39_arm bothHalves.report.child.address)" "$OUTER_ADDR"
 
 echo "== 12. THE EPHEMERAL-ARRAY SERVICE IS PER FRAME, WHICH IS THE HALF THAT POINTS THE OTHER WAY"
 # Six things became the TRANSACTION's; this one deliberately did not, because upstream constructs it

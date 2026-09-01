@@ -2,15 +2,15 @@
  "_baseline": 13022,
  "_declared_moves": {
   "m39": {
-   "checks": "NEW. test_nested_private_call_is_served 115 + e2e_transaction_steps_into_one_container 82",
-   "delta": 197,
+   "checks": "NEW. test_nested_private_call_is_served 118 + e2e_transaction_steps_into_one_container 83",
+   "delta": 201,
    "from": 0,
-   "to": 197
+   "to": 201
   }
  },
  "_expected_reds": "FIVE, AND NOT ONE IS M39's. All five are M38's own recorded set, re-derived rather than inherited. m20 verify_named_checks_exist 9/1 on TWO parallel names: L3's tools/scan_reverted_transactions.mjs and L2's verify_hydrated_roots_declared. M39 ADDED TWO DECLARED EXCEPTIONS to that check's table and both are its own subjects \u2014 `test_isolation` (an upstream Noir contract test cited where its rule is obeyed) and `test_tracer` (M38's second Rust test file, which M38 declared the first of and not the second, so an unresolved name of this repository's own making had ridden along since M38 while its sweep attributed the failure entirely to L3's). The exception list is asserted >= 5 on SIZE, so neither addition moves the count. m21 verify_no_pipeline_predicates 69/1 on L4's sixth `| grep -q` at verify_browser_replay_dd9_clean.sh:336 \u2014 none of M39's three new shell files contains one, grepped. m28 verify_npm_pack_no_optional_native 55/1 on L0's replay/package.json. m11 THE TENTH UPSTREAM MOVE, unchanged: upstream/next is still f6bf848795 and carry/rebase.json still records 7471a61f1a, measured by hand before this sweep, so m11 reads 287 \u2014 the reference value \u2014 with the same three checks failing. NOT REPAIRED: the decision half is M11's work. m16 verify_fallback_cost_priced 147/1, count unchanged, on the needle a parallel commit (bbfa872) handed to a THIRD engine \u2014 Python's `re`, which does not implement POSIX classes inside brackets. Recorded and deliberately not fixed.",
- "_nothing_else_may_move": "m27 345, m35 239, m36 150, m38 150 and m39 197 were each re-run individually before the sweep and each came out at its value with zero failures. FIVE DOCUMENT FIGURES MOVED AND NO COUNT DID, which is what says a pinned figure moved and not a structure: BROWSER-PACKAGING total 8,230.98 -> 8,234.38; PRIVATE-EXECUTION and LOCAL-HISTORY wallet 304.5 -> 306.92 and wallet-demo 344.36 -> 347.74; PRIVATE-TRACE handler methods 43 -> 44 and async 9 -> 10. Every one is a figure a check re-derives from the artefact, which is the only reason any of it was found, and the async one was found by M38's own guard REQUIRING the write-up to NAME each async method rather than count them. check-repo-hygiene 28, verify_named_checks_exist 9, verify_no_pipeline_predicates 69 measured unchanged. M38's five arms were re-run after the probe grew a frame list and reproduced every one of twenty-two figures exactly, 0 differences, before anything else was written.",
- "_total": 13219,
+ "_nothing_else_may_move": "m27 345, m35 239, m36 150, m38 150 and m39 201 were each re-run individually before the sweep and each came out at its value with zero failures. FIVE DOCUMENT FIGURES MOVED AND NO COUNT DID, which is what says a pinned figure moved and not a structure: BROWSER-PACKAGING total 8,230.98 -> 8,234.38; PRIVATE-EXECUTION and LOCAL-HISTORY wallet 304.5 -> 306.92 and wallet-demo 344.36 -> 347.74; PRIVATE-TRACE handler methods 43 -> 44 and async 9 -> 10. Every one is a figure a check re-derives from the artefact, which is the only reason any of it was found, and the async one was found by M38's own guard REQUIRING the write-up to NAME each async method rather than count them. check-repo-hygiene 28, verify_named_checks_exist 9, verify_no_pipeline_predicates 69 measured unchanged. M38's five arms were re-run after the probe grew a frame list and reproduced every one of twenty-two figures exactly, 0 differences, before anything else was written.",
+ "_total": 13223,
  "m0": 156,
  "m1": 181,
  "m10": 450,
@@ -44,7 +44,7 @@
  "m36": 150,
  "m37": 171,
  "m38": 150,
- "m39": 197,
+ "m39": 201,
  "m4": 218,
  "m5": 236,
  "m6": 363,
