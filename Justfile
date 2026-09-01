@@ -3674,6 +3674,68 @@ m39-trace-arms:
     node tools/run_m39_trace_arms.mjs "$work" > "$work/transaction-trace.json"
     echo "m39-trace-arms: wrote $work/transaction-trace.json"
 
+# ---------------------------------------------------------------------------
+# M40. BOTH HALVES of one transaction, executed and stepped in a browser: the public calls the
+# private half enqueues are RUN, the private half is stepped by the Noir tracer built for wasm32,
+# and the two containers a single page downloads carry one explicit join.
+#
+# NEEDS: a built browser bundle (`just browser-build`), `avm.wasm` (`just avm-wasm-build-m27`),
+# `ct_writer.wasm`, chromium on PATH, `@aztec/noir-acvm_js` installed, the M40 tracer module
+# (`just m40-tracer-build`), M38's native probe and the pinned `ct-print`.
+#
+# `M40_ARMS_REFRESH=1` forces the browser arm run; `M40_TRACE_REFRESH=1` forces the trace arm.
+# ---------------------------------------------------------------------------
+
+# The Noir tracer, built for wasm32 from the PUBLISHED `noir`. The module the page steps with.
+m40-tracer-build:
+    @verification/build_m40_private_trace_wasm.sh
+
+# The browser arms: both halves of one transaction in Chromium, into $M40_WORK/transaction.json.
+m40-arms:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    work="${M40_WORK:-$HOME/.cache/aztec-m40-transaction}"
+    mkdir -p "$work"
+    verification/build_m40_private_trace_wasm.sh >/dev/null || exit 1
+    node tools/run_m40_transaction_arms.mjs "$work" > "$work/transaction.json"
+    echo "m40-arms: wrote $work/transaction.json"
+
+# The native trace arm: the SAME transaction's private half, stepped by the native probe.
+m40-trace-arms:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    work="${M40_TRACE_WORK:-$HOME/.cache/aztec-m40-trace}"
+    mkdir -p "$work"
+    verification/build_m38_private_trace_probe.sh >/dev/null || exit 1
+    node tools/run_m40_trace_arms.mjs "$work" > "$work/joined-transaction.json"
+    echo "m40-trace-arms: wrote $work/joined-transaction.json"
+
+verify-m40-public:
+    @verification/test_public_half_runs_enqueued_calls.sh
+
+verify-m40-browser:
+    @verification/e2e_both_halves_step_in_the_browser.sh
+
+verify-m40:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      test_public_half_runs_enqueued_calls \
+      e2e_both_halves_step_in_the_browser
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m40: FAILED" >&2
+    else
+      echo "verify-m40: all checks passed"
+    fi
+    # THE STATUS IS RETURNED. A recipe that summarises a status and does not exit with it can never
+    # be one of a sweep's non-zero exits — M37's review found exactly that in two recipes.
+    exit "$rc"
+
 verify-m39-nested:
     @verification/test_nested_private_call_is_served.sh
 
