@@ -566,6 +566,28 @@ fn main() {
         "truncate" => {
             tape.pop();
         }
+        // ONE FIELD OF ONE RECORDED INPUT IS CHANGED, AND NOTHING ELSE. The oracle name, the
+        // sequence and the outputs stay as they were, so the only thing that can refuse this is
+        // the INPUT comparison. Without an arm that reaches it, that comparison is a branch nothing
+        // executes — a replay is faithful by construction, so removing the comparison altogether
+        // changes no other arm's result. Measured: it did not, and this arm is why it now does.
+        "permute-inputs" => {
+            let mut done = false;
+            for entry in tape.iter_mut() {
+                if let Some(slot) = entry.inputs.first_mut() {
+                    if let Some(first) = slot.first_mut() {
+                        *first = "0x00000000000000000000000000000000000000000000000000000000deadbeef"
+                            .to_string();
+                        done = true;
+                        break;
+                    }
+                }
+            }
+            if !done {
+                eprintln!("m38probe: the tape has no input field to permute");
+                std::process::exit(2);
+            }
+        }
         other => {
             eprintln!("m38probe: unknown arm `{other}`");
             std::process::exit(2);

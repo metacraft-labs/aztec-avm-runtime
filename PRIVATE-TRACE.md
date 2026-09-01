@@ -207,10 +207,19 @@ the shipped one.
 | `replay` | the whole tape of a frame that completed | **21** | — |
 | `truncate` | the same tape, last entry dropped | **13** | `aztec_prv_isExecutionInRevertiblePhase` |
 | `refuseAll` | the same tape, emptied | **2** | `aztec_misc_assertCompatibleOracleVersion` |
+| `permuted` | the same tape, ONE field of ONE recorded input changed | **2** | `aztec_misc_assertCompatibleOracleVersion` |
 | `transfer` | a recording that STOPPED at an oracle M35 does not serve | **62** | `aztec_utl_getNotes` |
 
 **The ladder is strict and monotone — 2 < 13 < 21 — and it is the measurement, not the arms'
 labels.** Fewer answers, fewer steps, and the oracle that ran out is named at each rung.
+
+**The `permuted` arm exists because a mutation survived.** Removing the executor's input comparison
+altogether changed no arm's result: a faithful replay never disagrees with its own recording, so
+that comparison was a branch nothing executed. This arm changes ONE field of ONE recorded input and
+nothing else — same oracle, same sequence, same outputs — so the only thing that can refuse it is
+the comparison, and the refusal names the fabricated field back. `isExecutionInRevertiblePhase` is
+called twice in this very frame with different counters, which is the case an executor matching on
+the NAME alone would answer with the wrong recording.
 
 ### The `transfer` arm is the strongest of the four, and it is a real contract
 

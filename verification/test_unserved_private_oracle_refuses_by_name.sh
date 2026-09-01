@@ -25,7 +25,12 @@
 TEST_NAME="test_unserved_private_oracle_refuses_by_name"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 . "$VERIFY_DIR/lib_m38_private_trace.sh"
-trap m38_summary_on_abnormal_exit EXIT
+# THE TRAP IS INSTALLED BY CALLING THIS, NOT BY TRAPPING IT. `summary_on_abnormal_exit` INSTALLS
+# `_abnormal_exit_summary` as the EXIT handler; `trap m38_summary_on_abnormal_exit EXIT` makes the
+# exit handler install a handler and print nothing, so a `die` reads to the sweep as a check that is
+# not there rather than as a red one. Found by M38's own mutation arm M1, which reddened correctly
+# and printed no summary line.
+m38_summary_on_abnormal_exit
 
 m38_require_arms
 
@@ -90,6 +95,28 @@ assert_true "and a truncated one sooner than the whole tape" test "$T_N" -lt "$R
 # AND IT STOPPED RATHER THAN NEVER STARTING. The steps before the refusal are recorded, which is
 # what distinguishes "the loop halted here" from "the loop never ran".
 assert_ge "even the empty-tape arm recorded the steps it took BEFORE the refusal" 1 "$A_N"
+
+echo "== 3b. ONE CHANGED INPUT FIELD: THE SAME ORACLE, A DIFFERENT QUESTION"
+# WITHOUT THIS ARM THE INPUT COMPARISON IS A BRANCH NOTHING EXECUTES. A faithful replay never
+# disagrees with its own recording, so removing the comparison altogether changes no other arm's
+# result — measured, by a mutation arm that survived. Here one field of one recorded input is
+# changed and nothing else: same oracle, same sequence, same outputs. `isExecutionInRevertiblePhase`
+# is called twice in this very frame with different counters, which is the case an executor matching
+# on the NAME alone would answer with the wrong recording.
+P_REFUSED="$(m38_arm permuted.refusedOracles)"
+P_LEDGER="$(m38_arm permuted.oracleLedger)"
+P_STEPS="$(m38_arm permuted.steps)"
+m38_absent permutedRefused="$P_REFUSED" permutedLedger="$P_LEDGER" permutedSteps="$P_STEPS"
+assert_eq "one changed input field is refused, by the oracle's own name" \
+  '["aztec_misc_assertCompatibleOracleVersion"]' "$P_REFUSED"
+P_REASON="$(printf '%s' "$P_LEDGER" | python3 -c '
+import json, sys
+print(next((e["reason"] for e in json.load(sys.stdin) if e["outcome"] == "refused"), "MISSING"))')"
+m38_absent permutedReason="$P_REASON"
+assert_true "and the reason names both sides of the comparison" \
+  str_has_sub "$P_REASON" 'asked'
+assert_true "and the fabricated field is in it, so the refusal says WHAT differed" \
+  str_has_sub "$P_REASON" 'deadbeef'
 
 echo "== 4. THE ARM THAT MATTERS: A CALL THE RECORDING ITSELF DID NOT ANSWER"
 # `Token.transfer`'s recording STOPS at `aztec_utl_getNotes`. That call is ON the tape — it was made

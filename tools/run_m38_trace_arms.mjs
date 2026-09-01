@@ -10,6 +10,10 @@
 //   replay     the whole tape of a frame that COMPLETED. Nothing refuses; the ceiling.
 //   truncate   the same tape with its last entry dropped. The frame runs out of answers.
 //   refuseAll  the same tape emptied. The FIRST oracle refuses.
+//   permuted   the same tape with ONE field of ONE recorded input changed. The oracle name, the
+//              sequence and the outputs are untouched, so the only thing that can refuse it is the
+//              INPUT comparison — which is otherwise a branch nothing executes, because a faithful
+//              replay never disagrees with its own recording.
 //   transfer   a different, much larger circuit whose recording STOPPED at an oracle M35 does not
 //              serve. The tape carries that call with no answer, and the executor must refuse it
 //              rather than hand back a fabricated answer of length zero.
@@ -88,6 +92,13 @@ const ARMS = [
   {
     name: 'refuseAll',
     arm: 'refuse-all',
+    artifact: oracleCheck.path,
+    function: 'private_function',
+    tape_frame: 'arms.private.report.executes',
+  },
+  {
+    name: 'permuted',
+    arm: 'permute-inputs',
     artifact: oracleCheck.path,
     function: 'private_function',
     tape_frame: 'arms.private.report.executes',

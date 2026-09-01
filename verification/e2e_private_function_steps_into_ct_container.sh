@@ -28,7 +28,12 @@
 TEST_NAME="e2e_private_function_steps_into_ct_container"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 . "$VERIFY_DIR/lib_m38_private_trace.sh"
-trap m38_summary_on_abnormal_exit EXIT
+# THE TRAP IS INSTALLED BY CALLING THIS, NOT BY TRAPPING IT. `summary_on_abnormal_exit` INSTALLS
+# `_abnormal_exit_summary` as the EXIT handler; `trap m38_summary_on_abnormal_exit EXIT` makes the
+# exit handler install a handler and print nothing, so a `die` reads to the sweep as a check that is
+# not there rather than as a red one. Found by M38's own mutation arm M1, which reddened correctly
+# and printed no summary line.
+m38_summary_on_abnormal_exit
 
 m38_require_arms
 
