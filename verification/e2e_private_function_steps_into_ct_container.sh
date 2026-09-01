@@ -251,7 +251,10 @@ m38_assert_doc "PRIVATE-TRACE.md section 4" "$M38_DOC" \
   "the same tape, last entry dropped|0|$(m38_arm truncate.steps)" \
   "the same tape, emptied|0|$(m38_arm refuseAll.steps)" \
   "ONE field of ONE recorded input changed|0|$(m38_arm permuted.steps)" \
-  "a recording that STOPPED at an oracle M35 does not serve|0|$(m38_arm transfer.steps)"
+  "a recording that STOPPED at an oracle M35 does not serve|0|$(m38_arm transfer.steps)" \
+  "bytes of ACIR|0|$(m38_arm transfer.bytecodeBytes)" \
+  "bytes of ACIR|1|$X_ACIR" \
+  "bytes of ACIR|2|$(m38_arm transfer.brilligFunctions)"
 m38_assert_doc "PRIVATE-TRACE.md section 5" "$M38_DOC" \
   "ACIR opcodes in the circuit|0|$R_ACIR" \
   "ACIR opcodes in the circuit|1|$X_ACIR" \
@@ -271,6 +274,16 @@ m38_assert_doc "PRIVATE-TRACE.md section 5" "$M38_DOC" \
   "container bytes|1|$BYTES_X" \
   "reads back|0|$R_STEPS" \
   "reads back|1|$X_STEPS"
+
+# SECTION 6's TWO PROSE FIGURES TOO. They are a claim about what the container does NOT carry, and
+# an absence stated as a figure rots exactly like any other — `register_call` is driven by
+# `__debug_fn_enter`, so the day an instrumented artifact is traced the sentence becomes false and
+# nothing would notice. Adding specs to an existing `m38_assert_doc` call moves no assertion count:
+# the third of its three assertions compares what the comparer covered against how many it was
+# given, so the coverage is checked rather than the number of arguments.
+m38_assert_doc "PRIVATE-TRACE.md section 6" "$M38_DOC" \
+  "The container has|0|$(m38_arm replay.calls)" \
+  "The container has|1|$(m38_arm replay.returns)"
 
 # THE COMPARER IS SHOWN TO SAY NO, in both of its two ways.
 CONTROL="$(m38_doc_figures "$M38_DOC" "ACIR opcodes in the circuit|1|999")"

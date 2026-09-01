@@ -166,8 +166,10 @@ echo "== 5. THE CONTROL: A FABRICATED ORACLE IS IN NONE OF THE THREE SETS"
 # A classifier that classified everything would put a name nobody serves somewhere. This plants one
 # in a COPY of the arm report and asserts the classifier reports it as `unresolved` — which is the
 # residue class, named rather than counted — and that the three real classes do not grow.
+# A `RETURN` TRAP AT A SCRIPT'S TOP LEVEL FIRES ON NO PATH — it is scoped to a function's return —
+# so the first version of this line leaked a directory per run. `$TMPDIR` is repointed under
+# `~/.cache` by `lib.sh`, so the leak was slow rather than harmless; the removal is explicit now.
 PLANT_WORK="$(mktemp -d)"
-trap 'rm -rf "$PLANT_WORK"' RETURN
 python3 - "$M38_TAPE_SOURCE" "$PLANT_WORK/planted.json" <<'PY'
 import json, sys
 doc = json.load(open(sys.argv[1]))
@@ -196,6 +198,7 @@ assert_eq "the fabricated oracle is reported as unresolved" "1" "$P_UNRES"
 assert_eq "and it did not join sync-in-wasm" "$SYNC_N" "$P_SYNC"
 assert_eq "nor host-round-trip" "$HOST_N" "$P_HOST"
 assert_eq "nor unimplemented" "$UNIMPL_N" "$P_UNIMPL"
+rm -rf "$PLANT_WORK"
 
 echo "== 6. THE DOCUMENT CARRIES WHAT WAS MEASURED, ROW BY ROW"
 [ -s "$M38_DOC" ] || die "no $M38_DOC"
