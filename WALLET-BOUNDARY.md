@@ -279,8 +279,8 @@ are supersets — and this build already ships three further entries outside it 
 
 | | derived |
 |---|---|
-| `wallet.js`'s own module | **1.2 KB** gzipped |
-| its eager set | **304.5 KB** gzipped across **9** files |
+| `wallet.js`'s own module | **1.22 KB** gzipped |
+| its eager set | **306.92 KB** gzipped across **9** files |
 | `@aztec/aztec.js` bytes in that eager set | **13,398** |
 | `@aztec/aztec.js` bytes in `browser.js`'s eager set | **0** |
 

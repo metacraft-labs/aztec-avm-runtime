@@ -257,8 +257,8 @@ a second copy of every shared chunk.
 
 | | derived |
 |---|---|
-| the wallet entry's eager set | **304.5 KB** gzipped across **9** files |
-| the wallet demo page's eager set | **344.36 KB** gzipped across **13** files |
+| the wallet entry's eager set | **306.92 KB** gzipped across **9** files |
+| the wallet demo page's eager set | **347.74 KB** gzipped across **13** files |
 | `@aztec/aztec.js` bytes in `browser.js`'s eager set | **0** |
 
 *(Both figures moved in M35, which fills the private half of the seam: the wallet entry now reaches
