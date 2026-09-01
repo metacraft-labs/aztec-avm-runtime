@@ -140,7 +140,15 @@ assert_eq "and none fell back" "0" \
   "$(m40_arm "$SUBJECT.report.privateContainer.recording.stepsUnpositioned")"
 # THE TWO WITHOUT A COLUMN ARE THE FRAME-ENTRY STEPS, ONE PER FRAME, and that is derived rather
 # than typed: `TraceSink::start` has no column to give.
-assert_eq "every step but one per frame carries a column" "$((PSTEPS - PFRAMES))" "$PCOLS"
+#
+# READ AT THE BOUNDARY, NOT OUT OF THE PRODUCER'S REPORT. `report.stepsWithColumn` is the tracer
+# module counting its own event stream, and M40's mutation arm P6 — which makes the module emit
+# `column: 0` in every op while leaving that count at the real figure — left this assertion GREEN
+# when it read it. `columnsWritten` is the HOST's count of what it passed to `ct_source_step`, which
+# is what decides the container. Both are asserted, and they are two producers of one number.
+assert_eq "every step but one per frame carries a column" "$((PSTEPS - PFRAMES))" \
+  "$(m38_num "$(m40_arm "$SUBJECT.report.privateContainer.columnsWritten")" 'columns written')"
+assert_eq "and the tracer module's own count of them agrees" "$((PSTEPS - PFRAMES))" "$PCOLS"
 assert_ge "over a non-degenerate number of source files" 5 \
   "$(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1])))' \
       "$(m40_arm "$SUBJECT.report.privateContainer.report.stepPaths")")"
@@ -211,6 +219,11 @@ assert_eq "the subject wrote the tracer's columns" "false" \
   "$(m40_arm "$SUBJECT.report.privateContainer.columnsDropped")"
 assert_eq "the control dropped them" "true" \
   "$(m40_arm "columnsDropped.report.privateContainer.columnsDropped")"
+# AND THE CONTROL REALLY WROTE NONE, measured at the same boundary rather than inferred from the
+# option it was given: an arm that set a flag and wrote the columns anyway would produce two equal
+# digests and read as "the column does not reach the container".
+assert_eq "and wrote zero columns into the writer" "0" \
+  "$(m40_arm "columnsDropped.report.privateContainer.columnsWritten")"
 # SAME OPS, SAME STEPS, SAME PATHS — one field changed.
 assert_eq "the control replayed the same op list" "$POPS" \
   "$(m40_arm "columnsDropped.report.privateContainer.opsReplayed")"

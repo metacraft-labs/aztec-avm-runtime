@@ -176,6 +176,14 @@ export interface PrivateHalfRecording {
   /** Whether the columns were deliberately dropped. See the option of this name. */
   readonly columnsDropped: boolean;
   /**
+   * Steps whose column this host passed to `ct_source_step` as a non-zero value.
+   *
+   * NOT the tracer's `stepsWithColumn`, which is the module's report about its own event stream: a
+   * module that counted columns and emitted none would agree with itself. This is the count at the
+   * boundary the container is on the other side of.
+   */
+  readonly columnsWritten: number;
+  /**
    * sha256 of the container, as lowercase hex, taken in the page.
    *
    * It is what the column control is compared ON: two runs of one transaction differing only in
@@ -247,6 +255,16 @@ export async function recordPrivateHalf(options: {
   // real-looking wrong file.
   const pathIds: number[] = [];
   let replayed = 0;
+  // THE COLUMNS THIS HOST ACTUALLY HANDED THE WRITER, counted here rather than read off the
+  // tracer's report.
+  //
+  // FOUND BY M40's OWN MUTATION MATRIX, ARM P6. That arm makes the module emit `column: 0` in every
+  // op while leaving its own `stepsWithColumn` at the real figure — and the check's column identity
+  // stayed GREEN, because it was reading the PRODUCER's report about itself rather than what the
+  // producer produced. This counter is one boundary closer: it is what crossed into `ct_source_step`
+  // and therefore what decides the container, and it is 0 under both P6 and the `dropColumns`
+  // control.
+  let columnsWritten = 0;
   for (const op of report.encode.ops) {
     switch (op.k) {
       case 'path':
@@ -259,7 +277,9 @@ export async function recordPrivateHalf(options: {
             `a step names path ${op.path} and only ${pathIds.length} have been interned`,
           );
         }
-        writer.sourceStep(id, op.line, options.dropColumns === true ? 0 : op.column);
+        const column = options.dropColumns === true ? 0 : op.column;
+        if (column !== 0) columnsWritten += 1;
+        writer.sourceStep(id, op.line, column);
         break;
       }
       case 'call': {
@@ -305,6 +325,7 @@ export async function recordPrivateHalf(options: {
     opsReplayed: replayed,
     filename,
     columnsDropped: options.dropColumns === true,
+    columnsWritten,
     sha256: await sha256Hex(container),
   };
 }
