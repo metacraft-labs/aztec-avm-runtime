@@ -227,7 +227,15 @@ m38_absent ncOutcome="$NC_OUTCOME" ncError="$NC_ERROR" ncApplied="$NC_APPLIED" o
 assert_eq "with the shim off the transaction fails" "failed" "$NC_OUTCOME"
 assert_true "on the slot count, naming both sides" \
   str_has_sub "$NC_ERROR" "2 output values were provided as a foreign call result for 1 destination slots"
-assert_eq "the shim fired exactly once on the arm that needs it" "1" "$OK_APPLIED"
+# ONCE PER NESTED CALL, DERIVED. The shim regroups `callPrivateFunction`'s RETURN, so it fires
+# exactly as often as the transaction makes one — a literal 1 here would be a property of this
+# fixture typed into a check rather than a relation between two of its readings.
+NESTED_FRAMES_N="$(m39_arm nested.report.run.nested | python3 -c '
+import json, sys
+d = sys.stdin.read().strip()
+print(len(json.loads(d)) if d.startswith("[") else "MISSING")')"
+m38_absent nestedFramesN="$NESTED_FRAMES_N"
+assert_eq "the shim fired once per nested call the transaction made" "$NESTED_FRAMES_N" "$OK_APPLIED"
 assert_eq "and not at all on the arm that disabled it" "0" "$NC_APPLIED"
 # AND THE CHILD RAN IN BOTH, so the difference between the arms is the PARENT's wire and not whether
 # a nested call happened at all. Without this the control would be satisfied by an arm that refused
@@ -347,13 +355,26 @@ import json, sys
 print(sum(1 for c in json.load(sys.stdin) if c["outcome"] == "refused"))')"
   GROUNDS_EXERCISED=$(( GROUNDS_EXERCISED + 1 ))
 done
-assert_eq "four grounds were exercised through a real circuit" "4" "$GROUNDS_EXERCISED"
+# THE EXPECTED COUNT COMES FROM THE ARM'S OWN REPORT, NOT FROM THIS LOOP'S LENGTH. Comparing a
+# loop's iteration count against the list it iterates is an assertion over the number of arguments
+# the check itself passed — a form this campaign has already shipped once, in a check advertising
+# "the exclusion list is EMPTY" while reporting `len(sys.argv[3:])`. The arm decides how many
+# grounds it produced; this asserts the loop reached all of them.
+GROUNDS_IN_REPORT="$(m39_arm refusals.report | python3 -c '
+import json, sys
+d = sys.stdin.read().strip()
+print(len(json.loads(d)) if d.startswith("{") else "MISSING")')"
+m38_absent groundsInReport="$GROUNDS_IN_REPORT"
+assert_ge "the refusals arm produced grounds at all" 2 "$(m38_num "$GROUNDS_IN_REPORT" 'grounds in report')"
+assert_eq "every ground the arm produced was exercised through a real circuit" \
+  "$GROUNDS_IN_REPORT" "$GROUNDS_EXERCISED"
 # EACH ARM STOPS FOR ITS OWN REASON AND NOT FOR A SHARED ONE. Four refusals that all named the same
 # ground would satisfy every assertion above; the SET is what says they are four.
 DISTINCT_GROUNDS="$(for g in unregistered-contract unknown-selector not-private depth-exceeded; do
     m39_arm "refusals.report.$g.run.errorChain" | grep -o 'NestedCallRefused: [a-z-]*:' | head -1
   done | sort -u | grep -c .)"
-assert_eq "and the four grounds they reported are four DIFFERENT grounds" "4" "$DISTINCT_GROUNDS"
+assert_eq "and the grounds they reported are all DIFFERENT from each other" \
+  "$GROUNDS_EXERCISED" "$DISTINCT_GROUNDS"
 # THE DIAGNOSTIC'S SHAPE IS WHAT MADE THE SELECTOR DEFECT FINDABLE: `unknown-selector` names the
 # requested selector AND every selector the artifact derives. Read out of the RUN.
 US_CHAIN="$(m39_arm refusals.report.unknown-selector.run.errorChain)"

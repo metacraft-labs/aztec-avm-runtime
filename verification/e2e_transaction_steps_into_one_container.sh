@@ -294,8 +294,18 @@ assert_eq "every recorded oracle call of both frames was replayed" \
 assert_eq "and nothing was refused" "[]" "$(m39_trace transaction.refusedOracles)"
 # THE BROWSER RUN AND THE NATIVE REPLAY AGREE ON THE TRANSACTION'S SHAPE, which is the property that
 # makes the container a recording OF that transaction rather than of a second execution.
-assert_eq "the replay's frame count is the browser run's" "2" "$(m39_trace transaction.frameCount)"
-assert_eq "and its depth is the browser run's" "1" "$(m39_trace transaction.maxDepth)"
+# READ FROM THE BROWSER RUN, NOT TYPED. These two lines said "is the browser run's" and compared
+# against the literals 2 and 1 — a description that claims a measurement its comparison cannot make,
+# which is this campaign's 40th and 41st instance of the assertion-that-cannot-fail family. A
+# transaction with three frames would have moved both artefacts together and neither assertion.
+BROWSER_FRAMES="$(m39_arm nested.report.run.nested | python3 -c '
+import json, sys
+d = sys.stdin.read().strip()
+print(1 + len(json.loads(d)) if d.startswith("[") else "MISSING")')"
+BROWSER_DEPTH="$(m39_arm nested.report.run.nested.0.depth)"
+m38_absent browserFrames="$BROWSER_FRAMES" browserDepth="$BROWSER_DEPTH"
+assert_eq "the replay's frame count is the browser run's" "$BROWSER_FRAMES" "$(m39_trace transaction.frameCount)"
+assert_eq "and its depth is the browser run's" "$BROWSER_DEPTH" "$(m39_trace transaction.maxDepth)"
 assert_eq "the two returns hashes agreed in the browser, which is why one tape replays into two" \
   "true" "$(m39_trace_top transaction.returnsHashesEqual)"
 
