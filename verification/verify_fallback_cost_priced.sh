@@ -143,7 +143,12 @@ assert_ge "…and it is a decorator holding a target it forwards to" 1 \
 # implements `\b` — so the control establishes that a GNU-grep needle matches, while the zero it is
 # controlling came from a GIT-grep needle that cannot. The two greps are different engines and the
 # control was scoped to the wrong one.
-DELETED_RE='implements [A-Za-z0-9_.]*(AppendOnlyTree|IndexedTree|UpdateOnlyTree)([^[:alnum:]_]|$)'
+# The trailing boundary is spelled [^A-Za-z0-9_] rather than [^[:alnum:]_] because this needle is
+# handed to THREE engines: git grep and GNU grep, which implement POSIX bracket expressions, and
+# `m16_words`, which is Python's `re`, which does NOT. Python parses `[^[:alnum:]_]` as a class
+# closed by the first `]` followed by the literal `_]`, so it can never match — and the control
+# below reported 0 of 3 while the assertion it controls kept passing. Portable across all three.
+DELETED_RE='implements [A-Za-z0-9_.]*(AppendOnlyTree|IndexedTree|UpdateOnlyTree)([^A-Za-z0-9_]|$)'
 DELETED_IMPLS="$( ( cd "$FORK_ROOT" && git grep -lE "$DELETED_RE" "$CPP_ANCHOR" -- '*.ts' ) 2>/dev/null | grep -vc '\.test\.ts' )"
 assert_eq "nothing in the fork implements the deleted package's tree interfaces" "0" "${DELETED_IMPLS:-0}"
 # THE SAME REGEX, run over the package that DOES implement them, must find them. Without this the
