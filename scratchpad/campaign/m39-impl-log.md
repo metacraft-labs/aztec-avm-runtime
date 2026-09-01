@@ -665,3 +665,207 @@ measurement §6 records.
 Per this campaign's own rule the three wrong responses are deleting the guard, deleting the arm, and
 leaving the arm unlabelled. All three are kept: the guard, the arm, and a comment **at the guard**
 naming the arm that cannot kill it and why.
+
+## STEP 12 — THE MUTATION MATRIX, SECOND PASS, AFTER THE THREE REPAIRS
+
+| arm | subject | result | what it killed |
+|---|---|---|---|
+| N1 | the execution cache is per frame again | 21 / **3** | the transaction stops executing; the check DIES at a missing field, with a summary line |
+| N2 | the child's `msgSender` is the tx origin, not its caller | 88 / **1** | exactly the assertion written for it, and nothing else |
+| N3 | the wire shim fires unconditionally | 88 / 0 | **EXPECTED SURVIVOR**, declared at the arm AND at the guard |
+| N4 | the selector includes the context parameter again | 66 / **3** | the selector pair and the both-halves arm, which dies at a missing field |
+| N5 | the replay guesses the wire kind from the slot length | 82 / **7** | the guessed-kind count 0 -> 5, the trace error, the replayed-call identity 11 -> 9, and six document rows |
+| N6 | the nested frame's `Call` is never written | 29 / **7** | both call counts, the frame's name, its call argument, the step identity, and then the numeric guard `die`s on the two missing span readings |
+| N7 | the trace arm run HANGS (bound cut to 20 s) | **0 / 1**, rc **137**, bound NAMED | the precondition, with a summary line at column 0 |
+| N8 | the trace arm report is truncated | **1 / 2** | the precondition, through the second of `m38_absent`'s three spellings of absence |
+| demo | `still_there` over a silently undone mutation | exit **5** | — |
+
+`HARNESS: restored; manifest verified`; no `MUTATION MISS`, no `DID NOT HOLD`; tree clean after.
+
+**N7 is a hang and not a die-before-summary wearing a hang's label.** The rc is 137 — `timeout`
+escalating to SIGKILL — because the arm holds a LIVE TIMER. A promise with no pending handle exits
+13 and an `await` in a synchronous function exits 1, and this campaign has written both by accident
+while meaning a hang.
+
+## STEP 13 — THE SWEEP WAS ABORTED ONCE, AND THE ABORT BOUGHT THIRTEEN ASSERTIONS THAT COULD NOT FAIL
+
+Killed at m2, five minutes in, `carry/*.json` verified OK against the pre-sweep digests and the tree
+clean. The only work a sweep leaves is reading your own checks, and that is where this campaign's
+aborts keep finding things.
+
+**§9 of `test_nested_private_call_is_served` was six tautologies.** It asserted each of the
+nested-call oracle's five refusal grounds with
+`str_has_sub "$(cat private_oracles.ts)" "'unregistered-contract'"` — **a name grepped in the file
+that declares that name**, this campaign's own catalogued form, which cannot be less than true. The
+comment beside it even said one of them *"was exercised by a real run"* — during development, with
+nothing re-deriving it.
+
+Four of the five are **produced** now, each by removing exactly ONE thing from the working
+transaction and leaving everything else alone:
+
+| ground | what was removed | what the ACVM carried back |
+|---|---|---|
+| `unregistered-contract` | the callee, from the artifact directory only | *"this wallet can execute 1 contract(s) and none of them is at 0x2330…"* |
+| `unknown-selector` | the selector, replaced by `0xdeadbeef` | *"no function of 'Child' derives selector 0xdeadbeef. The artifact derives […]"* |
+| `not-private` | nothing — a PUBLIC function's selector is passed to a private call | *"'Child.pub_set_value' matches selector 0xeb1e3342 and is not an abi_private function"* |
+| `depth-exceeded` | the bound, set to 0 | *"a nested call at depth 1 exceeds this wallet's bound of 0"* |
+
+Each is asserted on the LAST ledger entry, **parsed rather than grepped** — a substring search for an
+outcome anywhere in a ledger is satisfied by any entry having it, and the key order is the reader's
+`sort_keys` rather than the producer's, which the first needle got wrong. Each is `unavailable`
+rather than `refused`, which is M35's third outcome. And **the four grounds reported are asserted to
+be four DIFFERENT grounds**, because four refusals that all named the same one would satisfy
+everything above. The fifth stays declared and the check says which is which.
+
+**Then the census was widened over the FORM rather than the spelling** — the rule this campaign
+wrote after a two-digit census closed on `RI-` and missed `FX-` in the file being fixed. Seven more
+`str_has_sub` assertions whose haystack was a source file:
+
+| what it grepped | replaced by |
+|---|---|
+| `export async function privateFunctionSelector` | the same upstream comparison on a SECOND function, because one function agreeing is a coincidence |
+| `export function oraclesServedFor` | the always-served list parsed from source against the served set the RUN reports |
+| the enqueued-call extractor's own source line | the callee the CIRCUIT committed to against the address the page derived |
+| `readonly inputKinds:` / `readonly outputKinds:` / the fallback's diagnostic | asking the TAPE whether every slot carries a kind, with the slot count asserted non-zero |
+
+Thirteen assertions that could not fail, in one milestone's own two checks, found by reading them
+while a sweep ran. **M39 goes 170 -> 201.**
+
+*And moving one replacement above the variable it reads made the check exit on an unbound variable —
+which the abnormal-exit trap turned into a RED milestone with a summary line rather than a smaller
+one, which is exactly what it is for.*
+
+## STEP 14 — THE MUTATION MATRIX, RE-TAKEN AFTER THE LAST EDIT
+
+| arm | subject | result | what it killed |
+|---|---|---|---|
+| N1 | the execution cache is per frame again | 21 / **3** | the transaction stops executing; the check DIES at a missing field, with a summary line |
+| N2 | the child's `msgSender` is the tx origin, not its caller | 118 / **1** | exactly the assertion written for it |
+| N3 | the wire shim fires unconditionally | 118 / 0 | **EXPECTED SURVIVOR**, declared at the arm and at the guard |
+| N4 | the selector includes the context parameter again | 96 / **4** | both selector comparisons — the callee's and the caller's — and the both-halves arm, which dies |
+| N5 | the replay guesses the wire kind from the slot length | 83 / **7** | the guessed count 0 -> 5, the trace error, the replayed-call identity 11 -> 9, six document rows |
+| N6 | the nested frame's `Call` is never written | 29 / **7** | both call counts, the frame name, its argument, the step identity, then the numeric guard `die`s |
+| N7 | the trace arm run HANGS (bound cut to 20 s) | **0 / 1**, rc **137**, bound NAMED | the precondition, summary line at column 0 |
+| N8 | the trace arm report is truncated | **1 / 2** | the precondition, through the second spelling of absence |
+| demo | `still_there` over a silently undone mutation | exit **5** | — |
+
+`HARNESS: restored; manifest verified`; **no `MUTATION MISS`, no `DID NOT HOLD`**; tree clean after,
+and the bundle rebuilt after every arm that mutated it — because restoring a SOURCE leaves the
+mutated ARTEFACT on disk, which is the first entry on this campaign's own list.
+
+**N4 gained a failure between the third pass and this one (3 -> 4)**, and that is the new
+second-function selector assertion doing work: one function agreeing with upstream is a coincidence
+a hard-coded answer also produces.
+
+## STEP 15 — THE SWEEP WAS ABORTED A SECOND TIME, FOR FOUR TYPED LITERALS
+
+Killed at m2 again, six minutes in, `carry/*.json` verified OK and the tree clean. The census this
+time was mechanical — `assert_eq "…" "<digits>"` across both checks — rather than a re-read of the
+lines that looked suspect, which is the rule this campaign wrote after a census closed on one
+spelling and missed another in the file being fixed.
+
+Two of the twenty said *"is the browser run's"* and compared against the literals **2** and **1**.
+That is a description claiming a measurement its comparison cannot make — the campaign's 40th and
+41st instance — and a transaction with three frames would have moved both artefacts together and
+neither assertion. One compared a LOOP'S ITERATION COUNT against the list the loop iterates, which
+is an assertion over the number of arguments the check itself passed. One asserted the wire shim
+fired *"exactly once"*, which is a property of the fixture typed into a check.
+
+All four are readings now. The remaining sixteen are definitions — an entry frame is at depth 0, a
+control carries zero calls — and are left alone, which is the distinction the census exists to make.
+
+**M39 goes 201 -> 205.**
+
+## STEP 16 — THE MUTATION MATRIX, RE-TAKEN AFTER THAT LAST EDIT
+
+| arm | subject | result | what it killed |
+|---|---|---|---|
+| N1 | the execution cache is per frame again | 21 / **3** | the transaction stops executing; the check dies at a missing field, with a summary line |
+| N2 | the child's `msgSender` is the tx origin, not its caller | 121 / **1** | exactly the assertion written for it |
+| N3 | the wire shim fires unconditionally | 121 / 0 | **EXPECTED SURVIVOR**, declared at the arm and at the guard |
+| N4 | the selector includes the context parameter again | 99 / **4** | both selector comparisons — the callee's and the caller's — and the both-halves arm, which dies |
+| N5 | the replay guesses the wire kind from the slot length | 84 / **7** | the guessed count, the trace error, the replayed-call identity, six document rows |
+| N6 | the nested frame's `Call` is never written | 29 / **7** | both call counts, the frame name, its argument, the step identity, then the numeric guard dies |
+| N7 | the trace arm run HANGS (bound cut to 20 s) | **0 / 1**, rc **137**, bound NAMED | the precondition, summary line at column 0 |
+| N8 | the trace arm report is truncated | **1 / 2** | the precondition |
+| demo | `still_there` over a silently undone mutation | exit **5** | — |
+
+`HARNESS: restored; manifest verified`; no `MUTATION MISS`, no `DID NOT HOLD`; tree clean after.
+
+## STEP 17 — THE SWEEP: **13,227**, `delta +0`, NO HOLE, AND M9 DID NOT FLAKE
+
+Measured M0–M39 on 2026-09-01 **after the last commit**, `setsid`-detached in this repository's own
+dev shell (node v24.19.0), one milestone at a time with nothing else running, `TMPDIR` and the log
+under `~/.cache`. **80 markers for 40 milestones, no hole. 36 of 40 exit 0.** Polled **inside the
+agent's own run** in ten-minute blocks — every background waiter attached to it was killed by the
+harness, which is why the campaign's rule is what it is.
+
+```
+m0 156   m1 181   m2 293   m3 199   m4 218   m5 236   m6 363   m7 287   m8 516   m9 807
+m10 450  m11 287  m12 691  m13 458  m14 460  m15 537  m16 225  m17 297  m18 578
+m19 180  m20 237  m21 451  m22 349  m23 512  m24 350  m25 454  m26 340  m27 345
+m28 358  m29 127  m30 218  m31 450  m32 237  m33 248  m34 217  m35 239  m36 150
+m37 171  m38 150  m39 205
+                                                       CAMPAIGN TOTAL 13,227
+```
+
+The summariser validated the reference's own `_total` first and then reported **`delta +0`**:
+every one of the forty came out at its declared value, and the single move was named in
+`m39-reference.json` before the run. **13,022 + 205 = 13,227 exactly**, and M39's 205 is 121 / 84.
+
+**M9 DID NOT FLAKE** — 807, rc 0, **1,279 s**, immediately after m8's **179 s** build, which is
+D19's standing condition, present and not firing. M15 did not either (537, 382 s).
+
+**FOUR NON-ZERO EXITS AND NOT ONE IS M39's**, all four declared in the reference before the run:
+
+| milestone | check | count | offending subject | whose |
+|---|---|---|---|---|
+| m11 | four checks, 9 failing assertions | **287, unchanged** | the tenth upstream move, `upstream/next` still `f6bf848795` against a recorded `7471a61f1a` | **upstream's** |
+| m20 | `verify_named_checks_exist` 9/1 | unchanged | `tools/scan_reverted_transactions.mjs` and `verify_hydrated_roots_declared` | **L3's and L2's** |
+| m21 | `verify_no_pipeline_predicates` 69/1 | unchanged | a sixth `\| grep -q` in `verify_browser_replay_dd9_clean.sh:336` | **L4's** |
+| m28 | `verify_npm_pack_no_optional_native` 55/1 | unchanged | `replay/package.json` as an eighth tree | **L0's** |
+
+**M16 IS NO LONGER RED, AND THAT IS A PARALLEL TRACK'S REPAIR RATHER THAN M39's.** M38's sweep read
+m16 **225 rc=1** on a needle handed to a THIRD engine; this reads **225 rc=0**, and the fix is commit
+`c329c72`, which was on `origin/dev` before this pass began. The count is identical either way.
+
+**THE SIXTEEN L0–L5 CHECK NAMES APPEAR ZERO TIMES AS A COLUMN-0 SUMMARY LINE**, grepped one at a
+time against the summariser's own anchored pattern. None of their assertions is in the 13,227.
+
+**A sweep is a writer**: `carry/*.json` checksummed before, `sha256sum -c` after —
+`exposure.json` and `rebase.json` came back **FAILED**, were restored from HEAD, and all four
+re-verified OK.
+
+### AND THE FIRST SWEEP OF THIS PASS FOUND THAT THE "NOTHING ELSE MAY MOVE" LIST WAS INCOMPLETE
+
+The first run came out at the same **13,227** with **seven** non-zero exits: the four above plus
+**m32, m33 and m34**, on the SAME eager-size figures in `WALLET-BOUNDARY.md`, `WORKER-NODE.md` and
+`DEV-WALLET.md`. **Every count was at its reference value and only the rc moved**, which is what says
+a pinned figure moved and not a structure.
+
+The cause is worth the sentence: the milestones re-run by hand before that sweep were the ones whose
+SUBJECTS this pass had changed, not the ones whose FIGURES it had. Five documents carry the wallet
+entry's and the wallet demo page's gzipped eager sizes and this pass had corrected two of them.
+Corrected to the checks' values and the three re-run individually — **237 / 248 / 217, zero
+failures** — and the sweep above is the one taken after that commit.
+
+### AND AN AD-HOC SUMMARISER GOT m28 WRONG WHILE THE REAL ONE GOT IT RIGHT
+
+Re-running m28 after the rebase, a quick `awk -F'[ ,]'` reported **254** against a reference of 358.
+The shortfall is exactly `just ci-browser-gate: 104 assertion(s)` — **the one check whose printed
+name contains a SPACE**, which is the trap `m39-sweep-sum.py`'s own header records
+(*"an `^([A-Za-z_0-9]+):` needle silently DROPS it, which is how m0 once came out 128 against a
+reference of 156"*). The sweep's summariser uses the anchored pattern and read 358 correctly. *A
+summariser is a thing under test, and an ad-hoc one written at the prompt is not the one that was.*
+
+## STEP 18 — THE REBASE ONTO L4 AND L5
+
+`origin/dev` gained two commits while this pass ran — `29bd9cf` (**L4**) and `57496bd` (**L5**, a new
+track). Rebased onto both; **twelve commits replayed with no conflict**, and all four diff3 markers
+grepped for afterwards rather than three, which is the hazard this campaign records.
+
+Re-measured after the rebase, because a rebase is a change to the tree the sweep measured:
+`verify_named_checks_exist` **9/1** and `verify_no_pipeline_predicates` **69/1** — both unchanged,
+both on the same parallel-track subjects, so L5's new checks added no unresolved name and no
+pipeline predicate. `check-repo-hygiene` **28/0**. **m25 454, m27 345, m28 358, m39 205** — every one
+at its reference value. Nothing under `replay/` was touched.
