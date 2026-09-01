@@ -55,6 +55,21 @@ export L1_FIXTURES
 L2_FIXTURES=(testnet_settled_tx_refblock.json testnet_replay_tx.json)
 export L2_FIXTURES
 
+# L5's is a DIFFERENT KIND OF FIXTURE and it is declared separately for that reason.
+#
+# L1's and L2's are RECORDED JSON-RPC SESSIONS — a `calls` array, played back by `fixtureFetch`,
+# each carrying a `provenance.capturedBy` naming the script that could take another one.
+# `chain_contract_classes.json` is not a session: it is four numbers per contract, read once from
+# each live chain through `getContract` and `getContractClass`, and it exists so L5's resolver arms
+# can prove an artifact against numbers that did not come from the artifact. Folding it into
+# `L1_ALL_FIXTURES` would put it through the `capturedBy` loop above, which would assert a
+# playback property of a file that is not a playback.
+#
+# It is still in the SET below, because the set assertion's whole purpose is that an undeclared
+# fixture is a finding.
+L5_FIXTURES=(chain_contract_classes.json)
+export L5_FIXTURES
+
 L1_ALL_FIXTURES=("${L1_FIXTURES[@]}" "${L2_FIXTURES[@]}")
 export L1_ALL_FIXTURES
 
@@ -112,8 +127,8 @@ l1_prepare() {
   done
 
   # The set, not just the members: an undeclared fixture is as much a finding as a missing one.
-  assert_eq "the fixtures on disk are exactly the ones declared here, L1's and L2's" \
-    "$(printf '%s\n' "${L1_ALL_FIXTURES[@]}" | sort | tr '\n' ' ')" \
+  assert_eq "the fixtures on disk are exactly the ones declared here, L1's, L2's and L5's" \
+    "$(printf '%s\n' "${L1_ALL_FIXTURES[@]}" "${L5_FIXTURES[@]}" | sort | tr '\n' ' ')" \
     "$(cd "$L1_FIXTURE_DIR" && ls -1 ./*.json 2>/dev/null | sed 's|^\./||' | sort | tr '\n' ' ')"
 }
 

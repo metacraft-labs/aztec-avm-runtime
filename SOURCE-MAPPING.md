@@ -405,3 +405,78 @@ count is 0.
 **And hole 2 has a number now.** §2.4 recorded it as a measured gap with no consequence attached;
 its consequence is the table above. That is the figure a sixth upstream contribution would be
 worth, if one is ever prepared.
+
+---
+
+## 7. L5 — where the artifact comes from for a CHAIN-FETCHED contract, and what proves it
+
+§2 established that a shipped artifact carries a map already keyed by AVM program counter. §3
+established that the rung is measured per contract and never rounded up. **Neither said where the
+artifact comes from when the contract was not compiled here**, and for the live-chain replay
+campaign that was the whole gap: an Aztec node serves
+`{ id, privateFunctionsRoot, version, artifactHash, packedBytecode }` and no debug symbols, no file
+map and no source text.
+
+**The chain holds a COMMITMENT to the artifact and not the artifact, and upstream says so in the
+field's own doc comment**: `artifactHash` is *"intended to be used by clients to verify that an
+OFFCHAIN FETCHED ARTIFACT matches a registered class"*. `replay/src/artifact_resolution.ts` performs
+that fetch and that verification.
+
+### 7.1 Three checks, and check 2 alone is what a block explorer does
+
+| # | check | what it proves |
+|---|---|---|
+| 1 | `computeArtifactHash(candidate)` equals the class's `artifactHash` | this is the registered artifact |
+| 2 | the candidate's `public_dispatch` bytes equal the class's `packedBytecode` | this is the deployed code |
+| 3 | `computeContractClassId({artifactHash, privateFunctionsRoot, publicBytecodeCommitment})` equals the class's `id` | the two are bound to the identity the instance names |
+
+**Measured on a real published release, 2026-09-01:** `@aztec/protocol-contracts@5.0.0-rc.2`'s
+`FeeJuice` has bytecode *byte-identical* to the class deployed at `0x…03`, under artifact hash
+`0x1df228ba…` against the deployed `0x1a57ff2a…`, with `debug_symbols` of 2,968 base64 characters
+against 2,964. A bytecode-only check — which is Aztecscan's own — accepts it and produces
+real-looking line numbers out of a different compilation. `5.2.0` and `5.3.0-nightly.20260819`
+reproduce both hashes exactly.
+
+### 7.2 What `artifactHash` does NOT commit to, and it is exactly §2's two inputs
+
+`computeArtifactHash`'s preimage is the private-function tree root, the utility-function tree root
+and `computeArtifactMetadataHash`. **`debug_symbols` and `file_map` are in none of them.**
+
+`test_offchain_artifact_resolution_verified` §5 demonstrates this rather than arguing it: the
+installed FeeJuice with every `brillig_locations` entry rewritten to call-stack id 0 **passes all
+three checks**, with the same artifact hash and the same class id, differing only in a digest taken
+over the two uncommitted fields.
+
+The exposure is bounded by §2's own property and the bound is worth stating: a map is keyed by AVM
+byte offset into bytecode check 2 has just proved byte-equal to the chain's, so `rungFor` refuses a
+map whose highest key reaches past the bytecode and `ContractSourceMap.positionFor` answers `null`
+rather than rounding. What is undetectable is wrong *text* behind an in-range map — so the container
+states which distributor attested it, in `ct.source-provenance`, and whether a second one agreed.
+
+### 7.3 The measurement, on the artifact that resolves
+
+| what | measured |
+|---|---|
+| class deployed at `0x…03`, both chains | `0x1f85d8b901a87b3f…`, never updated |
+| resolved by | `npm:@aztec/protocol-contracts@5.3.0-nightly.20260819 FeeJuice` |
+| `public_dispatch` | **1,947 bytes**, byte-equal to `packedBytecode` |
+| `rungFor` verdict | **rung 1** |
+| mapped pcs | **314**, in **[130, 1785]** — inside the bytecode, which is what makes them byte offsets |
+| …resolving to a `(path, line, column)` | **314** |
+| `file_map` | **32** files, of which the mapping reaches **12** ids over **12** paths |
+| pc 130 | `fee_juice_contract/src/main.nr` **203:12** |
+| corroboration | **single-distributor** — Aztecscan's `/l2/artifacts/0x1a57ff2a…` is 404 on both deployments |
+
+### 7.4 The durability risk, recorded because the capability depends on it
+
+`@aztec/protocol-contracts/src/scripts/cleanup_artifacts.ts` sets `fileData.file_map = {}` on every
+shipped artifact. It runs from `yarn build` (`generate:cleanup-artifacts`) and **not** from
+`yarn generate` — and `yarn-project/bootstrap.sh:132` runs `… 'cd {} && yarn generate'`, so it never
+executes and the published artifacts keep their source.
+
+**If upstream changes that line to `yarn build`, every future protocol-contracts release loses its
+`file_map` and every protocol contract drops from rung 1 to rung 2.** §3's ladder would say so by
+name — *"no file_map source text was supplied, so a span cannot become a line and a column"* — which
+is the honest failure, and the capability would be gone. `build:keep-debug-symbols` exists in the
+same `package.json` and omits the cleanup; it is what a consumer would have to ask upstream to
+publish from.

@@ -1,0 +1,157 @@
+[0mdirenv: loading ~/m/dev/aztec-artifacts/.envrc
+[0mdirenv: using flake
+[0mdirenv: nix-direnv: Using cached dev shell
+aztec-avm-runtime: node v24.19.0, yarn 4.14.1, wasi-sdk 33.0+m, ccache 4.13.6 at /Users/zahary/.cache/ccache
+
+=== A1 — DECLARED SURVIVOR: the bytecode comparison is deleted
+  rc=0  test_offchain_artifact_resolution_verified: 83 assertion(s), 0 failure(s)
+  mutation still present after the run: yes
+  DECLARED SURVIVOR, AND UNKILLABLE IN PRINCIPLE — L2's M5 shape, not L3's N5.
+
+  Check 2 compares the artifact's `public_dispatch` bytes against the class's `packedBytecode`.
+  Check 1 computes `computeArtifactHash`, whose preimage runs through
+  `computeFunctionArtifactHash`, which hashes each function's BYTECODE. So an artifact whose
+  bytecode differs necessarily has a different artifact hash: killing this arm needs two distinct
+  byte strings with one sha256, and no input this harness can construct has that property.
+
+  IT IS KEPT ANYWAY AND THE REASON IS NOT SENTIMENT. Check 2 is the DIRECT comparison and check 1
+  is a claim about a preimage; when they disagree, check 2 refuses with two lengths in the message
+  while check 1 refuses with two 32-byte hashes, and only the first tells a caller they fetched a
+  different contract rather than a different release. Deleting it would lose nothing detectable
+  and lose the sentence that makes a refusal actionable — which is a real cost with no assertion
+  that can measure it, and that is exactly the kind of thing a declared survivor is for.
+
+=== A2a — THE artifactHash CHECK ALONE IS DELETED
+  rc=1  test_offchain_artifact_resolution_verified: 83 assertion(s), 3 failure(s)
+    RED:   FAIL …and it is REFUSED anyway  expected [artifact-hash-mismatch], got [class-id-mismatch]
+    RED:   FAIL …with the refusal naming both hashes (command failed: str_has_sub recomputing the class id from this artifact gives 0x231ee9ce003f9efba036999aa98ecf95594a80ae74e950ad2cf62ec908a1968f and the chain's instance names 0x1f85d8b901a87b3fa9b93a44ab569ca2f5eb62412dfd58c894fdfff218be11a4 0x05fbdb508283def7c050d641a99aee5d89eadaa836938abd02551032fe517fbd)
+    RED:   FAIL …and saying WHY that combination is the dangerous one (command failed: str_has_sub recomputing the class id from this artifact gives 0x231ee9ce003f9efba036999aa98ecf95594a80ae74e950ad2cf62ec908a1968f and the chain's instance names 0x1f85d8b901a87b3fa9b93a44ab569ca2f5eb62412dfd58c894fdfff218be11a4 THE BYTECODE MATCHED AND THIS DID NOT)
+  mutation still present after the run: yes
+  KILLED, AND BY THE OTHER HALF OF THE SAME COMMITMENT: the decoy is still refused, as
+  `class-id-mismatch` rather than `artifact-hash-mismatch`, because computeContractClassId's
+  preimage INCLUDES the artifact hash. The assertion written for it — the fault's NAME — goes
+  red, which is the bar; and the finding is that check 1 and check 3 are not independent.
+  A2 removes both, which is what "become the explorer's own check" actually requires.
+
+=== A2 — BOTH artifactHash CHECKS ARE DELETED — our verification becomes the explorer's own
+  rc=1  test_offchain_artifact_resolution_verified: 83 assertion(s), 3 failure(s)
+    RED:   FAIL …and it is REFUSED anyway  expected [artifact-hash-mismatch], got [MISSING]
+    RED:   FAIL …with the refusal naming both hashes (command failed: str_has_sub MISSING 0x05fbdb508283def7c050d641a99aee5d89eadaa836938abd02551032fe517fbd)
+    RED:   FAIL …and saying WHY that combination is the dangerous one (command failed: str_has_sub MISSING THE BYTECODE MATCHED AND THIS DID NOT)
+  mutation still present after the run: yes
+
+=== A3 — reviveBuffers BECOMES THE IDENTITY — every camelCase artifact reads as unverified
+  rc=1  test_offchain_artifact_resolution_verified: 83 assertion(s), 5 failure(s)
+    RED:   FAIL …and so does the camelCase one  expected [true], got [false]
+    RED:   FAIL …to the SAME artifact hash, because the spelling is not the artifact  expected [0x1a57ff2a8e653094229bd15c028683e08b2086dfeadecac4c6b950c383b3ae1d], got [MISSING]
+    RED:   FAIL …and the same debug digest, so the two shapes carry the same source map  expected [f87f9cc0f91809b2a0a607484a65ed5de9aa9ee44d83a1b510eb5a9013228e2a], got [MISSING]
+    RED:   FAIL hashing the camelCase payload WITHOUT reviving its JSON-serialised Buffers gives a
+    RED:   FAIL …while reviving them gives the chain's  expected [0x1a57ff2a8e653094229bd15c028683e08b2086dfeadecac4c6b950c383b3ae1d], got [0x1f9c94f6e407585dbbce79ab792d4f322353f6aab5143dbe94a12ab384baa198]
+  mutation still present after the run: yes
+
+=== A4 — AN UNRECOGNISED SHAPE BECOMES AN ABSENT ONE — the research's own first wrong answer
+  rc=1  test_offchain_artifact_resolution_verified: 83 assertion(s), 4 failure(s)
+    RED:   FAIL …and the loaded-and-JSON-round-tripped form is camelCase, which is what the explorer
+    RED:   FAIL …and so does the camelCase one  expected [true], got [false]
+    RED:   FAIL …to the SAME artifact hash, because the spelling is not the artifact  expected [0x1a57ff2a8e653094229bd15c028683e08b2086dfeadecac4c6b950c383b3ae1d], got [MISSING]
+    RED:   FAIL …and the same debug digest, so the two shapes carry the same source map  expected [f87f9cc0f91809b2a0a607484a65ed5de9aa9ee44d83a1b510eb5a9013228e2a], got [MISSING]
+  mutation still present after the run: yes
+
+=== A5 — CORROBORATION IS COUNTED OVER CANDIDATES RATHER THAN DISTRIBUTORS
+  rc=1  test_offchain_artifact_resolution_verified: 83 assertion(s), 3 failure(s)
+    RED:   FAIL …and both are named  expected [a-second-registry,npm], got [installed,the same bytes, independently served]
+    RED:   FAIL …named  expected [npm], got [npm:@aztec/protocol-contracts@5.3.0-nightly.20260819 FeeJuice]
+    RED:   FAIL …and names the single distributor (command failed: str_has_sub class 0x1f85d8b901a87b3fa9b93a44ab569ca2f5eb62412dfd58c894fdfff218be11a4 WAS proved — 1 candidate(s) matched its artifactHash, its packedBytecode and its class id — but only 1 distributor (npm:@aztec/protocol-contracts@5.3.0-nightly.20260819 FeeJuice) attests its debug_symbols and file_map, and requireCorroboration was set. artifactHash does not commit to either, so a single distributor's source text is unverified text, and this caller asked not to claim source level over it. only 1 distributor (npm))
+  mutation still present after the run: yes
+  NOTE: over the OFFLINE arms this is exercised by the disagreeing/agreeing pair in section 6
+  — a single provider offering one candidate cannot distinguish the two counting rules, which
+  is exactly why those two arms offer TWO candidates each.
+
+=== A8 — THE PACKAGE PRE-FILTER BECOMES A CHECK — a candidate is dropped silently on length
+  rc=1  test_offchain_artifact_resolution_verified: 83 assertion(s), 23 failure(s)
+    RED:   FAIL the class the chain serves at 0x…03 IS proved by an off-chain artifact  expected [true], got [false]
+    RED:   FAIL …by the installed protocol-contracts release, named  expected [npm:@aztec/protocol-contracts@5.3.0-nightly.20260819 FeeJuice], got [MISSING]
+    RED:   FAIL check 1: computeArtifactHash over the artifact equals the class's artifactHash  expected [MISSING], got [0x1a57ff2a8e653094229bd15c028683e08b2086dfeadecac4c6b950c383b3ae1d]
+    RED:   FAIL …and that length is 1947 bytes  expected [1947], got [MISSING]
+    RED:   FAIL …and it is the class deployed at 0x…03  expected [0x1f85d8b901a87b3fa9b93a44ab569ca2f5eb62412dfd58c894fdfff218be11a4], got [MISSING]
+    RED:   FAIL the artifact's own verdict is rung 1  expected [1], got [MISSING]
+    RED:   FAIL …over 314 mapped program counters  expected [314], got [MISSING]
+    RED:   FAIL …keyed from pc 130  expected [130], got [MISSING]
+    RED:   FAIL …to pc 1785, which is INSIDE the 1947-byte bytecode — the property that makes them AVM
+    RED:   FAIL …over 32 source files  expected [32], got [MISSING]
+    RED:   FAIL …of which the mapping reaches 12 FILE IDS  expected [12], got [MISSING]
+    RED:   FAIL …naming 12 DISTINCT paths, so no two of those ids share a path over the WHOLE map
+  mutation still present after the run: yes
+
+=== A6 — THE RECORDING'S RUNG BECOMES THE BEST CONTRACT'S RATHER THAN THE WORST
+  rc=1  e2e_resolved_contract_records_at_source_level: 162 assertion(s), 2 failure(s)
+    RED:   FAIL …so the TRANSACTION is NOT source level, however well one contract did  expected [false], got [true]
+    RED:   FAIL …and the recording's own rung is the WORST of the two, not the best  expected [3], got [1]
+  mutation still present after the run: yes
+
+=== A7 — DECLARED SURVIVOR: the position argument is omitted for an unpositioned step
+  rc=0  e2e_resolved_contract_records_at_source_level: 162 assertion(s), 0 failure(s)
+  mutation still present after the run: yes
+  DECLARED SURVIVOR, AND THE REASON IS A GUARD IN `ct-host` RATHER THAN A GAP IN THE CHECK.
+
+  This arm was WRITTEN expecting a kill: omit the argument for an unpositioned step and the two
+  order-paired FIFOs should desynchronise, sliding every later step onto its predecessor's line.
+  It survives because `CtWriter.push` will not let it happen — its condition is
+  `if (position !== undefined || this.posFilled > 0)`, and inside it a `while` loop pads every slot
+  the host skipped with a `line: 0` record before staging the current one. So a caller that has
+  ever supplied one position cannot fail to occupy a slot afterwards, and a caller whose FIRST
+  steps are unpositioned has the padding applied retroactively when the first real position
+  arrives.
+
+  **THE ARM IS THEREFORE EVIDENCE ABOUT `ct-host` AND NOT ABOUT `recording.ts`**, and it is kept
+  for that: the header of `push` claims exactly this property ("a caller that passes some cannot
+  desynchronise") and nothing had exercised the claim from a caller that tries. A7b is the arm that
+  attacks the same seam in the one way the writer cannot defend against — supplying a position for
+  the WRONG STEP, which is well-formed input the writer must trust.
+
+=== A7b — THE POSITION IS STAGED ONE STEP LATE — well-formed, and wrong
+  rc=1  e2e_resolved_contract_records_at_source_level: 162 assertion(s), 8 failure(s)
+    RED:   FAIL …with 63 of 64 positioned  expected [63], got [64]
+    RED:   FAIL …and exactly one not  expected [1], got [0]
+    RED:   FAIL …with the split visible: 32 positioned  expected [32], got [63]
+    RED:   FAIL …and 32 not  expected [32], got [1]
+    RED:   FAIL the subject's FIRST step is on path 1 — a Noir file, not the session's own path 0  expected [1:203], got [1:223]
+    RED:   FAIL …and 203 is the line the artifact's own map gives for pc 130  expected [203], got [223]
+    RED:   FAIL …and the two sequences are identical, record for record  expected [436127628 840], got [418889866 849]
+    RED:   FAIL …and every one of them matches the resolver's answer, with the unpositioned step's slot
+  mutation still present after the run: yes
+
+=== A9 — THE PER-CONTRACT RUNG IS ROUNDED UP — SOME steps positioned is declared rung 1
+  rc=1  e2e_resolved_contract_records_at_source_level: 162 assertion(s), 16 failure(s)
+    RED:   FAIL partial:  no throw  expected [MISSING], got [{'name': 'MappingRungDegraded', 'message': '1 contract(s) in this recording declared source-mapping rung 1 and then produced steps with no resolved source position — the first at pc 0. 63 step(s) were positioned and 1 were not. The container would read back complete, with every step present and some of them addressing a program counter while the metadata says they address Aztec.nr source. That is the SILENT DEGRADATION the ladder exists to '}]
+    RED:   FAIL partial declares rung 2  expected [2], got [MISSING]
+    RED:   FAIL …and is NOT source level, because rung 2 is not rung 1  expected [false], got [MISSING]
+    RED:   FAIL …with 63 of 64 positioned  expected [63], got [MISSING]
+    RED:   FAIL …and exactly one not  expected [1], got [MISSING]
+    RED:   FAIL …and the reason carries the split and cites the transpiler's procedure regions (command failed: str_has_sub MISSING 63 of 64 executed step(s) of this contract resolve)
+    RED:   FAIL partial writes exactly the six declared metadata keys  expected [6], got [MISSING]
+    RED:   FAIL …including ct.source-provenance  expected [true], got [MISSING]
+    RED:   FAIL …and the arm's expectation marks exactly one step unpositionable  expected [1], got [0]
+    RED:   FAIL …at index 32 counting from one, i.e. index 31 from zero  expected [32], got []
+    RED:   FAIL the partial container was written  missing file [/Users/zahary/.cache/aztec-l5-artifacts/containers/partial.ct]
+    RED:   FAIL the reference reader exited 0 over partial.ct  expected [0], got [1]
+  mutation still present after the run: yes
+  NOTE: the writer is expected to refuse the container here — a rung-1 declaration with an
+  unpositioned step is a rungViolation and CtWriter.close() throws MappingRungDegraded. The
+  arms report that as `threw`, and the check asserts `threw` is MISSING for every arm.
+
+=== AHANG — A CHECK THAT HANGS — rc 124 AND NO SUMMARY LINE
+  rc=124  test_offchain_artifact_resolution_verified: 15 assertion(s), 1 failure(s)
+  mutation still present after the run: yes
+  THE rc IS THE ASSERTION. 124 is a hang; 13 is an unsettled top-level await; 1 is a syntax
+  error. All three are missing a summary line and only one of them is this arm.
+
+=== ADIE — A CHECK THAT DIES BEFORE ITS SUMMARY — reads as a SMALLER milestone, not a red one
+  rc=1  test_offchain_artifact_resolution_verified: 15 assertion(s), 1 failure(s)
+  mutation still present after the run: yes
+  THE SUMMARY LINE IS THE ASSERTION. lib.sh's summary_on_abnormal_exit is installed by both
+  L5 checks, so a die prints `N assertion(s), M+1 failure(s)` at column 0 and the sweep sees
+  a FAILURE rather than an ABSENCE.
+
+=== restore
+restore verified by digest: the tree is byte-identical to how this run found it

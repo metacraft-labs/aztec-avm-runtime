@@ -148,14 +148,51 @@ export {
   RECORDING_METADATA_KEYS,
   REPLAY_STEP_PRODUCER,
   RUNG_BYTECODE_VALUE,
+  RUNG_FUNCTION_VALUE,
+  RUNG_SOURCE_VALUE,
   STEP_STREAM_FAULTS,
   buildSettledRecording,
   recordingIdFor,
+  type ContractRungDeclaration,
   type RecordingMetadataKey,
   type RecordingWriter,
+  type ResolvedContractSource,
   type SettledRecording,
   type StepStreamFault,
 } from './recording.ts';
+
+// ---- L5 --------------------------------------------------------------------------------------
+
+export {
+  ARTIFACT_KEY_SHAPES,
+  SOURCE_CORROBORATION,
+  VERIFICATION_FAULTS,
+  debugDigestOf,
+  keyShapeOf,
+  resolveContractArtifact,
+  reviveBuffers,
+  verifyCandidate,
+  type ArtifactCandidate,
+  type ArtifactCrypto,
+  type ArtifactKeyShape,
+  type ArtifactProvider,
+  type ArtifactResolution,
+  type ContractClassPublicLike,
+  type RejectedCandidate,
+  type ResolveOptions,
+  type SourceCorroboration,
+  type VerificationFault,
+  type VerifiedArtifact,
+} from './artifact_resolution.ts';
+
+export {
+  AZTECSCAN_BASE_URLS,
+  aztecscanArtifactProvider,
+  packageArtifactProvider,
+  stdlibArtifactCrypto,
+  type PackageArtifacts,
+  type StdlibBindings,
+} from './artifact_providers.ts';
 
 export {
   PATCH_REQUIRED_CONFIG_FIELDS,

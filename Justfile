@@ -3173,6 +3173,90 @@ produce-container-in-page out='/tmp/aztec-replay-page.ct' module=avm_wasm_defaul
 build-replay-browser-bundle:
     @node replay/tools/build_browser_bundle.mjs
 
+# =================================================================================================
+# L5 — OFF-CHAIN ARTIFACT RESOLUTION, AND THE RUNG A TRANSACTION ACTUALLY EARNS
+# =================================================================================================
+#
+#   just verify-l5-resolution   test_offchain_artifact_resolution_verified   (offline)
+#   just verify-l5-source       e2e_resolved_contract_records_at_source_level (offline)
+#   just verify-l5              both, in order — THE OFFLINE FLOOR
+#   just verify-l5-net          verify_l5_artifact_sources_live — NEEDS npm AND A BLOCK EXPLORER
+#   just await-resolvable-tx    wait for a settled transaction whose artifacts can be proved
+#
+# THE SPLIT IS THE SAME ONE `verify-l4` / `verify-l4-net` MAKES AND FOR THE SAME REASON: one of
+# these reaches the npm registry and api.testnet.aztecscan.xyz on every run, and a floor that
+# includes it is a floor that depends on somebody else's uptime. They are NOT summed.
+#
+# `verify-l5-source` needs the CT WRITER and the REFERENCE READER, and a missing one is a `die`
+# with a remedy rather than a skip. It reads the containers back rather than believing the writer,
+# which is L3's hard-won rule: the writer produced bytes for three containers `ct-print` refused.
+
+verify-l5-resolution:
+    @verification/test_offchain_artifact_resolution_verified.sh
+
+verify-l5-source:
+    @verification/e2e_resolved_contract_records_at_source_level.sh
+
+verify-l5:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      test_offchain_artifact_resolution_verified \
+      e2e_resolved_contract_records_at_source_level
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-l5: FAILED" >&2
+    else
+      echo "verify-l5: all checks passed"
+    fi
+    exit "$rc"
+
+# THE NETWORK ONE. Deliberately not in `verify-l5`, and it announces itself so a green line from it
+# cannot be mistaken for a line from the floor.
+verify-l5-net:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "=== verify-l5-net: THIS CHECK NEEDS THE NPM REGISTRY AND api.testnet.aztecscan.xyz."
+    echo "    It is NOT part of the offline floor. It re-takes three measurements about the WORLD:"
+    echo "    that a real published release is a decoy, that the explorer serves two key shapes,"
+    echo "    and that the explorer's own verification is weaker than this repository's."
+    verification/verify_l5_artifact_sources_live.sh
+
+# WAIT FOR A SUBJECT. The frozen container whose contract resolves — 0x12525d6d…, testnet block
+# 63670 — CANNOT be re-recorded: `getTxByHash` serves only from the active tx pool and the pool
+# deletes at the finalized tip, so its body is gone. A source-level recording of a real chain
+# transaction therefore needs a NEW one, inside the ~1-hour replayable window, touching a class
+# somebody publishes. This waits for one and records it through the shipped driver.
+await-resolvable-tx url='https://aztec-testnet.drpc.org' out='scratchpad/l5-live' module=avm_wasm_default minutes='240':
+    #!/usr/bin/env bash
+    set -uo pipefail
+    W="${CT_WRITER_WASM_PATH:-{{justfile_directory()}}/ct-writer/target/wasm32-unknown-unknown/release/aztec_ct_writer.wasm}"
+    [ -s "$W" ] || { echo "await-resolvable-tx: no ct_writer.wasm. Remedy: just ct-writer-build" >&2; exit 2; }
+    [ -s "{{module}}" ] || { echo "await-resolvable-tx: no avm.wasm at {{module}}" >&2; exit 2; }
+    node replay/tools/await_resolvable_transaction.mjs \
+      --url "{{url}}" --out "{{justfile_directory()}}/{{out}}" \
+      --module "{{module}}" --ct-writer "$W" --deadline-minutes "{{minutes}}"
+
+# THE BROWSER DEMONSTRATION. A NETWORK PRECONDITION rather than a network dependency: the published
+# engine must be mirrored once with `just mirror-replay-engine /tmp/l5engine`, and the check DIES
+# with that remedy rather than fetching behind your back. Deliberately not in `verify-l5`, for the
+# same reason `smoke_browser_opens_and_steps_l3_container` is not in `verify-l4`'s inner loop.
+#
+# WHAT IT SHOWS: the deployed CodeTracer engine, in a real headless browser, reporting
+# `fee_juice_contract/src/main.nr:203` for a step whose control reports `/aztec/l5.avm:130` — and
+# 130 is the program counter.
+verify-l5-browser engine='/tmp/l5engine':
+    @L5_ENGINE_DIR="{{engine}}" verification/smoke_browser_shows_noir_source_lines.sh
+
+# The mutation harness. Restores by digest and refuses to start over a tree a previous run left
+# mutated — see the script's header for the two red lines it obeys.
+l5-mutations *arms:
+    @scratchpad/campaign/l5-mutations.sh {{arms}}
+
 verify-browser-replay-dd9:
     @verification/verify_browser_replay_dd9_clean.sh
 

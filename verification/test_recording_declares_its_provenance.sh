@@ -160,11 +160,15 @@ CTRL_PROV="$(rec "$CTRL_DECODE" ct.chain-provenance)"
 echo "== 1. the container carries EXACTLY the declared metadata keys, both directions"
 # ---------------------------------------------------------------------------
 assert_ge "the subject container is a real one" 100000 "$(wc -c <"$SUBJECT_CT" | tr -d ' ')"
-assert_eq "five metadata keys are declared by the module" "5" "$(f subject.declaredKeyCount)"
-assert_eq "…and the container holds exactly those five, no more and no fewer" \
+# SIX SINCE L5, AND THE SIXTH IS `ct.source-provenance`. The count is written here rather than
+# read off the module for 4c's reason — a check whose expectation is derived from its subject
+# cannot notice the subject changing — so adding a key is a red line until somebody writes the new
+# number, which is the intended cost.
+assert_eq "six metadata keys are declared by the module" "6" "$(f subject.declaredKeyCount)"
+assert_eq "…and the container holds exactly those six, no more and no fewer" \
   "$(printf '%s\n' "$(f subject.declaredKeys)" | tr ',' '\n' | sort | paste -sd, -)" \
   "$(keys_in "$SUBJ_DECODE" | tr ',' '\n' | grep -v '^ct.mapping-rung$' | paste -sd, -)"
-assert_eq "…which is what the writer reported it wrote" "5" "$(f subject.logEvents)"
+assert_eq "…which is what the writer reported it wrote" "6" "$(f subject.logEvents)"
 # `ct.mapping-rung` is the WRITER's own record, emitted by `declareRung`, and is deliberately not in
 # the module's declared set — it is not a key this module chooses to write.
 assert_true "…plus the writer's own rung record, which this module does not own" \
@@ -268,6 +272,38 @@ assert_eq "the rung-3 ceiling's reason is in the container, whole" "$(f keys.run
 assert_contains "…naming the type that makes it a ceiling" "ContractClassPublic" "$CEIL"
 assert_contains "…and upstream's own words about the artifact being fetched OFFCHAIN" \
   "OFFCHAIN FETCHED ARTIFACT" "$CEIL"
+# L5 CHANGED THIS REASON'S LAST SENTENCE AND THE CHANGE IS ASSERTED, because the sentence it
+# replaced — "that resolution is not built here" — is the one two other repositories quoted as a
+# ceiling on the product. The reason now says the resolution IS built and that it was RUN for this
+# contract and proved nothing, which is a different and stronger claim: this transaction's contract
+# is at rung 3 because nobody publishes its artifact, not because nobody looked.
+assert_contains "…and that the off-chain resolution EXISTS and was run" \
+  "THAT OFF-CHAIN RESOLUTION IS BUILT" "$CEIL"
+assert_contains "…naming the module that does it" "replay/src/artifact_resolution.ts" "$CEIL"
+assert_not_contains "…and no longer claiming the resolution is unbuilt" \
+  "is not built here" "$CEIL"
+
+# ---------------------------------------------------------------------------
+echo "== 4b. L5: ct.source-provenance is written even when NOTHING resolved"
+#
+# THE KEY IS UNCONDITIONAL AND THIS IS THE ARM THAT SAYS SO. A record that appeared only on
+# source-level recordings would make its own absence ambiguous — a reader could not distinguish a
+# transaction whose artifacts were never looked for from one whose artifacts were looked for and
+# not found, and telling those apart is the whole subject of L5. This fixture's contract is the
+# third-party token, which no registry publishes, so this is the NOT-FOUND case and it must speak.
+# ---------------------------------------------------------------------------
+SRCPROV="$(rec "$SUBJ_DECODE" ct.source-provenance)"
+assert_ge "the source-provenance record is a real record" 200 "${#SRCPROV}"
+assert_contains "…and it says this transaction is NOT source level" "sourceLevel=false" "$SRCPROV"
+assert_contains "…over one contract" "contracts=1" "$SRCPROV"
+assert_contains "…of which zero resolved" "resolved=0" "$SRCPROV"
+assert_contains "…naming the contract and saying no artifact was proved for it" \
+  "artifact=NONE-PROVED" "$SRCPROV"
+# THE CAVEAT TRAVELS WITH THE CONTAINER. A container is published, downloaded and opened by a
+# debugger that has never seen this repository; a source-level claim whose caveat lives in a source
+# comment is a source-level claim with no caveat.
+assert_contains "…and it states what artifactHash does NOT commit to, in the artefact itself" \
+  "does NOT commit to debug_symbols or file_map" "$SRCPROV"
 
 PROD="$(rec "$SUBJ_DECODE" ct.step-producer)"
 assert_prefix "the producer names itself" "$(f subject.producer)" "$PROD"

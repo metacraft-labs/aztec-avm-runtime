@@ -27,6 +27,7 @@ import { TxHash } from '@aztec/stdlib/tx/tx-hash';
 
 import {
   RUNG_BYTECODE_VALUE,
+  RUNG_SOURCE_VALUE,
   buildSettledRecording,
   createReplayNodeClient,
   encodeRecordingInputs,
@@ -35,9 +36,12 @@ import {
   recordingIdFor,
   recordingPass,
   replaySettledTransaction,
+  resolveContractArtifact,
 } from '../src/index.ts';
-import { CtWriter, instantiateCtWriter, resolveTracingConfig, WRITER_PATH_A_PURE_RUST }
-  from '../../ct-host/src/index.ts';
+import { CtWriter, ContractSourceMap, instantiateCtWriter, resolveTracingConfig,
+  WRITER_PATH_A_PURE_RUST } from '../../ct-host/src/index.ts';
+import { artifactCrypto, contractClassPublicLike, liveChainProviders }
+  from './artifact_sources.mjs';
 import { COMPONENTS_VERSION_FIELDS } from '../src/pinned_protocol_version.ts';
 import { createNodeAvmHost } from './node_avm_host.ts';
 import {
@@ -55,6 +59,14 @@ const arg = (name, fallback) => {
 
 const fixturePath = arg('fixture');
 const capturePath = arg('capture');
+// L5: WHERE THE SOURCE TEXT GOES, AND IT IS NOT THE REPORT.
+//
+// A resolved FeeJuice carries 32 source files; the token contract would carry 87. Putting them in
+// the `--json` report would make a capture tool that pipes the report through a shell buffer carry
+// megabytes of Noir per transaction, and `capture-chain.mjs` does exactly that. So the report
+// carries the PATHS and the byte counts — enough to assert over — and the text goes to a file the
+// consumer reads only if it is going to publish it.
+const sourcesPath = arg('sources');
 const modulePath = arg('module', process.env.AVM_WASM_PATH);
 const ctOut = arg('ct');
 const ctWriterPath = arg('ct-writer', process.env.CT_WRITER_WASM_PATH
@@ -126,12 +138,62 @@ const outcome = await replaySettledTransaction(host, client, settled, encodeRepl
 // ---- L3: THE RECORDING --------------------------------------------------------------------------
 // Written BEFORE the wrong-block control pass, deliberately: the control re-runs the loop and would
 // leave `outcome` describing an execution nobody wants a container of.
+// ---- L5: RESOLVE THE ARTIFACTS *BEFORE* THE WRITER EXISTS -----------------------------------
+//
+// THE ORDER IS FORCED AND IT IS NOT A STYLE CHOICE. A session's mapping rung and its column
+// awareness are fixed when the `CtWriter` is CONSTRUCTED — `resolveTracingConfig` throws
+// `ColumnAwarenessUnavailable` for `columns: true` below rung 1 — so whether this transaction can
+// be recorded at source level has to be known before the constructor runs. Resolution reaches a
+// registry and an explorer; the writer reaches a wasm module; doing them in the other order would
+// mean either opening at rung 3 and discovering source we cannot use, or opening at rung 1 on
+// speculation and refusing the container at close.
+const artifactResolutions = [];
+if (ctOut) {
+  const providers = liveChainProviders({
+    // OMITTED FOR A FIXTURE PLAYBACK, ON PURPOSE. `--fixture` is the mode the offline checks run
+    // in, and reaching an explorer from it would make `just verify-l3` depend on somebody else's
+    // uptime — the rule `verify-l1`'s header states. With no chain named the resolver asks the
+    // installed package and nothing else, which is enough for a protocol contract and honestly
+    // reports "no artifact proved" for a third-party one.
+    chain: fixturePath ? undefined : (url.includes('testnet') ? 'aztec-testnet' : 'aztec-mainnet'),
+  });
+  for (const contract of settled.contracts) {
+    if (!contract.resolved || contract.contractClass === undefined) continue;
+    const resolution = await resolveContractArtifact(
+      contract.address,
+      contractClassPublicLike(contract.contractClass),
+      providers,
+      artifactCrypto,
+    );
+    artifactResolutions.push(resolution);
+    console.error(`replay: artifact ${contract.address.slice(0, 14)}… class `
+      + `${contract.contractClassId.slice(0, 14)}… -> `
+      + (resolution.resolved
+        ? `PROVED by ${resolution.artifact.origin} (${resolution.corroboration}, `
+          + `${resolution.artifact.files.size} source file(s))`
+        : `NOT PROVED — ${resolution.candidatesConsidered} candidate(s), `
+          + `${resolution.rejected.length} rejected`));
+  }
+}
+const anythingResolved = artifactResolutions.some(r => r.resolved);
+
 let recording = null;
 if (ctOut) {
   const writerBytes = await readFile(ctWriterPath);
-  // THE SESSION IS OPENED AT RUNG 3 AND THE MODULE IS TOLD SO TWICE — here, and again per contract
-  // through `declareRung`. `recording.ts` explains why 3 is a ceiling and not a shortfall: an Aztec
-  // node serves no debug symbols and no file map, so there is nothing to position a pc with.
+  // THE SESSION RUNG IS NOW A MEASUREMENT AND NOT A CONSTANT.
+  //
+  // It was `RUNG_BYTECODE_VALUE` unconditionally, with a comment explaining that an Aztec node
+  // serves no debug symbols and no file map — which is still true and is still why an unresolved
+  // transaction opens here at rung 3 with `columns: false`. What changed is that when an artifact
+  // has been PROVED off-chain there is a real `(path, line, column)` for a step to carry, and
+  // `SOURCE-MAPPING.md` §3.1's rule then applies: columns are recordable when the recording
+  // resolves to rung 1.
+  //
+  // THE SESSION'S RUNG AND A CONTRACT'S RUNG ARE DIFFERENT QUESTIONS (M29's distinction, kept). The
+  // session's says what SHAPE the positions this recording writes have; each contract's says how
+  // much of ITS execution was covered, and `buildSettledRecording` measures that per contract over
+  // the executed stream. A transaction with one resolved contract opens at rung 1 and can still
+  // declare rung 3 for a second contract that resolved nothing.
   const writer = new CtWriter(
     await instantiateCtWriter(writerBytes),
     resolveTracingConfig({
@@ -140,14 +202,14 @@ if (ctOut) {
         settled.blockData.header.globalVariables.timestamp),
       sourcePath: `/aztec/${settled.txHash}.avm`,
       workdir: '/aztec',
-      mappingRung: RUNG_BYTECODE_VALUE,
-      // COLUMNS OFF, AND THE ARTEFACT REFUSED THEM BEFORE THIS COMMENT EXISTED.
-      // The first draft copied `columns: true` from the browser path, which is at rung 1 and has
-      // real source columns. `resolveTracingConfig` threw `ColumnAwarenessUnavailable`: "enabling
-      // column mode would advertise breakpoint-sharp columns over positions that are program
-      // counters." That is M24's guard catching this milestone in exactly the dishonesty this
-      // milestone is otherwise built to avoid, and it is recorded rather than quietly corrected.
-      columns: false,
+      mappingRung: anythingResolved ? RUNG_SOURCE_VALUE : RUNG_BYTECODE_VALUE,
+      // COLUMNS FOLLOW THE RUNG, AND THE ARTEFACT REFUSED THEM BEFORE THIS COMMENT EXISTED.
+      // L3's first draft copied `columns: true` from the browser path while opening at rung 3, and
+      // `resolveTracingConfig` threw `ColumnAwarenessUnavailable`: "enabling column mode would
+      // advertise breakpoint-sharp columns over positions that are program counters." That guard is
+      // exactly right and it still runs — what L5 changed is that when an artifact is proved the
+      // positions are no longer program counters, so the guard is satisfied rather than bypassed.
+      columns: anythingResolved,
     }, WRITER_PATH_A_PURE_RUST),
     { batchRecords: 64 },
   );
@@ -158,11 +220,70 @@ if (ctOut) {
   console.error(`replay: step pass — ${pass.steps?.length ?? 'NULL'} step(s), revertCode `
     + `${pass.revertCode}, ${pass.verdict.matched}/${pass.verdict.comparisons.length} matched, `
     + 'and it agrees with the hydration pass');
-  recording = buildSettledRecording(writer, settled, { ...outcome, steps: pass.steps }, pass.steps);
+  // THE MAPS ARE BUILT HERE, AFTER THE WRITER, BECAUSE `internPath` NEEDS AN OPEN SESSION. The
+  // proof was done above with no writer at all, which is the split that matters: what is proved is
+  // a fact about the chain, and what is interned is a fact about this container.
+  const sources = artifactResolutions.filter(r => r.resolved).map(r => ({
+    address: r.address,
+    map: new ContractSourceMap(
+      r.artifact.debugInfo,
+      r.artifact.bytecode.length,
+      r.artifact.files,
+      (p, ll) => writer.internPath(p, ll),
+    ),
+    proof: r.reason,
+    corroboration: r.corroboration,
+    origin: r.artifact.origin,
+  }));
+  recording = buildSettledRecording(writer, settled, { ...outcome, steps: pass.steps }, pass.steps,
+    sources);
   await writeFile(ctOut, recording.container);
   console.error(`replay: wrote ${ctOut} — ${recording.bytes} bytes, ${recording.events} event(s), `
     + `${recording.steps} step(s), ${recording.callsOpened} frame(s), `
-    + `${recording.logEvents} log event(s), rung ${recording.declaredRung}`);
+    + `${recording.logEvents} log event(s), rung ${recording.declaredRung}, `
+    + `sourceLevel ${recording.sourceLevel}, positioned ${recording.stepsPositioned}/`
+    + `${recording.stepsPositioned + recording.stepsUnpositioned}`);
+  for (const c of recording.contractRungs) {
+    console.error(`replay:   ${c.address.slice(0, 14)}… rung ${c.rung} `
+      + `(${c.positioned}/${c.steps} positioned${c.resolved ? '' : ', no artifact proved'})`);
+  }
+
+  // ---- L5: THE SOURCE BUNDLE, KEYED BY CONTRACT CLASS ID ---------------------------------------
+  //
+  // **THE KEY IS THE CLASS ID AND NOT THE ADDRESS**, because the class id IS the chain's code
+  // hash: two instances of one class run the same bytecode and must not each publish a copy of the
+  // same source, and one address whose class was updated must not have two versions of its source
+  // collapsed onto one key. `blocktracer`'s `CodeEdge` is documented as "versioned edge keyed by
+  // code hash, never a column" and this is the value that makes that true here.
+  //
+  // Written only for contracts whose artifact was PROVED. A bundle for an unproved contract would
+  // be source text the chain has not committed to, published beside a trace, which is the whole
+  // failure this milestone is built around.
+  if (sourcesPath) {
+    const bundles = artifactResolutions.filter(r => r.resolved).map(r => ({
+      address: r.address,
+      codeHash: r.contractClassId,
+      artifactHash: r.artifact.artifactHash,
+      origin: r.artifact.origin,
+      shape: r.artifact.shape,
+      corroboration: r.corroboration,
+      agreeingDistributors: r.agreeingDistributors,
+      debugDigest: r.artifact.debugDigest,
+      // `path -> content`, the shape `writeSourceBundle`'s `sources` object wants. The paths are
+      // the artifact's own — absolute build paths out of upstream's CI, e.g.
+      // `/home/aztec-dev/aztec-packages/noir-projects/…/main.nr` — and they are NOT rewritten,
+      // because they are the exact strings this container interned and a bundle whose keys do not
+      // match the interned paths is a bundle the viewer cannot use.
+      files: Object.fromEntries([...r.artifact.files.values()].map(f => [f.path, f.source])),
+    }));
+    await writeFile(sourcesPath, `${JSON.stringify({
+      txHash: settled.txHash,
+      sourceLevel: recording.sourceLevel,
+      bundles,
+    }, null, 2)}\n`);
+    console.error(`replay: wrote ${sourcesPath} — ${bundles.length} source bundle(s), `
+      + `${bundles.reduce((n, b) => n + Object.keys(b.files).length, 0)} file(s)`);
+  }
 }
 
 // ---- THE CONTROL'S DATA, CAPTURED AS A REAL CHAIN ANSWER ----------------------------------------
@@ -224,7 +345,30 @@ const report = {
     declaredRung: recording.declaredRung, distinctOpcodes: recording.distinctOpcodes,
     contexts: recording.contexts, stepsPositioned: recording.stepsPositioned,
     stepsUnpositioned: recording.stepsUnpositioned,
+    // L5. `sourceLevel` is the field `blocktracer`'s manifest publishes, and it travels with the
+    // per-contract detail so a consumer never has to infer the second from the first.
+    sourceLevel: recording.sourceLevel,
+    contractRungs: recording.contractRungs,
   },
+  // L5: THE RESOLUTION ITSELF, INCLUDING EVERY REJECTION. A capture that recorded only successes
+  // could not tell "we did not look" from "we looked and nothing matched", and the second is the
+  // sentence a transaction page has to be able to say.
+  artifacts: artifactResolutions.map(r => (r.resolved
+    ? {
+      address: r.address, contractClassId: r.contractClassId, resolved: true,
+      origin: r.artifact.origin, shape: r.artifact.shape,
+      artifactHash: r.artifact.artifactHash, debugDigest: r.artifact.debugDigest,
+      sourceFiles: r.artifact.files.size, corroboration: r.corroboration,
+      agreeingDistributors: r.agreeingDistributors,
+      sources: [...r.artifact.files.values()].map(f => ({ path: f.path, bytes: f.source.length })),
+      reason: r.reason,
+      rejected: r.rejected.map(x => ({ origin: x.origin, fault: x.fault })),
+    }
+    : {
+      address: r.address, contractClassId: r.contractClassId, resolved: false,
+      candidatesConsidered: r.candidatesConsidered, reason: r.reason,
+      rejected: r.rejected.map(x => ({ origin: x.origin, fault: x.fault })),
+    })),
   roots: outcome.roots.declarations,
   rootsAnyAgree: outcome.roots.anyAgrees,
   skipped: outcome.rounds.flatMap(r => r.skipped.map(s => ({ value: s.value, reason: s.reason }))),
