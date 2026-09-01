@@ -74,7 +74,7 @@ and, lazily, never in any eager set:
 | `chunks/FeeJuice-*.js` | 185.88 KB | yes, when a fee payer is funded |
 | `chunks/ContractInstanceRegistry-*.js` | 103.25 KB | no |
 
-**8,230.78 KB gzipped across every chunk; 265.79 KB is what the reference entry point costs.** That is
+**8,230.98 KB gzipped across every chunk; 265.79 KB is what the reference entry point costs.** That is
 the whole of DD-11 in two numbers, and the difference between them is exactly the two things DD-11
 names.
 

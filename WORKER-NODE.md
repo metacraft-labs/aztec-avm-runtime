@@ -213,7 +213,7 @@ now, three assertions each.)*
 | `node/node.js` | 225.36 KB, 4 files | 225.36 KB, 4 files | 225.49 KB, 4 files | **225.48 KB, 4 files** |
 | `worker.js` | — | 282.40 KB, 9 files | 290.78 KB, 11 files | **293.67 KB, 11 files** |
 | `worker-demo.js` | — | 283.48 KB, 11 files | 291.85 KB, 13 files | **294.75 KB, 13 files** |
-| `wallet-demo.js` | — | — | 309.99 KB, 13 files | **344.15 KB, 13 files** |
+| `wallet-demo.js` | — | — | 309.99 KB, 13 files | **344.36 KB, 13 files** |
 
 *(M35 moved every row, and only one of them by much. The wallet demo carries the private-execution
 surface and pays 22 KB for it; the other six moved by 0.13 to 2.37 KB because an entry point that
