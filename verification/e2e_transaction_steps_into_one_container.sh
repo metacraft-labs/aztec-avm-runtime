@@ -280,4 +280,56 @@ assert_eq "and its depth is the browser run's" "1" "$(m39_trace transaction.maxD
 assert_eq "the two returns hashes agreed in the browser, which is why one tape replays into two" \
   "true" "$(m39_trace_top transaction.returnsHashesEqual)"
 
+echo "== 10. EVERY CONTAINER FIGURE NESTED-CALLS.md STATES IS READ BACK OUT OF THE CONTAINER"
+# THE FIGURES COMPARED HERE COME FROM THE CONTAINER, NOT FROM THE PROBE'S REPORT — the same rule the
+# rest of this check follows, applied to the document. `_m38_doc_figures.py` walks LINES and takes
+# the Nth bold figure on the row a needle names, because `str_has_re` is bash's `=~` and its `.`
+# matches a newline, so the obvious spelling of "anchor the needle to the row" is not anchored.
+[ -s "$M39_DOC" ] || die "there is no write-up at $M39_DOC"
+TX_S="$(m39_container "$TX_CT" steps)";        ONE_S="$(m39_container "$ONE_CT" steps)"
+TX_C="$(m39_container "$TX_CT" withColumn)";   ONE_C="$(m39_container "$ONE_CT" withColumn)"
+TX_L="$(m39_container "$TX_CT" distinctLines)"; ONE_L="$(m39_container "$ONE_CT" distinctLines)"
+TX_F="$(m39_container "$TX_CT" distinctPaths)"; ONE_F="$(m39_container "$ONE_CT" distinctPaths)"
+TX_P="$(m39_container "$TX_CT" paths)";        ONE_P="$(m39_container "$ONE_CT" paths)"
+TX_CA="$(m39_container "$TX_CT" calls)";       ONE_CA="$(m39_container "$ONE_CT" calls)"
+TX_B="$(stat -c %s "$TX_CT")";                 ONE_B="$(stat -c %s "$ONE_CT")"
+TX_RS="$(m39_trace transaction.steps)";        ONE_RS="$(m39_trace parentOnly.steps)"
+TX_FR="$(m39_trace transaction.frameCount)";   ONE_FR="$(m39_trace parentOnly.frameCount)"
+m38_absent txSteps="$TX_S" oneSteps="$ONE_S" txCols="$TX_C" oneCols="$ONE_C" txLines="$TX_L" \
+  oneLines="$ONE_L" txFiles="$TX_F" oneFiles="$ONE_F" txPaths="$TX_P" onePaths="$ONE_P" \
+  txCalls="$TX_CA" oneCalls="$ONE_CA" txBytes="$TX_B" oneBytes="$ONE_B" \
+  txRecorded="$TX_RS" oneRecorded="$ONE_RS" txFrames="$TX_FR" oneFrames="$ONE_FR"
+# BOTH COLUMNS OF EVERY ROW. M38's review found that thirteen of a write-up's twenty-six table
+# figures — every second column of one table — were stated and compared by NOTHING, under a header
+# claiming all of them were re-derived on every run. The index is the 0-based bold figure ON the row.
+m38_assert_doc "NESTED-CALLS.md section 4" "$M39_DOC" \
+  "frames in the container|0|$TX_FR"                  "frames in the container|1|$ONE_FR" \
+  "steps the recorder wrote|0|$TX_RS"                 "steps the recorder wrote|1|$ONE_RS" \
+  "\`Step\` events the pinned reader reads|0|$TX_S"   "\`Step\` events the pinned reader reads|1|$ONE_S" \
+  "carrying a COLUMN|0|$TX_C"                         "carrying a COLUMN|1|$ONE_C" \
+  "\`Call\` records|0|$TX_CA"                         "\`Call\` records|1|$ONE_CA" \
+  "distinct \`(path, line)\` positions|0|$TX_L"       "distinct \`(path, line)\` positions|1|$ONE_L" \
+  "distinct source files stepped|0|$TX_F"             "distinct source files stepped|1|$ONE_F" \
+  "paths the container interns|0|$TX_P"               "paths the container interns|1|$ONE_P" \
+  "container bytes|0|$TX_B"                           "container bytes|1|$ONE_B"
+# AND THE PROSE FIGURES UNDER THE TABLE, which are the half nothing compares unless it is told to.
+m38_assert_doc "NESTED-CALLS.md section 4 prose and section 5b" "$M39_DOC" \
+  "Both containers reach|0|$TX_L"                     "Both containers reach|1|$TX_F" \
+  "opcodes that halt was|0|$(m38_num "$(m39_trace transaction.frames.0.acirOpcodes)" 'caller acir')"
+assert_true "and the write-up states the identity rather than the two numbers" \
+  str_has_sub "$(cat "$M39_DOC")" 'container = probe + frames'
+# THE COMPARER IS CALIBRATED HERE TOO, over THIS document, rather than trusted because another check
+# calibrated it over another one. Both of its refusals are exercised: a figure that disagrees is
+# reported as BAD naming both sides, and a needle that names no row is reported as MISSING. Without
+# these, "no figure disagrees" is a sentence a comparer whose needles had all stopped matching would
+# also produce — which is this campaign's most repeated shape.
+assert_true "a wrong expected value over THIS document is reported as BAD, naming both sides" \
+  str_has_sub "$(m38_doc_figures "$M39_DOC" "\`Step\` events the pinned reader reads|0|999999")" \
+    "expected 999999"
+assert_true "and a needle that names no row in it is reported as MISSING" \
+  str_has_sub "$(m38_doc_figures "$M39_DOC" "a row this document does not have|0|1")" \
+    "no row carries that needle"
+assert_true "and a needle that names TWO rows is refused rather than matched to the first" \
+  str_has_sub "$(m38_doc_figures "$M39_DOC" "derived|0|1")" "rows carry that needle"
+
 m39_finish

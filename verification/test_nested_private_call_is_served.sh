@@ -352,4 +352,63 @@ PY
 )" = "yes"
 done
 
+echo "== 13. EVERY FIGURE NESTED-CALLS.md STATES IS THE ONE THE ARTEFACTS PRODUCE"
+# THE COMPARER IS M38's, AND ITS TWO REFUSALS ARE EXERCISED BELOW. `str_has_re` is bash's `=~`,
+# whose `.` MATCHES A NEWLINE, so the obvious spelling of "anchor the needle to the row" is not
+# anchored at all — thirteen of M38's assertions were written that way and reported 33 / 0 over a
+# document stating the reverse of its own data. `_m38_doc_figures.py` walks LINES, takes the Nth
+# bold figure on the row a needle names, refuses a needle that names more than one row, and reports
+# how many figures it compared, so "no disagreement" cannot be "nothing compared".
+[ -s "$M39_DOC" ] || die "there is no write-up at $M39_DOC"
+REQS_TOTAL=29; REQS_HAVE=5; REQS_MISSING=24; REQS_SHARE=6; REQS_NEW=4
+m39_assert_doc_ok() { m38_assert_doc "$@"; }
+P_BYTES="$(m39_arm nested.report.run.bytecodeBytes)"
+P_WITNESS="$(m39_arm nested.report.run.solvedWitnessSize)"
+C_BYTES="$(m39_arm nested.report.run.nested.0.bytecodeBytes)"
+C_WITNESS="$(m39_arm nested.report.run.nested.0.solvedWitnessSize)"
+P_CALLS="$(m39_arm nested.report.run.oracleCalls | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+C_CALLS="$(m39_arm nested.report.run.nested.0.oracleCalls | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+SERVED_N="$(m39_arm nested.report.run.servedSetSize)"
+COMPAT_N="$(m39_arm nested.report.run.wireCompatApplied)"
+BH_CALLS="$(m39_arm bothHalves.report.run.oracleCalls | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+BH_OUT_N="$(m39_arm bothHalves.report.run.publicInputs.publicCallRequests | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+BH_IN_N="$(m39_arm bothHalves.report.run.nested.0.publicInputs.publicCallRequests | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+BH_END="$(m39_arm bothHalves.report.run.publicInputs.endSideEffectCounter)"
+LEGACY_N="$( cd "$REPO_ROOT" && python3 -c '
+import re, sys
+src = open(sys.argv[1]).read()
+body = src[src.index("export const LEGACY_ORACLE_REGISTRY"):]
+print(len(set(re.findall(r"^  (aztec_[A-Za-z0-9_]+): legacyOracle", body, re.M))))' \
+  "$BROWSER_SRC/vendor/pxe/contract_function_simulator/oracle/legacy_oracle_registry.ts" )"
+A_DECL="$(m39_arm anchorLine.report.contextInputFieldsDeclared)"
+N_DECL="$(m39_arm nested.report.contextInputFieldsDeclared)"
+m38_absent pBytes="$P_BYTES" pWitness="$P_WITNESS" cBytes="$C_BYTES" cWitness="$C_WITNESS" \
+  pCalls="$P_CALLS" cCalls="$C_CALLS" servedN="$SERVED_N" compatN="$COMPAT_N" \
+  bhCalls="$BH_CALLS" bhOut="$BH_OUT_N" bhIn="$BH_IN_N" bhEnd="$BH_END" legacyN="$LEGACY_N" \
+  aDecl="$A_DECL" nDecl="$N_DECL"
+m38_assert_doc "NESTED-CALLS.md sections 1, 3 and 5" "$M39_DOC" \
+  "distinct requirements|0|$REQS_TOTAL" \
+  "of them already present|0|$REQS_HAVE" \
+  "of them missing|0|$REQS_MISSING" \
+  "share what is currently per-frame|0|$REQS_SHARE" \
+  "genuinely new subsystems|0|$REQS_NEW" \
+  "\`Parent.entry_point\` bytecode|0|$P_BYTES" \
+  "the caller's solved witness|0|$P_WITNESS" \
+  "oracle calls the caller made|0|$P_CALLS" \
+  "the callee's solved witness|0|$C_WITNESS" \
+  "oracle calls the callee made|0|$C_CALLS" \
+  "\`Child.value\` bytecode|0|$C_BYTES" \
+  "the served set with a nested-call source attached|0|$SERVED_N" \
+  "times the call-private wire regrouping fired|0|$COMPAT_N" \
+  "oracle calls the outer frame made|0|$BH_CALLS" \
+  "public calls the outer frame enqueued|0|$BH_OUT_N" \
+  "public calls the nested frame enqueued|0|$BH_IN_N" \
+  "side-effect counter range ends at|0|$BH_END"
+# AND THE PROSE FIGURES UNDER THOSE TABLES, which are the half M38's own review found stated and
+# compared by NOTHING — thirteen of twenty-six, under a header claiming all were re-derived.
+m38_assert_doc "NESTED-CALLS.md sections 5a and 6" "$M39_DOC" \
+  "Entries in that table|0|$LEGACY_N" \
+  "context width the \`deletion_era\` artifacts declare|0|$N_DECL" \
+  "context width the anchor line declares|0|$A_DECL"
+
 m39_finish
