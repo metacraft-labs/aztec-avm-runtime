@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test_public_half_runs_enqueued_calls
+# e2e_joined_public_half_executed
 #
 # M40 verification: **the PUBLIC half of a transaction whose private half executed, executed.**
 #
@@ -37,7 +37,7 @@
 
 set -uo pipefail
 
-TEST_NAME="test_public_half_runs_enqueued_calls"
+TEST_NAME="e2e_joined_public_half_executed"
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 # lib_m23_chain.sh first: lib_m27_browser.sh dies on M23_REQUIRED_EXPORTS otherwise.
 . "$(dirname "${BASH_SOURCE[0]}")/lib_m23_chain.sh"

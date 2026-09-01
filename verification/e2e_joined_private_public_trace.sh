@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# e2e_both_halves_step_in_the_browser
+# e2e_joined_private_public_trace
 #
 # M40 verification: **both halves of one transaction step in Chromium, and the two containers the
 # page downloaded are an explicit join the pinned reader opens.**
@@ -40,7 +40,7 @@
 
 set -uo pipefail
 
-TEST_NAME="e2e_both_halves_step_in_the_browser"
+TEST_NAME="e2e_joined_private_public_trace"
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 . "$(dirname "${BASH_SOURCE[0]}")/lib_m23_chain.sh"
 . "$(dirname "${BASH_SOURCE[0]}")/lib_m27_browser.sh"

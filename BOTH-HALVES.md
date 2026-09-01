@@ -1,6 +1,6 @@
 <!-- M40's write-up. Every figure in §2, §3 and §4 is re-derived from the artefacts on every run and
-     compared AGAINST THIS FILE — by `test_public_half_runs_enqueued_calls` §8 and
-     `e2e_both_halves_step_in_the_browser` §7 — each matched on the line that NAMES ITS SUBJECT
+     compared AGAINST THIS FILE — by `e2e_joined_public_half_executed` §8 and
+     `e2e_joined_private_public_trace` §7 — each matched on the line that NAMES ITS SUBJECT
      rather than anywhere in the file, and as a delimited figure on that line rather than as a run
      of characters anywhere in it. Do not edit the numbers by hand; re-run and copy what the CHECK
      prints. -->
@@ -36,7 +36,7 @@ enqueues a second directly.
 
 ## 2. THE PUBLIC HALF EXECUTES, FROM THE CALLDATA THE CIRCUIT COMMITTED TO
 
-**Owned by `test_public_half_runs_enqueued_calls`.**
+**Owned by `e2e_joined_public_half_executed`.**
 
 | | derived |
 |---|---|
@@ -113,7 +113,7 @@ a corrected constant.
 
 ## 3. THE PRIVATE HALF STEPS IN THE SAME PAGE
 
-**Owned by `e2e_both_halves_step_in_the_browser`.**
+**Owned by `e2e_joined_private_public_trace`.**
 
 Two wasm modules and **no third writer**:
 

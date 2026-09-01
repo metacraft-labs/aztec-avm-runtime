@@ -3711,18 +3711,18 @@ m40-trace-arms:
     echo "m40-trace-arms: wrote $work/joined-transaction.json"
 
 verify-m40-public:
-    @verification/test_public_half_runs_enqueued_calls.sh
+    @verification/e2e_joined_public_half_executed.sh
 
 verify-m40-browser:
-    @verification/e2e_both_halves_step_in_the_browser.sh
+    @verification/e2e_joined_private_public_trace.sh
 
 verify-m40:
     #!/usr/bin/env bash
     set -uo pipefail
     rc=0
     for check in \
-      test_public_half_runs_enqueued_calls \
-      e2e_both_halves_step_in_the_browser
+      e2e_joined_public_half_executed \
+      e2e_joined_private_public_trace
     do
       echo "=== $check"
       verification/"$check".sh || rc=1
