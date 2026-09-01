@@ -233,25 +233,25 @@ DOC="$(cat "$M38_DOC")"
 # that states the reverse of the data — M24's OQ-6 finding, and the reason every row here names what
 # it is about.
 assert_true "the ladder's replay row states its step count" \
-  str_has_re "$DOC" 'a frame that completed .*\*\*'"$(m38_arm replay.steps)"'\*\*'
+  str_has_line_re "$DOC" 'a frame that completed .*\*\*'"$(m38_arm replay.steps)"'\*\*'
 assert_true "the truncate row states its own" \
-  str_has_re "$DOC" 'last entry dropped .*\*\*'"$(m38_arm truncate.steps)"'\*\*'
+  str_has_line_re "$DOC" 'last entry dropped .*\*\*'"$(m38_arm truncate.steps)"'\*\*'
 assert_true "the refuseAll row states its own" \
-  str_has_re "$DOC" 'emptied .*\*\*'"$(m38_arm refuseAll.steps)"'\*\*'
+  str_has_line_re "$DOC" 'emptied .*\*\*'"$(m38_arm refuseAll.steps)"'\*\*'
 assert_true "the transfer row states its own" \
-  str_has_re "$DOC" 'STOPPED at an oracle M35 does not serve .*\*\*'"$(m38_arm transfer.steps)"'\*\*'
+  str_has_line_re "$DOC" 'STOPPED at an oracle M35 does not serve .*\*\*'"$(m38_arm transfer.steps)"'\*\*'
 assert_true "the container table states the replay arm's ACIR opcode count" \
-  str_has_re "$DOC" 'ACIR opcodes in the circuit.*\*\*'"$(m38_arm replay.acirOpcodes)"'\*\*'
+  str_has_line_re "$DOC" 'ACIR opcodes in the circuit.*\*\*'"$(m38_arm replay.acirOpcodes)"'\*\*'
 assert_true "and the step records the recorder wrote" \
-  str_has_re "$DOC" 'step records the recorder wrote.*\*\*'"$(m38_arm replay.steps)"'\*\*'
+  str_has_line_re "$DOC" 'step records the recorder wrote.*\*\*'"$(m38_arm replay.steps)"'\*\*'
 assert_true "and the Step events the reader reads back" \
-  str_has_re "$DOC" 'the pinned .ct-print. reads back.*\*\*'"$R_STEPS"'\*\*'
+  str_has_line_re "$DOC" 'the pinned .ct-print. reads back.*\*\*'"$R_STEPS"'\*\*'
 BYTES_WITH_COMMAS="$(python3 -c 'import sys; print(format(int(sys.argv[1]), ","))' \
   "$(m38_num "$(m38_arm replay.containerBytes)" 'replay bytes')")"
 assert_true "the byte figure rendered with separators is not empty" \
   test -n "$BYTES_WITH_COMMAS"
 assert_true "and the container's byte count, in the document's own thousands separators" \
-  str_has_re "$DOC" 'container bytes.*\*\*'"$BYTES_WITH_COMMAS"'\*\*'
+  str_has_line_re "$DOC" 'container bytes.*\*\*'"$BYTES_WITH_COMMAS"'\*\*'
 
 echo "== 8. THE UNPUBLISHED WORKTREE IS UNTOUCHED, WHICH OQ-7's VERDICT RESTS ON"
 # M38 builds from `noir` on `codetracer`, not from the `wasm/webpage` worktree, precisely so that

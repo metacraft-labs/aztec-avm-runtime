@@ -203,14 +203,14 @@ DOC="$(cat "$M38_DOC")"
 # EACH FIGURE IS MATCHED ON THE LINE THAT NAMES ITS SUBJECT rather than anywhere in the file, which
 # is M24's OQ-6 finding: every figure can be present while the table states the reverse of the data.
 assert_true "the write-up states the completing frame's call count on its own row" \
-  str_has_re "$DOC" "oracle calls it made.*\\*\\*$OBSERVED\\*\\*"
+  str_has_line_re "$DOC" "oracle calls it made.*\\*\\*$OBSERVED\\*\\*"
 assert_true "and how many of them are answerable synchronously" \
-  str_has_re "$DOC" "answerable synchronously in wasm.*\\*\\*$SYNC_N\\*\\*"
+  str_has_line_re "$DOC" "answerable synchronously in wasm.*\\*\\*$SYNC_N\\*\\*"
 assert_true "and how many need a host round trip" \
-  str_has_re "$DOC" "needing a host round trip.*\\*\\*$HOST_N\\*\\*"
+  str_has_line_re "$DOC" "needing a host round trip.*\\*\\*$HOST_N\\*\\*"
 assert_true "and how many are unimplemented" \
-  str_has_re "$DOC" "unimplemented.*\\*\\*$UNIMPL_N\\*\\*"
+  str_has_line_re "$DOC" "unimplemented.*\\*\\*$UNIMPL_N\\*\\*"
 assert_true "and the handler's async method count, which is the boundary's size" \
-  str_has_re "$DOC" "handler methods declared .async.*\\*\\*$ASYNC_N\\*\\*"
+  str_has_line_re "$DOC" "handler methods declared .async.*\\*\\*$ASYNC_N\\*\\*"
 
 m38_finish

@@ -35,7 +35,20 @@ load).
 Each of these is a defect that shipped, not a precaution.
 
 ### An assertion must be capable of failing
-**Forty-three instances.** (**The residuals pass added the 42nd and the 43rd on 2026-08-31, and
+**Forty-four instances.** (**M38 added the 44th, and a TOOL made it: `str_has_re` is bash's `=~`,
+whose `.` MATCHES A NEWLINE.** Thirteen document assertions across M38's two checks were written in
+M24's OQ-6 shape — anchor the needle to the ROW that names its subject, not to the file — as
+`str_has_re "$DOC" 'subject.*\*\*N\*\*'`, and every one of them could match a subject on one line
+and a figure many lines below it. Measured, by swapping two figures onto each other's rows in
+`PRIVATE-TRACE.md` §1: the old form reports **33 assertions, 0 failures** over a document stating
+the reverse of its own data, and `str_has_line_re` — which tries the pattern against each LINE —
+reports **33 / 2**, naming both rows. This file already records that `str_has_re` is not
+`str_has_line_re` and that bash has no `REG_NEWLINE`; what it had not said is that the difference
+defeats row anchoring, which is the remedy the paragraph two entries above prescribes. **The census
+is over the FORM rather than the spelling**: all 33 other `str_has_re` uses in the repository are
+applied to a single-value haystack (a hash, a count, one line) with `^…$` anchors, where the
+newline behaviour cannot change the answer, and the one that takes a multi-line haystack has no
+`.*` in it. One family, two checks, both M38's own.) (**The residuals pass added the 42nd and the 43rd on 2026-08-31, and
 both were green over a statement that was false.** The 42nd is
 `test_fr_rendering_matches_noir_tracer`'s `str_has_sub "$DOC_TEXT" '…/tracer_glue.rs:160-189'` —
 an assertion that a STRING IS IN A DOCUMENT, standing in for the claim that the citation is
