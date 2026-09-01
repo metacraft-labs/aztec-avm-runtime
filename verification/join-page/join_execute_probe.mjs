@@ -89,9 +89,43 @@ function adaptStorageGlobals(input) {
   return { artifact: copy, lifted };
 }
 
-const adapted = adaptStorageGlobals(artifact);
-console.log(`  storage-globals adapter lifted ${adapted.lifted} entry(ies) ` +
-  `(0 would mean the shapes already agree)`);
+/**
+ * THE SECOND ADAPTER, AND IT IS THE ONE THAT MADE THE CALL LAND.
+ *
+ * `aztec-nr`'s dispatch macro renames every externally-callable function to
+ * `__aztec_nr_internals__<name>` and generates a dispatcher that CALLS the prefixed name while
+ * computing its selector over the ORIGINAL one (`dispatch.nr:46-47`, `fn_name =
+ * function.name()`). The prefix is a compiler-internal detail; it is not part of the on-chain
+ * ABI identity.
+ *
+ * But it is what lands in the artifact's `name` field, so any host deriving a selector from the
+ * artifact — `getFunctionSelector(fn.name, artifact)`, which is what upstream's own helpers do —
+ * derives it over the prefixed name and calls a selector no branch matches. The dispatcher's
+ * last arm is `panic(f"Unknown selector {selector}")` (`dispatch.nr:116`).
+ *
+ * THIS WAS FOUND WITH THE TRACE THIS CHAIN PRODUCES, not by reasoning. The 374-step container's
+ * interned paths were `/aztec/tx.avm`, `dispatch.nr` and `std/panic.nr`; 73 steps sat on
+ * `dispatch.nr:116` and the last 7 on `std/panic.nr:8`. The authwit hypothesis was wrong and the
+ * step positions said so before it was tested.
+ */
+function stripInternalsPrefix(input) {
+  const PREFIX = '__aztec_nr_internals__';
+  const copy = JSON.parse(JSON.stringify(input));
+  let renamed = 0;
+  for (const fn of copy.functions ?? []) {
+    if (typeof fn.name === 'string' && fn.name.startsWith(PREFIX)) {
+      fn.name = fn.name.slice(PREFIX.length);
+      renamed += 1;
+    }
+  }
+  return { artifact: copy, renamed };
+}
+
+const storageAdapted = adaptStorageGlobals(artifact);
+const adapted = stripInternalsPrefix(storageAdapted.artifact);
+adapted.lifted = storageAdapted.lifted;
+console.log(`  adapters: storage-globals lifted ${adapted.lifted}, ` +
+  `internals-prefix renamed ${adapted.renamed} (0 either would mean the shapes already agree)`);
 
 /**
  * A UUIDv7. `ct-print` REFUSES a v4 — "expected version nibble '7' at position 14, got '4'" — and
@@ -143,9 +177,11 @@ try {
   report = await runTokenTransfer(opened, adapted.artifact, {
     // Read off the artifact above, not guessed: this SimpleToken is built against a later
     // aztec-nr whose macros prefix the generated entry points.
-    transferFunction: '__aztec_nr_internals__public_transfer',
-    balanceFunction: '__aztec_nr_internals__public_balance_of',
-    constructorFunction: '__aztec_nr_internals__constructor',
+    // UNPREFIXED, because `stripInternalsPrefix` has restored the names the dispatcher's
+    // selectors are defined over. With the prefixed names this call reverted at 374 steps.
+    transferFunction: 'public_transfer',
+    balanceFunction: 'public_balance_of',
+    constructorFunction: 'constructor',
     constructorArgs: ['Tok', 'TOK', 18],
     // `public_balances` (slot 3), NOT `balances` (slot 1). `balances` is the PRIVATE note set —
     // `Owned<BalanceSet>` — and seeding it produced a transaction that read 1000 back through the
@@ -177,6 +213,35 @@ if (report.registeredClasses >= 1 && report.registeredInstances >= 1) {
 // reverting transaction perfectly happily. M29's defect was exactly this conflation.
 if (report.revertCode === 0) ok('revertCode is 0 — the transaction did not revert');
 else bad(`revertCode is ${report.revertCode} — the transaction REVERTED`);
+
+// ===========================================================================================
+// THE STATE MOVED, WHICH IS THE ONLY ASSERTION HERE THAT IS ABOUT AN EFFECT.
+// ===========================================================================================
+//
+// Everything above is a field on a report. A driver that registered nothing and executed
+// nothing could in principle produce `revertCode: 0`, and this milestone has already met a run
+// that reported `before.sender = 1000` by reading the balance back through the SAME derivation
+// that wrote it — self-consistent, and worth nothing. A public data tree that CHANGED, by the
+// amount the call asked for, in both directions, is a different kind of claim.
+const before = report.balances.before;
+const after = report.balances.after;
+const asNumber = (v) => (v === 'EMPTY' ? 0n : BigInt(v));
+const moved = Number(process.env.JOIN_TRANSFER_AMOUNT || 5);
+const senderDelta = asNumber(before.sender) - asNumber(after.sender);
+const receiverDelta = asNumber(after.receiver) - asNumber(before.receiver);
+console.log(`  BALANCES sender ${before.sender} -> ${after.sender}, ` +
+  `receiver ${before.receiver} -> ${after.receiver}`);
+if (senderDelta === BigInt(moved)) ok(`the sender's balance FELL by exactly ${moved}`);
+else bad(`the sender's balance moved by ${senderDelta}, expected ${moved}`);
+if (receiverDelta === BigInt(moved)) ok(`the receiver's balance ROSE by exactly ${moved}`);
+else bad(`the receiver's balance moved by ${receiverDelta}, expected ${moved}`);
+// Conservation: the two deltas are read from two different leaves, so a driver that wrote one
+// number twice fails here and passes both checks above.
+if (senderDelta === receiverDelta && senderDelta > 0n) {
+  ok('and the two deltas are equal and non-zero — the tokens moved between two leaves');
+} else {
+  bad(`the deltas disagree: sender ${senderDelta}, receiver ${receiverDelta}`);
+}
 
 // The instruction count lives on the RECORDING, not on this report — `TokenTransferReport` has
 // no such field, and reading one off it printed `undefined` next to a green tick until the
