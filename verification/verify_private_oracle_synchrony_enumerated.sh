@@ -197,20 +197,46 @@ assert_eq "and it did not join sync-in-wasm" "$SYNC_N" "$P_SYNC"
 assert_eq "nor host-round-trip" "$HOST_N" "$P_HOST"
 assert_eq "nor unimplemented" "$UNIMPL_N" "$P_UNIMPL"
 
-echo "== 6. THE DOCUMENT CARRIES WHAT WAS MEASURED"
+echo "== 6. THE DOCUMENT CARRIES WHAT WAS MEASURED, ROW BY ROW"
 [ -s "$M38_DOC" ] || die "no $M38_DOC"
+# EVERY FIGURE §1 STATES IS COMPARED AGAINST THE ARTEFACTS, ON THE ROW THAT NAMES ITS SUBJECT.
+#
+# The first version of this section matched five of them with `str_has_re "$DOC" 'subject.*N'` —
+# which is bash's `=~`, whose `.` MATCHES A NEWLINE, so a subject on one line and a figure many
+# lines below it satisfied the needle. Measured by swapping two figures onto each other's rows:
+# that form reported 33 assertions and 0 failures over a document stating the reverse of its own
+# data. `_m38_doc_figures.py` walks LINES, refuses a needle that names more than one row, and
+# reports what it compared so "no disagreement" cannot be "nothing compared".
+DISTINCT_N="$(printf '%s' "$DISTINCT" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+m38_require_num observed="$OBSERVED" sync="$SYNC_N" host="$HOST_N" unimplemented="$UNIMPL_N" \
+  distinct="$DISTINCT_N" methods="$METHODS" asyncMethods="$ASYNC_N"
+m38_assert_doc "PRIVATE-TRACE.md section 1" "$M38_DOC" \
+  "oracle calls it made|0|$OBSERVED" \
+  "of them answerable synchronously in wasm|0|$SYNC_N" \
+  "of them needing a host round trip|0|$HOST_N" \
+  "of them unimplemented|0|$UNIMPL_N" \
+  "distinct oracles among them|0|$DISTINCT_N" \
+  "handler methods declared across the served and discovery partitions|0|$METHODS" \
+  "handler methods declared \`async\`|0|$ASYNC_N"
+
+# THE COMPARER IS SHOWN TO SAY NO. Without this the three assertions above are satisfied by a
+# comparer that matches nothing and reports nothing — which is what the form they replace did.
+CONTROL="$(m38_doc_figures "$M38_DOC" "oracle calls it made|0|999")"
+assert_true "a wrong expected value is reported as BAD, naming both sides" \
+  str_has_sub "$CONTROL" "BAD oracle calls it made | 0 | expected 999 | got $OBSERVED"
+CONTROL2="$(m38_doc_figures "$M38_DOC" "a subject no row carries|0|1")"
+assert_true "and a needle that names no row is reported as MISSING" \
+  str_has_sub "$CONTROL2" "MISSING a subject no row carries"
+
+# AND THE NINE ASYNC METHODS ARE NAMED IN THE DOCUMENT, NOT ONLY COUNTED. A count moves when
+# upstream adds an oracle; the membership is what decides whether a frame can be replayed, and it is
+# the sentence a reader acts on.
 DOC="$(cat "$M38_DOC")"
-# EACH FIGURE IS MATCHED ON THE LINE THAT NAMES ITS SUBJECT rather than anywhere in the file, which
-# is M24's OQ-6 finding: every figure can be present while the table states the reverse of the data.
-assert_true "the write-up states the completing frame's call count on its own row" \
-  str_has_line_re "$DOC" "oracle calls it made.*\\*\\*$OBSERVED\\*\\*"
-assert_true "and how many of them are answerable synchronously" \
-  str_has_line_re "$DOC" "answerable synchronously in wasm.*\\*\\*$SYNC_N\\*\\*"
-assert_true "and how many need a host round trip" \
-  str_has_line_re "$DOC" "needing a host round trip.*\\*\\*$HOST_N\\*\\*"
-assert_true "and how many are unimplemented" \
-  str_has_line_re "$DOC" "unimplemented.*\\*\\*$UNIMPL_N\\*\\*"
-assert_true "and the handler's async method count, which is the boundary's size" \
-  str_has_line_re "$DOC" "handler methods declared .async.*\\*\\*$ASYNC_N\\*\\*"
+NAMED=0
+for m in $(printf '%s' "$ASYNC" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)))'); do
+  str_has_sub "$DOC" "\`$m\`" || die "the write-up does not name the async method $m"
+  NAMED=$(( NAMED + 1 ))
+done
+assert_eq "the write-up names every async method the scanner found" "$ASYNC_N" "$NAMED"
 
 m38_finish

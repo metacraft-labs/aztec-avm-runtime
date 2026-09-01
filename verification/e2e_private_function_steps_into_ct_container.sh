@@ -226,32 +226,59 @@ assert_eq "and the two streams are the same length, so the difference is the pat
   "$(s steps)" "$(s synthSteps)"
 rm -rf "$WORK"
 
-echo "== 7. THE WRITE-UP CARRIES WHAT WAS MEASURED"
+echo "== 7. THE WRITE-UP CARRIES WHAT WAS MEASURED, ROW BY ROW AND COLUMN BY COLUMN"
 [ -s "$M38_DOC" ] || die "no $M38_DOC"
-DOC="$(cat "$M38_DOC")"
-# EACH ROW MATCHED BY ITS OWN SUBJECT. A figure present anywhere in the file is satisfied by a table
-# that states the reverse of the data — M24's OQ-6 finding, and the reason every row here names what
-# it is about.
-assert_true "the ladder's replay row states its step count" \
-  str_has_line_re "$DOC" 'a frame that completed .*\*\*'"$(m38_arm replay.steps)"'\*\*'
-assert_true "the truncate row states its own" \
-  str_has_line_re "$DOC" 'last entry dropped .*\*\*'"$(m38_arm truncate.steps)"'\*\*'
-assert_true "the refuseAll row states its own" \
-  str_has_line_re "$DOC" 'emptied .*\*\*'"$(m38_arm refuseAll.steps)"'\*\*'
-assert_true "the transfer row states its own" \
-  str_has_line_re "$DOC" 'STOPPED at an oracle M35 does not serve .*\*\*'"$(m38_arm transfer.steps)"'\*\*'
-assert_true "the container table states the replay arm's ACIR opcode count" \
-  str_has_line_re "$DOC" 'ACIR opcodes in the circuit.*\*\*'"$(m38_arm replay.acirOpcodes)"'\*\*'
-assert_true "and the step records the recorder wrote" \
-  str_has_line_re "$DOC" 'step records the recorder wrote.*\*\*'"$(m38_arm replay.steps)"'\*\*'
-assert_true "and the Step events the reader reads back" \
-  str_has_line_re "$DOC" 'the pinned .ct-print. reads back.*\*\*'"$R_STEPS"'\*\*'
-BYTES_WITH_COMMAS="$(python3 -c 'import sys; print(format(int(sys.argv[1]), ","))' \
-  "$(m38_num "$(m38_arm replay.containerBytes)" 'replay bytes')")"
-assert_true "the byte figure rendered with separators is not empty" \
-  test -n "$BYTES_WITH_COMMAS"
-assert_true "and the container's byte count, in the document's own thousands separators" \
-  str_has_line_re "$DOC" 'container bytes.*\*\*'"$BYTES_WITH_COMMAS"'\*\*'
+# EVERY FIGURE §4 AND §5 STATE, BOTH COLUMNS, AGAINST THE ARTEFACTS.
+#
+# The first version of this section compared eight of the twenty-one with
+# `str_has_re "$DOC" 'subject.*N'`. That is bash's `=~`, whose `.` matches a NEWLINE, so it was not
+# anchored to the row at all — and thirteen figures, including every second column of §5, were
+# stated and compared by nothing while the document's own header claimed otherwise. The comparer
+# walks LINES, refuses a needle that names more than one row, and reports how many figures it
+# actually compared.
+X_LINES_C="$(read_container "$TRANSFER_CT" distinctLines)"
+X_PATHS_C="$(read_container "$TRANSFER_CT" distinctPaths)"
+X_INTERNED="$(read_container "$TRANSFER_CT" paths)"
+BYTES_R="$(m38_arm replay.containerBytes)"
+BYTES_X="$(m38_arm transfer.containerBytes)"
+m38_require_num replaySteps="$(m38_arm replay.steps)" truncateSteps="$(m38_arm truncate.steps)" \
+  refuseAllSteps="$(m38_arm refuseAll.steps)" permutedSteps="$(m38_arm permuted.steps)" \
+  transferSteps="$(m38_arm transfer.steps)" bytesR="$BYTES_R" bytesX="$BYTES_X" \
+  containerStepsR="$R_STEPS" containerStepsX="$X_STEPS" xLines="$X_LINES_C" xPaths="$X_PATHS_C" \
+  xInterned="$X_INTERNED"
+m38_assert_doc "PRIVATE-TRACE.md section 4" "$M38_DOC" \
+  "the whole tape of a frame that completed|0|$(m38_arm replay.steps)" \
+  "the same tape, last entry dropped|0|$(m38_arm truncate.steps)" \
+  "the same tape, emptied|0|$(m38_arm refuseAll.steps)" \
+  "ONE field of ONE recorded input changed|0|$(m38_arm permuted.steps)" \
+  "a recording that STOPPED at an oracle M35 does not serve|0|$(m38_arm transfer.steps)"
+m38_assert_doc "PRIVATE-TRACE.md section 5" "$M38_DOC" \
+  "ACIR opcodes in the circuit|0|$R_ACIR" \
+  "ACIR opcodes in the circuit|1|$X_ACIR" \
+  "opcodes the stepper stepped|0|$(m38_arm replay.opcodesStepped)" \
+  "opcodes the stepper stepped|1|$(m38_arm transfer.opcodesStepped)" \
+  "of those, opcodes carrying a source location|0|$(m38_arm replay.opcodesPositioned)" \
+  "of those, opcodes carrying a source location|1|$(m38_arm transfer.opcodesPositioned)" \
+  "step records the recorder wrote|0|$(m38_arm replay.steps)" \
+  "step records the recorder wrote|1|$(m38_arm transfer.steps)" \
+  "distinct \`(path, line)\` in the container|0|$R_LINES" \
+  "distinct \`(path, line)\` in the container|1|$X_LINES_C" \
+  "distinct source files in the container|0|$R_PATHS" \
+  "distinct source files in the container|1|$X_PATHS_C" \
+  "paths the container interns|0|$R_INTERNED" \
+  "paths the container interns|1|$X_INTERNED" \
+  "container bytes|0|$BYTES_R" \
+  "container bytes|1|$BYTES_X" \
+  "reads back|0|$R_STEPS" \
+  "reads back|1|$X_STEPS"
+
+# THE COMPARER IS SHOWN TO SAY NO, in both of its two ways.
+CONTROL="$(m38_doc_figures "$M38_DOC" "ACIR opcodes in the circuit|1|999")"
+assert_true "a wrong expected value in the SECOND column is reported as BAD" \
+  str_has_sub "$CONTROL" "BAD ACIR opcodes in the circuit | 1 | expected 999 | got"
+CONTROL2="$(m38_doc_figures "$M38_DOC" "ACIR opcodes in the circuit|9|1")"
+assert_true "and a column the row does not have is reported as MISSING rather than matched" \
+  str_has_sub "$CONTROL2" "the row carries 2 bold figure(s)"
 
 echo "== 8. THE UNPUBLISHED WORKTREE IS UNTOUCHED, WHICH OQ-7's VERDICT RESTS ON"
 # M38 builds from `noir` on `codetracer`, not from the `wasm/webpage` worktree, precisely so that

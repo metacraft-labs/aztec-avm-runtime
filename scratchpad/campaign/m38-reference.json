@@ -2,15 +2,15 @@
  "_baseline": 12872,
  "_declared_moves": {
   "m38": {
-   "checks": "NEW. verify_private_oracle_synchrony_enumerated 33 + verify_foreign_call_executor_is_injectable 23 + test_unserved_private_oracle_refuses_by_name 40 + e2e_private_function_steps_into_ct_container 49",
-   "delta": 145,
+   "checks": "NEW. verify_private_oracle_synchrony_enumerated 35 + verify_foreign_call_executor_is_injectable 23 + test_unserved_private_oracle_refuses_by_name 40 + e2e_private_function_steps_into_ct_container 49",
+   "delta": 147,
    "from": 0,
-   "to": 145
+   "to": 147
   }
  },
  "_expected_reds": "THREE, ALL PARALLEL TRACKS', ALL RE-DERIVED RATHER THAN INHERITED: m20 verify_named_checks_exist 9/1 on L3's tools/scan_reverted_transactions.mjs; m21 verify_no_pipeline_predicates 69/1 on L4's verify_browser_replay_dd9_clean.sh; m28 verify_npm_pack_no_optional_native 55/1 on L0's replay/package.json.",
  "_nothing_else_may_move": "m27 345, m32 237, m33 248, m34 217, m35 239, m36 150 were each re-run individually before the sweep and each came out at its reference value TO THE ASSERTION. Four documents carried rotted eager-size figures (BROWSER-PACKAGING total 8,230.78 -> 8,230.98; WORKER-NODE / DEV-WALLET / WALLET-BOUNDARY / LOCAL-HISTORY wallet 304.3 -> 304.5 and wallet-demo 344.15 -> 344.36) because M38 adds the oracle tape to the wallet bundle. Every one is a figure a check re-derives from the artefact, which is the only reason any of it was found, and NO COUNT MOVED \u2014 which is what says a pinned figure moved and not a structure. verify_provenance_complete 70, verify_pinned_nightly_single_source 28, check-drift 25, check-repo-hygiene 28, verify_reuse_inventory_complete 19, verify_named_checks_exist 9 (its exception list is asserted >= 5 on size, so M38's one declared exception adds nothing) and verify_no_pipeline_predicates 69 were all measured unchanged.",
- "_total": 13017,
+ "_total": 13019,
  "m0": 156,
  "m1": 181,
  "m10": 450,
@@ -43,7 +43,7 @@
  "m35": 239,
  "m36": 150,
  "m37": 171,
- "m38": 145,
+ "m38": 147,
  "m4": 218,
  "m5": 236,
  "m6": 363,

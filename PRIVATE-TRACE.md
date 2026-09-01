@@ -246,10 +246,10 @@ supplies an executor.
 |---|---|---|
 | ACIR opcodes in the circuit | **889** | **5,602** |
 | opcodes the stepper stepped | **1,004** | **643** |
-| …carrying a source location | **44** | **349** |
+| …of those, opcodes carrying a source location | **44** | **349** |
 | step records the recorder wrote | **21** | **62** |
-| distinct `(path, line)` among them | **12** | **46** |
-| distinct source files among them | **5** | **16** |
+| distinct `(path, line)` in the container | **13** | **47** |
+| distinct source files in the container | **5** | **16** |
 | paths the container interns | **60** | **135** |
 | container bytes | **745,472** | **1,343,488** |
 | `Step` events the pinned `ct-print` reads back | **22** | **63** |

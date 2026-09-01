@@ -200,6 +200,36 @@ m38_synchrony() { # <report.json> <frame path>...
     "${M35_ORACLES_SRC:-$REPO_ROOT/browser/src/wallet/private_oracles.ts}" "$@"
 }
 
+# m38_doc_figures <document> <needle>|<index>|<expected>...
+#
+# Prints `BAD` / `MISSING` lines and a trailing `OK <n>`. The caller asserts on all three, because a
+# comparer that exited non-zero would make the caller's assertion about the comparer.
+m38_doc_figures() {
+  python3 "$VERIFY_DIR/_m38_doc_figures.py" "$@"
+}
+
+# m38_assert_doc <label> <document> <needle>|<index>|<expected>...
+#
+# The three assertions every use of the comparer needs, in one place: nothing BAD, nothing MISSING,
+# and a non-zero number of figures actually compared. The third is the one that matters — a
+# comparer whose needles had all stopped matching reports no BAD lines, and "no disagreement" over
+# an empty comparison is this campaign's most repeated shape.
+#
+# `xargs -r echo` AND NOT `tr` FOR THE COLLAPSE: `tr '\n' ' '` over an EMPTY list produces a single
+# SPACE, so `assert_eq "" " "` fails on a document with nothing wrong with it — M36's own
+# check-that-can-only-be-red, in the section whose job is to notice a rotted figure.
+m38_assert_doc() { # <label> <document> <spec>...
+  local label="$1" doc="$2"; shift 2
+  local out bad missing okcount
+  out="$(m38_doc_figures "$doc" "$@")"
+  bad="$(printf '%s\n' "$out" | sed -n 's/^BAD //p' | xargs -r echo)"
+  missing="$(printf '%s\n' "$out" | sed -n 's/^MISSING //p' | xargs -r echo)"
+  okcount="$(printf '%s\n' "$out" | sed -n 's/^OK //p' | tail -1)"
+  assert_eq "$label: no figure disagrees with the artefacts" "" "$bad"
+  assert_eq "$label: every needle names exactly one row" "" "$missing"
+  assert_eq "$label: and the comparison covered every figure it was given" "$#" "$okcount"
+}
+
 # The pinned `ct-print`, built by `build_ct_print.sh`.
 m38_ct_print() {
   printf "%s" "${M24_CTPRINT_WORK:-$HOME/.cache/aztec-m24-ctprint}/ct-print"
