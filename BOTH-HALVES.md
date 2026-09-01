@@ -55,12 +55,14 @@ public inputs. Every other driver in this repository names a function and its ar
 them — **a second producer of a value the circuit already produced**, free to disagree with it.
 
 This fixture is built to expose exactly that: its two enqueued calls differ by their **argument**
-(10 and 20) and not by their function, so a re-declaration that got the argument wrong would run two
-identical calls and every count above would agree with it.
+and not by their function, so a re-declaration that got the argument wrong would run two identical
+calls and every count above would agree with it. The two arguments are in the table below and are
+read out of the CALLDATA on every run, not out of the contract's source.
 
 | | counter 2 | counter 4 |
 |---|---|---|
 | enqueued by | `enqueue_call_to_child` (the nested frame) | `enqueue_calls_to_child_with_nested_first` |
+| the argument it carries | **10** | **20** |
 | the hash the circuit committed to | `0x124ef545…` | `0x2b667ab5…` |
 | the hash rebuilt from the preimage | `0x124ef545…` | `0x2b667ab5…` |
 | the selector resolves to | `pub_set_value` | `pub_set_value` |
@@ -198,9 +200,17 @@ Both containers are written **in one Chromium page, from one execution of one tr
 browser's own download machinery writes both files.
 
 ```
-ct.trace-join   join=0x0330099ccfa170… half=private halves=2 arm=split reason=recorded-by-the-producer-not-inferred-by-a-reader
-ct.trace-join   join=0x0330099ccfa170… half=public  halves=2 arm=split reason=recorded-by-the-producer-not-inferred-by-a-reader
+ct.trace-join   join=<the transaction's own argsHash> half=private halves=2 arm=split reason=recorded-by-the-producer-not-inferred-by-a-reader
+ct.trace-join   join=<the transaction's own argsHash> half=public  halves=2 arm=split reason=recorded-by-the-producer-not-inferred-by-a-reader
 ```
+
+| | value |
+|---|---|
+| the join identity both halves carry | `0x0330099ccfa170…` |
+
+*(The identity is stated in exactly ONE place, and it is compared against the arm report's own
+`argsHash` on every run. The two lines above show the GRAMMAR, which is why the value is elided
+there: a figure written twice is a figure that can rot in one of the two.)*
 
 * the identity is the outer frame's own `argsHash` — a value the circuit committed to — so two runs
   of one transaction agree and two transactions cannot collide;

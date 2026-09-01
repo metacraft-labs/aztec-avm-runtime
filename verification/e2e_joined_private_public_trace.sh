@@ -389,6 +389,14 @@ m38_assert_doc "BOTH-HALVES.md sections 3 and 4" "$M40_DOC" \
   "column differences between them|0|$COLDIFF_N" \
   "imports the tracer module declares|0|$DECLARED"
 
+# AND THE ABBREVIATED VALUES §3 AND §4 QUOTE, compared against what the artefacts measure. A
+# `d53fc677…` is a measurement with its tail cut off; a digit that rots in one is exactly as wrong
+# as a digit that rots in a count, and until this comparison existed nothing looked at any of them.
+m40_assert_prefixes "BOTH-HALVES.md sections 3 and 4" "$M40_DOC" \
+  "the tracer's columns|0|$SUBJ_SHA" \
+  "every step's column set to 0|0|$DROP_SHA" \
+  "the join identity both halves carry|0|$JOIN_ID"
+
 # THE COMPARER IS CALIBRATED OVER THIS DOCUMENT, both ways, because a document comparer that has
 # never been shown to say `BAD` is a comparer nobody has run.
 CAL="$(m38_doc_figures "$M40_DOC" "steps the browser's tracer produced|0|999999")"

@@ -2,15 +2,15 @@
  "_baseline": 13227,
  "_declared_moves": {
   "m40": {
-   "checks": "NEW. e2e_joined_public_half_executed 60 + e2e_joined_private_public_trace 75",
-   "delta": 135,
+   "checks": "NEW. e2e_joined_public_half_executed 67 + e2e_joined_private_public_trace 78",
+   "delta": 145,
    "from": 0,
-   "to": 135
+   "to": 145
   }
  },
  "_expected_reds": "TWO, AND NEITHER IS M40's, both re-derived rather than inherited by re-running the two checks by hand before the sweep. m20 verify_named_checks_exist 9/1 on TWO parallel names \u2014 L3's test_reverted_transaction_recorded_as_reverted in tools/scan_reverted_transactions.mjs and L2's verify_hydrated_roots_declared; M40's two new checks are named after the two milestone entries they close, so both resolve and neither adds a name. m21 verify_no_pipeline_predicates 69/1 on L4's sixth `| grep -q` at verify_browser_replay_dd9_clean.sh:336; none of M40's three new shell files contains one. m28 verify_npm_pack_no_optional_native 55/1 on L0's replay/package.json is a THIRD and is measured the same way. M11 IS THE OPEN QUESTION: M39's sweep read 287 with nine failures on the tenth upstream move, and upstream may have moved again; it is measured by hand before the run and written here rather than explained afterwards.",
  "_nothing_else_may_move": "m24 350, m27 345, m28 358, m32 237, m33 248, m34 217, m35 239, m36 150, m38 150, m39 205 and m40 130 were each re-run individually after the LAST edit and each came out at its value with zero failures (m28's one red is L0's). ELEVEN DOCUMENT FIGURES MOVED AND ONLY ONE COUNT DID, which is what says a pinned figure moved and not a structure. The one count is M24's: nothing \u2014 its 350 is unchanged, but its OQ-6 benchmark RE-RAN because editing ct-host/src moves _m24_oq6_stamp, exactly as CAMPAIGN-BRIEF.md says it does, so TRACE-ABI.md section 2 is re-rendered from the new arms.tsv and run 11 joins section 8's retained table at +1.07 %, [+0.36, +1.78] %, within-noise. The figures: TRACE-ABI section 7 ct_writer.wasm 262,693 -> 263,211 and sha256 5edf9671 -> e94baceb; BROWSER-PACKAGING's four eager rows and its total 8,234.38 -> 8,239.75; BROWSER-GATE's browser metafile inputs 1196 -> 1198; WORKER-NODE's seven current-column rows; and the wallet / wallet-demo eager pairs in DEV-WALLET, PRIVATE-EXECUTION and LOCAL-HISTORY. Every one is a figure a check re-derives from the artefact on every run, which is the only reason any of it was found. check-repo-hygiene 28 and verify_named_checks_exist 9 measured unchanged.",
- "_total": 13362,
+ "_total": 13372,
  "m0": 156,
  "m1": 181,
  "m10": 450,
@@ -46,7 +46,7 @@
  "m38": 150,
  "m39": 205,
  "m4": 218,
- "m40": 135,
+ "m40": 145,
  "m5": 236,
  "m6": 363,
  "m7": 287,

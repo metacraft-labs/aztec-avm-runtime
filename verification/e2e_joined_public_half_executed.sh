@@ -300,7 +300,37 @@ assert_eq "and the page reported no errors" "[]" "$(m40_arm "$SUBJECT.pageErrors
 echo "== 8. BOTH-HALVES.md section 2 IS RE-DERIVED FROM THIS RUN"
 # ===========================================================================================
 assert_file "the write-up exists" "$M40_DOC"
+# THE TWO ARGUMENTS, READ OUT OF THE CALLDATA. The fixture's whole point is that its two enqueued
+# calls differ by their ARGUMENT and not by their function, and until this row existed that pair was
+# prose: the check compared the two HASHES and never the values behind them, so a document quoting
+# the wrong arguments would have passed. Walked over the frame tree, sorted by the circuit's own
+# side-effect counter, and rendered as decimals.
+# THE REPORT IS READ FROM THE FILE, NOT PASSED AS AN ARGUMENT. The arm report's `run` node is 157 KB
+# and an argv that large is `Argument list too long` — a failure that arrives as a bare exec error
+# with nothing naming the cause.
+ARGS="$(python3 -c '
+import json, sys
+def walk(run, out):
+    for c in (run.get("publicInputs") or {}).get("publicCallRequests") or []:
+        out.append(c)
+    for n in run.get("nested") or []:
+        walk(n, out)
+    return out
+doc = json.load(open(sys.argv[1]))
+run = doc["arms"][sys.argv[2]]["report"]["run"]
+calls = sorted(walk(run, []), key=lambda c: c["counter"])
+# calldata[0] is the selector; everything after it is the encoded argument list.
+print(" ".join(str(int(c["calldata"][1], 16)) for c in calls))
+' "$M40_ARMS" "$SUBJECT" 2>/dev/null || echo NOTJSON)"
+ARG_LOW="$(printf '%s\n' "$ARGS" | awk '{print $1}')"
+ARG_HIGH="$(printf '%s\n' "$ARGS" | awk '{print $2}')"
+m38_require_num lowerCounterArgument="$ARG_LOW" higherCounterArgument="$ARG_HIGH"
+assert_true "the two enqueued calls carry DIFFERENT arguments, which is the fixture's whole point" \
+  test "$ARG_LOW" != "$ARG_HIGH"
+
 m38_assert_doc "BOTH-HALVES.md section 2" "$M40_DOC" \
+  "the argument it carries|0|$ARG_LOW" \
+  "the argument it carries|1|$ARG_HIGH" \
   "public calls the transaction enqueued|0|$ENQ_COUNT" \
   "instructions the public half executed|0|$STEPS" \
   "AVM contexts they ran in|0|$CONTEXTS" \
@@ -308,5 +338,39 @@ m38_assert_doc "BOTH-HALVES.md section 2" "$M40_DOC" \
   "the public half's container bytes|0|$(m38_num "$(m40_arm "$SUBJECT.report.publicContainer.containerBytes")" 'public container bytes')" \
   "steps of it positioned in aztec-nr source|0|$(m38_num "$(m40_arm "$SUBJECT.report.publicContainer.stepsPositioned")" 'public positioned')" \
   "instructions the unseeded control executed|0|$CTL_STEPS"
+
+# AND THE ABBREVIATED VALUES §2 QUOTES, compared against what the artefacts measure. A `0x124ef545…`
+# is a measurement with its tail cut off; a digit that rots in one is exactly as wrong as a digit
+# that rots in a count, and until this comparison existed nothing looked at any of them.
+CALL_LOW="$(python3 -c '
+import json, sys
+calls = sorted(json.loads(sys.argv[1]), key=lambda c: c["counter"])
+print(calls[0]["committedCalldataHash"]); print(calls[0]["rebuiltCalldataHash"])
+print(calls[1]["committedCalldataHash"]); print(calls[1]["rebuiltCalldataHash"])' "$CALLS")"
+# THE CLASS-ID ROW IS TOKEN 1 AND NOT 0. Its first backticked token is `public_dispatch`, which
+# NAMES the function rather than quoting a value — and a comparer that took token 0 would be
+# comparing a class id against a function name. It says MISSING rather than passing, because that
+# token does not end in an ellipsis, which is exactly the refusal this comparer exists to make and
+# is the assertion below that caught this.
+#
+# A COMMENT MUST NOT SIT INSIDE THE ARGUMENT LIST. A `#` line after a `\` continuation ENDS the
+# command, so the specs below it become a separate command and the comparison silently shrinks —
+# which is how this note came to be here rather than three lines further down.
+m40_assert_prefixes "BOTH-HALVES.md section 2" "$M40_DOC" \
+  "the hash the circuit committed to|0|$(printf '%s\n' "$CALL_LOW" | sed -n '1p')" \
+  "the hash the circuit committed to|1|$(printf '%s\n' "$CALL_LOW" | sed -n '3p')" \
+  "the hash rebuilt from the preimage|0|$(printf '%s\n' "$CALL_LOW" | sed -n '2p')" \
+  "the hash rebuilt from the preimage|1|$(printf '%s\n' "$CALL_LOW" | sed -n '4p')" \
+  "over the artifact's base64 text|0|$FROM_TEXT" \
+  "over the decoded \`public_dispatch\` bytecode|1|$FROM_BYTECODE"
+
+# THE COMPARER IS CALIBRATED OVER THIS DOCUMENT, both ways, because a comparer that has never been
+# shown to say BAD is a comparer nobody has run.
+PCAL="$(m40_doc_prefixes "$M40_DOC" "the hash the circuit committed to|0|0xdeadbeef")"
+assert_true "a value that does not start with the quoted prefix is reported as BAD" \
+  str_has_sub "$PCAL" "BAD"
+PCAL2="$(m40_doc_prefixes "$M40_DOC" "the selector resolves to|0|pub_set_value")"
+assert_true "and a token with no ellipsis is refused rather than compared as a prefix of itself" \
+  str_has_sub "$PCAL2" "MISSING"
 
 m40_finish

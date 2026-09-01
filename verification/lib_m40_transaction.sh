@@ -40,6 +40,33 @@ M40_TRACE_TIMEOUT="${M40_TRACE_TIMEOUT:-1800}"
 m40_finish() { finish; }
 m40_summary_on_abnormal_exit() { summary_on_abnormal_exit; }
 
+# m40_doc_prefixes <doc> <needle|index|measured>... — the abbreviated-value comparer.
+#
+# `m38_assert_doc` closes a write-up's BOLD NUMBERS. This closes the other half: the
+# `0x124ef545…` and `d53fc677…` tokens a document quotes because the whole value is unreadable.
+# M38's second sweep abort found thirteen figures "stated and compared by NOTHING, under a header
+# claiming all of them were re-derived on every run", and an abbreviation is a measurement with its
+# tail cut off rather than a decoration.
+m40_doc_prefixes() { # <doc> <needle|index|measured>...
+  local doc="$1"; shift
+  python3 "$VERIFY_DIR/_m40_doc_prefixes.py" "$doc" "$@"
+}
+
+# m40_assert_prefixes <label> <doc> <needle|index|measured>... — three assertions, as
+# `m38_assert_doc` makes three: nothing BAD, nothing MISSING, and the comparison covered every
+# token it was given. The third is what stops a comparer that silently checked nothing.
+m40_assert_prefixes() { # <label> <doc> <spec>...
+  local label="$1" doc="$2"; shift 2
+  local out bad missing ok
+  out="$(m40_doc_prefixes "$doc" "$@")"
+  bad="$(printf '%s\n' "$out" | grep '^BAD ' | tr '\n' ' ' | xargs -r echo)"
+  missing="$(printf '%s\n' "$out" | grep '^MISSING ' | tr '\n' ' ' | xargs -r echo)"
+  ok="$(printf '%s\n' "$out" | sed -n 's/^OK //p' | tail -1)"
+  assert_eq "$label: no quoted value disagrees with the artefacts" "" "$bad"
+  assert_eq "$label: every needle names exactly one row and every token is an abbreviation" "" "$missing"
+  assert_eq "$label: and the comparison covered every value it was given" "$#" "$ok"
+}
+
 # ---------------------------------------------------------------------------
 # The tracer module the page steps the private half with.
 # ---------------------------------------------------------------------------

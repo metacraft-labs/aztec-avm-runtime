@@ -386,3 +386,44 @@ omission.** This check names the worktree because it asserts a fact about it; a 
 itself would be an assertion about the check instead of about the code M40 ships.
 
 **M40 goes 132 -> 135.**
+
+## Step 9 — THE SWEEP WAS ABORTED A SECOND TIME, FOR THE HALF OF THE WRITE-UP NOTHING COMPARED
+
+Killed at m1, six minutes in, every child confirmed gone, `carry/*.json` unchanged and the tree
+clean.
+
+**`m38_assert_doc` closes a write-up's BOLD NUMBERS and nothing closed the other half.**
+`BOTH-HALVES.md` quotes eight ABBREVIATED values — `0x124ef545…`, `0x2b667ab5…`, the two class ids,
+the two container digests, the join identity — because a sixty-six character hex string is
+unreadable in a table. **Every one of them was prose.** That is M38's second abort finding one
+kind of figure over: *thirteen of a write-up's twenty-six figures stated and compared by NOTHING,
+under a header claiming all of them were re-derived on every run.*
+
+`verification/_m40_doc_prefixes.py` compares each against the artefact's own value, on the ROW that
+names its subject, and **the ellipsis is required**: a token that does not end in one is refused as
+MISSING rather than compared as a prefix of itself, so a document quoting a whole value cannot pass
+by accident. Calibrated over this document in both directions — `d53fc677…` changed to `dEADbeef…`
+is reported `BAD`, and `` `pub_set_value` `` (a token with no ellipsis) is reported `MISSING`.
+
+### Three things the same read found
+
+1. **`(10 and 20)` was prose too.** The fixture's whole point is that its two enqueued calls differ
+   by their ARGUMENT and not by their function, and the check compared the two HASHES and never the
+   values behind them. It is a table row now — **10** and **20** — read out of the CALLDATA on
+   every run, walked over the frame tree and sorted by the circuit's own side-effect counter, with
+   the two asserted DIFFERENT beside it.
+2. **The join identity was stated TWICE**, in two lines of one code block, and re-derived nowhere.
+   It is stated in exactly ONE place now and elided in the block, which shows the grammar: a figure
+   written twice is a figure that can rot in one of the two.
+3. **A row's first backticked token is not always its value.** `over the decoded
+   `public_dispatch` bytecode` names a FUNCTION first and quotes the class id second, and a comparer
+   taking token 0 would have compared a class id against a function name. It said `MISSING` rather
+   than passing — the ellipsis rule doing exactly what it exists for.
+
+**And the argument extraction met `Argument list too long`**: the arm report's `run` node is 157 KB
+and passing it as an argv is a bare exec failure with nothing naming the cause. It reads the report
+from the file now. **And a `#` comment inside a `\` continuation ENDS the command**, so the specs
+below it became a separate command and the comparison silently shrank — found because the covered
+count is asserted against `$#`.
+
+**M40 goes 135 -> 145.**
