@@ -60,6 +60,51 @@ export const DEMO_TOKEN_BALANCE = 1_000n;
 export const DEMO_TRANSFER_AMOUNT = 5n;
 
 /**
+ * THE NAMES THIS DRIVER USES, AS A PARAMETER RATHER THAN AS CONSTANTS.
+ *
+ * Everything below defaults to the demo Token's vocabulary, so `runTokenTransfer(opened, raw)`
+ * behaves exactly as it did. The parameter exists because the vocabulary turned out to be a
+ * property of ONE contract rather than of tokens: the `SimpleToken` in
+ * `aztec-packages/noir-projects/labs/noir-contracts` — the contract the browser compile gate
+ * compiles — names the same functions
+ *
+ *   transfer_in_public  ->  __aztec_nr_internals__public_transfer
+ *   balance_of_public   ->  __aztec_nr_internals__public_balance_of
+ *   constructor         ->  __aztec_nr_internals__constructor   (3 args, not 4)
+ *   public_balances     ->  balances
+ *
+ * because it is built against a later `aztec-nr`, whose macros prefix generated entry points.
+ * With the names inlined, this driver could only ever run the one artifact it was written for,
+ * and "the contract the tab compiled executes" would have been unreachable without a second
+ * copy of these 300 lines — which is the "two instruments" shape this campaign refuses
+ * elsewhere.
+ *
+ * THE ARGUMENT SHAPES ARE NOT PARAMETERS, deliberately. `transfer(from, to, amount, nonce)` and
+ * `balance_of(owner)` are asserted against the ABI by `createTx`, and a contract whose transfer
+ * took different arguments is not a different NAME for this transaction — it is a different
+ * transaction, and it should need a different driver rather than a wider option bag.
+ */
+export interface TokenVocabulary {
+  /** The public state-changing call. */
+  readonly transferFunction?: string;
+  /** The `#[view]` read enqueued second. */
+  readonly balanceFunction?: string;
+  /** The initializer, whose ABI and arguments fix the initialization hash. */
+  readonly constructorFunction?: string;
+  /** The initializer's arguments, in ABI order. */
+  readonly constructorArgs?: readonly unknown[];
+  /** The `Storage` member holding the public balance map. */
+  readonly balancesStorageMember?: string;
+}
+
+const DEFAULT_VOCABULARY = {
+  transferFunction: TRANSFER_FUNCTION,
+  balanceFunction: BALANCE_FUNCTION,
+  constructorFunction: 'constructor',
+  balancesStorageMember: 'public_balances',
+} as const;
+
+/**
  * A named storage slot, read out of the ARTIFACT rather than typed in.
  *
  * `outputs.globals.storage` is Noir's own comptime rendering of the contract's `Storage` struct:
@@ -199,10 +244,34 @@ export interface TokenTransferReport {
 export async function runTokenTransfer(
   opened: OpenedRuntime,
   rawArtifact: unknown,
+  vocabulary: TokenVocabulary = {},
 ): Promise<TokenTransferReport> {
   const artifact = loadContractArtifact(rawArtifact as never);
   const deployer = await AztecAddress.fromNumber(4242);
   const sender = await AztecAddress.fromNumber(1001);
+
+  const transferFunction = vocabulary.transferFunction ?? DEFAULT_VOCABULARY.transferFunction;
+  const balanceFunction = vocabulary.balanceFunction ?? DEFAULT_VOCABULARY.balanceFunction;
+  const constructorFunction =
+    vocabulary.constructorFunction ?? DEFAULT_VOCABULARY.constructorFunction;
+  const balancesStorageMember =
+    vocabulary.balancesStorageMember ?? DEFAULT_VOCABULARY.balancesStorageMember;
+  // The demo Token's initializer takes (deployer, name, symbol, decimals); this default is what
+  // it always passed. A caller with a different initializer supplies its own, and the ABI it is
+  // hashed against is looked up under `constructorFunction`, so the two cannot disagree.
+  const constructorArgs = vocabulary.constructorArgs ?? [deployer, 'Tok', 'TOK', 18];
+
+  // REFUSED BY NAME, HERE, rather than at the point of use. A missing function surfaces later as
+  // a selector computed over `undefined` or a transaction that reverts for a reason that looks
+  // like the contract's fault; this says which name was not found, in a contract that lists what
+  // it does have.
+  for (const [role, name] of [['transfer', transferFunction], ['balance', balanceFunction]]) {
+    if (getContractFunctionAbi(name, artifact) === undefined) {
+      const available = artifact.functions.map(f => f.name).join(', ');
+      throw new Error(
+        `${artifact.name} has no ${role} function named \`${name}\`. It has: ${available}`);
+    }
+  }
 
   // ===========================================================================================
   // THE FIXTURE INSTANCE IS BUILT WITH `PublicKeys.default()`, AND THAT IS DD-11 AGAIN.
@@ -233,8 +302,8 @@ export async function runTokenTransfer(
   const dispatch = getContractFunctionArtifact(PUBLIC_DISPATCH_FN_NAME, artifact);
   if (dispatch === undefined) throw new Error(`${artifact.name} has no ${PUBLIC_DISPATCH_FN_NAME}`);
   const contractClass = await makeContractClassPublic(27, dispatch.bytecode);
-  const constructorAbi = getContractFunctionAbi('constructor', artifact);
-  const initializationHash = await computeInitializationHash(constructorAbi, [deployer, 'Tok', 'TOK', 18]);
+  const constructorAbi = getContractFunctionAbi(constructorFunction, artifact);
+  const initializationHash = await computeInitializationHash(constructorAbi, constructorArgs as never[]);
   const contractInstance = await makeContractInstanceFromClassId(contractClass.id, 27, {
     deployer,
     initializationHash,
@@ -271,21 +340,21 @@ export async function runTokenTransfer(
   const tx = await tester.createTx(sender, [], [
     {
       address: contractInstance.address,
-      fnName: TRANSFER_FUNCTION,
+      fnName: transferFunction,
       args: [sender, deployer, DEMO_TRANSFER_AMOUNT, new Fr(0)],
     },
     // STATIC, AND THE STREAM IS WHY. `balance_of_public` is `#[view]`, and aztec-nr's generated
     // dispatch for a view function asserts the call is static — the executed stream ended on
     // `GETENVVAR_16`, `JUMPI_32`, `INTERNALCALL`, `REVERT_8` inside context 2 until this flag was
     // set. Another thing that could not be seen while the steps were the artifact's debug map.
-    { address: contractInstance.address, fnName: BALANCE_FUNCTION, args: [sender], isStaticCall: true },
+    { address: contractInstance.address, fnName: balanceFunction, args: [sender], isStaticCall: true },
   ]);
 
-  const transferSelector = await getFunctionSelector(TRANSFER_FUNCTION, artifact);
-  const balanceSelector = await getFunctionSelector(BALANCE_FUNCTION, artifact);
-  const transferAbi = getContractFunctionAbi(TRANSFER_FUNCTION, artifact);
+  const transferSelector = await getFunctionSelector(transferFunction, artifact);
+  const balanceSelector = await getFunctionSelector(balanceFunction, artifact);
+  const transferAbi = getContractFunctionAbi(transferFunction, artifact);
   if (transferAbi === undefined) {
-    throw new Error(`${artifact.name} has no ${TRANSFER_FUNCTION} in its ABI`);
+    throw new Error(`${artifact.name} has no ${transferFunction} in its ABI`);
   }
 
   const registered = await opened.runtime.registerContract(contractClass, contractInstance);
@@ -372,7 +441,7 @@ export async function runTokenTransfer(
   // map's slot — 5 — is read out of the ARTIFACT's own `outputs.globals.storage` rather than typed
   // in, because a slot typed in here is a constant that drifts away from the contract silently and
   // this campaign has a rule about exactly that.
-  const publicBalancesSlot = storageSlotOf(rawArtifact, 'public_balances');
+  const publicBalancesSlot = storageSlotOf(rawArtifact, balancesStorageMember);
   const senderBalanceSlot = await deriveStorageSlotInMap(publicBalancesSlot, sender);
   const senderBalanceLeaf = await computePublicDataTreeLeafSlot(contractInstance.address, senderBalanceSlot);
   opened.publicDataTree.insertPublicDataLeaf(senderBalanceLeaf, new Fr(DEMO_TOKEN_BALANCE));
