@@ -47,9 +47,15 @@ assert_eq "and the recorder reports no error" "ok" "$R_RESULT"
 assert_ge "and it produced a real number of steps" 10 "$(m38_num "$R_STEPS" 'replay steps')"
 REPLAYED="$(printf '%s' "$R_LEDGER" | python3 -c '
 import json, sys
-print(sum(1 for e in json.load(sys.stdin) if e["outcome"] == "replayed"))')"
-assert_eq "every recorded call was replayed" "$(m38_num "$R_TAPE" 'tape entries')" \
-  "$(m38_num "$REPLAYED" 'replayed')"
+try:
+    print(sum(1 for e in json.load(sys.stdin) if e["outcome"] == "replayed"))
+except Exception:
+    print("UNREADABLE")')"
+# NUMERICNESS FIRST, AND THE COMPARISON SECOND. Both sides of the identity below come from the
+# report, so a report with nothing in it makes them equal — this check's own mutation arm M7
+# reported `ok` for it over a truncated file.
+m38_require_num tapeEntries="$R_TAPE" replayed="$REPLAYED"
+assert_eq "every recorded call was replayed" "$R_TAPE" "$REPLAYED"
 
 echo "== 2. AN EMPTY TAPE: THE FIRST ORACLE REFUSES, BY NAME"
 A_STEPS="$(m38_arm refuseAll.steps)"

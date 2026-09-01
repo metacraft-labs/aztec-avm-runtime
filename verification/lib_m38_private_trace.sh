@@ -95,7 +95,15 @@ $built"
 m38_arm() {
   python3 - "$M38_ARMS" "$1" <<'PY'
 import json, sys
-doc = json.load(open(sys.argv[1]))
+# AN UNREADABLE REPORT IS `UNREADABLE`, NOT THE EMPTY STRING, and the difference is a defect this
+# milestone's own mutation arm M7 found. `m38_absent` looks for `MISSING`; a report that is
+# TRUNCATED rather than incomplete makes `json.load` throw, the reader print nothing, and the
+# absence guard pass over ten fields it could not read — `assert_eq "" ""` in its most degenerate
+# shape, ten times, under a guard written to prevent exactly that.
+try:
+    doc = json.load(open(sys.argv[1]))
+except Exception:
+    print('UNREADABLE'); raise SystemExit(0)
 node = doc.get('arms', {})
 for part in sys.argv[2].split('.'):
     if isinstance(node, list):
@@ -122,7 +130,10 @@ PY
 m38_top() {
   python3 - "$M38_ARMS" "$1" <<'PY'
 import json, sys
-node = json.load(open(sys.argv[1]))
+try:
+    node = json.load(open(sys.argv[1]))
+except Exception:
+    print('UNREADABLE'); raise SystemExit(0)
 for part in sys.argv[2].split('.'):
     if not isinstance(node, dict) or part not in node:
         print('MISSING'); raise SystemExit(0)
@@ -137,7 +148,12 @@ m38_absent() {
   local bad="" pair
   for pair in "$@"; do
     case "$pair" in
-      *=MISSING) bad="$bad ${pair%%=*}" ;;
+      # THREE SPELLINGS OF ABSENCE, AND THE SECOND TWO WERE ADDED BY A MUTATION. `MISSING` is a key
+      # that is not there; `UNREADABLE` is a report that cannot be parsed at all; and the EMPTY
+      # string is what a reader that died mid-way leaves behind. A guard that knew only the first
+      # passed over ten unreadable fields.
+      *=MISSING|*=UNREADABLE) bad="$bad ${pair%%=*}" ;;
+      *=) bad="$bad ${pair%%=*}(empty)" ;;
     esac
   done
   assert_eq "every field this check reads is present in the arm report" "" "$bad"
@@ -151,11 +167,31 @@ m38_absent() {
 # `$(( 1000 + MISSING ))` is an unbound-variable error that KILLS the check rather than failing it.
 # The final-four pass found nine of these across four checks, each one absent field away from a
 # silent shrink. Every arithmetic site here goes through this.
+# IT DOES NOT `die`, AND THE REASON IS THE MUTATION THAT FOUND IT. Every call site is inside a
+# command substitution, so a `die` here kills the SUBSHELL and the parent carries on with an empty
+# string — and two empty strings compare EQUAL. Measured on arm M7 (a truncated arm report):
+# `assert_eq "every recorded call was replayed" "" ""` reported `ok` over a report with nothing in
+# it. The sentinel carries `$2`, which differs per call site, so no two of them can compare equal
+# either; and `m38_require_num` is the loud path, one assertion naming every non-numeric reading.
 m38_num() { # <value> <what>
   case "${1:-}" in
-    ''|*[!0-9-]*) die "$2 is not a number: [${1:-}]. See $M38_ARMS." ;;
+    ''|*[!0-9-]*) printf 'NOTNUM(%s)[%s]' "$2" "${1:-}" ; return 0 ;;
   esac
   printf '%s' "$1"
+}
+
+# m38_require_num <name=value>... — ONE assertion naming every non-numeric reading, then a die.
+m38_require_num() {
+  local bad="" pair value
+  for pair in "$@"; do
+    value="${pair#*=}"
+    case "$value" in
+      ''|*[!0-9-]*) bad="$bad ${pair%%=*}" ;;
+    esac
+  done
+  assert_eq "every value this check does arithmetic over is a number" "" "$bad"
+  [ -z "$bad" ] || die "these readings are not numbers:$bad
+             Arithmetic over one of them is a comparison between two sentinels. See $M38_ARMS."
 }
 
 # The oracle synchrony classification, derived from the handler SOURCE and an M35 arm report.

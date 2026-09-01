@@ -31,10 +31,16 @@ export M38_WORK="$WORK/arms"
 
 NOIR="$(cd "$REPO/.." && pwd)/noir"
 
+# EVERY FILE ANY ARM MUTATES IS HERE, INCLUDING A CHECK. The first draft listed the four subjects
+# and not `verify_foreign_call_executor_is_injectable.sh`, which arm M5 mutates — so M5's
+# substitution survived the run, in the working tree, because `restore_all` only restores what the
+# backup holds. That is "a mutated artefact outlived its restored source" with the arrow reversed,
+# and the harness's own dirty-subject refusal is what surfaced it on the next run.
 FILES=(
   "verification/m38_private_trace_probe.rs"
   "verification/_m38_oracle_synchrony.py"
   "verification/lib_m38_private_trace.sh"
+  "verification/verify_foreign_call_executor_is_injectable.sh"
   "tools/run_m38_trace_arms.mjs"
 )
 
@@ -191,11 +197,14 @@ for arm in "${ARMS[@]}"; do
         # Predicted: `e2e_private_function_steps_into_ct_container` §3's "the first one is the
         # oracle the frame calls first", and §6's path predicate.
       echo "" | tee -a "$LOG"; echo "=== M4 — the container's step paths are synthesised" | tee -a "$LOG"
+      # THE NEEDLE IS ONE LINE, AND THE FIRST DRAFT'S WAS TWO. `grep -F` treats a multi-line
+      # pattern as an ALTERNATION, so the guard matched on the first line while python's
+      # `assert a in s` did not — and `still_there` caught it, exited 5, and restored. That is the
+      # "a substitution that never applied, printed as the arm's result" defect prevented, arriving
+      # through rustfmt having wrapped the line since the needle was written.
       sub verification/m38_private_trace_probe.rs \
-        '        self.steps.push((path.display().to_string(), line.0, column.map(|c| c.0)));
-        self.inner.register_step_with_column(path, line, column);' \
-        '        self.steps.push((path.display().to_string(), line.0, column.map(|c| c.0))); // ZZZ_M38_M4
-        self.inner.register_step_with_column(std::path::Path::new("synthesised/main.nr"), line, column);'
+        'self.inner.register_step_with_column(path, line, column);' \
+        'self.inner.register_step_with_column(std::path::Path::new("synthesised/main.nr"), line, column); // ZZZ_M38_M4'
       still_there verification/m38_private_trace_probe.rs 'ZZZ_M38_M4' M4
       run_check e2e_private_function_steps_into_ct_container
       ;;
