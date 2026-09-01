@@ -1627,6 +1627,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
+          gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Install diffsim's packages (this is where the NAPI oracle lives)
         working-directory: aztec-avm-runtime/diffsim
@@ -1767,6 +1768,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
+          gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Assert the series base commit is present
         working-directory: aztec-packages
@@ -1934,6 +1936,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
+          gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Assert the series base commit is present
         working-directory: aztec-packages

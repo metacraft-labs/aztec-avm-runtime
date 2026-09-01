@@ -2550,6 +2550,20 @@ verify-m30-retrace:
 verify-m30-git-refusal:
     @verification/verify_git_dependency_refused_by_name.sh
 
+# A REAL AZTEC CONTRACT, COMPILED IN A BROWSER TAB, BY THE COMPILER THE PRODUCT SERVES.
+#
+# `verify-m30-git-refusal` asserts that the compiler refuses a `git` dependency by name. This is
+# the other half: `tools/vendor_noir_tree.py` performs the remedy that refusal names, and the
+# check drives the vendored tree through `https://ide.codetracer.com/assets/noir_wasm.wasm` in
+# headless Chromium.
+#
+# DELIBERATELY NOT A MEMBER OF `ci-browser-gate`. That recipe's composition is pinned at seven
+# checks by `ci_browser_gate.sh` §2 — an eighth would redden the gate's own check — and this one
+# needs the network (it fetches the deployed module on purpose) and the aztec-packages fork
+# beside the repository, neither of which the gate's members require.
+verify-aztec-contract-in-browser:
+    @verification/e2e_aztec_contract_compiles_in_browser.sh
+
 # Build the two wasm modules M30's page loads, without running a check.
 m30-modules:
     #!/usr/bin/env bash
