@@ -420,7 +420,39 @@ export interface PrivateExecutionReport {
      * only these fields answer, and answering it from the wallet's bookkeeping instead would be a
      * second producer of a value the circuit already commits to.
      */
-    readonly publicCallRequests: readonly { readonly contractAddress: string; readonly calldataHash: string }[];
+    readonly publicCallRequests: readonly {
+      readonly contractAddress: string;
+      readonly calldataHash: string;
+      /**
+       * `PublicCallRequest.msgSender` — the frame that ENQUEUED the call, not the transaction's
+       * origin. The two differ for a call enqueued by a nested frame, and the sequencer hands
+       * this address to the AVM as `msg_sender`.
+       */
+      readonly msgSender: string;
+      readonly isStaticCall: boolean;
+      /**
+       * `CountedPublicCallRequest.counter` — the side-effect counter the call was enqueued at.
+       *
+       * A transaction's enqueued calls are spread across its private FRAMES, and a tree walk
+       * recovers them in the order the frames were visited rather than the order the protocol
+       * runs them in. This counter is the circuit's own ordering, so a consumer that has to run
+       * them sorts by a value the circuit committed to instead of by how it happened to traverse.
+       */
+      readonly counter: number;
+      /**
+       * The CALLDATA the request commits to, as hex fields: the selector followed by the encoded
+       * arguments.
+       *
+       * **The circuit's public inputs carry only the HASH.** A consumer that wanted to run the
+       * call would have to re-encode it from a function name and arguments it chose itself —
+       * which is a second producer of a value the circuit already committed to, and the two can
+       * disagree with nothing to notice. The preimage is in the shared execution cache, stored by
+       * `aztec_prv_setHashPreimage` one opcode before the enqueue and looked up by
+       * `aztec_prv_assertValidPublicCalldata` under this exact key, so it is read out rather than
+       * reconstructed. A hash with no preimage is a named failure and not an empty array.
+       */
+      readonly calldata: readonly string[];
+    }[];
   };
 }
 
@@ -1058,8 +1090,14 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
           // carries the callee's address and selector. Read by NAME with a named failure, for the
           // reason `fieldOf` records one line up: a struct rendered with `String(...)` produces a
           // sentence, not a field, and the failure lands four layers away.
-          const inner = (r as { inner?: { contractAddress?: unknown; calldataHash?: unknown } })?.inner ?? r;
-          const request = inner as { contractAddress?: { toString(): string }; calldataHash?: { toString(): string } };
+          const counted = r as { inner?: unknown; counter?: number };
+          const inner = counted.inner ?? r;
+          const request = inner as {
+            contractAddress?: { toString(): string };
+            calldataHash?: { toString(): string };
+            msgSender?: { toString(): string };
+            isStaticCall?: boolean;
+          };
           if (request.contractAddress === undefined) {
             throw new Error(
               `an enqueued public call in the circuit's public inputs has no \`contractAddress\`; it carries ` +
@@ -1077,9 +1115,50 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
                 `${JSON.stringify(Object.keys((inner as object) ?? {}))}`,
             );
           }
+          if (request.msgSender === undefined) {
+            throw new Error(
+              `an enqueued public call in the circuit's public inputs has no \`msgSender\`; it carries ` +
+                `${JSON.stringify(Object.keys((inner as object) ?? {}))}`,
+            );
+          }
+          if (typeof request.isStaticCall !== 'boolean') {
+            throw new Error(
+              `an enqueued public call in the circuit's public inputs has no boolean \`isStaticCall\`; it ` +
+                `carries ${JSON.stringify(Object.keys((inner as object) ?? {}))}`,
+            );
+          }
+          if (typeof counted.counter !== 'number') {
+            throw new Error(
+              `an enqueued public call is not wrapped in a \`CountedPublicCallRequest\`: no numeric ` +
+                `\`counter\` beside it, only ${JSON.stringify(Object.keys((r as object) ?? {}))}`,
+            );
+          }
+          // THE CALLDATA PREIMAGE, OUT OF THE SHARED EXECUTION CACHE, UNDER THE HASH THE CIRCUIT
+          // COMMITTED TO. `aztec-nr`'s `call_public_function` stores it there through
+          // `aztec_prv_setHashPreimage` before it enqueues, and upstream's own
+          // `assertValidPublicCalldata` reads it back under the same key — so this is the store
+          // the protocol already uses, not a second one kept beside it.
+          //
+          // A MISS IS A NAMED FAILURE. Returning `[]` would hand a consumer an enqueued call with
+          // no arguments, which encodes and hashes exactly like a real one and would be refused
+          // by the sequencer four layers away with nothing naming the cause.
+          const calldataHash = request.calldataHash.toString();
+          const calldata = shared.executionCache.get(calldataHash);
+          if (calldata === undefined) {
+            throw new Error(
+              `the circuit enqueued a public call whose calldata hash ${calldataHash} has no preimage in ` +
+                `the transaction's execution cache; the cache holds ` +
+                `${shared.executionCache.size} entr(ies). Without the preimage the call cannot be run, ` +
+                `only re-declared.`,
+            );
+          }
           return {
             contractAddress: request.contractAddress.toString(),
-            calldataHash: request.calldataHash.toString(),
+            calldataHash,
+            msgSender: request.msgSender.toString(),
+            isStaticCall: request.isStaticCall,
+            counter: counted.counter,
+            calldata: calldata.map(f => f.toString()),
           };
         }),
       },

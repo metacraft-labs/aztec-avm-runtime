@@ -1,10 +1,10 @@
 {
   "//": [
-    "CHUNK BUDGETS — recorded, enforced, and a BUILD FAILURE when exceeded.",
+    "CHUNK BUDGETS \u2014 recorded, enforced, and a BUILD FAILURE when exceeded.",
     "",
     "M27's deliverable: 'chunk budgets recorded and enforced, so a regression is a build failure",
-    "rather than a discovery'. The shape is upstream's — aztec-packages/playground/vite.config.ts",
-    "declares a list of { pattern, maxSizeKB, description } and its plugin THROWS on a violation —",
+    "rather than a discovery'. The shape is upstream's \u2014 aztec-packages/playground/vite.config.ts",
+    "declares a list of { pattern, maxSizeKB, description } and its plugin THROWS on a violation \u2014",
     "and so is the discipline: their limits carry a per-bump log naming what grew and why. Ours is",
     "the `bumps` array, which is data rather than a comment so that a check can read it.",
     "",
@@ -16,7 +16,7 @@
     "    no budget FAILS THE BUILD. 'the budget did not catch it' and 'nothing had a budget' are",
     "    indistinguishable from the outside.",
     "  * PER-ENTRY EAGER TOTALS as well as per-file sizes. A per-file budget cannot see the",
-    "    regression that matters for DD-11 — a lazily-loaded megabyte moving into the eager set —",
+    "    regression that matters for DD-11 \u2014 a lazily-loaded megabyte moving into the eager set \u2014",
     "    because every individual file can stay the same size while the SET grows. `entryBudgets`",
     "    is the transitive closure of an entry point's STATIC imports, which is exactly what a page",
     "    pays before it does anything.",
@@ -29,7 +29,7 @@
       "name": "entry-browser",
       "pattern": "^browser\\.js$",
       "maxGzipKB": 4,
-      "description": "the reference entry point's own module — DD-5's browser surface",
+      "description": "the reference entry point's own module \u2014 DD-5's browser surface",
       "bumps": []
     },
     {
@@ -50,29 +50,36 @@
       "name": "entry-worker",
       "pattern": "^worker\\.js$",
       "maxGzipKB": 4,
-      "description": "M32: the worker entry's own module — the dev node's dispatcher, the comlink transport and the protocol declarations. The runtime it hosts is in the shared chunks it imports, which is why this number is a kilobyte rather than a hundred.",
+      "description": "M32: the worker entry's own module \u2014 the dev node's dispatcher, the comlink transport and the protocol declarations. The runtime it hosts is in the shared chunks it imports, which is why this number is a kilobyte rather than a hundred.",
       "bumps": []
     },
     {
       "name": "entry-worker-demo",
       "pattern": "^worker-demo\\.js$",
       "maxGzipKB": 5,
-      "description": "M32: the worker demo page's own script — the client, the five arms and the main-thread control",
+      "description": "M32: the worker demo page's own script \u2014 the client, the five arms and the main-thread control",
       "bumps": []
     },
     {
       "name": "entry-wallet",
       "pattern": "^wallet\\.js$",
       "maxGzipKB": 20,
-      "description": "M33: the wallet protocol boundary's own module — the provider, the port connection handler, the null wallet and the vendored protocol types. Upstream's WalletSchema and the crypto it needs are in the shared chunks it imports, which is why this number is kilobytes rather than hundreds.",
+      "description": "M33: the wallet protocol boundary's own module \u2014 the provider, the port connection handler, the null wallet and the vendored protocol types. Upstream's WalletSchema and the crypto it needs are in the shared chunks it imports, which is why this number is kilobytes rather than hundreds.",
       "bumps": []
     },
     {
       "name": "entry-wallet-demo",
       "pattern": "^wallet-demo\\.js$",
-      "maxGzipKB": 12,
-      "description": "M34: the wallet demo page's own script — the dev wallet's host adapter, the five arms and the dev shortcuts it names. Larger than the other demo entries because it drives both halves of the wallet boundary in one page.",
-      "bumps": []
+      "maxGzipKB": 16,
+      "description": "M34: the wallet demo page's own script \u2014 the dev wallet's host adapter, the five arms and the dev shortcuts it names. Larger than the other demo entries because it drives both halves of the wallet boundary in one page.",
+      "bumps": [
+        {
+          "milestone": "M40",
+          "from": 12,
+          "to": 16,
+          "why": "The wallet demo page now runs BOTH HALVES of one transaction: the arm that executes the enqueued public calls, the frame-tree walk that collects them, the two controls that perturb the calldata and drop the deployment nullifier, and the join record it writes into the public container. Measured: the entry's own module went 11.91 KB gzipped to 12.16. It is the ENTRY's own script that grew and not its eager set \u2014 the transaction-public-half module and the join grammar land in shared chunks, so the page's first-paint cost went 350.68 KB to 350.95 against a 380 KB budget. Recorded here rather than absorbed because a budget with headroom nobody has to think about is a budget that stops measuring."
+        }
+      ]
     },
     {
       "name": "entry-node",
@@ -150,7 +157,7 @@
       "name": "worker",
       "entry": "worker.js",
       "maxGzipKB": 320,
-      "description": "M32, and it is the DD-5 number for the worker: everything the WORKER thread downloads before it can do anything. It hosts the same runtime the browser entry does plus comlink and the protocol's zod schemas, and it must contain no more of the proving stack or the contract artifacts than the browser entry does — which is nothing.",
+      "description": "M32, and it is the DD-5 number for the worker: everything the WORKER thread downloads before it can do anything. It hosts the same runtime the browser entry does plus comlink and the protocol's zod schemas, and it must contain no more of the proving stack or the contract artifacts than the browser entry does \u2014 which is nothing.",
       "bumps": []
     },
     {
@@ -164,7 +171,7 @@
       "name": "wallet-demo",
       "entry": "wallet-demo.js",
       "maxGzipKB": 380,
-      "description": "M34: what the wallet demo page costs on first paint. It is necessarily the largest of the demo entries, because it reaches the runtime (to host the chain), the vendored transaction builder (which the wallet uses) and the wallet protocol (which both halves speak) — the union of what three other entries reach.",
+      "description": "M34: what the wallet demo page costs on first paint. It is necessarily the largest of the demo entries, because it reaches the runtime (to host the chain), the vendored transaction builder (which the wallet uses) and the wallet protocol (which both halves speak) \u2014 the union of what three other entries reach.",
       "bumps": [
         {
           "milestone": "M35",
@@ -184,13 +191,13 @@
           "milestone": "M34",
           "from": 270,
           "to": 300,
-          "why": "The wallet now BUILDS transactions, so M26's vendored transaction builder (PublicTxSimulationTester, SimpleContractDataSource, RI-72) and @aztec/stdlib/testing's makeContractClassPublic are reachable from the wallet entry where before nothing was. Measured: the eager set went 245.87 KB across 8 files to 275.21 KB across 9. That cost is the deliverable rather than a regression — a wallet that did not construct the transaction would be a wallet the runtime reached around — and it is recorded here rather than absorbed silently, which is what this array is for. The DD-11 property the original number protects is unchanged and is still measured: browser.js's own eager set contains zero bytes of @aztec/aztec.js, so a page that attaches no wallet still pays none of this."
+          "why": "The wallet now BUILDS transactions, so M26's vendored transaction builder (PublicTxSimulationTester, SimpleContractDataSource, RI-72) and @aztec/stdlib/testing's makeContractClassPublic are reachable from the wallet entry where before nothing was. Measured: the eager set went 245.87 KB across 8 files to 275.21 KB across 9. That cost is the deliverable rather than a regression \u2014 a wallet that did not construct the transaction would be a wallet the runtime reached around \u2014 and it is recorded here rather than absorbed silently, which is what this array is for. The DD-11 property the original number protects is unchanged and is still measured: browser.js's own eager set contains zero bytes of @aztec/aztec.js, so a page that attaches no wallet still pays none of this."
         },
         {
           "milestone": "M35",
           "from": 300,
           "to": 340,
-          "why": "The wallet entry now carries PRIVATE EXECUTION: upstream's WASMSimulator (RI-64, PROVENANCE.md V10, 13 files) and the whole private-execution oracle WIRE layer (RI-97, V11, 37 files) — the 68-entry registry, its type mappings, buildACIRCallback and the Noir struct codecs. Measured: the eager set went 275.26 KB across 9 files to 296.39 KB across 9. That is the deliverable rather than a regression: a wallet that could not execute a private function would be a wallet the runtime had to reach around, which is the shape M33's null wallet exists to refuse. THE TWO WASM MODULES ARE NOT IN THIS NUMBER AND THAT IS THE POINT — acvm_js_bg.wasm (3,601,516 bytes) and noirc_abi_wasm_bg.wasm (789,053) are fetched BY URL at the moment a page asks for a private execution and never before, which the arm run's own control measures on a network log rather than asserting from this file. The DD-11 property the original number protects is unchanged: browser.js's eager set still contains zero bytes of @aztec/aztec.js."
+          "why": "The wallet entry now carries PRIVATE EXECUTION: upstream's WASMSimulator (RI-64, PROVENANCE.md V10, 13 files) and the whole private-execution oracle WIRE layer (RI-97, V11, 37 files) \u2014 the 68-entry registry, its type mappings, buildACIRCallback and the Noir struct codecs. Measured: the eager set went 275.26 KB across 9 files to 296.39 KB across 9. That is the deliverable rather than a regression: a wallet that could not execute a private function would be a wallet the runtime had to reach around, which is the shape M33's null wallet exists to refuse. THE TWO WASM MODULES ARE NOT IN THIS NUMBER AND THAT IS THE POINT \u2014 acvm_js_bg.wasm (3,601,516 bytes) and noirc_abi_wasm_bg.wasm (789,053) are fetched BY URL at the moment a page asks for a private execution and never before, which the arm run's own control measures on a network log rather than asserting from this file. The DD-11 property the original number protects is unchanged: browser.js's eager set still contains zero bytes of @aztec/aztec.js."
         }
       ]
     }

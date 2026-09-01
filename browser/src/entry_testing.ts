@@ -33,6 +33,20 @@ export {
   type TokenTransferReport,
 } from './token_transfer.ts';
 
+// ---- the PUBLIC half of a transaction whose private half already ran --------------------------
+//
+// Beside `runTokenTransfer` rather than inside it, because the two answer different questions: that
+// one DECLARES a public transaction, this one runs the calls a private circuit ENQUEUED, from the
+// calldata the circuit committed to. See the file header.
+export {
+  CONTRACT_CLASS_SEED,
+  PUBLIC_HALF_FUNDING,
+  runEnqueuedPublicCalls,
+  type EnqueuedPublicCall,
+  type ExecutedEnqueuedCall,
+  type PublicHalfReport,
+} from './transaction_public_half.ts';
+
 // ---- upstream's own builder, vendored ---------------------------------------------------------
 export {
   createContractClassAndInstance,

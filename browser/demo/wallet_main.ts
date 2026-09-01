@@ -45,7 +45,9 @@ import {
   getContractFunctionAbi,
   getFunctionSelector,
   runTokenTransfer,
+  runEnqueuedPublicCalls,
   storageSlotOf,
+  type EnqueuedPublicCall,
   type OpenedRuntime,
 } from '../src/entry_testing.ts';
 import {
@@ -98,6 +100,11 @@ import {
   PUBLIC_DISPATCH_FN_NAME,
   getContractFunctionArtifact,
 } from '../../orchestration/src/vendor/avm_fixtures_utils.ts';
+// THE JOIN GRAMMAR, FROM THE ONE MODULE THAT OWNS IT. `orchestration/src/trace_join.ts` imports
+// nothing — no npm package and no Node builtin — which is why a browser page can render the record
+// the native private-half probe renders and the two can be compared as BYTES rather than each
+// against its own copy of a format string.
+import { JOIN_EVENT_METADATA, formatJoinRecord, joinRecord } from '../../orchestration/src/trace_join.ts';
 import { buildACIRCallback } from '../src/vendor/pxe/contract_function_simulator/oracle/acir_callback.ts';
 import { EphemeralArray } from '../src/vendor/pxe/contract_function_simulator/noir-structs/ephemeral_array.ts';
 import { Option } from '../src/vendor/pxe/contract_function_simulator/noir-structs/option.ts';
@@ -194,6 +201,14 @@ const PRIVATE_ENTROPY_SEED = 0x35n;
 
 /** A UUID. `ct-print` refuses a `recording_id` that is not exactly 36 characters. */
 const RECORDING_ID = '01949fcc-7d92-7e9c-8000-000000003401';
+
+/**
+ * M40's public-half recording id. Distinct from {@link RECORDING_ID} on purpose: the two
+ * containers a page writes are different recordings, and a shared id would make "these are two
+ * halves of one transaction" a property of the recording id rather than of the join record — which
+ * is the inference `JOIN-SHAPE.md` §4 exists to refuse.
+ */
+const PUBLIC_HALF_RECORDING_ID = '01949fcc-7d92-7e9c-8000-000000004001';
 
 /** The application identifier the session is bound to. */
 const APP_ID = 'm34-wallet-demo';
@@ -704,11 +719,35 @@ async function armDirectShortcut(): Promise<Record<string, unknown>> {
   }
 }
 
-/** The class id the wallet derives, derived here too so the two can be compared. */
+/**
+ * The class id the wallet derives, derived here too so the two can be compared.
+ *
+ * ===========================================================================================
+ * THE BYTECODE IS DECODED FIRST, AND FOR A WHILE IT WAS NOT.
+ * ===========================================================================================
+ *
+ * A raw artifact's `functions[].bytecode` is BASE64 TEXT; `loadContractArtifact` decodes it, and
+ * `makeContractClassPublic` hashes what it is handed through
+ * `computePublicBytecodeCommitment(packedBytecode)`. Handing it the base64 string produces a
+ * well-formed class id that is the commitment of the ARTIFACT'S TEXT rather than of the contract's
+ * bytecode — and every address derived from it is self-consistent, so `aztec-nr`'s
+ * `get_contract_instance` assertion (`instance.to_address() == address`) holds and nothing in a
+ * private frame can tell.
+ *
+ * It became visible the moment the PUBLIC half had to register that class and the AVM had to find
+ * bytecode by its id: the two derivations disagreed (`0x228f83d8…` from the text against
+ * `0x0e85bd51…` from the bytecode), and `runEnqueuedPublicCalls`'s guard named both. That is M39's
+ * selector defect one contract over — *a value that was correct enough for one frame and wrong for
+ * two* — and it is the third time this campaign has met that shape.
+ *
+ * `loadContractArtifact` is upstream's own decoder and `getContractFunctionArtifact` its own
+ * two-place lookup, so nothing here decodes base64 by hand.
+ */
 async function classIdOf(parsed: { name: string; functions: { name: string; bytecode: string }[] }): Promise<Fr> {
-  const dispatch = parsed.functions.find(f => f.name === 'public_dispatch');
+  const loaded = loadContractArtifact(parsed as never);
+  const dispatch = getContractFunctionArtifact(PUBLIC_DISPATCH_FN_NAME, loaded);
   if (!dispatch) throw new Error('the artifact has no public_dispatch');
-  const cls = await makeContractClassPublic(27, dispatch.bytecode as never);
+  const cls = await makeContractClassPublic(27, dispatch.bytecode);
   return cls.id;
 }
 
@@ -1175,6 +1214,24 @@ async function armPrivateExecution(): Promise<Record<string, unknown>> {
 // The fixture is upstream's own and the callee is deliberately the emptiest one it has:
 // `Child.value(input) = input + chain_id + version` touches no note, no tag, no storage and no
 // contract instance, so a failure here is a failure of the NESTING.
+/**
+ * What {@link runNestedPrivateCall} hands back beside the arm's report.
+ *
+ * The PUBLIC half needs the callee's INSTANCE OBJECT and its ARTIFACT, not their hex renderings:
+ * it registers the contract class the instance was derived from and it re-hashes the enqueued
+ * calldata. Re-deriving either from the report would be a second producer of a value this function
+ * already produced — the defect `transaction_public_half.ts` exists to keep out of the calldata,
+ * one level up.
+ */
+interface NestedPrivateCallRun {
+  report: Record<string, unknown>;
+  parentArtifact: unknown;
+  childArtifact: unknown;
+  parentInstance: Awaited<ReturnType<typeof privateContractInstance>>;
+  childInstance: Awaited<ReturnType<typeof privateContractInstance>>;
+  run: Awaited<ReturnType<typeof executePrivateFunction>> | undefined;
+}
+
 async function armNestedPrivateCall(options?: {
   /** `deletion_era` is the corpus this runtime executes; `anchor` is the one it cannot. */
   line?: 'deletion_era' | 'anchor';
@@ -1196,6 +1253,10 @@ async function armNestedPrivateCall(options?: {
    */
   refuse?: 'unregistered-contract' | 'unknown-selector' | 'not-private' | 'depth-exceeded';
 }): Promise<Record<string, unknown>> {
+  return (await runNestedPrivateCall(options)).report;
+}
+
+async function runNestedPrivateCall(options?: Parameters<typeof armNestedPrivateCall>[0]): Promise<NestedPrivateCallRun> {
   // Same reason as `armPrivateExecution`: a function SELECTOR is a poseidon hash of the ABI
   // signature, and under this build's DD-11 redirect table poseidon2 is `avm.wasm`'s.
   await open();
@@ -1330,7 +1391,211 @@ async function armNestedPrivateCall(options?: {
     run: nested ? jsonSafe(nested) : null,
   };
   lastRun = report as never;
-  return jsonSafe(report) as Record<string, unknown>;
+  return {
+    report: jsonSafe(report) as Record<string, unknown>,
+    parentArtifact,
+    childArtifact,
+    parentInstance,
+    childInstance,
+    run: nested,
+  };
+}
+
+// =============================================================================================
+// M40 — BOTH HALVES OF ONE TRANSACTION, EXECUTED, IN ONE PAGE.
+// =============================================================================================
+//
+// M39 got the private half of `Parent.enqueue_calls_to_child_with_nested_first` to execute — two
+// private frames, two ENQUEUED public calls — and recorded, in `NESTED-CALLS.md` §6, that the
+// public half was not run. This arm runs it.
+//
+// THE ENQUEUED CALLS ARE TAKEN FROM THE CIRCUIT AND NOT RE-DECLARED. Every one of them is
+// collected out of `publicInputs.publicCallRequests`, across the whole FRAME TREE, with its
+// calldata preimage out of the transaction's own execution cache; `runEnqueuedPublicCalls` rebuilds
+// each request from that preimage and refuses if the hash it derives is not the one the circuit
+// committed to. The alternative — naming `pub_set_value` and its arguments here — is what every
+// other driver in this repository does, and it would make the public half a transaction that
+// RESEMBLES the enqueued one. The two enqueued calls differ by their argument (10 and 20) and not
+// by their function, which is exactly the difference a re-declaration is free to get wrong.
+//
+// THE PUBLIC HALF RUNS IN A RUNTIME OF ITS OWN, for `armDirectShortcut`'s reason: a world state
+// other arms have already written is not this transaction's.
+//
+// THE CONTAINER CARRIES THE JOIN RECORD, `half=public halves=2 arm=split`, under the SAME identity
+// the private half's container carries — the parent frame's own `argsHash`, a value the circuit
+// committed to. `joinRecordings` refuses one half of a declared two-half join on `count-mismatch`,
+// so a public container written without this record, or with a minted identity, is a half nothing
+// can join rather than a half that joins wrongly.
+
+/** Every enqueued public call in a frame TREE, with the frame that enqueued it named. */
+function enqueuedCallsOf(
+  run: { functionName?: string; publicInputs?: { publicCallRequests?: readonly unknown[] }; nested?: readonly unknown[] },
+  out: { frame: string; call: EnqueuedPublicCall }[] = [],
+): { frame: string; call: EnqueuedPublicCall }[] {
+  for (const call of run.publicInputs?.publicCallRequests ?? []) {
+    out.push({ frame: String(run.functionName ?? '?'), call: call as EnqueuedPublicCall });
+  }
+  // PRE-ORDER, AND THE ORDER HERE IS NOT THE ORDER THEY RUN IN. A frame tree is walked in visit
+  // order; the protocol runs enqueued calls in SIDE-EFFECT COUNTER order, which is a value the
+  // circuit committed to. `runEnqueuedPublicCalls` sorts by it, so this walk only has to be
+  // complete rather than ordered — and it is the completeness that a tree walk can get wrong.
+  for (const child of run.nested ?? []) {
+    enqueuedCallsOf(child as Parameters<typeof enqueuedCallsOf>[0], out);
+  }
+  return out;
+}
+
+/**
+ * ARM: the whole transaction — the private half executes, the public half executes, one join.
+ *
+ * Returns the private half's report unchanged (so every M39 assertion still reads the same paths)
+ * plus `publicHalf` and `publicContainer`.
+ */
+async function armTransactionBothHalvesExecuted(
+  options: {
+    download?: boolean;
+    /**
+     * CONTROL: change one field of one enqueued call's CALLDATA and nothing else.
+     *
+     * The identity this whole path rests on is "the preimage hashes to what the circuit committed
+     * to". An identity nobody has seen fail is an identity nobody has calibrated, and a check that
+     * read `calldataHashMatches: true` off a report would be reading a field the producer sets. So
+     * the perturbation is made HERE, in the data, and the refusal comes back out of
+     * `runEnqueuedPublicCalls` — which means the comparison is a thing that runs rather than a
+     * sentence in a file.
+     */
+    corruptCalldata?: boolean;
+    /** CONTROL: M29's one-instruction shape. See `runEnqueuedPublicCalls`'s option of this name. */
+    skipDeploymentNullifier?: boolean;
+  } = {},
+): Promise<Record<string, unknown>> {
+  const priv = await runNestedPrivateCall({ entry: 'enqueue_calls_to_child_with_nested_first' });
+  if (!priv.run) {
+    throw new Error(
+      'the private half did not assemble, so there is no transaction to run a public half of: ' +
+        String(priv.report.refusedToAssemble),
+    );
+  }
+  if (priv.run.outcome !== 'executed') {
+    throw new Error(
+      `the private half's outcome is '${priv.run.outcome}' (stopped at ` +
+        `${priv.run.stoppedAtOracle ?? 'nothing'}); a public half run over a private half that did not ` +
+        'complete would be running calls the transaction never committed to',
+    );
+  }
+
+  const enqueued = enqueuedCallsOf(priv.run as never);
+  say(`[both halves] the private half enqueued ${enqueued.length} public call(s)`);
+
+  // THE PERTURBATION IS ONE FIELD OF ONE CALL, AND EVERYTHING ELSE IS THE SUBJECT ARM'S. Adding a
+  // field, or changing the address, or changing the counter would each be refused by a DIFFERENT
+  // guard, and then the arm would say nothing about the hash comparison.
+  let corrupted: string | null = null;
+  if (options.corruptCalldata === true) {
+    const target = enqueued[enqueued.length - 1];
+    if (!target) throw new Error('the corruption control needs at least one enqueued call');
+    const fields = [...target.call.calldata];
+    const last = fields.length - 1;
+    fields[last] = new Fr(Fr.fromString(fields[last]).toBigInt() + 1n).toString();
+    corrupted = `counter=${target.call.counter} field=${last} ${target.call.calldata[last]} -> ${fields[last]}`;
+    enqueued[enqueued.length - 1] = { frame: target.frame, call: { ...target.call, calldata: fields } };
+    say(`[both halves] CONTROL: ${corrupted}`);
+  }
+
+  // THE JOIN IDENTITY IS THE PARENT FRAME'S OWN `argsHash`, which is what M39's private container
+  // uses. Derived, not minted: two runs of one transaction agree and two transactions cannot
+  // collide. `run_m39_trace_arms.mjs` takes the same field for the private half.
+  const joinId = String(priv.run.publicInputs?.argsHash ?? '');
+  if (joinId === '') throw new Error('the private half reported no argsHash, so there is no join identity');
+
+  const o = await openAvmRuntime({
+    moduleUrl: MODULE_URL,
+    clock: new DateProvider(),
+    production: { intervalMs: 0, minBlockSpacingSeconds: 1 } as never,
+    collectExecutionSteps: true,
+    disclosureSink: (line: string) => say(`[disclosure] ${line}`),
+  });
+  try {
+    // THE REFUSAL IS REPORTED RATHER THAN THROWN, for the reason the anchor-line arm gives one
+    // level up: a control whose failure kills the run tells a driver nothing about WHICH guard
+    // fired, and `refusedToRunPublicHalf` is a field a check can read beside the arm that produced
+    // it.
+    let publicHalf: Awaited<ReturnType<typeof runEnqueuedPublicCalls>> | undefined;
+    let refusedToRunPublicHalf: string | undefined;
+    try {
+      publicHalf = await runEnqueuedPublicCalls(
+        o,
+        priv.childArtifact,
+        priv.childInstance as never,
+        enqueued.map(e => e.call),
+        {
+          firstNullifier: joinId,
+          firstNullifierSource:
+            "the private half's own argsHash — the same value the join record carries, so the carrier " +
+            'transaction is derived from what the circuit committed to rather than from a counter',
+          ...(options.skipDeploymentNullifier === true ? { skipDeploymentNullifier: true } : {}),
+        },
+      );
+    } catch (e) {
+      refusedToRunPublicHalf = String((e as Error)?.message ?? e);
+    }
+    if (!publicHalf) {
+      say(`[both halves] the public half was refused: ${refusedToRunPublicHalf}`);
+      return jsonSafe({
+        ...priv.report,
+        joinId,
+        corruptedCalldata: corrupted,
+        enqueued: enqueued.map(e => ({ frame: e.frame, counter: e.call.counter, calldataHash: e.call.calldataHash })),
+        publicHalf: null,
+        refusedToRunPublicHalf: refusedToRunPublicHalf ?? null,
+        publicContainer: null,
+      }) as Record<string, unknown>;
+    }
+    say(
+      `[both halves] public: ${publicHalf.outcome}, revertCode ${publicHalf.revertCode}, ` +
+        `${publicHalf.executed?.count ?? 0} executed step(s)`,
+    );
+
+    const record = formatJoinRecord(joinRecord(joinId, 'public', 2, 'split'));
+    const writerBytes = await fetchCtWriter(CT_WRITER_URL);
+    const recording = await recordAndDownload({
+      writerBytes,
+      rawArtifact: priv.childArtifact,
+      contractAddress: priv.childInstance.address.toBuffer(),
+      // ONE NAME PER TOP-LEVEL AVM FRAME, IN THE ORDER THE TRANSACTION RUNS THEM, and each name is
+      // a RESOLVED selector rather than a label: `runEnqueuedPublicCalls` matched the selector the
+      // circuit committed to against the artifact's own ABI-derived ones, and reports `null` when
+      // nothing matches. A frame named after a function the transaction did not call is a fiction
+      // a reader has no way to check.
+      frameNames: publicHalf.calls.map(c =>
+        c.functionName === null ? undefined : `${publicHalf.contract.name}.${c.functionName}`,
+      ),
+      recordingId: PUBLIC_HALF_RECORDING_ID,
+      executed: o.steps.last,
+      download: options.download !== false,
+      filename: `aztec-avm-public-half-${PUBLIC_HALF_RECORDING_ID}.ct`,
+      extraLogEvents: [{ metadata: JOIN_EVENT_METADATA, content: record }],
+    });
+    say(`[both halves] wrote ${recording.bytes} container bytes with the join record`);
+
+    return jsonSafe({
+      ...priv.report,
+      joinId,
+      corruptedCalldata: corrupted,
+      enqueued: enqueued.map(e => ({ frame: e.frame, counter: e.call.counter, calldataHash: e.call.calldataHash })),
+      publicHalf,
+      refusedToRunPublicHalf: null,
+      publicContainer: {
+        ...recording,
+        container: undefined,
+        containerBytes: recording.bytes,
+        joinRecord: record,
+        filename: `aztec-avm-public-half-${PUBLIC_HALF_RECORDING_ID}.ct`,
+      },
+    }) as Record<string, unknown>;
+  } finally {
+    await o.close();
+  }
 }
 
 /**
@@ -2313,6 +2578,8 @@ const api = {
   },
   armNestedPrivateCallBothHalves: () =>
     armNestedPrivateCall({ entry: 'enqueue_calls_to_child_with_nested_first' }),
+  armTransactionBothHalvesExecuted: (options?: Parameters<typeof armTransactionBothHalvesExecuted>[0]) =>
+    armTransactionBothHalvesExecuted(options ?? {}),
   armNestedPrivateCallAnchorLine: () => armNestedPrivateCall({ line: 'anchor' }),
   armOracleSurface,
   armNoteDiscovery,
