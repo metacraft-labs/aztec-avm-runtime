@@ -1180,6 +1180,11 @@ async function armNestedPrivateCall(options?: {
   line?: 'deletion_era' | 'anchor';
   /** `off` disables the call-private wire regrouping, which is how its necessity is measured. */
   wireCompat?: 'auto' | 'off';
+  /**
+   * `entry_point` is the minimal nested call; `enqueue_calls_to_child_with_nested_first` is the
+   * BOTH-HALVES shape — a nested private call AND two enqueued public calls in one transaction.
+   */
+  entry?: 'entry_point' | 'enqueue_calls_to_child_with_nested_first';
 }): Promise<Record<string, unknown>> {
   // Same reason as `armPrivateExecution`: a function SELECTOR is a poseidon hash of the ABI
   // signature, and under this build's DD-11 redirect table poseidon2 is `avm.wasm`'s.
@@ -1205,7 +1210,18 @@ async function armNestedPrivateCall(options?: {
   // THE SELECTOR THE PARENT PASSES AND THE SELECTOR THE ORACLE LOOKS UP ARE ONE VALUE.
   // `privateFunctionSelector` is exported from `private_execution.ts` for exactly this: deriving it
   // twice is how a lookup misses for a reason that looks like a missing contract.
-  const childSelector = await privateFunctionSelector(childArtifact, 'value');
+  // THE CALLEE'S SELECTOR, AND WHICH CALLEE IT IS DEPENDS ON WHAT THE ENTRY DOES WITH IT.
+  //
+  //   `entry_point` passes it to `call_private_function`, so it must be a PRIVATE function of the
+  //   child — `value`, which is `input + chain_id + version` and touches nothing else.
+  //
+  //   `enqueue_calls_to_child_with_nested_first` passes it to `call_public_function`, so it must be
+  //   a PUBLIC one — `pub_set_value`. Handing that entry a private selector would enqueue a public
+  //   call to a function that is not public, which the sequencer would refuse later rather than the
+  //   circuit refusing now, and this arm would look green.
+  const entry = options?.entry ?? 'entry_point';
+  const childFunction = entry === 'entry_point' ? 'value' : 'pub_set_value';
+  const childSelector = await privateFunctionSelector(childArtifact, childFunction);
 
   const say1 = (text: string) => say(text);
   const request = {
@@ -1218,7 +1234,7 @@ async function armNestedPrivateCall(options?: {
     contractInstances: heldInstances,
     accountKeys: heldAccountKeys,
     artifact: parentArtifact,
-    functionName: 'entry_point',
+    functionName: entry,
     // `target_contract` and `target_selector`, one field each, in the order the ABI declares.
     args: [childInstance.address.toField(), childSelector.toField()],
     // TIER 4's SOURCE. Both contracts, because a directory holding only the callee would leave
@@ -1261,6 +1277,8 @@ async function armNestedPrivateCall(options?: {
   const report = {
     line,
     wireCompat,
+    entry,
+    childFunction,
     aztecVersion: String((parentArtifact as { aztec_version?: string }).aztec_version ?? '?'),
     // THE CONTEXT WIDTH THE ARTIFACT ITSELF DECLARES, beside the one this environment builds. The
     // 37-against-38 fact is the whole reason the anchor line cannot run here, and reading it off
@@ -2251,6 +2269,8 @@ const api = {
   armPrivateExecution,
   armNestedPrivateCall,
   armNestedPrivateCallNoCompat: () => armNestedPrivateCall({ wireCompat: 'off' }),
+  armNestedPrivateCallBothHalves: () =>
+    armNestedPrivateCall({ entry: 'enqueue_calls_to_child_with_nested_first' }),
   armNestedPrivateCallAnchorLine: () => armNestedPrivateCall({ line: 'anchor' }),
   armOracleSurface,
   armNoteDiscovery,

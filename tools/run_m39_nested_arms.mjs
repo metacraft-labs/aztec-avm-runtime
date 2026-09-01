@@ -192,7 +192,22 @@ try {
     await page.close();
   }
 
-  // ---- ARM 3: THE ANCHOR LINE, WHICH THIS RUNTIME CANNOT ASSEMBLE A FRAME FOR --------------------
+  // ---- ARM 3: BOTH HALVES — a nested private call AND enqueued public calls ---------------------
+  //
+  // `Parent.enqueue_calls_to_child_with_nested_first` calls ITSELF privately (through
+  // `enqueue_call_to_child`, which enqueues a public call) and then enqueues a second one directly.
+  // So one transaction has two private frames and two enqueued public calls — the shape a joined
+  // recording is a recording OF, and the shape the minimal `entry_point` arm deliberately does not
+  // have. The self-call is also the reason the artifact directory holds the caller as well as the
+  // callee.
+  {
+    const page = await walletPage();
+    const report = await page.eval('window.walletDemo.armNestedPrivateCallBothHalves()', 600_000);
+    arms.bothHalves = { ...pageFacts(page), report };
+    await page.close();
+  }
+
+  // ---- ARM 4: THE ANCHOR LINE, WHICH THIS RUNTIME CANNOT ASSEMBLE A FRAME FOR --------------------
   //
   // A claim that a corpus cannot run here is a claim. This runs it: the artifact's own `inputs`
   // parameter is 38 fields wide, the installed `@aztec/constants` declares 37, and the frame is

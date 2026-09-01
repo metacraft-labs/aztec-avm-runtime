@@ -105,6 +105,23 @@ struct Spec {
     /// executor parameter: the old entry point keeps its meaning and delegates.
     #[serde(default)]
     frames: Vec<FrameSpec>,
+    /// The explicit join this container is one half of, when it is one.
+    ///
+    /// **Absent means no join record, and that is not the same as a join with one half.**
+    /// `JOIN-SHAPE.md` §4: without `halves` in the record, a reader handed one half of a two-half
+    /// join cannot tell it from a whole recording — so a container that carries no record at all is
+    /// a recording that claims nothing, which is the honest state for a half nobody joined.
+    #[serde(default)]
+    join: Option<JoinSpec>,
+}
+
+/// The `ct.trace-join` record's four declared fields. The fifth, `reason`, is a constant.
+#[derive(Clone, serde::Deserialize)]
+struct JoinSpec {
+    id: String,
+    half: String,
+    halves: u32,
+    arm: String,
 }
 
 /// One frame of a transaction: which bytecode ran, whose tape answers it, and how deep it sat.
@@ -597,6 +614,31 @@ fn load(artifact_path: &str, function: &str) -> Result<Loaded, String> {
     })
 }
 
+/// The `ct.trace-join` record's metadata key, spelled once and identical to
+/// `orchestration/src/trace_join.ts`'s `JOIN_EVENT_METADATA`.
+const JOIN_EVENT_METADATA: &str = "ct.trace-join";
+
+/// The explicit join record, written into a half of a joined recording.
+///
+/// **THE BYTES ARE THE GRAMMAR AND THEY ARE NOT REDERIVED HERE.** `orchestration/src/trace_join.ts`
+/// renders the same record in TypeScript and `test_join_fallback_two_recordings` compares the two
+/// BYTE FOR BYTE rather than each against a copy of itself — so field order, spacing and the
+/// constant `reason` are load-bearing, and the same `format!` as
+/// `verification/oq7_shared_writer_probe.rs` is used deliberately rather than a second spelling.
+fn write_join_record(sink: &mut dyn TraceSink, join: &JoinSpec) {
+    let content = format!(
+        "join={} half={} halves={} arm={} \
+         reason=recorded-by-the-producer-not-inferred-by-a-reader",
+        join.id, join.half, join.halves, join.arm
+    );
+    TraceSink::register_special_event(
+        sink,
+        codetracer_trace_types::EventLogKind::TraceLogEvent,
+        JOIN_EVENT_METADATA,
+        &content,
+    );
+}
+
 /// Where a nested frame's `Call` is anchored: the callee's own contract source, and line 1.
 ///
 /// **A `Call` needs a `(path, line)` BEFORE the callee has stepped**, because `register_call` has
@@ -1022,6 +1064,12 @@ fn main() {
         TraceSink::register_return(&mut sink, ValueRecord::None { type_id: NONE_TYPE_ID });
     }
 
+    // THE JOIN RECORD IS WRITTEN AFTER EVERY FRAME HAS CLOSED, so a reader that stops at the record
+    // has already seen the whole half it describes.
+    if let Some(join) = &spec.join {
+        write_join_record(&mut sink, join);
+    }
+
     let finish = finish_trace(&mut sink);
 
     let container = std::fs::read_dir(&spec.out_dir)
@@ -1042,6 +1090,9 @@ fn main() {
         "function": frames[0].function,
         "program": program_name,
         "frameCount": frames.len(),
+        "join": spec.join.as_ref().map(|j| serde_json::json!({
+            "id": j.id, "half": j.half, "halves": j.halves, "arm": j.arm,
+        })),
         "maxDepth": frames.iter().map(|f| f.depth).max().unwrap_or(0),
         "frames": frame_reports,
         "tapeEntriesRecorded": all_tape_entries,

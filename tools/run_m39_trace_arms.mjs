@@ -109,8 +109,21 @@ const FRAME_CHILD = {
   contract_address: childReport.publicInputs.contractAddress,
 };
 
+// THE JOIN IDENTITY IS DERIVED FROM THE TRANSACTION, NOT MINTED. It is the parent frame's own
+// `argsHash` — a value the CIRCUIT committed to — so two runs of the same transaction produce the
+// same identity and two different transactions cannot collide. A random id would make the join a
+// fact about when the driver ran.
+const JOIN_ID = run.publicInputs.argsHash;
+
 const ARMS = [
-  { name: 'transaction', frames: [FRAME_PARENT, FRAME_CHILD] },
+  {
+    name: 'transaction',
+    frames: [FRAME_PARENT, FRAME_CHILD],
+    // `halves: 2` and `arm: split` because this is the PRIVATE half of a two-container recording —
+    // OQ-7's shipped fallback. Declaring `halves: 1` over a container that is one of two is the
+    // exact confusion `JOIN-SHAPE.md` §4 put `halves` in the record to prevent.
+    join: { id: JOIN_ID, half: 'private', halves: 2, arm: 'split' },
+  },
   { name: 'parentOnly', frames: [FRAME_PARENT] },
 ];
 
@@ -126,6 +139,11 @@ for (const arm of ARMS) {
     out_dir: outDir,
     program: `${run.contractName}.${run.functionName}`,
     frames: arm.frames,
+    // `parentOnly` carries NO join, deliberately: it is a control over one frame and not a half of
+    // anything, and a record claiming otherwise would be the inference this grammar exists to
+    // refuse. It is also what makes "the transaction arm's container carries a join record" a
+    // measurement rather than a property of the writer.
+    ...(arm.join ? { join: arm.join } : {}),
   };
   const specPath = path.join(WORK, `spec-${arm.name}.json`);
   writeFileSync(specPath, JSON.stringify(spec, null, 2) + '\n');

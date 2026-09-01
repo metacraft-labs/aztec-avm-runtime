@@ -400,6 +400,16 @@ export interface PrivateExecutionReport {
      */
     readonly l2ToL1MsgCount: number;
     readonly contractClassLogHashCount: number;
+    /**
+     * The PUBLIC calls this private frame enqueued, as `(contractAddress, selector)` pairs.
+     *
+     * **This is the seam between the two halves of a transaction, and it is read from the CIRCUIT's
+     * own public inputs.** A private frame does not execute a public function; it enqueues one, and
+     * the sequencer runs it later. So "which public calls does this transaction have" is a question
+     * only these fields answer, and answering it from the wallet's bookkeeping instead would be a
+     * second producer of a value the circuit already commits to.
+     */
+    readonly publicCallRequests: readonly { readonly contractAddress: string; readonly calldataHash: string }[];
   };
 }
 
@@ -431,9 +441,32 @@ function findFunction(artifact: unknown, name: string) {
  */
 export async function privateFunctionSelector(artifact: unknown, functionName: string): Promise<FunctionSelector> {
   const fn = findFunction(artifact, functionName);
+  const declared = ((fn.abi as { parameters?: { name?: string }[] } | undefined)?.parameters ?? []);
+  // THE CONTEXT INPUTS ARE NOT PART OF THE SIGNATURE, AND LEAVING THEM IN PRODUCED A SELECTOR THE
+  // PROTOCOL DOES NOT DERIVE.
+  //
+  // A raw artifact's `abi.parameters` begins with `inputs: PrivateContextInputs` — the frame's
+  // context, which the macro injects and which no caller passes. `loadContractArtifact` strips it,
+  // and upstream's own `getFunctionSelector` derives over what is left. Measured on
+  // `Parent.enqueue_call_to_child`:
+  //
+  //     with `inputs`    -> 0xeb8256a3
+  //     without `inputs` -> 0x20abda42
+  //
+  // and **0x20abda42 is what the CONTRACT derives**, in `comptime { FunctionSelector::from_signature
+  // ("enqueue_call_to_child((Field),(u32),Field)") }`, and what `loadContractArtifact` +
+  // `getFunctionSelector` produce over the same artifact.
+  //
+  // **This was wrong from the first frame this runtime executed and nothing could see it.** The
+  // selector goes into the `CallContext` and no assertion in a single frame compares it with
+  // anything; it became visible the moment one contract passed another's selector across a nested
+  // call and the callee had to be FOUND by it. That is this campaign's own shape — a value nobody
+  // measured, right-looking until the first consumer that compared it — arriving in a derivation
+  // rather than in a check.
+  const withoutContext = declared[0]?.name === 'inputs' ? declared.slice(1) : declared;
   return FunctionSelector.fromNameAndParameters({
     name: functionName,
-    parameters: ((fn.abi as { parameters?: unknown[] } | undefined)?.parameters ?? []) as never,
+    parameters: withoutContext as never,
   });
 }
 
@@ -993,6 +1026,35 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
         }),
         l2ToL1MsgCount: claimed(publicInputs.l2ToL1Msgs).length,
         contractClassLogHashCount: claimed(publicInputs.contractClassLogsHashes).length,
+        publicCallRequests: claimed(publicInputs.publicCallRequests).map(r => {
+          // `CountedPublicCallRequest` wraps the request beside its counter, and the request
+          // carries the callee's address and selector. Read by NAME with a named failure, for the
+          // reason `fieldOf` records one line up: a struct rendered with `String(...)` produces a
+          // sentence, not a field, and the failure lands four layers away.
+          const inner = (r as { inner?: { contractAddress?: unknown; calldataHash?: unknown } })?.inner ?? r;
+          const request = inner as { contractAddress?: { toString(): string }; calldataHash?: { toString(): string } };
+          if (request.contractAddress === undefined) {
+            throw new Error(
+              `an enqueued public call in the circuit's public inputs has no \`contractAddress\`; it carries ` +
+                `${JSON.stringify(Object.keys((inner as object) ?? {}))}`,
+            );
+          }
+          // THE FIELD IS `calldataHash` AND IT IS NAMED THAT. An enqueued call commits to a HASH of
+          // its calldata, whose first field is the selector; calling it `selector` here would be a
+          // label that reads as a measurement of something else, and the two enqueued calls in
+          // `enqueue_calls_to_child_with_nested_first` differ by their ARGUMENT (10 against 20)
+          // rather than by their function — which is exactly the distinction a wrong name hides.
+          if (request.calldataHash === undefined) {
+            throw new Error(
+              `an enqueued public call in the circuit's public inputs has no \`calldataHash\`; it carries ` +
+                `${JSON.stringify(Object.keys((inner as object) ?? {}))}`,
+            );
+          }
+          return {
+            contractAddress: request.contractAddress.toString(),
+            calldataHash: request.calldataHash.toString(),
+          };
+        }),
       },
       nested: nestedReports,
       wireCompatApplied: wireCompatApplied.count,
