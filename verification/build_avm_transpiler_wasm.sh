@@ -212,7 +212,7 @@ fi
 
 cp -r "$SHIM_SRC" "$TREE/avm-transpiler-wasm.new" || die "could not copy the shim crate"
 rm -rf "$TREE/avm-transpiler-wasm/src" "$TREE/avm-transpiler-wasm/.cargo" \
-       "$TREE/avm-transpiler-wasm/Cargo.toml"
+       "$TREE/avm-transpiler-wasm/Cargo.toml" "$TREE/avm-transpiler-wasm/Cargo.lock"
 mkdir -p "$TREE/avm-transpiler-wasm"
 cp -r "$TREE/avm-transpiler-wasm.new/." "$TREE/avm-transpiler-wasm/"
 rm -rf "$TREE/avm-transpiler-wasm.new"
@@ -307,13 +307,30 @@ MODULE_STAMP="$TREE/avm-transpiler-wasm/target/wasm32-unknown-unknown/release/.m
 if [ "$FORCE" = 1 ] || [ ! -f "$MODULE" ] || \
    [ "$(cat "$MODULE_STAMP" 2>/dev/null)" != "$BUILD_WANT" ]; then
   say "building avm_transpiler_wasm.wasm for wasm32-unknown-unknown"
+  # THE BUILD BELOW PASSES `--locked`, AND THE LOCK IS COMMITTED BESIDE THE CRATE.
+  #
+  # It used to be a bare `cargo build --release --target wasm32-unknown-unknown` with no lock
+  # anywhere, so a cold build resolved whatever was newest and semver-compatible. It drifted,
+  # measurably, three times for one revision of one crate:
+  #
+  #   4,970,171   the M31 impl log, section 2.3
+  #   5,196,936   the M31 review log, and the size verify_transpiler_wasm_output_identical_to_native
+  #               still asserts
+  #   5,188,559   the first build against a generated lock (2026-09-01, aarch64-darwin)
+  #
+  # Three sizes is what "not pinned" looks like from outside, and it stopped being tolerable when
+  # the module became an asset a browser downloads: CodeTracer declares `avm-transpiler` in
+  # webRuntimeAssets() and fetches it into a tab.
+  #
+  # `--locked` also turns a lock that has fallen behind Cargo.toml into a NAMED REFUSAL here,
+  # rather than a silent re-resolution that quietly un-pins the build again.
   TREE="$TREE" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" \
     nix shell nixpkgs#rustup --command bash -c '
       set -euo pipefail
       export PATH="$CARGO_HOME/bin:$PATH"
       rustup -q target add wasm32-unknown-unknown >/dev/null 2>&1 || true
       cd "$TREE/avm-transpiler-wasm"
-      cargo build --release --target wasm32-unknown-unknown
+      cargo build --locked --release --target wasm32-unknown-unknown
     ' >&2 || die "the wasm build failed"
   [ -f "$MODULE" ] || die "the wasm build reported success but $MODULE does not exist"
   printf '%s\n' "$BUILD_WANT" >"$MODULE_STAMP"

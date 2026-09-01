@@ -36,8 +36,39 @@ avm-transpiler = { path = "../avm-transpiler" }
 # different DEFLATE implementations agreeing to the byte. `verify_transpiler_native_build_unaffected`
 # §6 asserts the difference exists and prints which crates, so this is data and not a sentence.
 #
-# It also means THIS BUILD IS NOT PINNED: nothing passes `--locked` and no lock for this crate is
-# committed, so a cold build resolves whatever is newest and semver-compatible. That is recorded as
-# an Outstanding task on M31 rather than papered over here, because committing a lock is a decision
-# about what this crate is (a reproducible artefact, or a thin shim that follows its dependency)
-# and not a tidy-up.
+# THAT OUTSTANDING TASK IS NOW CLOSED, AND THE DECISION WENT THE OTHER WAY. This comment used to
+# end: *"THIS BUILD IS NOT PINNED: nothing passes `--locked` and no lock for this crate is
+# committed, so a cold build resolves whatever is newest and semver-compatible ... committing a
+# lock is a decision about what this crate is (a reproducible artefact, or a thin shim that follows
+# its dependency) and not a tidy-up."*
+#
+# It is a reproducible artefact, because it became a DEPLOYED ASSET: CodeTracer's web bundle
+# declares `avm-transpiler` in `webRuntimeAssets()` and fetches it into a tab. An asset a page
+# downloads has to be able to say which bytes it is, and this crate could not — one revision of it
+# built to THREE different sizes:
+#
+#   4,970,171   M31's impl log, §2.3
+#   5,196,936   M31's review log, and the size `verify_transpiler_wasm_output_identical_to_native`
+#               still asserts
+#   5,188,559   the first build against a generated lock (2026-09-01, aarch64-darwin)
+#
+# So `Cargo.lock` is committed beside this file and `build_avm_transpiler_wasm.sh` passes
+# `--locked`. 263 packages. The native binary still builds against upstream's own
+# `avm-transpiler/Cargo.lock`, so the two builds still differ in their resolution — which is what
+# makes the byte-identity result in §6 stronger rather than weaker, and that argument is unchanged.
+#
+# WHAT THE LOCK BUYS, AND WHAT IT DOES NOT — MEASURED, NOT ASSUMED. Building this crate twice from
+# the SAME committed lock and the SAME directory gave 5,188,559 and 5,186,166 bytes. The two runs
+# used two different rustc INSTALLATIONS of 1.89.0, and rustc embeds sysroot and source paths, so
+# the install reaches the artifact. The lock removes the 4,970,171-vs-5,196,936 class of drift —
+# different dependency VERSIONS — and it does not make the module byte-reproducible.
+#
+# THE SIZE IS THEREFORE ADVISORY AND THE OUTPUT IS NOT. Both of those modules transpile the
+# browser-compiled `SimpleToken` artifact to the SAME bytes:
+#
+#   sha256 65941af46a19d623b4f3e24f15c1483d02fb3fec2c594a09bff970c4e87f0e24, 3,598,824 bytes
+#
+# and that digest also equals what the module produces inside Chromium. So the property worth
+# asserting is the one about the ANSWER, not the one about the file — an exact-size assertion here
+# would fail on a rustc bump for reasons that have nothing to do with the product, which is the
+# argument `ci/deploy/noir-wasm.pin` already makes for the two Noir modules.

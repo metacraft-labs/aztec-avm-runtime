@@ -1,0 +1,29 @@
+<!doctype html>
+<!--
+  The compile -> transpile join, in one tab.
+
+  A contract is compiled by `noir_wasm.wasm` here, and the artifact THAT compile returned is
+  handed to `avm_transpiler_wasm.wasm` here. Both modules have run in a browser before; nothing
+  has ever passed one's output to the other.
+
+  The `window.__*__` values are written by the harness before the page is served, so the page
+  carries no hard-coded fixture.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Compile and transpile an Aztec contract in the browser</title>
+    <style>
+      body { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2rem; }
+      #status { color: #444; }
+      pre { background: #f6f6f6; padding: 1rem; overflow-x: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>Compile &rarr; transpile, in this tab</h1>
+    <p id="status">loading&hellip;</p>
+    <pre id="out"></pre>
+    <script src="./fixture.js"></script>
+    <script type="module" src="./join_page.mjs"></script>
+  </body>
+</html>
