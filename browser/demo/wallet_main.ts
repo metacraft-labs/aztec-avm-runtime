@@ -47,6 +47,8 @@ import {
   runTokenTransfer,
   runEnqueuedPublicCalls,
   recordPrivateHalf,
+  publicDispatchBytecode,
+  CONTRACT_CLASS_SEED,
   storageSlotOf,
   type EnqueuedPublicCall,
   type OpenedRuntime,
@@ -753,14 +755,14 @@ async function armDirectShortcut(): Promise<Record<string, unknown>> {
  * selector defect one contract over — *a value that was correct enough for one frame and wrong for
  * two* — and it is the third time this campaign has met that shape.
  *
- * `loadContractArtifact` is upstream's own decoder and `getContractFunctionArtifact` its own
- * two-place lookup, so nothing here decodes base64 by hand.
+ * `publicDispatchBytecode` is the ONE derivation, shared with the public half so the class this
+ * page registers and the class its instance was derived from cannot come from two routines. Its own
+ * header records why it does not go through `loadContractArtifact`: that decoder cannot load an
+ * anchor-line artifact at all, and M39's `anchorLine` arm derives an instance for exactly one of
+ * those in order to measure that this runtime cannot execute it.
  */
 async function classIdOf(parsed: { name: string; functions: { name: string; bytecode: string }[] }): Promise<Fr> {
-  const loaded = loadContractArtifact(parsed as never);
-  const dispatch = getContractFunctionArtifact(PUBLIC_DISPATCH_FN_NAME, loaded);
-  if (!dispatch) throw new Error('the artifact has no public_dispatch');
-  const cls = await makeContractClassPublic(27, dispatch.bytecode);
+  const cls = await makeContractClassPublic(CONTRACT_CLASS_SEED, publicDispatchBytecode(parsed) as never);
   return cls.id;
 }
 

@@ -61,7 +61,6 @@ import {
 
 import {
   PUBLIC_DISPATCH_FN_NAME,
-  getContractFunctionArtifact,
   getFunctionSelector,
 } from '../../orchestration/src/vendor/avm_fixtures_utils.ts';
 import {
@@ -70,6 +69,7 @@ import {
 } from '../../orchestration/src/vendor/public_fixtures_utils.ts';
 import { defaultGlobals } from '../../orchestration/src/vendor/public_tx_simulation_tester.ts';
 
+import { base64ToBytes } from './ct_download.ts';
 import type { OpenedRuntime } from './runtime.ts';
 
 /** Fee juice credited to the fee payer before the transaction. M20's shortcut, DD-2. */
@@ -177,6 +177,61 @@ export interface PublicHalfReport {
 }
 
 /**
+ * A contract's `public_dispatch` bytecode, decoded, out of the RAW artifact.
+ *
+ * ===========================================================================================
+ * WHY THIS DOES NOT GO THROUGH `loadContractArtifact`, WHICH IS THE OBVIOUS ROUTE
+ * ===========================================================================================
+ *
+ * A raw artifact's `functions[].bytecode` is BASE64 TEXT and `makeContractClassPublic` hashes what
+ * it is handed, so the class id has to be taken over the DECODED bytes — `loadContractArtifact` is
+ * upstream's own decoder and was the first thing tried.
+ *
+ * **It cannot load an artifact from the other nightly line at all.** Measured against the two lines
+ * this tree has installed: the `deletion_era` Parent loads, and the `cpp`-anchor one fails with
+ * `Could not generate contract artifact for Parent: TypeError: Cannot read properties of undefined
+ * (reading 'find')`. That is the anchor-versus-pin family again — *read the anchor to understand the
+ * design; read the INSTALLED PIN to know what will parse* — and it matters here because M39's
+ * `anchorLine` arm derives an instance for an artifact this runtime deliberately cannot execute, in
+ * order to measure that it cannot. A derivation that threw would replace that measurement with a
+ * page error.
+ *
+ * `Buffer.from(b64, 'base64')` and this `Uint8Array` produce the SAME class id; measured, both
+ * lines, before the route was changed.
+ */
+export function publicDispatchBytecode(artifact: unknown): Uint8Array {
+  const doc = artifact as { name?: string; functions?: { name?: string; bytecode?: unknown }[] };
+  const dispatch = (doc.functions ?? []).find(f => f.name === PUBLIC_DISPATCH_FN_NAME);
+  const bytecode = dispatch?.bytecode;
+  if (bytecode === undefined) {
+    throw new Error(
+      `${doc.name ?? 'the artifact'} has no ${PUBLIC_DISPATCH_FN_NAME} bytecode, so it has no AVM code`,
+    );
+  }
+  // ===========================================================================================
+  // BOTH ARTIFACT SHAPES, AND THAT IS THE WHOLE DEFECT STATED AS A TYPE.
+  // ===========================================================================================
+  //
+  // A RAW artifact's `bytecode` is base64 TEXT; a `loadContractArtifact`ed one's is BYTES. This
+  // runtime has callers of both kinds — the wallet demo registers a LOADED Token artifact and
+  // `privateContractInstance` derives an address from a RAW one — and a helper that assumed either
+  // shape is wrong for half its callers in a way that produces a well-formed answer rather than an
+  // error. That is exactly how `classIdOf` came to hash base64 text for one caller and bytecode for
+  // the other; the two class ids differ and every address derived from either is self-consistent,
+  // so no private frame can tell.
+  //
+  // So the shape is READ rather than assumed, and a third kind is a named failure rather than a
+  // coercion.
+  if (typeof bytecode === 'string') return base64ToBytes(bytecode);
+  if (bytecode instanceof Uint8Array) return bytecode;
+  throw new Error(
+    `${doc.name ?? 'the artifact'}'s ${PUBLIC_DISPATCH_FN_NAME} bytecode is a `
+      + `${Object.prototype.toString.call(bytecode)}; it must be base64 text (a raw artifact) or `
+      + 'bytes (a loaded one)',
+  );
+}
+
+/**
  * Every public function name the artifact declares, from BOTH places upstream keeps them.
  *
  * A `#[public]` function of a contract with a `public_dispatch` may live in `functions` or in
@@ -263,10 +318,6 @@ export async function runEnqueuedPublicCalls(
   const ordered = [...calls].sort((a, b) => a.counter - b.counter);
 
   const artifact = loadContractArtifact(calleeArtifactRaw as never);
-  const dispatch = getContractFunctionArtifact(PUBLIC_DISPATCH_FN_NAME, artifact);
-  if (dispatch === undefined) {
-    throw new Error(`${artifact.name} has no ${PUBLIC_DISPATCH_FN_NAME}, so it has no AVM bytecode`);
-  }
 
   // THE CLASS ID MUST BE THE ONE THE INSTANCE WAS DERIVED FROM, AND THAT IS ASSERTED RATHER THAN
   // ARRANGED. The private half derived the callee's ADDRESS from its class id; deriving a second
@@ -279,7 +330,10 @@ export async function runEnqueuedPublicCalls(
   // deployment, which is why `Child` at salt 33 and `Parent` at salt 31 share a class seed. The
   // equality below is what makes a drift in either loud, so the constant is a starting point for a
   // comparison rather than a value anything trusts.
-  const contractClass = await makeContractClassPublic(CONTRACT_CLASS_SEED, dispatch.bytecode);
+  const contractClass = await makeContractClassPublic(
+    CONTRACT_CLASS_SEED,
+    publicDispatchBytecode(calleeArtifactRaw) as never,
+  );
   if (!contractClass.id.equals(calleeInstance.originalContractClassId)) {
     throw new Error(
       `the class id derived from ${artifact.name}'s public_dispatch (${contractClass.id.toString()}) is not ` +

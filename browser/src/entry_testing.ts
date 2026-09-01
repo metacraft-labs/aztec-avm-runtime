@@ -41,6 +41,7 @@ export {
 export {
   CONTRACT_CLASS_SEED,
   PUBLIC_HALF_FUNDING,
+  publicDispatchBytecode,
   runEnqueuedPublicCalls,
   type EnqueuedPublicCall,
   type ExecutedEnqueuedCall,

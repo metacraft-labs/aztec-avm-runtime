@@ -4,10 +4,10 @@
 
 # The trace event ABI — OQ-6, settled
 
-**THE MEASUREMENT DOES NOT HAVE A STABLE SIGN, AND THAT IS THE RESULT.** Run nine times — once in
-the system engine and eight times in this repository's dev shell — `perEvent - batched` came out
+**THE MEASUREMENT DOES NOT HAVE A STABLE SIGN, AND THAT IS THE RESULT.** Run eleven times — once in
+the system engine and ten times in this repository's dev shell — `perEvent - batched` came out
 **+0.20 %**, **+1.09 %**, **-0.58 %**, **-0.09 %**, **+0.96 %**, **+0.98 %**, **+0.85 %**,
-**+0.74 %** and **+1.34 %**. Every one is inside the declared **margin of 3 %**; runs 2, 3 and 4 were taken on the *same engine, the
+**+0.74 %**, **+1.34 %**, **+1.21 %** and **+1.07 %**. Every one is inside the declared **margin of 3 %**; runs 2, 3 and 4 were taken on the *same engine, the
 same module and the same binary*, and two of those have 95 % intervals that do not overlap and
 point opposite ways. So the honest statement is not "the batched ABI is about one per cent faster"
 — it is that **the difference is smaller than the run-to-run variation of the instrument that
@@ -101,20 +101,20 @@ silently.
 
 | arm | median (µs) | min (µs) | crossings | container (B) |
 |---|---|---|---|---|
-| `batched` | 627,120 | 616,408 | 25 | 4,694,016 |
-| `perEvent` | 632,951 | 621,529 | 100,000 | 4,694,016 |
-| `control` | 623,664 | 608,135 | 25 | 4,694,016 |
-| `nopBatched` | 4,711 | 4,488 | 25 | 159,744 |
-| `nopPerEvent` | 5,584 | 4,945 | 100,000 | 159,744 |
+| `batched` | 628,918 | 616,616 | 25 | 4,694,016 |
+| `perEvent` | 634,878 | 621,511 | 100,000 | 4,694,016 |
+| `control` | 628,989 | 614,727 | 25 | 4,694,016 |
+| `nopBatched` | 4,748 | 4,513 | 25 | 159,744 |
+| `nopPerEvent` | 5,617 | 4,934 | 100,000 | 159,744 |
 
 | comparison | median | 95 % interval | reads as |
 |---|---|---|---|
-| `perEvent - batched` | **+1.21 %** | **[+0.58, +1.85] %** | within noise |
-| `control - batched` | -0.35 % | [-0.62, -0.07] % | the instrument is calibrated |
-| `nopPerEvent - nopBatched` | +18.71 % | [+15.64, +21.78] % | the crossing, priced alone |
+| `perEvent - batched` | **+1.07 %** | **[+0.36, +1.78] %** | within noise |
+| `control - batched` | +0.22 % | [-0.50, +0.93] % | the instrument is calibrated |
+| `nopPerEvent - nopBatched` | +21.21 % | [+16.67, +25.75] % | the crossing, priced alone |
 
 **Verdict: `within-noise`.** The comparator resolves a verdict only when the whole interval lies
-OUTSIDE ±3 %, and none of the nine runs comes close. Within a *single* run the interval is narrow
+OUTSIDE ±3 %, and none of the eleven runs comes close. Within a *single* run the interval is narrow
 enough to exclude zero — twice, in opposite directions — which is exactly the pathology
 `_timing_compare.py`'s header records for a different measurement: *"six runs of the same
 measurement over the same two binaries produced mutually disjoint 95 % intervals"*. The
@@ -364,9 +364,20 @@ else can resolve is a local file wearing a pin's clothes.
 - **The module has zero wasm imports**, so it instantiates under a bare
   `WebAssembly.instantiate(bytes, {})` with no WASI shim, no `wasm-bindgen` and no glue file.
   `ct-host` has **no npm dependencies** and imports no Node module in its trace path.
-- **262,693 bytes** for the writer plus this ABI, release, `opt-level = "z"`, LTO,
+- **263,211 bytes** for the writer plus this ABI, release, `opt-level = "z"`, LTO,
   `panic = "abort"`, one codegen unit, stripped. Two clean builds (`rm -rf target`) are
-  byte-identical, sha256 `5edf9671…`.
+  byte-identical, sha256 `e94baceb…`.
+
+  *Re-derived on 2026-09-02, when M40 added the source-step surface: **262,693 -> 263,211, +518
+  (+0.20 %)**, and the import count is unchanged at **0**. The growth is TWO exports —
+  `ct_source_step` and `ct_source_steps_written`, in their own `SOURCE_STEP_EXPORTS` list for the
+  reason `JOIN_EXPORTS` is in its own — plus one field on the session. **The step record did not
+  grow** and the 100,000-event container is 4,694,016 bytes, unchanged TO THE BYTE, so §3's
+  byte-identical-container claim still holds and run 11 in §8 measures the same event stream on
+  different module bytes. The pair exists because a Noir private frame's step is a
+  `(path, line, column)` and `emit()` records five AVM variables per step: writing one through
+  `ct_step` would mean a host inventing four counters per step, which is the shape M29 found in
+  M27's synthesised opcodes. See `BOTH-HALVES.md` §3.*
 
   *Re-derived on 2026-08-27, when M26 added the join surface: **259,839 -> 262,693, +2,854
   (+1.10 %)**, and the import count is unchanged at **0**. The growth is six exports —
@@ -411,15 +422,15 @@ reconsidered if any of these changed:
 
 | quantity | measured | where |
 |---|---|---|
-| `perEvent - batched`, median | +1.21 % | §2 |
-| its 95 % interval | [+0.58, +1.85] % | §2 |
+| `perEvent - batched`, median | +1.07 % | §2 |
+| its 95 % interval | [+0.36, +1.78] % | §2 |
 | cost of one boundary crossing in V8 | ~8.7 ns | §2 |
 | the crossing's share of a 100k-event recording | 0.14 % | §2 |
-| writer work versus boundary work | ~719× | §2 |
+| writer work versus boundary work | ~724× | §2 |
 | containers produced by the two ABIs | byte-identical | §3 |
 | host-side buffer at 250,000 events | 65,536 B, constant | §7 |
 
-**All ten runs, retained**, because the disagreement between them is the finding rather than a
+**All eleven runs, retained**, because the disagreement between them is the finding rather than a
 nuisance. None is wrong; they are what this measurement does.
 
 | # | engine | `perEvent - batched` | 95 % interval | `control - batched` | `nopPerEvent - nopBatched` | crossing |
@@ -433,9 +444,10 @@ nuisance. None is wrong; they are what this measurement does.
 | 7 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M26's module, join records) | +0.85 % | [+0.50, +1.21] % | -0.21 % | +15.65 % | ~8.6 ns |
 | 8 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M26's module, + frames) | +0.74 % | [+0.11, +1.36] % | -0.16 % | +18.40 % | ~7.9 ns |
 | 9 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **the SAME module as run 8**) | +1.34 % | [+0.67, +2.00] % | -0.17 % | +17.24 % | ~7.7 ns |
-| 10 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **the SAME module as runs 8 and 9**) | **+1.21 %** | **[+0.58, +1.85] %** | -0.35 % | +18.71 % | ~8.7 ns |
+| 10 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, the SAME module as runs 8 and 9) | +1.21 % | [+0.58, +1.85] % | -0.35 % | +18.71 % | ~8.7 ns |
+| 11 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M40's module, source steps) | **+1.07 %** | **[+0.36, +1.78] %** | +0.22 % | +21.21 % | ~8.7 ns |
 
-Run 10 is the one §2 tabulates, because it is the one `arms.tsv` currently holds and the one the
+Run 11 is the one §2 tabulates, because it is the one `arms.tsv` currently holds and the one the
 check compares this file against. **Runs 2, 3 and 4 are the same engine, the same module and the
 same binary**, and runs 2 and 3 have disjoint intervals with opposite signs — which is why §2 says
 the sign is not stable rather than quoting any one run's interval as a precision. **Runs 5 to 8
@@ -447,8 +459,15 @@ they read +0.74 %, +1.34 % and +1.21 %: the point estimate nearly doubles betwee
 binary, and the third lands between them. Three replicates is what the earlier eight runs never
 had, and they span +0.74 to +1.34 with overlapping intervals — the between-run nuisance measured
 directly rather than inferred from runs that differed in something else.
-In all ten the control reports no difference beyond the margin, so the instrument is calibrated
-in all ten; what is not stable is the subject.
+In all eleven the control reports no difference beyond the margin, so the instrument is calibrated
+in all eleven; what is not stable is the subject.
+
+**RUN 11 IS M40's MODULE, AND IT IS THE FIFTH TIME A NEW MODULE HAS BEEN PUT TO THE SAME TEST.**
+`ct_source_step` and its counter add 518 bytes and no step-record field, and the run reads
+**+1.07 %, [+0.36, +1.78] %** — run 2's sign, run 10's size, on a fifth distinct module. The
+control reads **+0.22 %** with an interval that straddles zero, which is the instrument saying it
+cannot resolve a difference between two byte-for-byte identical arms; that is the same statement
+the subject's own interval makes, and it is why the verdict stays `within-noise`.
 
 **RUN 10 EXISTS BECAUSE A COMMENT WAS CORRECTED**, which is a fact about the instrument worth
 having in the record. `_m24_oq6_stamp` hashes `ct-host/src/{writer,abi,config}.ts` and
