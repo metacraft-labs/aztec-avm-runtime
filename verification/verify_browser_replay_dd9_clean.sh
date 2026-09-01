@@ -132,13 +132,42 @@ assert_eq "…and no cpp_ module" "0" "$(reach "$META" 'cpp_')"
 # THE PIN, ASSERTED ON THE ARTIFACT. `browser/build.mjs` resolves @aztec through
 # `orchestration/node_modules` (deletion_era); this bundle must resolve through `replay/`'s
 # (npm.current), and if it did not, every `Fr` in it would be the wrong class.
+#
+# ---------------------------------------------------------------------------
+# THE PATTERN COULD NOT MATCH THE GOOD CASE, AND THAT IS WHY THIS BLOCK CHANGED.
+#
+# It read `re.search(r"(.*?/node_modules)/@aztec/", k)`, which needs at least one character before
+# `/node_modules`. `build_browser_bundle.mjs` runs esbuild with `cwd: REPLAY`, so a module resolved
+# through `replay/node_modules` — the CORRECT root, the one this section exists to require —
+# appears in the metafile as the bare key `node_modules/@aztec/foundation/…` and matches nothing.
+# Measured on the artefact this check had just built: 380 inputs mention `@aztec`, every one of
+# them under `replay/node_modules`, and `ROOTS` came back EMPTY, so `expected [1], got [0]`.
+#
+# This is `Testing/Verification-Harness-Traps.md` §4 in its loud form: a scanner whose pattern
+# cannot express the state it is looking for. The rewrite is meaning-preserving — the wrong root
+# `../orchestration/node_modules/@aztec/…` still matches and still comes back with its prefix — and
+# the empty prefix is NAMED as `replay/node_modules` rather than dropped, because a root the scan
+# cannot spell is a root the assertion below cannot check for.
+# ---------------------------------------------------------------------------
 ROOTS="$(python3 -c '
 import json, re, sys
 d = json.load(open(sys.argv[1]))
-roots = sorted({re.search(r"(.*?/node_modules)/@aztec/", k).group(1)
-                for k in d["inputs"] if re.search(r"(.*?/node_modules)/@aztec/", k)})
-print("\n".join(roots))
+roots = set()
+for k in d["inputs"]:
+    m = re.search(r"(.*?)node_modules/@aztec/", k)
+    if not m:
+        continue
+    prefix = m.group(1)
+    # esbuild wrote this metafile with cwd = replay/, so a BARE `node_modules/…` key IS
+    # replay/node_modules. Naming it is what lets the assertion below say so.
+    roots.add((prefix + "node_modules") if prefix else "replay/node_modules")
+print("\n".join(sorted(roots)))
 ' "$META")"
+# THE SCAN IS ASSERTED NON-EMPTY BEFORE ANYTHING IS ASSERTED ABOUT ITS CONTENTS. Without this, a
+# pattern that stopped matching reports "exactly one root" as `0 != 1` — which is what happened —
+# and, worse, the `assert_not_contains` two lines down would pass over an empty haystack forever.
+assert_ge "the @aztec scan reached the graph at all, before any claim about which root" 1 \
+  "$(printf '%s\n' "$ROOTS" | grep -c . )"
 assert_eq "every @aztec module comes from EXACTLY ONE node_modules root" "1" \
   "$(printf '%s\n' "$ROOTS" | grep -c . )"
 assert_contains "…and it is replay's, which is npm.current" "replay/node_modules" "$ROOTS"

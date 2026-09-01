@@ -135,7 +135,13 @@ assert_eq "the chain's revert code and the page's agree" "$(r publishedRevertCod
 assert_eq "the recording declares rung 3" "3" "$(r declaredRung)"
 assert_eq "…and reports the roots do NOT agree, which is L2's handoff surviving into the page" \
   "False" "$(r rootsAgree)"
-assert_eq "…with all five metadata records" "5" "$(r logEvents)"
+# SIX SINCE L5, AND THE SIXTH IS `ct.source-provenance` — written unconditionally, including on
+# this recording, whose contract has no provable off-chain artifact. That is the point of the key:
+# a record that appeared only on source-level recordings would make its own absence ambiguous.
+# `test_recording_declares_its_provenance` asserts the SET; this asserts the COUNT the page reported,
+# so a page that wrote a different number of records than the Node path would be caught here rather
+# than only in §3's byte comparison.
+assert_eq "…with all six metadata records" "6" "$(r logEvents)"
 assert_eq "the bytes that left the page are the bytes it reported" "$(r containerBytes)" \
   "$(wc -c <"$PAGE_CT" | tr -d ' ')"
 
