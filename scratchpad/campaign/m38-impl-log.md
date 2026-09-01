@@ -244,3 +244,132 @@ empty** and `git ls-remote origin | grep -c f0e7edcd2` **zero** — before the w
 Nothing here builds from that worktree; M38 builds from `noir` on `codetracer`, and
 `e2e_private_function_steps_into_ct_container` §8 asserts the emptiness on every run with a positive
 control that the same counter answers non-zero for a commit that IS published.
+
+---
+
+## STEP 10 — THE SWEEP: **13,022**, `delta +0`, NO HOLE, AND M9 DID NOT FLAKE
+
+Measured M0–M38 on 2026-09-01 **after the last edit**, `setsid`-detached in this repository's own
+dev shell (node v24.19.0), one milestone at a time with nothing else running, `TMPDIR` and the log
+under `~/.cache`. **78 markers for 39 milestones, no hole. 34 of 39 exit 0.** Polled **inside the
+agent's own run**, in nine-minute blocks — the four background waiters attached to it were all
+killed by the harness, which is why the campaign's rule is what it is.
+
+```
+m0 156   m1 181   m2 293   m3 199   m4 218   m5 236   m6 363   m7 287   m8 516   m9 807
+m10 450  m11 287  m12 691  m13 458  m14 460  m15 537  m16 225  m17 297  m18 578
+m19 180  m20 237  m21 451  m22 349  m23 512  m24 350  m25 454  m26 340  m27 345
+m28 358  m29 127  m30 218  m31 450  m32 237  m33 248  m34 217  m35 239  m36 150
+m37 171  m38 150
+                                                       CAMPAIGN TOTAL 13,022
+```
+
+The summariser validated the reference's own `_total` first and then reported **`delta +0`**:
+every one of the thirty-nine came out at its declared value, and the single move was named in
+`m38-reference.json` before the run. **12,872 + 150 = 13,022 exactly**, and M38's 150 is
+35 / 23 / 40 / 52.
+
+**M9 DID NOT FLAKE** — 807, rc 0, **1,282 s**, immediately after m8's **176 s** build, which is
+D19's standing condition, present and not firing. M15 did not flake either (537, 383 s).
+
+**FIVE NON-ZERO EXITS, AND NOT ONE IS M38's.** Four were declared in the reference before the run;
+the fifth was not, and is attributed below rather than explained away.
+
+| milestone | check | count | offending subject | whose |
+|---|---|---|---|---|
+| m20 | `verify_named_checks_exist` 9/1 | unchanged | `tools/scan_reverted_transactions.mjs` | **L3's** (`a601ce7`) |
+| m21 | `verify_no_pipeline_predicates` 69/1 | unchanged | a sixth `\| grep -q` in `verify_browser_replay_dd9_clean.sh` | **L4's** (`75ffd7e`) |
+| m28 | `verify_npm_pack_no_optional_native` 55/1 | unchanged | `replay/package.json` as an eighth tree | **L0's** (`541bf5f`) |
+| m11 | four checks, 9 failing assertions | **287, unchanged** | the tenth upstream move | **upstream's** |
+| m16 | `verify_fallback_cost_priced` 147/1 | **unchanged** | a needle a parallel commit changed | **`bbfa872`'s** |
+
+**The fourteen L0–L4 check names appear ZERO times as a column-0 summary line**, grepped one at a
+time against the summariser's own anchored pattern. None of their assertions is in the 13,022.
+
+### The fourth red: the TENTH upstream move, declared before the run
+
+`upstream/next` went `7471a61f1a` -> **`f6bf848795`** (*"fix(ci3): the GitHub runner no longer needs
+the build-instance SSH key in SSM mode"*, #25349), by a fetch in the sibling `aztec-packages`
+checkout since M37. Measured by hand BEFORE the sweep and written into the reference:
+`verify_carry_set_applies_to_upstream_head` fails on the stale recorded tip, the stale exposure hash
+and `bootstrap.sh`'s acknowledged region; `verify_carry_ledger_complete` on the stale rendered
+ledger; `verify_accepted_patches_dropped_from_carry` on a commit now in upstream HEAD.
+**m11's count is 287 — the reference value** — which is what says a pinned list moved and not a
+structure. NOT REPAIRED: the check's own conjunct prints the decision-needed signal rather than the
+mechanical one, and the decision half is M11's work.
+
+### The fifth red, which was NOT declared, and its attribution
+
+`verify_fallback_cost_priced` fails one assertion — a POSITIVE CONTROL: *"the same regex finds all
+three of them in the deleted package itself"*, expected 3, got 0.
+
+**It is not M38's**: `git diff 44eeef3..HEAD -- verification/verify_fallback_cost_priced.sh` is
+empty, the count is unchanged at 147 (and m16 at 225), and the last commit on that file is
+`bbfa872` — *"verification: two more platform needles — a seventh `\b`, an eighth, and `nm`'s
+Mach-O underscore"* — which landed on `origin/dev` at 22:02 on 2026-08-31, before this milestone's
+first commit and before its rebase.
+
+**And the cause is worth recording, because it is a THIRD engine.** That commit replaced `\b` with
+the POSIX bracket expression `([^[:alnum:]_]|$)` for portability, in a needle used twice: once
+through `git grep -E` and once through `m16_words`. The check's own header already records that
+those were two different engines and that the control had been scoped to the wrong one — and
+`m16_words` is neither of them, it is **Python's `re`**, which does not implement POSIX classes
+inside brackets. Measured: `implements UpdateOnlyTree` is present in `sparse_tree.ts` and GNU grep
+finds it; the same needle through Python's `re` returns **0** for all three files.
+So the fix for a two-engine hazard introduced a three-engine one.
+
+**Recorded and deliberately not fixed** — a second track editing the first track's expectations is
+the collision this campaign has already paid for.
+
+**A sweep is a writer**: `carry/*.json` checksummed before, `sha256sum -c` after — **`exposure.json`
+and `rebase.json` came back FAILED**, were restored from HEAD, and re-verified all four OK. The
+working tree is clean.
+
+---
+
+## STEP 11 — THE UPSTREAM CONTRIBUTION, EXECUTED RATHER THAN SHIPPED UNRUN
+
+And running it found that it did not run.
+
+**The first version of `reproduce.sh` was an external crate with path dependencies, and it could
+never have worked for a maintainer.** `noir_debugger` upstream exposes `run_repl_session`,
+`run_dap_loop`, `errors` and three re-exported structs; **`context` and `foreign_calls` are PRIVATE
+modules**, so `DebugContext` cannot be constructed from outside the crate at all. This fork makes
+both `pub` — part of its own 209 lines in that crate. So the reproduction built and reproduced
+against `noir`, and failed against `noir-lang/noir`'s own tree with
+`E0603: module 'foreign_calls' is private`. **A reproduction that only runs on the fork it was
+written in is not a reproduction**, and nothing but running it against the right tree would have
+said so.
+
+Rewritten as an in-crate `#[cfg(test)]` module appended to `context.rs`, run, and removed by a trap
+with the restore verified by sha256. Two further drafts failed before it worked, and each was
+NAMED as `INCONCLUSIVE` rather than reported as a reproduction: an uninitialised Brillig memory
+slot, an empty `location_tree`, and `serde_json` — which the header had asserted was one of
+`noir_debugger`'s dependencies and is not.
+
+**Four arms, all against `noir-lang/noir` `3d3a1ce78` (`v1.0.0-beta.26`) itself:**
+
+| arm | tree | subject | control | verdict |
+|---|---|---|---|---|
+| D | upstream base, unpatched | **PANICKED** | completed | **REPRODUCED**, rc 1 |
+| E | upstream base + only this patch | completed | completed | **FIXED**, rc 0 |
+| — | `git apply` of the patch to `3d3a1ce78` | — | — | applies, no offset |
+| — | `cargo test -p noir_debugger --lib` both ways | — | — | **4 passed / 0 failed** each |
+
+The control differs from the subject in one map entry and passes in both directions.
+
+**And the script's own guard was wrong for the workflow it exists to serve.** It refused when
+`context.rs` differed from HEAD — but the intended use is `git apply` the patch and then reproduce,
+so the fixed-tree arm was unrunnable. The guard is about the PROBE now (a previous run that did not
+clean up), not about `git status`.
+
+---
+
+## STEP 12 — THE TWO FIXES THAT MUST NOT BE FILED
+
+`noir/tooling/tracer/CARRY-VS-UPSTREAM.md` gains a table naming all three of M38's `noir` changes
+and which of them has an upstream to go to. Two do not, for a structural reason rather than a
+judgement: `tooling/tracer` is 2,490 lines of additive fork code, so the executor seam and the
+uninstrumented-program step rule have nothing upstream to be a change TO. The one-command test is
+recorded beside them, and so is the second, narrower reason — a file can be upstream's while its
+public surface is not, which is what cost the reproduction its first draft.
