@@ -1309,6 +1309,68 @@ m28 353  m29 127
                                                        CAMPAIGN TOTAL 10,178
 ```
 
+**M38 TOOK IT TO 13,022, `delta +0`, AND ITS ONE MOVE WAS NAMED BEFORE THE SWEEP RAN.** Measured
+M0–M38 on 2026-09-01 by M38's implementation, **after its last edit**, `setsid`-detached in this
+repository's own dev shell (node v24.19.0), one milestone at a time with nothing else running,
+`TMPDIR` and the log under `~/.cache`, **78 markers for 39 milestones, NO HOLE**, **34 of 39 exit
+0**:
+
+```
+m0 156   m1 181   m2 293   m3 199   m4 218   m5 236   m6 363   m7 287   m8 516   m9 807
+m10 450  m11 287  m12 691  m13 458  m14 460  m15 537  m16 225  m17 297  m18 578
+m19 180  m20 237  m21 451  m22 349  m23 512  m24 350  m25 454  m26 340  m27 345
+m28 358  m29 127  m30 218  m31 450  m32 237  m33 248  m34 217  m35 239  m36 150
+m37 171  m38 150
+                                                       CAMPAIGN TOTAL 13,022
+```
+
+**Every one of M0–M37 came out at its reference value TO THE ASSERTION**, and 12,872 + 150 = 13,022
+exactly. **M38's own 150** is 35 / 23 / 40 / 52. **M9 DID NOT FLAKE** — 807, rc 0, 1,282 s,
+immediately after m8's 176 s build, D19's standing condition present and not firing; M15 did not
+either (537, 383 s).
+
+**AND THE SWEEP WAS POLLED INSIDE THE AGENT'S OWN RUN, WHICH IS NOT A STYLE PREFERENCE.** Four
+background waiters and a monitor were attached to it and **all five were killed by the harness**
+while the sweep itself ran on. An agent that had believed any of them would have reported a
+half-finished sweep or waited forever on a watcher that had outlived nothing. *Poll it yourself, in
+nine-minute blocks; a watcher's silence is not a measurement.*
+
+**FIVE NON-ZERO EXITS AND NOT ONE IS THIS MILESTONE'S. FOUR WERE DECLARED BEFORE THE RUN AND THE
+FIFTH IS ATTRIBUTED RATHER THAN EXPLAINED AWAY.** m20's `verify_named_checks_exist` 9/1 is **L3's**
+(`a601ce7`); m21's `verify_no_pipeline_predicates` 69/1 is **L4's** (`75ffd7e`); m28's
+`verify_npm_pack_no_optional_native` 55/1 is **L0's** (`541bf5f`); and **m11 is the TENTH upstream
+move** — `upstream/next` `7471a61f1a` -> `f6bf848795`, measured by hand before the sweep and written
+into the reference, count unchanged at 287, not repaired because the check's own conjunct prints the
+decision-needed signal and the decision half is M11's work. **The fourteen L0–L4 check names appear
+ZERO times as a column-0 summary line.** **A sweep is a writer**: `carry/exposure.json` and
+`carry/rebase.json` came back FAILED against the pre-sweep digests, were restored from HEAD, and all
+four re-verified OK.
+
+**THE FIFTH RED IS A NEEDLE FIXED FOR TWO ENGINES AND USED BY THREE.** m16's
+`verify_fallback_cost_priced` fails one assertion — a POSITIVE CONTROL, *"the same regex finds all
+three of them in the deleted package itself"*, expected 3, got 0 — with its count unchanged at 147.
+It is not M38's: the file is not in this pass's diff and its last commit is `bbfa872`, which landed
+on `origin/dev` before M38's first commit. That commit replaced `\b` with the POSIX bracket
+expression `([^[:alnum:]_]|$)` for portability, in a needle used **twice**: through `git grep -E`
+and through `m16_words`. The check's own header already records that those were two different
+engines and that an earlier control had been scoped to the wrong one — and `m16_words` is neither of
+them, it is **Python's `re`**, which does not implement POSIX classes inside brackets. Measured:
+`implements UpdateOnlyTree` is in `sparse_tree.ts`, GNU grep finds it, and the same needle through
+Python returns **0** for all three files. *A portability fix for a needle is a change to every
+engine that needle is handed to; enumerate them before believing the count.* Recorded and
+deliberately not fixed.
+
+**AND M38'S SWEEP WAS ABORTED TWICE, WHICH IS THE RULE WORKING TWICE.** Both aborts were bought by
+the only work a sweep leaves — reading this pass's own checks — and both found the same family one
+level apart. The first: **`str_has_re` is bash's `=~`, whose `.` MATCHES A NEWLINE**, so thirteen
+document assertions written in M24's "anchor the needle to the row" shape were not anchored at all;
+swapping two figures onto each other's rows left the old form at **33 assertions, 0 failures over a
+document stating the reverse of its own data**. The second: **the repair exposed that thirteen of
+the write-up's twenty-six table figures — every second column of one table, and every prose figure
+under another — were stated and compared by NOTHING**, under a header claiming all of them were
+re-derived on every run. The comparer written for it found two rotted rows on its first run, both
+this milestone's own.
+
 **THE RESIDUALS PASS TOOK IT TO 12,176, `delta +0`, WITH ALL FIVE MOVES DECLARED BEFORE THE SWEEP
 RAN AND EVERY OTHER MILESTONE AT ITS REFERENCE VALUE TO THE ASSERTION.** Measured M0–M37 on
 2026-08-31, **after the last edit**, `setsid`-detached in this repository's own dev shell (node
