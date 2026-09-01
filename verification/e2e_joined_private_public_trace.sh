@@ -333,17 +333,46 @@ if [ -e "$WT/.git" ]; then
 else
   note "no noir-wt4-webpage worktree beside this repository; OQ-7's fact 7 is M26's check's to make"
 fi
-# NOTHING M40 SHIPS NAMES THAT WORKTREE. A grep over M40's own files, which is the half a
-# publication check cannot make.
-assert_eq "no M40 file reaches for the unpublished worktree" "0" \
-  "$(grep -l 'noir-wt4-webpage' \
-       "$REPO_ROOT/verification/build_m40_private_trace_wasm.sh" \
-       "$REPO_ROOT/verification/m40_private_trace_wasm.rs" \
-       "$REPO_ROOT/verification/lib_m40_transaction.sh" \
-       "$REPO_ROOT/tools/run_m40_transaction_arms.mjs" \
-       "$REPO_ROOT/tools/run_m40_trace_arms.mjs" \
-       "$REPO_ROOT/browser/src/private_half_container.ts" 2>/dev/null \
-     | xargs -r -n1 basename | grep -cv '^build_m40_private_trace_wasm.sh$' || true)"
+# ===========================================================================================
+# NOTHING M40 SHIPS NAMES THAT WORKTREE — AND THE NEEDLE IS SHOWN TO WORK BEFORE IT IS BELIEVED.
+# ===========================================================================================
+#
+# A grep over M40's own files is the half a publication check cannot make: it says the code does
+# not REACH for the worktree, where the ref count says only that the branch is unpublished today.
+#
+# **THE FIRST DRAFT WAS THE SECOND FORM ON THIS CAMPAIGN'S OWN LIST**, found by re-reading it while
+# a sweep ran. It was one assertion — `grep -l … | grep -cv <the one legitimate mention> == 0` —
+# and a needle that silently stopped matching drives that to 0 as surely as a clean tree does. The
+# one file that DOES mention the worktree (the build script's header, which records why it builds
+# from `noir` instead) is the positive control, and nothing asserted it was found.
+#
+# Two assertions now, the paired-zero shape this campaign's own remedy prescribes: the mention IS
+# found where it is expected, and it is found NOWHERE else. A dead needle drives both to zero and
+# the first one fails.
+#
+# THE TWO CHECK FILES ARE NOT IN THE SCANNED SET, and that is a decision rather than an omission:
+# THIS check names the worktree because it asserts a fact about it, and a scan that included itself
+# would be making an assertion about the check instead of about the code M40 ships. What is scanned
+# is the module, its build script, the two drivers, the library and the two browser sources.
+M40_OWN_FILES=(
+  "$REPO_ROOT/verification/build_m40_private_trace_wasm.sh"
+  "$REPO_ROOT/verification/m40_private_trace_wasm.rs"
+  "$REPO_ROOT/verification/lib_m40_transaction.sh"
+  "$REPO_ROOT/tools/run_m40_transaction_arms.mjs"
+  "$REPO_ROOT/tools/run_m40_trace_arms.mjs"
+  "$REPO_ROOT/browser/src/private_half_container.ts"
+  "$REPO_ROOT/browser/src/transaction_public_half.ts"
+)
+# The predicate is computed into a variable before it is asserted: `assert_* … | grep -q` binds the
+# pipe to the HELPER and loses the failure counter in a subshell, which this campaign has now met
+# three times.
+WT_MENTIONS="$(grep -l 'noir-wt4-webpage' "${M40_OWN_FILES[@]}" 2>/dev/null | xargs -r -n1 basename | sort)"
+assert_eq "the ONE legitimate mention is found, so the needle is not dead"   "build_m40_private_trace_wasm.sh"   "$(printf '%s\n' "$WT_MENTIONS" | grep -c '^build_m40_private_trace_wasm.sh$' >/dev/null && printf 'build_m40_private_trace_wasm.sh')"
+assert_eq "and no other M40 file reaches for the unpublished worktree" ""   "$(printf '%s\n' "$WT_MENTIONS" | grep -v '^build_m40_private_trace_wasm.sh$' | grep -v '^$' | tr '\n' ' ' | xargs -r echo)"
+# AND THE SCAN REALLY READ NINE FILES, so "no other file mentions it" is not "no file was scanned".
+assert_eq "the scan covered every M40 file it ships" "7" "${#M40_OWN_FILES[@]}"
+assert_eq "and every one of them exists" "7" \
+  "$(for f in "${M40_OWN_FILES[@]}"; do [ -f "$f" ] && echo x; done | grep -c .)"
 
 # ===========================================================================================
 echo "== 7. BOTH-HALVES.md sections 3 and 4 ARE RE-DERIVED FROM THIS RUN"

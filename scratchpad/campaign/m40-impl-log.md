@@ -263,3 +263,126 @@ ONE HALF ALONE -> refused, ground=count-mismatch
 
 The identity is the outer frame's own `argsHash` — a value the circuit committed to — so two runs
 of one transaction agree and two transactions cannot collide.
+
+## Step 5 — THE CHECKS, NAMED AFTER THE ENTRIES THEY CLOSE
+
+`just verify-m40` — **132 assertions, 0 failures, 2/2, exit 0**:
+`e2e_joined_public_half_executed` **60**, `e2e_joined_private_public_trace` **72**.
+
+The names are the milestone entries', deliberately. The convention is that a non-`pending` entry
+names a `file:` that exists and CONTAINS the named test, and `verify_named_checks_exist` refuses a
+check name in this repository's sources that resolves to nothing — so naming the entries in a check
+header would have created two unresolved names. Naming the checks after the entries satisfies both,
+and is what M39 already does.
+
+### Two defects in the checks' own first runs, both found by running them
+
+1. **A comment inside a single-quoted `python3 -c` program carried an apostrophe**, which CLOSED the
+   program. Every field answered the empty string and sixteen assertions compared it against real
+   values — loudly, which is the cheap direction, but a comment that terminates the program it
+   documents is worth recording.
+2. **The split-versus-legacy reader discriminator asked whether ANY event carried a `kind`.** A
+   `Type` event carries `kind: "tkNone"`, so a Path A container read as `split` and `withColumn`
+   answered **0** where it has to refuse to answer at all. An instrument that cannot see the subject
+   must SAY so — `m40_container` answers `NOCOLUMNS` from that rendering now, and the discriminator
+   is the reader's own `counts` object.
+
+## Step 6 — WHAT MOVED ELSEWHERE, AND EVERY FIGURE IS THE CHECK'S
+
+| document | figure | was | is |
+|---|---|---|---|
+| `TRACE-ABI.md` §7 | `ct_writer.wasm` bytes | 262,693 | **263,211** |
+| `TRACE-ABI.md` §7 | its sha256 prefix | `5edf9671` | **`e94baceb`** |
+| `TRACE-ABI.md` §2 | the whole OQ-6 arm table | run 10 | **run 11** |
+| `TRACE-ABI.md` §8 | retained runs | ten | **eleven** |
+| `BROWSER-GATE.md` §3 | browser metafile inputs | 1,196 | **1,198** |
+| `BROWSER-PACKAGING.md` | four eager rows + the total | | **8,239.78 KB** |
+| `WORKER-NODE.md` §5 | seven current-column rows | | |
+| `DEV-WALLET.md`, `PRIVATE-EXECUTION.md`, `LOCAL-HISTORY.md` | the wallet / wallet-demo eager pair | | **307.17 / 352.88 KB** |
+
+**The OQ-6 benchmark re-ran because this pass edited `ct-host/src`**, which is exactly what
+`CAMPAIGN-BRIEF.md` says buying a comment there costs. §2 is re-rendered from the new `arms.tsv` by
+`m24-render-trace-abi.py` and **run 11 joins §8's retained table at +1.07 %, [+0.36, +1.78] %** —
+run 2's sign, run 10's size, on a fifth distinct module, `within-noise`. The control reads +0.22 %
+with an interval straddling zero, which is the instrument saying it cannot resolve a difference
+between two byte-for-byte identical arms.
+
+### AND M39's ARMS WENT RED, WHICH FOUND THE CLASS-ID DEFECT'S SHARPER FORM
+
+`classIdOf` did not simply hash the wrong thing. **It had TWO KINDS OF CALLER**: the wallet demo
+hands it a `loadContractArtifact`ed Token whose `bytecode` is BYTES, and `privateContractInstance`
+hands it a RAW artifact whose `bytecode` is base64 TEXT. One caller was right and the other wrong,
+and both produced a well-formed class id.
+
+And the first fix — routing everything through `loadContractArtifact` — **cannot load an
+anchor-line artifact at all**: measured on both lines, the `deletion_era` Parent loads and the
+`cpp`-anchor one fails with `Cannot read properties of undefined (reading 'find')`. M39's
+`anchorLine` arm derives an instance for exactly one of those in order to measure that this runtime
+cannot execute it, so the throw replaced a measurement with a page error. A fourth instance of
+read-the-anchor-versus-read-the-pin, found by M39's arms rather than by reading.
+
+`publicDispatchBytecode` reads the shape, refuses a third kind by name, and is the ONE derivation
+both routes go through.
+
+## Step 7 — THE MUTATION MATRIX, RE-TAKEN AFTER THE LAST EDIT
+
+| arm | subject | result | what it killed |
+|---|---|---|---|
+| P1 | the calldata hash comparison is removed | 1 / **2** | the CONTROL stops refusing, so `m38_absent` names the absent field and the check dies with a summary line |
+| P2 | the initialization nullifier is seeded unconditionally | 60 / **1** | exactly the assertion written for it |
+| P3 | the class id is the base64 TEXT's commitment again | 60 / **9** | the whole execution — 1 instruction, opcode 68, 1 context, `revertCode` 1 — plus the class-id pair and a document row |
+| P4 | `ct_source_step` ignores its column argument | 72 / **1** | the digest pair, and nothing else can see it |
+| P5 | the nested frame's `Call` op is never emitted | 72 / **2** | the container's call count and a document row |
+| P6 | the op list carries no column, while the report still counts them | 72 / **2** | the column identity AND the digest pair |
+| P7 | the browser arm run HANGS (bound cut to 20 s) | **0 / 1**, rc **137**, bound NAMED | the precondition, with a summary line at column 0 |
+| P8 | the browser arm report is truncated | 1 / **2** | the precondition, through the second of `m38_absent`'s three spellings of absence |
+| demo | `still_there` over a silently undone mutation | exit **5** | — |
+
+`HARNESS: restored; manifest verified`; no `MUTATION MISS`, no `DID NOT HOLD`; tree clean after.
+
+**P7 is a hang and not a die-before-summary wearing a hang's label.** The rc is 137 — `timeout`
+escalating to SIGKILL — because the arm holds a LIVE TIMER. A promise with no pending handle exits
+13 and an `await` in a synchronous function exits 1, and this campaign has written both by accident.
+
+### THE MATRIX FOUND TWO THINGS IN M40's OWN WORK, AND THE FIRST IS THE CAMPAIGN'S COMMONEST SHAPE
+
+1. **P6's first run killed ONE assertion where it should have killed three.** The arm makes the
+   module emit `column: 0` in every op while leaving its own `stepsWithColumn` at the real figure —
+   and §2's column identity stayed GREEN, because it was **reading the producer's report about
+   itself rather than what the producer produced**. Only the digest pair noticed.
+   `recordPrivateHalf` counts the columns it passes to `ct_source_step` now — the boundary the
+   container is on the other side of — and the control's count is asserted ZERO at the same
+   boundary, because an arm that set a flag and wrote the columns anyway would give two equal
+   digests and read as "the column does not reach the container". **72 assertions, up from 70.**
+2. **P5's first form was killed by a GUARD rather than by the assertions it was written for.**
+   Dropping only the `Call` op leaves the `Return`, and `ct_return` with no frame open is
+   `CT_ERR_NO_FRAME` — so the writer threw before a container existed and the check died at its
+   precondition. Both ops are dropped now.
+
+**And P6's first needle MISSED**, because a formatter had split the line it named across four.
+`sub` reported `MUTATION MISS`, restored the tree, verified its manifest and exited **3** without
+printing a result.
+
+## Step 8 — THE SWEEP WAS ABORTED ONCE, AND THE ABORT BOUGHT AN ASSERTION THAT COULD NOT FAIL
+
+Killed at m4, fifteen minutes in, every child confirmed gone, `carry/*.json` unchanged against the
+pre-sweep digests and the tree clean. The only work a sweep leaves is reading your own checks, and
+that is where this campaign's aborts keep finding things.
+
+**§6's `no M40 file reaches for the unpublished worktree` was the second form on this campaign's
+own list.** One assertion — `grep -l 'noir-wt4-webpage' <seven files> | grep -cv <the one
+legitimate mention> == 0` — and a needle that silently stopped matching drives it to 0 as surely as
+a clean tree does. The ONE file that legitimately mentions the worktree is the build script's
+header, which records why it builds from `noir` instead, and **nothing asserted that it was found**.
+
+It is the paired zero now: the mention IS found where it is expected, and it is found NOWHERE else,
+with the set size and the files' existence asserted beside them so "no other file mentions it"
+cannot be "no file was scanned". **Calibrated in both directions**: a planted mention in
+`run_m40_trace_arms.mjs` fires the second assertion and names the file, and breaking the needle to
+`noir-wt4-webpageXX` fires the first.
+
+**And the two CHECK files were dropped from the scanned set, which is a decision rather than an
+omission.** This check names the worktree because it asserts a fact about it; a scan that included
+itself would be an assertion about the check instead of about the code M40 ships.
+
+**M40 goes 132 -> 135.**
