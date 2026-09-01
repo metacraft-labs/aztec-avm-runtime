@@ -78,14 +78,20 @@ of the sixty-eight oracles in the registry, the frame that completes calls **thr
 
 | | derived |
 |---|---|
-| handler methods declared across the served and discovery partitions | **43** |
-| handler methods declared `async` | **9** |
+| handler methods declared across the served and discovery partitions | **44** |
+| handler methods declared `async` | **10** |
 
-The nine are `getRandomField`, `notifyNullifiedNote`, `notifyCreatedNullifier`,
+The ten are `getRandomField`, `notifyNullifiedNote`, `notifyCreatedNullifier`,
 `isNullifierPending`, `getPendingTaggedLogsV2`, `getLogsByTagV2`,
-`validateAndStoreEnqueuedNotesAndEvents`, `getAppTaggingSecret` and `resolveTaggingStrategy`.
+`validateAndStoreEnqueuedNotesAndEvents`, `getAppTaggingSecret`, `resolveTaggingStrategy` and
+`callPrivateFunction`.
 
-**And every one of the nine awaits CRYPTO or the tagging half — not the network and not a disk.**
+*(This table read 43 and 9 until M39 served tier 4. The tenth is `callPrivateFunction`, and it is
+`async` for a reason the other nine are not: it awaits a WHOLE NESTED FRAME — the ACVM driving a
+second circuit through this same handler — rather than a hash. See `NESTED-CALLS.md`.)*
+
+**And every one of the first nine awaits CRYPTO or the tagging half — not the network and not a
+disk.**
 `poseidon2HashWithSeparator` and `siloNullifier` go through `avm.wasm`, whose world state is
 *itself in wasm*. So "needs a host round trip" here means "cannot be answered inside a synchronous
 Rust call", which is a statement about the language boundary rather than about the chain. That
@@ -296,8 +302,12 @@ calls, told by the trace.
 - **The tracer does not ORIGINATE the oracle answers.** It consumes a tape M35's handler produced.
   That is the honest description of what crosses the synchrony boundary, and it is stated here
   rather than left for a reader to notice.
-- **No nested private calls.** `aztec_prv_callPrivateFunction` is tier 4 and still refuses, in the
-  handler and therefore on the tape.
+- **No nested private calls** *(M38's state; **M39 serves tier 4** when a nested-call source is
+  attached — see `NESTED-CALLS.md`)*. This bullet said `aztec_prv_callPrivateFunction` *"is tier 4
+  and still refuses, in the handler and therefore on the tape"*, which was true of M38 and is now
+  false of the handler. It is corrected here rather than noted elsewhere, because a note about a
+  false sentence in a neighbouring file is a second document to keep in step. The tape M38's arms
+  replay is still a single frame's, and the probe's own frame LIST is what M39 added to it.
 - **Nothing here drives CodeTracer.** The container is read by the pinned `ct-print`; "the file
   parses" and "the recording steps correctly in the debugger" are different claims and this
   establishes the first.

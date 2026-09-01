@@ -78,6 +78,26 @@ EXCEPTIONS = {
     # argument it passes. It is not a check of this repository and cannot resolve to one; the four
     # tests INSIDE it are asserted present and passing, one at a time, by name.
     "test_foreign_call_executor": "noir's tooling/tracer/tests/test_foreign_call_executor.rs, run by verify_foreign_call_executor_is_injectable",
+    # AN UPSTREAM CONTRACT'S OWN NOIR TEST, NAMED WHERE THE RULE IT ENFORCES IS OBEYED. M39 keeps
+    # the ephemeral-array service PER FRAME while making six other stores the transaction's, and the
+    # reason is that upstream constructs one per oracle and ships
+    # `EphemeralParent.test_isolation` to say a child must not see its parent's slots. The comment in
+    # `private_oracles.ts` names it because a reader deciding whether to "simplify" that asymmetry
+    # needs to know something already tests it. It is a Noir function in `aztec-packages`, not a
+    # check here, and it cannot resolve to one.
+    "test_isolation": "aztec-packages' ephemeral_parent_contract test, cited by private_oracles.ts where its rule is obeyed",
+    # AND ITS SIBLING, WHICH M38 DECLARED THE OTHER HALF OF AND NOT THIS ONE.
+    # `verify_foreign_call_executor_is_injectable` names TWO Rust test files in `noir`:
+    # `test_foreign_call_executor.rs`, excepted above, and `test_tracer.rs`, which was not. So that
+    # check's one set-comparison assertion has carried an unresolved name of this repository's OWN
+    # making since M38 landed, while M38's sweep attributed m20's single failure entirely to a
+    # parallel track's `test_reverted_transaction_recorded_as_reverted`.
+    #
+    # **The attribution was right about that name and incomplete about the set**, and a set
+    # comparison reports ONE failure however many members it has — so the count did not move and
+    # nothing said the list was longer than the story. Found by M39 running the check after adding a
+    # name of its own. *A check that names a set needs its whole set read, not its count.*
+    "test_tracer": "noir's tooling/tracer/tests/test_tracer.rs, the twelve-fixture suite verify_foreign_call_executor_is_injectable asserts present and non-skipping",
     # HISTORICAL MENTIONS. Three of the five names this check exists because of are still
     # mentioned, by comments that record the correction. (The other two were repointed
     # outright and are NOT excepted — the dead-exception assertion below would fail if they

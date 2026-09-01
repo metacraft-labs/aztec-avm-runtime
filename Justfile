@@ -3643,3 +3643,59 @@ verify-m38:
     # THE STATUS IS RETURNED. A recipe that summarises a status and does not exit with it can never
     # be one of a sweep's non-zero exits — M37's review found exactly that in two recipes.
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M39. End-to-end joined transaction tracing: a nested private call, so a transaction is a TREE of
+# frames, and its private half is ONE `.ct` container with an explicit join record.
+#
+# NEEDS: a built browser bundle (`just browser-build`), `avm.wasm` (`just avm-wasm-build-m27`),
+# `ct_writer.wasm`, chromium on PATH, `@aztec/noir-acvm_js` installed, M38's native probe
+# (`just m38-probe-build`) and the pinned `ct-print`.
+#
+# `M39_ARMS_REFRESH=1` forces the browser arm run; `M39_TRACE_REFRESH=1` forces the trace arms.
+# ---------------------------------------------------------------------------
+
+# The browser arms: a nested private call in Chromium, into $M39_WORK/nested.json.
+m39-arms:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    work="${M39_WORK:-$HOME/.cache/aztec-m39-nested}"
+    mkdir -p "$work"
+    node tools/run_m39_nested_arms.mjs "$work" > "$work/nested.json"
+    echo "m39-arms: wrote $work/nested.json"
+
+# The trace arms: that transaction's private half stepped into one container.
+m39-trace-arms:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    work="${M39_TRACE_WORK:-$HOME/.cache/aztec-m39-trace}"
+    mkdir -p "$work"
+    verification/build_m38_private_trace_probe.sh >/dev/null || exit 1
+    node tools/run_m39_trace_arms.mjs "$work" > "$work/transaction-trace.json"
+    echo "m39-trace-arms: wrote $work/transaction-trace.json"
+
+verify-m39-nested:
+    @verification/test_nested_private_call_is_served.sh
+
+verify-m39-container:
+    @verification/e2e_transaction_steps_into_one_container.sh
+
+verify-m39:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      test_nested_private_call_is_served \
+      e2e_transaction_steps_into_one_container
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m39: FAILED" >&2
+    else
+      echo "verify-m39: all checks passed"
+    fi
+    # THE STATUS IS RETURNED. A recipe that summarises a status and does not exit with it can never
+    # be one of a sweep's non-zero exits — M37's review found exactly that in two recipes.
+    exit "$rc"

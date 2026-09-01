@@ -481,8 +481,8 @@ the count.)*
 
 | | derived |
 |---|---|
-| the wallet entry's eager set | **304.5 KB** gzipped across **9** files |
-| the wallet demo page's eager set | **344.36 KB** gzipped across **13** files |
+| the wallet entry's eager set | **306.91 KB** gzipped across **9** files |
+| the wallet demo page's eager set | **347.58 KB** gzipped across **13** files |
 | `acvm_js_bg.wasm` | **3,601,516** bytes |
 | `noirc_abi_wasm_bg.wasm` | **789,053** bytes |
 | `@aztec/aztec.js` bytes in `browser.js`'s eager set | **0** |
@@ -516,9 +516,15 @@ control that the scanner can find them at all. **Zero requests containing `barre
   execution, in the wallet, in the browser"*, and it does not. `Token.transfer` executes into the
   oracle wire and stops at `aztec_utl_getContractInstance`, refusing by name. What is delivered is
   the executor, the wire, tier 1 of four, and a measured ladder to the rest. §3 names the first rung.
-- **No nested calls.** `aztec_prv_callPrivateFunction` is tier 4 and refuses; this executes ONE frame.
-  A contract that makes a nested private call fails at the oracle that would have made it, which is
-  the correct failure and not a silent single-frame result.
+- **No nested calls** *(M35's state; **M39 serves them** when a nested-call source is attached —
+  see `NESTED-CALLS.md`)*. Without one, `aztec_prv_callPrivateFunction` still refuses by name and a
+  contract that makes a nested private call fails at the oracle that would have made it, which is
+  the correct failure and not a silent single-frame result. **The refusal's stated REASON has been
+  rewritten**, and that is not tidying: it named "its own ephemeral-array service and its own
+  side-effect counter range", and the built thing shares the counter range across a transaction and
+  deliberately does NOT share the ephemeral service. A refusal whose stated cause has been removed
+  is a refusal a reader will act on wrongly — this file's own `aztec_utl_recordFact` entry is the
+  record of that.
 - **No note discovery and no tagging** *(M35's state; **M36 serves them** when a discovery source is
   attached — see `LOCAL-HISTORY.md`)*. The eight oracles M36 owns refuse by name here, and the
   refusal now says what the handler LACKS rather than naming a milestone, because a reader running

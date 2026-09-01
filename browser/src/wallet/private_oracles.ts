@@ -317,9 +317,23 @@ export const ORACLE_REFUSAL_REASONS: Readonly<Record<string, string>> = Object.f
   aztec_utl_getSharedSecrets:
     'tier 3 (crypto): grumpkin ECDH over avm_grumpkin_mul, and its return carries an EPHEMERAL_ARRAY',
   // ---- tier 4, structural ----------------------------------------------------------------------
+  // TIER 4 IS SERVED WHEN A NESTED-CALL SOURCE IS ATTACHED, and this reason is what it says when
+  // one is not. It is written in M36's shape — what the handler LACKS, not which milestone owns it
+  // — for M36's own reason: a reader running this code would go and check a milestone number.
+  //
+  // **AND IT IS REWRITTEN RATHER THAN LEFT.** The old text said the oracle needed "a nested call
+  // frame, its own ephemeral-array service and its own side-effect counter range". Two of those
+  // three are now false of the built thing: the counter range is the TRANSACTION's, and the
+  // ephemeral service is per frame precisely because upstream does NOT hand a child its parent's.
+  // This file's own `aztec_utl_recordFact` entry records what a stale cause costs — *a refusal
+  // whose stated cause has been removed is a refusal a reader will act on wrongly.*
   aztec_prv_callPrivateFunction:
-    'tier 4 (structural): recursion back into the simulator, with a nested call frame, its own ' +
-    'ephemeral-array service and its own side-effect counter range',
+    'this handler was built WITHOUT a nested-call source, so it has no way to find a callee\'s ' +
+    'bytecode. Pass `nested` to createPrivateOracleHandler — a directory of the contracts this ' +
+    'wallet can execute, and a way back into the simulator — or `contracts` to ' +
+    'executePrivateFunction, which assembles it. A handler that answered anyway would have to ' +
+    'invent the child frame\'s result, and a fabricated end-side-effect counter and returns hash ' +
+    'produce a transaction that looks valid.',
   aztec_utl_callUtilityFunction: 'tier 4 (structural): recursion into a utility function',
   aztec_utl_getUtilityContext:
     'tier 4 (structural): there is no utility context in a private call frame, and inventing one is ' +
