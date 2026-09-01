@@ -2323,6 +2323,12 @@ verify-browser-entry-points:
 verify-browser-artifacts-lazy:
     @verification/verify_browser_artifacts_lazy.sh
 
+# A JavaScript Aztec contract test suite, executed in a real browser tab against the SHIPPED
+# `testing.js`. The testkit is not an entry point and does not go through the bundler, so this
+# adds nothing to the browser bundle — the check asserts that on the metafile.
+verify-contract-tests-in-browser:
+    @verification/e2e_contract_tests_run_in_browser.sh
+
 # Run the whole M27 verification set; every check runs even if an earlier one fails.
 verify-m27:
     #!/usr/bin/env bash
