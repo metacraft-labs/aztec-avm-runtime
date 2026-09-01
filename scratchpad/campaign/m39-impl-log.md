@@ -615,3 +615,53 @@ Both remaining unresolved names are parallel tracks' — L3's above and L2's
 `verify_no_pipeline_predicates` 69/1 is **L4's** sixth `| grep -q` at
 `verify_browser_replay_dd9_clean.sh:336`, which M38's sweep already names; none of M39's three new
 shell files contains one. `just check-repo-hygiene` is **28/0**.
+
+## STEP 11 — THE MUTATION MATRIX, FIRST PASS, AND IT FOUND THREE THINGS
+
+Eight arms on M38's harness. `still_there` over a silently undone mutation exits **5**, measured —
+and the first measurement of it read `rc=0` because the invocation piped it into `tail`, which is
+this campaign's own "a pipe that put the failure counter in a subshell" arriving in the way an
+agent *reads* a result rather than in a check.
+
+| arm | subject | result | verdict |
+|---|---|---|---|
+| N1 | the execution cache is per frame again | 21 / **3** | killed |
+| N2 | the child's `msgSender` is the tx origin, not its caller | **84 / 0** | **SURVIVED — a real gap** |
+| N3 | the wire shim fires unconditionally | **84 / 0** | **SURVIVED — unkillable here** |
+| N4 | the selector includes the context parameter again | 62 / **3** | killed |
+| N5 | the replay guesses the wire kind from the slot length | **82 / 0** | **SURVIVED — the mutation never applied** |
+| N6 | the nested frame's `Call` is never written | **82 / 0** | **SURVIVED — the mutation never applied** |
+
+### N5 and N6 are M32's FOURTH STATE, and the arm's prediction disagreeing is why I looked
+
+`m39_require_trace_arms` checks that the probe BINARY exists and never rebuilds it, while
+`m39_trace_newer_inputs` watches the probe's SOURCE. So mutating `m38_private_trace_probe.rs` marks
+the arms stale, the arms re-run — **with the old binary** — and the report is a faithful
+measurement of unmutated code, printed as the arm's result.
+
+That is *"a mutation that never applied, printed as the arm's result"*, the worst of M32's four
+states. **M38's own `m38_require_arms` builds the probe (`lib_m38_private_trace.sh:58`) and mine
+did not** — the one line of its library I did not carry over, in the library whose header says it
+sources M38's rather than repeating it.
+
+*And the arm's PREDICTION agreeing with its RESULT is the condition under which nobody re-reads the
+log — here the two disagreed, which is the only reason this was found.*
+
+### N2 is a gap in the CHECK, not in the code
+
+`Child.value` is `input + chain_id + version` and reads no `msg_sender`, so handing the child the
+transaction's origin instead of its caller changes no value the check reads. Upstream's
+`deriveCallContext` passes THIS frame's contract precisely so that a contract cannot impersonate the
+caller of the frame above it — and nothing asserted it.
+
+### N3 is unkillable HERE, and that is a fact about the corpus
+
+The shim's predicate is *"the contract declared an older minor of the same major"*. Every artifact
+this runtime can execute is 30.0 against an environment of 30.8, so `older` is true for all of them
+and removing the test changes nothing any arm can see. **The corpus that would make it false — the
+anchor line — cannot assemble a frame here at all** (37 fields against 38), which is the same
+measurement §6 records.
+
+Per this campaign's own rule the three wrong responses are deleting the guard, deleting the arm, and
+leaving the arm unlabelled. All three are kept: the guard, the arm, and a comment **at the guard**
+naming the arm that cannot kill it and why.

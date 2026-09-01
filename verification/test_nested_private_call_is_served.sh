@@ -189,6 +189,24 @@ assert_eq "the field the child returned is input + chain_id + version" "$EXPECTE
 assert_ge "the chain id is not zero, so the identity is not 0 == 0" 1 "$CHAIN_ID"
 assert_ge "nor is the version" 1 "$CHAIN_VERSION"
 
+echo "== 4b. THE CHILD'S CALLER IS ITS PARENT, NOT THE TRANSACTION'S ORIGIN"
+# UPSTREAM'S `deriveCallContext` PASSES THIS FRAME'S CONTRACT, so that a contract cannot impersonate
+# the caller of the frame above it. **Nothing else in a report can see this.** `Child.value` does not
+# read `msg_sender`, so handing the child the transaction's origin changes no step count, no
+# counter, no oracle ledger and no returned value — measured, by a mutation arm that did exactly
+# that and left every assertion in this file green. It is read out of the CIRCUIT's own
+# `CallContext` rather than out of the request that built it.
+CHILD_SENDER="$(m39_arm nested.report.run.nested.0.publicInputs.msgSender)"
+PARENT_ADDR="$(m39_arm nested.report.run.publicInputs.contractAddress)"
+PARENT_SENDER="$(m39_arm nested.report.run.publicInputs.msgSender)"
+m38_absent childSender="$CHILD_SENDER" parentAddr="$PARENT_ADDR" parentSender="$PARENT_SENDER"
+assert_eq "the child's msgSender is the CALLER's contract address" "$PARENT_ADDR" "$CHILD_SENDER"
+# THE NON-DEGENERACY: the transaction's origin is a DIFFERENT address, so the equality above is not
+# satisfied by a runtime that hands every frame the same sender.
+assert_true "and the transaction's own origin is a different address, so that is not free" \
+  test "$PARENT_SENDER" != "$PARENT_ADDR"
+assert_true "the child's msgSender is not the origin" test "$CHILD_SENDER" != "$PARENT_SENDER"
+
 echo "== 5. THE SIDE-EFFECT COUNTER RANGE CHAINS, WHICH IS THE CIRCUIT'S OWN RULE"
 P_START="$(m39_arm nested.report.run.publicInputs.startSideEffectCounter)"
 P_END="$(m39_arm nested.report.run.publicInputs.endSideEffectCounter)"

@@ -129,9 +129,26 @@ m39_trace_newer_inputs() {
 m39_require_trace_arms() {
   m39_require_arms
   mkdir -p "$M39_TRACE_WORK"
+  # THE PROBE IS BUILT, NOT MERELY REQUIRED TO EXIST, AND THE MUTATION MATRIX IS WHAT SAID SO.
+  #
+  # The first version of this function checked that the BINARY was there and left it alone, while
+  # `m39_trace_newer_inputs` watches the probe's SOURCE. So mutating `m38_private_trace_probe.rs`
+  # marked the arms stale, the arms re-ran — with the OLD binary — and the report was a faithful
+  # measurement of unmutated code, PRINTED AS THE ARM'S RESULT. That is M32's fourth and worst
+  # state: not a mutation that crashed, not one silently undone, but one that never applied. Two
+  # arms reported `82 assertion(s), 0 failure(s)` over code that had been changed under them.
+  #
+  # `m38_require_arms` builds it (`lib_m38_private_trace.sh:58`) and this is the one line of that
+  # library this one did not carry over, in the library whose header says it sources M38's rather
+  # than repeating it. The build script has its own content stamp, so this is a no-op when nothing
+  # moved and twelve seconds when the source did.
+  local built
+  built="$("$VERIFY_DIR/build_m38_private_trace_probe.sh" 2>&1)" \
+    || die "the probe did not build:
+$built
+             It needs the sibling codetracer-trace-format dev shell for nim."
   local probe="${M39_PROBE:-$HOME/.cache/aztec-m38-private-trace/probe/bin/m38probe}"
-  [ -x "$probe" ] || die "no probe at $probe.
-             Remedy: just m38-probe-build (it needs the sibling codetracer-trace-format dev shell)"
+  [ -x "$probe" ] || die "the probe build reported success but there is no binary at $probe"
 
   local stale=0 newer
   newer="$(m39_trace_newer_inputs)"

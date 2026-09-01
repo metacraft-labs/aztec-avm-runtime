@@ -373,6 +373,17 @@ export interface PrivateExecutionReport {
   /** A handful of the circuit's own public inputs, when it solved. */
   readonly publicInputs?: {
     readonly contractAddress: string;
+    /**
+     * The frame's own `msgSender`, out of the circuit's `CallContext`.
+     *
+     * **A NESTED FRAME'S `msgSender` IS ITS CALLER, AND NOTHING ELSE IN A REPORT CAN SEE IT.**
+     * Upstream's `deriveCallContext` passes THIS frame's contract to the child precisely so that a
+     * contract cannot impersonate the caller of the frame above it. Handing a child the
+     * transaction's ORIGIN instead changes no step count, no counter, no oracle ledger and no
+     * returned value for a callee that does not read `msg_sender` — measured, by a mutation that
+     * did exactly that and left every assertion green. It is read here so that it can be asserted.
+     */
+    readonly msgSender: string;
     readonly argsHash: string;
     readonly returnsHash: string;
     readonly startSideEffectCounter: number;
@@ -760,6 +771,21 @@ function wireCompatCallback(
       declared !== undefined &&
       declared.major === ORACLE_ENVIRONMENT_VERSION.major &&
       declared.minor < ORACLE_ENVIRONMENT_VERSION.minor;
+    // ==========================================================================================
+    // A NAMED MUTATION ARM CANNOT KILL THIS TEST, AND THE REASON IS THE CORPUS RATHER THAN THE
+    // CHECK. `m39-mutations.sh` arm N3 removes it and every arm stays green.
+    // ==========================================================================================
+    //
+    // The predicate is *"the contract declared an older minor of the same major"*. **Every artifact
+    // this runtime can execute declares 30.0 against an environment of 30.8**, so `older` is true
+    // for all of them and deleting the test changes nothing any arm can observe. The corpus that
+    // would make it FALSE is the `cpp` anchor line, and that corpus cannot assemble a frame here at
+    // all: its `PrivateContextInputs` is 38 fields wide against this environment's 37, which
+    // `test_nested_private_call_is_served` §7 runs and reports on every run.
+    //
+    // The guard stays. Deleting it makes the shim the WIRE rather than a shim, and it becomes live
+    // the day M37's reconciliation lands a corpus at this environment's own minor — which is
+    // exactly when a wire regrouping applied unconditionally would corrupt a correct return.
     if (!older) {
       return outputs;
     }
@@ -1004,6 +1030,7 @@ export async function executePrivateFunction(request: PrivateExecutionRequest): 
       effects: oracles.effects(),
       publicInputs: {
         contractAddress: publicInputs.callContext.contractAddress.toString(),
+        msgSender: publicInputs.callContext.msgSender.toString(),
         argsHash: publicInputs.argsHash.toString(),
         returnsHash: publicInputs.returnsHash.toString(),
         startSideEffectCounter: Number(publicInputs.startSideEffectCounter),

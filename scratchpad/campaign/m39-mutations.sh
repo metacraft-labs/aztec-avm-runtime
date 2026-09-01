@@ -201,10 +201,21 @@ for arm in "${ARMS[@]}"; do
 
     # ---------------------------------------------------------------------------------------
     N3) # THE WIRE REGROUPING FIRES FOR EVERY CONTRACT, not only for one compiled against an older
-        # minor. A shim that cannot say no is not a shim, it is the wire — and the arm that proves
-        # its necessity would still pass, because the arm that DISABLES it is a separate option.
-        # Predicted: §6's "the shim fired exactly once" pair, on the control arm's count.
-      echo "" | tee -a "$LOG"; echo "=== N3 — the wire shim fires unconditionally" | tee -a "$LOG"
+        # minor. A shim that cannot say no is not a shim, it is the wire.
+        #
+        # **EXPECTED SURVIVOR, AND THE REASON IS THE CORPUS RATHER THAN THE CHECK.** Every artifact
+        # this runtime can execute declares oracle version 30.0 against an environment of 30.8, so
+        # `older` is true for all of them and removing the test changes nothing any arm can observe.
+        # The corpus that would make it FALSE is the `cpp` anchor line, and that cannot assemble a
+        # frame here at all — 38 context fields against 37, which §7 of the check runs and reports.
+        #
+        # The three wrong responses are deleting the guard (it becomes live the day M37's
+        # reconciliation lands a corpus at this environment's own minor, and an unconditional
+        # regrouping would then corrupt a correct return), deleting the arm (the next reader
+        # re-derives this), and leaving it unlabelled (a green arm in a harness whose contract is
+        # "every arm red" reads as a defect in the harness). All three are kept, and the same
+        # sentence is at the GUARD in `private_execution.ts`.
+      echo "" | tee -a "$LOG"; echo "=== N3 — the wire shim fires unconditionally (EXPECTED SURVIVOR: no corpus here has this environment's minor)" | tee -a "$LOG"
       sub browser/src/wallet/private_execution.ts \
         '    if (!older) {' \
         '    if (false && !older) { // ZZZ_M39_N3'
