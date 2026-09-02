@@ -427,3 +427,60 @@ below it became a separate command and the comparison silently shrank — found 
 count is asserted against `$#`.
 
 **M40 goes 135 -> 145.**
+
+## Step 10 — THE FIRST FULL SWEEP: 13,372, `delta +0`, NO HOLE, AND TWO OF THE SIX REDS WERE MINE
+
+Measured M0–M40 on 2026-09-02, `setsid`-detached in this repository's own dev shell (node
+v24.19.0), one milestone at a time with nothing else running, `TMPDIR` and the log under
+`~/.cache`. **82 markers for 41 milestones, no hole. 35 of 41 exit 0.** Polled INSIDE the agent's
+own run in nine-minute blocks — **five background waiters were killed by the harness** while the
+sweep ran on, which is why the campaign's rule is what it is.
+
+```
+m0 156   m1 181   m2 293   m3 199   m4 218   m5 236   m6 363   m7 287   m8 516   m9 807
+m10 450  m11 287  m12 691  m13 458  m14 460  m15 537  m16 225  m17 297  m18 578
+m19 180  m20 237  m21 451  m22 349  m23 512  m24 350  m25 454  m26 340  m27 345
+m28 358  m29 127  m30 218  m31 450  m32 237  m33 248  m34 217  m35 239  m36 150
+m37 171  m38 150  m39 205  m40 145
+                                                       CAMPAIGN TOTAL 13,372
+```
+
+**Every one of M0–M39 came out at its reference value TO THE ASSERTION**, and 13,227 + 145 = 13,372
+exactly. **M9 DID NOT FLAKE** — 807, rc 0, **1,283 s**, immediately after m8's **179 s** build,
+which is D19's standing condition, present and not firing. M15 did not either (537, 383 s).
+
+### FOUR OF THE SIX REDS ARE OTHER TRACKS' AND TWO WERE M40's OWN
+
+| milestone | count | what | whose |
+|---|---|---|---|
+| m11 | **287, unchanged**, 8 failures | the **ELEVENTH** upstream move: `upstream/next` `7471a61f1a` -> `89b3b1c14505b8595e4bc5cd3499dda1bf7e8d81` | **upstream's** |
+| m20 | 237, unchanged, 1 | `verify_named_checks_exist` on L3's and L2's two names | **L3's and L2's** |
+| m21 | 451, unchanged, 1 | `verify_no_pipeline_predicates`, a sixth `\| grep -q` | **L4's** |
+| m28 | 358, unchanged, 1 | `verify_npm_pack_no_optional_native`, `replay/package.json` as an extra tree | **L0's** |
+| m25 | 454, unchanged, 1 | **M40's**: the export union is 38 and the check asserts 36 | **mine** |
+| m26 | 340, unchanged, 2 | **M40's**: the same union, and `JOIN-SHAPE.md` §7's module size | **mine** |
+
+**Every count is unchanged in all six, which is what says a pinned list moved and not a structure.**
+
+`ct-host` gains a FOURTH export list, `SOURCE_STEP_EXPORTS`, for the reason the third is in its own:
+appending to another milestone's list moves that milestone's assertion count for a change that is
+not its. M25's and M26's checks assert the union is "exactly the THREE lists" at 36; both now name
+M40's two and assert the FOUR lists at 38. **m25 454 -> 455, m26 340 -> 341.**
+
+And `JOIN-SHAPE.md` §7 stated the module's size as the join surface's own arithmetic
+(259,839 -> 262,693), which a later milestone growing the module makes false in one of the two
+numbers. It states the CURRENT size as its own figure now, with the delta kept as the historical
+measurement it is.
+
+### AND A `git add -A` COMMITTED THE TWO FILES THE SWEEP REWROTE
+
+**A sweep is a writer**, and `verify-m11` rewrites `carry/exposure.json` and `carry/rebase.json` to
+the current `upstream/next` on every run. The procedure is to checksum before and restore after;
+what happened here is one step worse than forgetting the restore — the next commit's `git add -A`
+picked the rewrites up and **committed** them.
+
+That is the half-repair the brief names: the two files would have recorded the eleventh upstream
+move while `carry/overlap.json` and `CARRY-LEDGER.md` still record the tenth. Three files move
+together or the ledger and the data disagree, and the decision half of that repair is M11's rather
+than a milestone that happened to run its check. Both restored to `HEAD~1`; the digests are back to
+`3836c2b6…` and `79f597b2…`, which are the post-sweep values every run since M30 has produced.
