@@ -7,8 +7,8 @@
   "sum_of_per_patch_hunks": 80,
   "base": "233d8e099336c1773b89e939100af047ed9c4f71",
   "base_date": "2026-08-19",
-  "upstream_tip": "7471a61f1a92f5b2f474db714f34430253892d99",
-  "upstream_tip_date": "2026-08-27",
+  "upstream_tip": "89b3b1c14505b8595e4bc5cd3499dda1bf7e8d81",
+  "upstream_tip_date": "2026-09-01",
   "churn_window": [
     "2025-08-19",
     "2026-08-19"
@@ -682,7 +682,7 @@
     "barretenberg/cpp/src/barretenberg/world_state/world_state.hpp": 0,
     "barretenberg/cpp/src/barretenberg/world_state/world_state_stores.hpp": 0,
     "barretenberg/cpp/src/barretenberg/world_state_reference/memory_merkle_db.hpp": 0,
-    "bootstrap.sh": 4,
+    "bootstrap.sh": 6,
     "build-images/src/Dockerfile": 1,
     "scripts/setup-container.sh": 1
   },

@@ -43,6 +43,7 @@ export {
   RUNG_SOURCE,
   SOURCE_MAPPING_EXPORTS,
   JOIN_EXPORTS,
+  SOURCE_STEP_EXPORTS,
   WRITER_KIND_PATH_A_PURE_RUST,
   decodePosition,
   decodeStep,

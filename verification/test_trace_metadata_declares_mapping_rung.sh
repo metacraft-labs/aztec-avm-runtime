@@ -92,7 +92,11 @@ assert_true "…and whose reserved-byte figure is the measured one" \
   str_has_sub "$ABI_ROW" "**$(m25_arm 'd["surface"]["recordReservedBytesFromOffsets"]')** are reserved"
 assert_eq "M24's nineteen exports are untouched" "19" "$(m25_arm 'd["surface"]["requiredExports"]')"
 assert_eq "M25 adds eleven, in their own list" "11" "$(m25_arm 'd["surface"]["sourceMappingExports"]')"
-assert_eq "…and the union is exactly the three lists" "36" "$(m25_arm 'd["surface"]["allRequiredExports"]')"
+# M40 ADDS TWO, IN A FOURTH LIST, for the reason the third one exists: appending to M24's nineteen
+# would move an assertion count for a change that is not M24's. `ct_source_step` and its counter are
+# what a Noir private frame's step is written through — see `BOTH-HALVES.md` §3.
+assert_eq "M40 adds two, in their own list" "2" "$(m25_arm 'd["surface"]["sourceStepExports"]')"
+assert_eq "…and the union is exactly the four lists" "38" "$(m25_arm 'd["surface"]["allRequiredExports"]')"
 assert_eq "every one of the thirty-six is present in the built module" "0" \
   "$(m25_arm 'len(d["surface"]["missingFromModule"])')"
 # THE RESIDUE IS PRINTED, NOT COUNTED. A module export no list names is a finding — it is either a

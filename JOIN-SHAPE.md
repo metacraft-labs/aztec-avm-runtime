@@ -223,10 +223,14 @@ this milestone.
 
 ### M27 / M28 — browser packaging and the no-Node gate
 
-- The join surface adds **2,854 bytes** to the module, 259,839 → **262,693 bytes**, and **no
-  imports**: the count is still 0 and the module still instantiates under a bare
-  `WebAssembly.instantiate(bytes, {})`. `TRACE-ABI.md` §7 re-derives that figure from the built
-  artefact on every run, so the two documents cannot disagree about it.
+- The join surface added **2,854 bytes** to the module, 259,839 → 262,693, and **no imports**: the
+  count is still 0 and the module still instantiates under a bare
+  `WebAssembly.instantiate(bytes, {})`. **The module is **263,211 bytes** today**, because M40 added
+  a source-step surface of two exports (+518) for a private half's steps — see `BOTH-HALVES.md` §3.
+  `TRACE-ABI.md` §7 re-derives the CURRENT figure from the built artefact on every run and so does
+  this line, which is why the delta above is stated as a historical measurement rather than as an
+  arithmetic that has to keep coming out: a later milestone growing the module must not be able to
+  make one of the two numbers false.
 - `orchestration/src/trace_join.ts` imports nothing — no npm package and no Node module — so the
   join grammar is available to a browser host unchanged. The CONTAINER READING is not: decoding a
   `.ct` needs a reader, and this repository's is the pinned `ct-print`, which is a native binary.

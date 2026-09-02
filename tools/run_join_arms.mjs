@@ -46,6 +46,7 @@ import {
   REQUIRED_EXPORTS,
   RUNG_SOURCE,
   SOURCE_MAPPING_EXPORTS,
+  SOURCE_STEP_EXPORTS,
   WRITER_PATH_A_PURE_RUST,
   instantiateCtWriter,
   lineLengths,
@@ -308,6 +309,7 @@ const moduleArm = {
   exports: {
     required: REQUIRED_EXPORTS.length,
     sourceMapping: SOURCE_MAPPING_EXPORTS.length,
+    sourceStep: SOURCE_STEP_EXPORTS.length,
     join: JOIN_EXPORTS.length,
     all: ALL_REQUIRED_EXPORTS.length,
     joinNames: [...JOIN_EXPORTS],

@@ -1,6 +1,18 @@
 {
  "_baseline": 13227,
  "_declared_moves": {
+  "m25": {
+   "checks": "test_trace_metadata_declares_mapping_rung 92 -> 93",
+   "delta": 1,
+   "from": 454,
+   "to": 455
+  },
+  "m26": {
+   "checks": "verify_oq7_shared_writer_verdict_recorded 65 -> 66",
+   "delta": 1,
+   "from": 340,
+   "to": 341
+  },
   "m40": {
    "checks": "NEW. e2e_joined_public_half_executed 67 + e2e_joined_private_public_trace 78",
    "delta": 145,
@@ -8,9 +20,9 @@
    "to": 145
   }
  },
- "_expected_reds": "TWO, AND NEITHER IS M40's, both re-derived rather than inherited by re-running the two checks by hand before the sweep. m20 verify_named_checks_exist 9/1 on TWO parallel names \u2014 L3's test_reverted_transaction_recorded_as_reverted in tools/scan_reverted_transactions.mjs and L2's verify_hydrated_roots_declared; M40's two new checks are named after the two milestone entries they close, so both resolve and neither adds a name. m21 verify_no_pipeline_predicates 69/1 on L4's sixth `| grep -q` at verify_browser_replay_dd9_clean.sh:336; none of M40's three new shell files contains one. m28 verify_npm_pack_no_optional_native 55/1 on L0's replay/package.json is a THIRD and is measured the same way. M11 IS THE OPEN QUESTION: M39's sweep read 287 with nine failures on the tenth upstream move, and upstream may have moved again; it is measured by hand before the run and written here rather than explained afterwards.",
- "_nothing_else_may_move": "m24 350, m27 345, m28 358, m32 237, m33 248, m34 217, m35 239, m36 150, m38 150, m39 205 and m40 130 were each re-run individually after the LAST edit and each came out at its value with zero failures (m28's one red is L0's). ELEVEN DOCUMENT FIGURES MOVED AND ONLY ONE COUNT DID, which is what says a pinned figure moved and not a structure. The one count is M24's: nothing \u2014 its 350 is unchanged, but its OQ-6 benchmark RE-RAN because editing ct-host/src moves _m24_oq6_stamp, exactly as CAMPAIGN-BRIEF.md says it does, so TRACE-ABI.md section 2 is re-rendered from the new arms.tsv and run 11 joins section 8's retained table at +1.07 %, [+0.36, +1.78] %, within-noise. The figures: TRACE-ABI section 7 ct_writer.wasm 262,693 -> 263,211 and sha256 5edf9671 -> e94baceb; BROWSER-PACKAGING's four eager rows and its total 8,234.38 -> 8,239.75; BROWSER-GATE's browser metafile inputs 1196 -> 1198; WORKER-NODE's seven current-column rows; and the wallet / wallet-demo eager pairs in DEV-WALLET, PRIVATE-EXECUTION and LOCAL-HISTORY. Every one is a figure a check re-derives from the artefact on every run, which is the only reason any of it was found. check-repo-hygiene 28 and verify_named_checks_exist 9 measured unchanged.",
- "_total": 13372,
+ "_expected_reds": "FOUR, AND NOT ONE IS M40's, each re-derived rather than inherited. m11 is the ELEVENTH UPSTREAM MOVE \u2014 `upstream/next` went 7471a61f1a -> 89b3b1c14505b8595e4bc5cd3499dda1bf7e8d81, measured by hand before this run and confirmed by the previous sweep's own output, count unchanged at 287 with eight failing assertions, `carry/` left at HEAD rather than half-repaired. m20 verify_named_checks_exist 9/1 on TWO parallel names \u2014 L3's test_reverted_transaction_recorded_as_reverted and L2's verify_hydrated_roots_declared; M40's two checks are named after the milestone entries they close, so both resolve and neither adds a name. m21 verify_no_pipeline_predicates 69/1 on L4's sixth `| grep -q` at verify_browser_replay_dd9_clean.sh:336; measured at 6 by hand and none of M40's four new shell files contains one. m28 verify_npm_pack_no_optional_native 55/1 on L0's replay/package.json, for the ninth milestone running.",
+ "_nothing_else_may_move": "THE FIRST SWEEP OF THIS PASS CAME OUT AT 13,372 WITH SIX NON-ZERO EXITS, TWO OF THEM M40's OWN, and that is what this reference exists to have already accounted for. M40 adds a FOURTH export list to ct-host \u2014 SOURCE_STEP_EXPORTS \u2014 and both M25's and M26's checks assert that the union is 'exactly the THREE lists' with a size of 36. Every count was at its reference value and only the rc moved, which is what says a pinned list moved and not a structure. Both now name M40's two beside M24's nineteen, M25's eleven and M26's six, and assert the union is the FOUR lists at 38: m25 454 -> 455, m26 340 -> 341. M26's second red was JOIN-SHAPE.md section 7 quoting the module's size as the join surface's arithmetic; it states the CURRENT size as its own figure now, with the join delta kept as a historical measurement, so a later milestone growing the module cannot make one of the two numbers false. TWELVE DOCUMENT FIGURES MOVED IN ALL and every one is the CHECK's value: TRACE-ABI section 7 (262,693 -> 263,211, sha 5edf9671 -> e94baceb) and section 2 and 8 (the OQ-6 benchmark RE-RAN because editing ct-host/src moves _m24_oq6_stamp, so run 11 joins the retained table at +1.07 %, within-noise); BROWSER-PACKAGING's four eager rows and its total; BROWSER-GATE's metafile inputs 1196 -> 1198; WORKER-NODE's seven current-column rows; and the wallet / wallet-demo eager pairs in DEV-WALLET, PRIVATE-EXECUTION and LOCAL-HISTORY. m24 350, m27 345, m28 358, m32 237, m33 248, m34 217, m35 239, m36 150, m38 150, m39 205 and m40 145 were each re-run individually after the LAST edit. check-repo-hygiene 28 and verify_named_checks_exist 9 measured unchanged; verify_no_pipeline_predicates measured 6, which is L4's.",
+ "_total": 13374,
  "m0": 156,
  "m1": 181,
  "m10": 450,
@@ -29,8 +41,8 @@
  "m22": 349,
  "m23": 512,
  "m24": 350,
- "m25": 454,
- "m26": 340,
+ "m25": 455,
+ "m26": 341,
  "m27": 345,
  "m28": 358,
  "m29": 127,

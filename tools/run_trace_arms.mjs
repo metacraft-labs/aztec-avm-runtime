@@ -40,6 +40,7 @@ import {
   RUNG_FUNCTION,
   RUNG_SOURCE,
   SOURCE_MAPPING_EXPORTS,
+  SOURCE_STEP_EXPORTS,
   REQUIRED_EXPORTS,
   ALL_REQUIRED_EXPORTS,
   WRITER_PATH_A_PURE_RUST,
@@ -182,6 +183,7 @@ const out = { module: MODULE, artifactPath: ARTIFACT };
     exportedFunctions: exports.length,
     requiredExports: REQUIRED_EXPORTS.length,
     sourceMappingExports: SOURCE_MAPPING_EXPORTS.length,
+    sourceStepExports: SOURCE_STEP_EXPORTS.length,
     allRequiredExports: ALL_REQUIRED_EXPORTS.length,
     missingFromModule: ALL_REQUIRED_EXPORTS.filter(n => typeof ex[n] !== 'function'),
     // The residue, PRINTED rather than counted: exports the module has that no list names.

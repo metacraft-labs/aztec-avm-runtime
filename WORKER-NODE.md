@@ -207,7 +207,7 @@ now, three assertions each.)*
 
 | entry point | before M32 | M32's measurement | after M34 | current |
 |---|---|---|---|---|
-| `browser.js` | 255.79 KB, 7 files | 255.87 KB, 8 files | 263.10 KB, 9 files | **265.96 KB, 9 files** |
+| `browser.js` | 255.79 KB, 7 files | 255.87 KB, 8 files | 263.10 KB, 9 files | **265.97 KB, 9 files** |
 | `testing.js` | 279.77 KB, 8 files | 279.93 KB, 10 files | 288.28 KB, 12 files | **294.83 KB, 12 files** |
 | `demo.js` | 280.97 KB, 8 files | 281.12 KB, 10 files | 289.50 KB, 12 files | **295.93 KB, 12 files** |
 | `node/node.js` | 225.36 KB, 4 files | 225.36 KB, 4 files | 225.49 KB, 4 files | **225.62 KB, 4 files** |
