@@ -35,7 +35,26 @@ load).
 Each of these is a defect that shipped, not a precaution.
 
 ### An assertion must be capable of failing
-**Forty-four instances.** (**M38 added the 44th, and a TOOL made it: `str_has_re` is bash's `=~`,
+**Fifty-eight instances.** (**M40 added the 57th and the 58th, and BOTH were found by aborting a
+sweep to read its own checks — which is now the fourth pass running in which the only work a sweep
+leaves has been the work that found something.** The 57th is
+`e2e_joined_private_public_trace`'s *"no M40 file reaches for the unpublished worktree"*: one
+assertion of the shape this list catalogues second, `grep -l <needle> | grep -cv <the one
+legitimate mention> == 0`, where a needle that silently stopped matching drives the count to 0 as
+surely as a clean tree does. The one file that legitimately names the worktree is the build
+script's header, and **nothing asserted it was found**. It is the paired zero now, calibrated both
+ways — a planted mention names the file, a broken needle fails the positive control — with the
+scanned set's size and its files' existence asserted beside it so "no other file mentions it"
+cannot be "no file was scanned". **The 58th was found by a MUTATION ARM rather than by reading, and
+it is this list's most-repeated shape**: `e2e_joined_private_public_trace`'s column identity read
+`report.stepsWithColumn` — the tracer module counting its OWN event stream — so an arm that made
+the module emit `column: 0` in every op while leaving that count at the real figure left the
+assertion GREEN. Only a digest pair noticed. The host counts the columns it passes to
+`ct_source_step` now, which is the boundary the container is on the other side of, and both counts
+are asserted so they are two producers of one number. *M39 added thirteen and this line was not
+moved with them; the count above is a re-census rather than an increment, and it is the drift this
+parenthetical exists to prevent arriving in the parenthetical itself.*)
+(**M38 added the 44th, and a TOOL made it: `str_has_re` is bash's `=~`,
 whose `.` MATCHES A NEWLINE.** Thirteen document assertions across M38's two checks were written in
 M24's OQ-6 shape — anchor the needle to the ROW that names its subject, not to the file — as
 `str_has_re "$DOC" 'subject.*\*\*N\*\*'`, and every one of them could match a subject on one line
@@ -1308,6 +1327,58 @@ m19 180  m20 237  m21 325  m22 260  m23 509  m24 350  m25 272  m26 313  m27 345
 m28 353  m29 127
                                                        CAMPAIGN TOTAL 10,178
 ```
+
+**M40 TOOK IT TO 13,374, `delta +0`, AND NOT ONE OF THE FOUR NON-ZERO EXITS IS ITS OWN.** Measured
+M0–M40 on 2026-09-02 by M40's implementation, **after its last commit**, `setsid`-detached in this
+repository's own dev shell (node v24.19.0), one milestone at a time with nothing else running,
+`TMPDIR` and the log under `~/.cache`, **82 markers for 41 milestones, NO HOLE**, **37 of 41 exit
+0**:
+
+```
+m0 156   m1 181   m2 293   m3 199   m4 218   m5 236   m6 363   m7 287   m8 516   m9 807
+m10 450  m11 287  m12 691  m13 458  m14 460  m15 537  m16 225  m17 297  m18 578
+m19 180  m20 237  m21 451  m22 349  m23 512  m24 350  m25 455  m26 341  m27 345
+m28 358  m29 127  m30 218  m31 450  m32 237  m33 248  m34 217  m35 239  m36 150
+m37 171  m38 150  m39 205  m40 145
+                                                       CAMPAIGN TOTAL 13,374
+```
+
+`13,227 + 145 + 1 + 1 = 13,374` exactly, and every unit is one of three declared moves. **M40's own
+145** is 67 / 78. **m25 454 -> 455** and **m26 340 -> 341** are the same cause and are M40's doing:
+`ct-host` gains a FOURTH export list, `SOURCE_STEP_EXPORTS`, and both checks assert the union is
+"exactly the THREE lists" at 36. Both now name M40's two and assert the FOUR lists at 38.
+
+**M9 DID NOT FLAKE** — 807, rc 0, **1,283 s**, immediately after m8's **180 s** build, which is
+D19's standing condition, present and not firing; M15 did not either (537, 383 s).
+
+**THE FOUR NON-ZERO EXITS, EACH RE-DERIVED RATHER THAN INHERITED, AND EVERY COUNT UNCHANGED:**
+**m11 IS THE ELEVENTH UPSTREAM MOVE** — `upstream/next` `7471a61f1a` -> `89b3b1c14505b8595e4bc5cd3499dda1bf7e8d81`,
+measured by hand before the run, 287 with eight failing assertions, `carry/` left at HEAD rather
+than half-repaired; m20 `verify_named_checks_exist` 9/1 on **L3's and L2's** two names; m21
+`verify_no_pipeline_predicates` 69/1 on **L4's** sixth `| grep -q`; m28
+`verify_npm_pack_no_optional_native` 55/1 on **L0's** `replay/package.json`, for the ninth
+milestone running.
+
+**THE SIXTEEN L0–L5 CHECK NAMES APPEAR ZERO TIMES AS A COLUMN-0 SUMMARY LINE**, grepped one at a
+time. None of their assertions is in the 13,374.
+
+**A sweep is a writer**: `carry/*.json` checksummed before and `sha256sum -c` after —
+`exposure.json` and `rebase.json` came back changed, were restored from HEAD, and all four
+re-verified OK.
+
+**AND THE PASS'S FIRST SWEEP FOUND TWO OF ITS OWN REDS, WHICH IS THE SWEEP WORKING.** It came out
+at the same 13,372 with SIX non-zero exits: the four above plus m25 and m26, on the export union
+above. **Every count was at its reference value and only the rc moved**, which is what says a
+pinned list moved and not a structure. **And a `git add -A` in the next commit COMMITTED the two
+files the sweep rewrote** — `carry/exposure.json` and `carry/rebase.json` at the eleventh upstream
+tip while `carry/overlap.json` and `CARRY-LEDGER.md` still record the tenth, which is the
+half-repair this file names by name. Restored and committed back. *A sweep is a writer, and the
+step after "restore it" is "do not stage it".*
+
+**AND M40'S SWEEP WAS ABORTED TWICE, WHICH IS THE RULE WORKING TWICE.** Both aborts were bought by
+the only work a sweep leaves — reading this pass's own checks — and both found an assertion that
+could not fail; they are the 57th and 58th above. Killed at m4 and at m1, every child confirmed
+gone, `carry/*.json` verified unchanged and the tree clean before either edit.
 
 **M38 TOOK IT TO 13,022, `delta +0`, AND ITS ONE MOVE WAS NAMED BEFORE THE SWEEP RAN.** Measured
 M0–M38 on 2026-09-01 by M38's implementation, **after its last edit**, `setsid`-detached in this

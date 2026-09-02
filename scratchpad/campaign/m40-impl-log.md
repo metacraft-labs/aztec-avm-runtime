@@ -484,3 +484,44 @@ move while `carry/overlap.json` and `CARRY-LEDGER.md` still record the tenth. Th
 together or the ledger and the data disagree, and the decision half of that repair is M11's rather
 than a milestone that happened to run its check. Both restored to `HEAD~1`; the digests are back to
 `3836c2b6…` and `79f597b2…`, which are the post-sweep values every run since M30 has produced.
+
+## Step 11 — THE SWEEP: **13,374**, `delta +0`, NO HOLE, AND NOT ONE RED IS M40's
+
+Measured M0–M40 on 2026-09-02 **after the last commit**, `setsid`-detached in this repository's own
+dev shell (node v24.19.0), one milestone at a time with nothing else running, `TMPDIR` and the log
+under `~/.cache`. **82 markers for 41 milestones, no hole. 37 of 41 exit 0.** Polled INSIDE the
+agent's own run in nine-minute blocks; **five background waiters were killed by the harness** while
+the sweep ran on, which is exactly why the campaign's rule is what it is.
+
+```
+m0 156   m1 181   m2 293   m3 199   m4 218   m5 236   m6 363   m7 287   m8 516   m9 807
+m10 450  m11 287  m12 691  m13 458  m14 460  m15 537  m16 225  m17 297  m18 578
+m19 180  m20 237  m21 451  m22 349  m23 512  m24 350  m25 455  m26 341  m27 345
+m28 358  m29 127  m30 218  m31 450  m32 237  m33 248  m34 217  m35 239  m36 150
+m37 171  m38 150  m39 205  m40 145
+                                                       CAMPAIGN TOTAL 13,374
+```
+
+The summariser validated the reference's own `_total` first and then reported **`delta +0`**:
+every one of the forty-one came out at its declared value, and the three moves were named in
+`m40-reference.json` before the run. **13,227 + 145 + 1 + 1 = 13,374 exactly**, and M40's own 145
+is 67 / 78.
+
+**M9 DID NOT FLAKE** — 807, rc 0, **1,283 s**, immediately after m8's **180 s** build, which is
+D19's standing condition, present and not firing. M15 did not either (537, 383 s).
+
+### THE FOUR NON-ZERO EXITS, EACH RE-DERIVED, EVERY COUNT UNCHANGED
+
+| milestone | check | count | subject | whose |
+|---|---|---|---|---|
+| m11 | four checks, **8** failing assertions | **287** | the **ELEVENTH** upstream move, `upstream/next` `7471a61f1a` -> `89b3b1c145` | **upstream's** |
+| m20 | `verify_named_checks_exist` 9/1 | unchanged | `tools/scan_reverted_transactions.mjs` and `verify_hydrated_roots_declared` | **L3's and L2's** |
+| m21 | `verify_no_pipeline_predicates` 69/1 | unchanged | a sixth `\| grep -q` in `verify_browser_replay_dd9_clean.sh:336` | **L4's** |
+| m28 | `verify_npm_pack_no_optional_native` 55/1 | unchanged | `replay/package.json` as an extra tree | **L0's** |
+
+**THE SIXTEEN L0–L5 CHECK NAMES APPEAR ZERO TIMES AS A COLUMN-0 SUMMARY LINE**, grepped one at a
+time. None of their assertions is in the 13,374.
+
+**A sweep is a writer**: `carry/*.json` checksummed before and `sha256sum -c` after —
+`exposure.json` and `rebase.json` came back changed, were restored from HEAD, and **all four
+re-verified OK**.
