@@ -97,10 +97,112 @@ export function foldRuleFor(
   return null;
 }
 
+/**
+ * The path a renderer writes for a frame whose SOURCE FILE THE CONTAINER COULD NOT NAME.
+ *
+ * A frame's path comes from a path id the container carries per function. A container written in a
+ * format that has no such field — or one whose id does not resolve against the container's own path
+ * table — leaves the renderer with a frame it cannot place in a file, and `'?'` is what it writes.
+ * Exported so the sentinel is one value in one place rather than a literal repeated at each site
+ * that has to recognise it.
+ */
+export const UNRESOLVED_PATH = '?';
+
+/**
+ * Whether a tree can be folded AT ALL — the container-format boundary, made readable.
+ *
+ * ===============================================================================================
+ * WHY THIS EXISTS: `0` FOLDED FRAMES HAS TWO CAUSES AND THEY ARE NOT THE SAME NEWS.
+ *
+ * `foldTree` matches {@link FoldRule.matches} against `FrameNode.path`, and nothing else. So a tree
+ * whose frames carry no path folds NOTHING — every rule tests a string that is the sentinel, no
+ * rule matches, and the result is a well-formed view reporting zero fold points. That is BYTE FOR
+ * BYTE the report produced by a recording that carries every path perfectly and simply contains no
+ * standard-library or vendored code. One is "nothing qualified"; the other is "THE FORMAT CANNOT
+ * SAY". A reader shown `foldedFrames: 0` cannot tell which they are looking at, and the second is a
+ * defect in the container while the first is an ordinary fact about a contract.
+ *
+ * The nearest existing guard is on an id that is OUT OF RANGE, which is a different failure: an id
+ * that is present and wrong. A format that cannot carry the id at all never produces one to be out
+ * of range, so that guard is silent on exactly the case that needs reporting — and every self-test
+ * supplies a path id, so no arm has ever exercised the silence.
+ *
+ * This function answers the question the count cannot: OF THE FRAMES IN THIS TREE, HOW MANY CARRY A
+ * PATH? `canFold` false means a zero fold count is uninformative and must not be read as evidence
+ * about the contract's contents.
+ */
+export interface FoldReadiness {
+  /** Frames in the tree, at every depth. */
+  readonly frames: number;
+  /** Frames whose path is {@link UNRESOLVED_PATH} — the container could not name their file. */
+  readonly framesWithoutPath: number;
+  /**
+   * True when EVERY frame carries a path, so the fold rules were evaluated against real data and a
+   * fold count of `0` genuinely means no frame matched a rule.
+   */
+  readonly canFold: boolean;
+  /** Distinct names of the frames that carry no path, sorted — what a report shows a reader. */
+  readonly unresolved: readonly string[];
+}
+
+/** Raised by {@link foldTreeChecked} for a tree whose format cannot carry what the rules need. */
+export class FoldFormatError extends Error {
+  readonly readiness: FoldReadiness;
+  constructor(readiness: FoldReadiness) {
+    super(
+      `this container cannot be folded: ${readiness.framesWithoutPath} of ${readiness.frames} `
+      + `frames carry no source path (${readiness.unresolved.join(', ')}). A fold count of 0 over `
+      + 'this tree would mean "the format cannot say", not "nothing qualified".',
+    );
+    this.name = 'FoldFormatError';
+    this.readiness = readiness;
+  }
+}
+
+/** Measure {@link FoldReadiness} over a tree. Walks every frame at every depth. */
+export function foldReadiness(nodes: readonly FrameNode[]): FoldReadiness {
+  let frames = 0;
+  let framesWithoutPath = 0;
+  const unresolved = new Set<string>();
+  const walk = (ns: readonly FrameNode[]): void => {
+    for (const n of ns) {
+      frames += 1;
+      if (n.path === UNRESOLVED_PATH || n.path === '') {
+        framesWithoutPath += 1;
+        unresolved.add(n.name);
+      }
+      walk(n.children);
+    }
+  };
+  walk(nodes);
+  return {
+    frames,
+    framesWithoutPath,
+    canFold: framesWithoutPath === 0,
+    unresolved: [...unresolved].sort(),
+  };
+}
+
+/**
+ * {@link foldTree}, but REFUSING a tree whose frames have no paths to match rules against.
+ *
+ * This is the strict door, for a caller producing a sidecar or a published report — somewhere a
+ * `0` will be read as a fact. {@link foldTree} stays total on purpose, because a live renderer
+ * showing an unfoldable tree unfolded is better than a renderer that throws at the user.
+ */
+export function foldTreeChecked(
+  nodes: readonly FrameNode[],
+  rules: readonly FoldRule[] = DEFAULT_FOLD_RULES,
+): FoldedView[] {
+  const readiness = foldReadiness(nodes);
+  if (!readiness.canFold) throw new FoldFormatError(readiness);
+  return foldTree(nodes, rules);
+}
+
 /** A node of a Noir call tree, as a renderer holds it. */
 export interface FrameNode {
   readonly name: string;
-  /** The source file this frame's code is in. */
+  /** The source file this frame's code is in, or {@link UNRESOLVED_PATH} when it has none. */
   readonly path: string;
   /**
    * Steps recorded directly in this frame, not counting its children's. Optional because a caller

@@ -86,8 +86,13 @@ export { NoirFrameTracker, type FrameSink } from './noir_frames.ts';
 
 export {
   DEFAULT_FOLD_RULES,
+  UNRESOLVED_PATH,
+  FoldFormatError,
+  foldReadiness,
   foldRuleFor,
   foldTree,
+  foldTreeChecked,
+  type FoldReadiness,
   type FoldRule,
   type FoldedView,
   type FrameNode,

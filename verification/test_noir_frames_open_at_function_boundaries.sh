@@ -238,4 +238,57 @@ for f in replay/src/recording.ts browser/src/ct_download.ts; do
     str_has_sub "$(cat "$REPO_ROOT/$f")" "NoirFrameTracker"
 done
 
+echo "== 9. THE CONTAINER-FORMAT BOUNDARY: what a fold count of 0 is allowed to mean"
+# Folding reads `FrameNode.path` and nothing else. So a container in a format that cannot carry a
+# path id per function produces a well-formed report saying ZERO FOLDED FRAMES — which is byte for
+# byte what a recording carrying every path and containing no library code produces. One is "the
+# format cannot say"; the other is "nothing qualified", and until now nothing here could tell them
+# apart. The existing id guard fires on an OUT-OF-RANGE id, never a MISSING one, and every arm above
+# supplies a path id, so the silent case had never been exercised.
+#
+# Three arms, one tree: `real` (the snapshot's own paths), `stripped` (every path replaced by the
+# sentinel a renderer writes when the container cannot name a file) and `contract` (every path
+# rewritten to contract-owned source, so paths are REAL and no rule matches).
+assert_eq "the real tree carries a path for all 44 frames" \
+  "44" "$(arm foldBoundary.real.readiness.frames)"
+assert_eq "…none of them unresolved" "0" "$(arm foldBoundary.real.readiness.framesWithoutPath)"
+assert_eq "…so it is foldable, and its 2 fold points mean what they say" \
+  "true" "$(arm foldBoundary.real.readiness.canFold)"
+assert_eq "…and the strict door lets it through" "" "$(arm foldBoundary.real.refused)"
+
+# THE AMBIGUITY, EXHIBITED: both of these fold NOTHING.
+assert_eq "a format that cannot carry a path folds nothing" \
+  "0" "$(arm foldBoundary.stripped.foldPoints)"
+assert_eq "a tree of purely contract-owned code also folds nothing" \
+  "0" "$(arm foldBoundary.contract.foldPoints)"
+
+# AND THE GUARD THAT SEPARATES THEM. This is the whole point of the section: the two zeroes above
+# are now distinguishable, by a reading rather than by an inference.
+assert_eq "but the unfoldable one reports all 44 frames as unresolved" \
+  "44" "$(arm foldBoundary.stripped.readiness.framesWithoutPath)"
+assert_eq "…and says so: canFold is false" \
+  "false" "$(arm foldBoundary.stripped.readiness.canFold)"
+assert_eq "while the contract-only one is genuinely foldable and simply had no match" \
+  "true" "$(arm foldBoundary.contract.readiness.canFold)"
+assert_eq "…with zero unresolved frames" \
+  "0" "$(arm foldBoundary.contract.readiness.framesWithoutPath)"
+
+# REFUSAL, not merely reporting: a producer writing a sidecar gets an exception rather than a 0.
+STRIPPED_REFUSAL="$(arm foldBoundary.stripped.refused)"
+assert_true "the strict door REFUSES the unfoldable container" \
+  str_has_sub "$STRIPPED_REFUSAL" "FoldFormatError"
+assert_true "…naming how many frames carry no path" \
+  str_has_sub "$STRIPPED_REFUSAL" "44 of 44 frames carry no source path"
+assert_true "…and saying which reading of 0 is being refused" \
+  str_has_sub "$STRIPPED_REFUSAL" "the format cannot say"
+assert_eq "…while the contract-only container passes the same door" \
+  "" "$(arm foldBoundary.contract.refused)"
+
+# The sentinel is one value in one place. A renderer that spells it inline would drift from the
+# guard that recognises it, and the guard would go quietly blind.
+assert_true "the fold sentinel is exported rather than spelled at each site" \
+  str_has_sub "$(cat "$REPO_ROOT/ct-host/src/frame_fold.ts")" "export const UNRESOLVED_PATH"
+assert_false "the arm does not spell the sentinel inline" \
+  str_has_sub "$(cat "$REPO_ROOT/tools/run_noir_frames_arms.mjs")" "?? '?'"
+
 finish

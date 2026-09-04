@@ -70,7 +70,11 @@ import {
   ContractSourceMap,
   NoirFrameTracker,
   DEFAULT_FOLD_RULES,
+  UNRESOLVED_PATH,
+  FoldFormatError,
+  foldReadiness,
   foldTree,
+  foldTreeChecked,
   locationsOf,
   isDummyLocation,
 } from '../ct-host/src/index.ts';
@@ -242,7 +246,8 @@ function driveTracker() {
   const sink = {
     call(name, opts) {
       const node = {
-        name, path: pathById.get(opts.pathId) ?? '?', line: opts.line, steps: 0, children: [],
+        name, path: pathById.get(opts.pathId) ?? UNRESOLVED_PATH, line: opts.line, steps: 0,
+        children: [],
       };
       openPath[openPath.length - 1].push(node);
       openPath.push(node.children);
@@ -327,6 +332,60 @@ function foldPoints(views, out = []) {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// ARM `foldBoundary` — WHAT `foldedFrames: 0` MEANS, AND THE TWO WAYS TO GET IT
+// ---------------------------------------------------------------------------
+// The fold rules read `FrameNode.path` and nothing else, so a container whose format cannot carry a
+// path id per function yields a tree that folds nothing — a well-formed report saying `0`, exactly
+// what a recording containing no library code says. These three arms are the same tree three ways,
+// measured so the reports can be COMPARED rather than trusted:
+//
+//   real       the snapshot's own tree. Paths present, rules match, folds.
+//   stripped   the same tree with every path replaced by the sentinel a renderer writes when the
+//              container cannot name the file. THE FORMAT CANNOT SAY.
+//   contract   the same tree with every path rewritten to contract-owned source. Paths present and
+//              real; no rule matches. NOTHING QUALIFIED.
+//
+// `stripped` and `contract` both produce zero fold points. `foldReadiness` separates them, and
+// `foldTreeChecked` refuses the first outright.
+const stripPaths = (ns) => ns.map((n) => ({
+  ...n, path: UNRESOLVED_PATH, children: stripPaths(n.children),
+}));
+const contractPaths = (ns) => ns.map((n) => ({
+  ...n, path: 'fee_juice_contract/src/main.nr', children: contractPaths(n.children),
+}));
+
+const stripped = stripPaths(root);
+const contractOnly = contractPaths(root);
+
+function refusal(nodes) {
+  try {
+    foldTreeChecked(nodes, DEFAULT_FOLD_RULES);
+    return null;
+  } catch (e) {
+    if (e instanceof FoldFormatError) return { name: e.name, message: e.message };
+    throw e;
+  }
+}
+
+const foldBoundary = {
+  real: {
+    readiness: foldReadiness(root),
+    foldPoints: foldPoints(foldTree(root, DEFAULT_FOLD_RULES)).length,
+    refused: refusal(root),
+  },
+  stripped: {
+    readiness: foldReadiness(stripped),
+    foldPoints: foldPoints(foldTree(stripped, DEFAULT_FOLD_RULES)).length,
+    refused: refusal(stripped),
+  },
+  contract: {
+    readiness: foldReadiness(contractOnly),
+    foldPoints: foldPoints(foldTree(contractOnly, DEFAULT_FOLD_RULES)).length,
+    refused: refusal(contractOnly),
+  },
+};
+
 const out = {
   artifact: {
     path: ARTIFACT,
@@ -381,6 +440,7 @@ const out = {
     // WITH it off. Must be everything the recorder wrote.
     unfoldedFunctionsVisible: [...namesOf(unfolded)].sort(),
   },
+  foldBoundary,
 };
 
 writeFileSync(`${WORK}/noir-frames.json`, JSON.stringify(out, null, 2));
