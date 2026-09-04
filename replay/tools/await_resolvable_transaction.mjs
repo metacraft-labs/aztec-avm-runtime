@@ -133,13 +133,40 @@ while (found === null && Date.now() - startedAt < deadlineMinutes * 60_000) {
       if (resolution.resolved) proved.push(resolution);
       else unproved.push(`${contract.contractClassId.slice(0, 14)}…`);
     }
-    // EVERY contract must be proved, not merely one: `SettledRecording.sourceLevel` is a
-    // conjunction, and a subject that can only ever be half source-level is a weaker
-    // demonstration than the one this milestone owes.
+    // ONE PROVED CONTRACT IS THE BAR, and the ratio is recorded rather than required.
+    //
+    // This read `proved.length === all`, justified by `SettledRecording.sourceLevel`
+    // being a conjunction. It is — but `sourceLevel` is only ONE of the three ways past
+    // the actual publish bar, which is `ingest.nim`'s
+    //
+    //     measuredSourceLevel or hasPostHocPositions or
+    //     (recording.stepsPositioned > 0 and a positions file)
+    //
+    // The transaction this repository already publishes settles it: testnet
+    // `0x20ed5b91…` has `sourceLevel: false`, sits at rung 2 with 86 of 108 steps
+    // positioned, and ships a source bundle through the third disjunct. Under the old
+    // conjunction a subject exactly like it would have been vetoed by this file for
+    // failing a condition its own published sibling does not meet.
+    //
+    // AND A VETO HERE IS PERMANENT. `getTxByHash` serves only the active pool, which
+    // deletes at the finalized tip, so a transaction passed over is replayable for about
+    // an hour and then never again — the same one-way door the commit above this one
+    // exists to close. A rejection is not "wait for a better subject next poll"; it is
+    // that subject destroyed. The asymmetry is total: accepting a half-proved container
+    // costs a weaker demonstration, rejecting one costs the container.
+    //
+    // The repository already treats this as a valid container elsewhere —
+    // `e2e_resolved_contract_records_at_source_level.sh`'s `mixed` arm is two contracts,
+    // one proved and one not, asserted to produce rungs 1 AND 3 in ONE container without
+    // throwing. Vetoing here what that arm asserts is publishable was the contradiction.
+    //
+    // `all` IS CARRIED ON THE SUBJECT, not merely logged per candidate, so the rung stays
+    // legible: a reader of the run has to be able to see "2 contract(s), 1 proved" against
+    // the transaction that was chosen, and not only against the ones that were passed over.
     const all = settled.contracts.filter(c => c.resolved).length;
     note(`  block ${n} ${hash.slice(0, 14)}… ${all} contract(s), ${proved.length} proved`);
-    if (proved.length > 0 && proved.length === all) {
-      found = { hash, blockNumber: n, proved };
+    if (proved.length > 0) {
+      found = { hash, blockNumber: n, proved, all };
     }
   }
   if (found === null) {
@@ -150,16 +177,26 @@ while (found === null && Date.now() - startedAt < deadlineMinutes * 60_000) {
   }
 }
 
-await writeFile(join(outDir, 'await-log.txt'), `${log.join('\n')}\n`);
-
 if (found === null) {
   note(`gave up after ${deadlineMinutes} minute(s) with no provable subject. THAT IS A FACT ABOUT `
     + 'THE CHAIN OVER THAT PERIOD and it is in await-log.txt with a timestamp per poll.');
-  process.exit(3);
+} else {
+  // THE RATIO IS ON THE VERDICT LINE. `proved.length` alone reads as "this subject was
+  // fully proved" whatever it was; printed against `all` it says which rung the container
+  // is going to be able to reach, which is the thing a reader of this run needs and the
+  // thing the removed `=== all` conjunction used to imply for free.
+  note(`FOUND ${found.hash} in block ${found.blockNumber}, `
+    + `${found.all} contract(s), ${found.proved.length} proved: `
+    + found.proved.map(p => `${p.address.slice(0, 12)}… <- ${p.artifact.origin} (${p.corroboration})`).join('; '));
 }
 
-note(`FOUND ${found.hash} in block ${found.blockNumber}: `
-  + found.proved.map(p => `${p.address.slice(0, 12)}… <- ${p.artifact.origin} (${p.corroboration})`).join('; '));
+// WRITTEN AFTER THE VERDICT AND NOT BEFORE IT. This stood above the two notes, so the
+// line saying which transaction was chosen — or that none was — reached stderr and never
+// the file, and `await-log.txt` ended at the last poll. The log is the artefact the run
+// is read from afterwards; a verdict it does not carry is a verdict nobody can check.
+await writeFile(join(outDir, 'await-log.txt'), `${log.join('\n')}\n`);
+
+if (found === null) process.exit(3);
 
 // Hand off to the driver rather than re-implementing it. The recording this produces has to be the
 // one the shipped path produces or the demonstration is of this file instead of of that one.
