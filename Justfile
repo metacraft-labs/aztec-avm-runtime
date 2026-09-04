@@ -3217,13 +3217,23 @@ verify-l5-resolution:
 verify-l5-source:
     @verification/e2e_resolved_contract_records_at_source_level.sh
 
+# The Noir CALL TREE, on top of the source positions `verify-l5-source` establishes.
+#
+# Needs neither the writer nor the reader nor a browser: it drives `ContractSourceMap.framesFor` and
+# `NoirFrameTracker` — the same code both recorders run — over the version-matched FeeJuice artifact
+# and the published snapshot's own decoded step positions, both on disk. So it is in the OFFLINE
+# floor rather than beside `verify-l5-net`.
+verify-noir-frames:
+    @verification/test_noir_frames_open_at_function_boundaries.sh
+
 verify-l5:
     #!/usr/bin/env bash
     set -uo pipefail
     rc=0
     for check in \
       test_offchain_artifact_resolution_verified \
-      e2e_resolved_contract_records_at_source_level
+      e2e_resolved_contract_records_at_source_level \
+      test_noir_frames_open_at_function_boundaries
     do
       echo "=== $check"
       verification/"$check".sh || rc=1

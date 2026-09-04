@@ -70,6 +70,22 @@ export L2_FIXTURES
 L5_FIXTURES=(chain_contract_classes.json)
 export L5_FIXTURES
 
+# A THIRD KIND AGAIN, declared separately for the same reason L5's is.
+#
+# `published_snapshot_step_positions.json` is neither a recorded JSON-RPC session nor a set of chain
+# numbers: it is the DECODE OF A PUBLISHED CONTAINER — the 12 interned paths and the 108
+# `(pathId, line)` step records read out of `trace.ct` for testnet 0x20ed5b91…, the snapshot whose
+# frame tree `test_noir_frames_open_at_function_boundaries` asserts. Its provenance names the
+# container and its sha1, not a script under `replay/tools/`, because nothing under `replay/tools/`
+# could take it again: that transaction fell out of the node's tx pool long ago and
+# `replay/src/settled_transaction.ts:52-70` records why it can never be re-fetched.
+#
+# So it is deliberately NOT in `L1_ALL_FIXTURES`: the `provenance.capturedBy` loop above would
+# assert a regeneration path that does not and cannot exist. It IS in the set comparison below,
+# because the whole purpose of that assertion is that an undeclared fixture is a finding.
+NOIR_FRAMES_FIXTURES=(published_snapshot_step_positions.json)
+export NOIR_FRAMES_FIXTURES
+
 L1_ALL_FIXTURES=("${L1_FIXTURES[@]}" "${L2_FIXTURES[@]}")
 export L1_ALL_FIXTURES
 
@@ -126,9 +142,16 @@ l1_prepare() {
       git -C "$REPO_ROOT" ls-files --error-unmatch "${capturer%% *}"
   done
 
+  # …and the published-container decode is asserted present and tracked on the same terms.
+  for f in "${NOIR_FRAMES_FIXTURES[@]}"; do
+    assert_file "…the declared container-decode fixture $f" "$L1_FIXTURE_DIR/$f"
+    assert_true "…and $f is TRACKED, so the suite runs from a clean checkout" \
+      git -C "$REPO_ROOT" ls-files --error-unmatch "replay/fixtures/$f"
+  done
+
   # The set, not just the members: an undeclared fixture is as much a finding as a missing one.
-  assert_eq "the fixtures on disk are exactly the ones declared here, L1's, L2's and L5's" \
-    "$(printf '%s\n' "${L1_ALL_FIXTURES[@]}" "${L5_FIXTURES[@]}" | sort | tr '\n' ' ')" \
+  assert_eq "the fixtures on disk are exactly the ones declared here, L1's, L2's, L5's and the frame gate's" \
+    "$(printf '%s\n' "${L1_ALL_FIXTURES[@]}" "${L5_FIXTURES[@]}" "${NOIR_FRAMES_FIXTURES[@]}" | sort | tr '\n' ' ')" \
     "$(cd "$L1_FIXTURE_DIR" && ls -1 ./*.json 2>/dev/null | sed 's|^\./||' | sort | tr '\n' ' ')"
 }
 

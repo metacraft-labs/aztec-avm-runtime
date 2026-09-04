@@ -93,7 +93,18 @@ note "$EVENTS event(s), $FRAMES frame(s), $PATHS path(s), $POS positioned / $UNP
 artifact rung $RUNG, declared rung $DECLARED"
 
 assert_ge "the recording carries a real number of steps" 32 "$EVENTS"
-assert_eq "…split across the transaction's two enqueued calls" "2" "$FRAMES"
+# `callsOpened` IS NOW TWO SIGNALS AND THE ASSERTION SUBTRACTS ONE TO KEEP MEASURING THE OTHER.
+#
+# It used to be exactly the AVM context frames — one per enqueued call — because that was the only
+# signal the recorder had. It now also counts a frame per NOIR FUNCTION entered, derived from the
+# artifact's inline call-stack chains. Re-baselining this to the new total would silently stop
+# asserting the thing it was written to assert, so the Noir frames are subtracted back out and the
+# original claim survives unchanged: the AVM-context frames are one per enqueued call, still two.
+NOIRF="$(m27_arm download recording.noirFramesOpened)"
+note "…of which $NOIRF are Noir function frames, $((FRAMES - NOIRF)) AVM context frames"
+assert_eq "…the AVM-context frames split across the transaction's two enqueued calls" \
+  "2" "$((FRAMES - NOIRF))"
+assert_ge "…and the Noir call tree is present rather than collapsed to the contexts" 1 "$NOIRF"
 assert_ge "…referring to several source files" 2 "$PATHS"
 assert_eq "…with positioned and unpositioned accounting for every event" "$EVENTS" "$((POS + UNPOS))"
 assert_ge "…and a non-zero number of them at a resolved SOURCE position" 1 "$POS"

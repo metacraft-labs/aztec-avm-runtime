@@ -73,11 +73,13 @@ import {
   RUNG_FUNCTION,
   RUNG_SOURCE,
   WRITER_PATH_A_PURE_RUST,
+  NoirFrameTracker,
   instantiateCtWriter,
   lineLengths,
   resolveTracingConfig,
   type CtRecording,
   type MappingRung,
+  type SourceFile,
   type StepPosition,
 } from '../../ct-host/src/index.ts';
 import type { ExecutedTransaction, ExecutionStep } from './executed_steps.ts';
@@ -131,8 +133,17 @@ export interface BrowserRecording {
   readonly stepBatchRecords: number;
   /** Distinct opcodes in the stream. One is what a constant produces; see the check. */
   readonly distinctOpcodes: number;
-  /** Distinct AVM context ids, i.e. how many call frames the execution really opened. */
+  /** Distinct AVM context ids, i.e. how many EXTERNAL calls the execution really made. */
   readonly contexts: number;
+  /**
+   * Noir function frames opened from the artifact's inline call-stack chains. Zero means the tree
+   * collapsed back to one frame per AVM context, which is the defect this replaced.
+   */
+  readonly noirFramesOpened: number;
+  /** Deepest Noir inline stack reached inside a single AVM context. */
+  readonly noirMaxDepth: number;
+  /** Distinct Noir function names the tree contains. */
+  readonly noirFunctions: number;
   /** The filename the download was offered under. */
   readonly filename: string;
 }
@@ -231,7 +242,13 @@ export async function recordAndDownload(options: RecordOptions): Promise<Browser
   }
 
   const raw = options.rawArtifact as {
-    file_map?: Record<string, { path: string; source: string }>;
+    file_map?: Record<string, {
+      path: string;
+      source: string;
+      // Noir's own per-file function table, `{ name, start }` and no `end`. Read here so the Noir
+      // frames the pass below opens can be NAMED; see `FunctionLocation` in source_map.ts.
+      function_locations?: { name: string; start: number }[];
+    }>;
     functions: { name: string; bytecode: string; debug_symbols: string }[];
   };
   const dispatch = raw.functions.find((f) => f.name === 'public_dispatch');
@@ -241,9 +258,13 @@ export async function recordAndDownload(options: RecordOptions): Promise<Browser
   const debugJson = new TextDecoder().decode(await inflateRaw(base64ToBytes(dispatch.debug_symbols)));
   const debugInfo = (JSON.parse(debugJson) as { debug_infos: unknown[] }).debug_infos[0] as never;
 
-  const files = new Map<number, { path: string; source: string }>();
+  const files = new Map<number, SourceFile>();
   for (const [id, entry] of Object.entries(raw.file_map ?? {})) {
-    files.set(Number(id), { path: entry.path, source: entry.source });
+    files.set(Number(id), {
+      path: entry.path,
+      source: entry.source,
+      functionLocations: entry.function_locations ?? [],
+    });
   }
 
   const writer = new CtWriter(
@@ -301,22 +322,64 @@ export async function recordAndDownload(options: RecordOptions): Promise<Browser
   writer.declareRung(options.contractAddress, declaredRung, declaredRungReason);
 
   // ---------------------------------------------------------------------------------------------
-  // PASS TWO: the frames, from the AVM's OWN context ids, and the steps inside them.
+  // PASS TWO: the frames — AVM contexts on the outside, NOIR FUNCTIONS on the inside.
   //
-  // A context id is the AVM's identity for an execution frame; a new one is a call and returning to
-  // an id already on the stack is a return. Reconstructing frames from it is the only honest source
-  // available here — the alternative M27 used was to deal the artifact's mapped pcs round-robin
-  // across the enqueued call names, which produced the right NUMBER of frames and put arbitrary
-  // steps in them.
+  // ---------------------------------------------------------------------------------------------
+  // WHY THIS IS TWO SIGNALS AND NOT ONE, AND WHY THE SECOND ONE WAS MISSING.
   //
-  // Top-level contexts are named from `frameNames` in the order they first appear, which is the
-  // order the calls were enqueued. A nested context has no name available here — the debug function
-  // name is keyed by selector and the stream does not carry one — so it is named for what it is.
+  // A context id is the AVM's identity for an EXTERNAL call. It changes once per enqueued call and
+  // not once per function, so a frame loop driven by it alone opens exactly as many frames as there
+  // were external calls — two, for this campaign's snapshot transaction, no matter that the
+  // execution ran through thirty-odd Aztec.nr functions on the way. That is not a small
+  // under-count; it is a call tree with no calls in it.
+  //
+  // The other signal was already being parsed and thrown away one line at a time. Every pc the
+  // artifact keys resolves to a `CallStackId`, and `location_tree` makes that a PARENT-LINKED CHAIN
+  // of locations — the Noir inline call stack. `positionFor` walks the whole chain and keeps
+  // `locs[locs.length - 1]`, the innermost, because a step's LINE is the innermost location.
+  // `framesFor` keeps the rest of it, and the rest of it is the frames.
+  //
+  // ---------------------------------------------------------------------------------------------
+  // THE DIFFING RULE, AND THE ONE CASE THAT MAKES IT NON-OBVIOUS.
+  //
+  // Per step: the desired Noir stack is `framesFor(pc)`, outermost first. It is diffed against the
+  // open stack by LONGEST COMMON PREFIX of frame KEYS — close the divergent suffix, open the rest.
+  // Frame keys are containing-function identities, not locations, so moving between statements of
+  // one function opens and closes nothing (see `NoirFrame.key`).
+  //
+  // A STEP WHOSE pc HAS NO CHAIN INHERITS THE PREVIOUS STEP'S STACK. It does NOT close to depth 0.
+  //
+  // This is the rule the whole pass turns on and it is not cosmetic. `brillig_locations` is SPARSE
+  // over the executed pcs: on the snapshot transaction 22 of 108 steps resolve to nothing, and — the
+  // part that matters — 8 of those 22 sit at pcs 192…247, INSIDE the keyed range [130, 1785], with
+  // chained steps on both sides. They are holes in the middle of a function body, not a prologue.
+  // Closing to depth 0 on a hole would emit a full unwind and an immediate identical re-entry at
+  // every one of them: a tree that claims the execution left and re-entered eight nested functions
+  // eight times, in the middle of a straight-line body, because a source map had a gap. Inheriting
+  // reports what actually happened — nothing — and the gate asserts exactly that by step index.
+  //
+  // The inheritance is scoped to the AVM context. Crossing a context boundary resets it, because an
+  // external call cannot be inside the previous call's inline stack, and a pc from a DIFFERENT
+  // contract is not keyed by this artifact's map at all.
+  //
+  // ---------------------------------------------------------------------------------------------
+  // EVERYTHING IS RECORDED. NOTHING IS ELIDED HERE.
+  //
+  // 28 of the positioned steps are inside poseidon2 hashing, and the default view for this trace
+  // should show that subtree FOLDED. That is a fold, not a filter, and it belongs to whatever
+  // renders the tree: a container that omitted the frames could never be unfolded, while a complete
+  // container with a collapsed default is one interaction away from either. So this pass writes
+  // every frame it derives, and the renderer decides which start closed — off the frame's own
+  // `pathId`, which `writer.call` already carries.
   // ---------------------------------------------------------------------------------------------
   const stack: number[] = [];
   let topLevelSeen = 0;
   /** The opcodes actually WRITTEN, accumulated in the loop. See `distinctOpcodes` below. */
   const written = new Set<number>();
+  // The diffing rule is `ct-host`'s, shared with the settled-transaction recorder so the two cannot
+  // drift. `noir_frames.ts` holds the rule and the evidence the inherit case rests on.
+  const noir = new NoirFrameTracker(writer);
+
   const openFrame = (step: ExecutionStep, position: StepPosition | null): void => {
     const name = stack.length === 0
       ? (options.frameNames[topLevelSeen] ?? `context${step.contextId}`)
@@ -335,16 +398,24 @@ export async function recordAndDownload(options: RecordOptions): Promise<Browser
     if (stack.length === 0 || stack[stack.length - 1] !== step.contextId) {
       const known = stack.lastIndexOf(step.contextId);
       if (known >= 0) {
-        // A RETURN: unwind to the frame this record belongs to.
+        // A RETURN: unwind to the frame this record belongs to. The Noir frames open inside the
+        // contexts being left go first — a frame cannot outlive the frame it is nested in.
+        noir.closeAll();
         while (stack.length - 1 > known) {
           writer.returnFrame();
           stack.pop();
         }
       } else {
+        noir.closeAll();
         openFrame(step, at);
         stack.push(step.contextId);
       }
     }
+
+    // THE NOIR STACK FOR THIS STEP. `null` means this pc has no chain, and the rule for that is to
+    // inherit — `noir` is left exactly as it is and no call or return is written. See above.
+    noir.step(map.framesFor(step.pc), step.contractAddress);
+
     const opcode = step.opcode;
     const event = {
       contextId: step.contextId,
@@ -362,6 +433,8 @@ export async function recordAndDownload(options: RecordOptions): Promise<Browser
     if (at === null) writer.push(event);
     else writer.push(event, at);
   }
+  // Noir frames first, for the same reason the context-change path closes them first.
+  noir.closeAll();
   while (stack.length > 0) {
     writer.returnFrame();
     stack.pop();
@@ -390,7 +463,13 @@ export async function recordAndDownload(options: RecordOptions): Promise<Browser
     `${STEP_PRODUCER} steps=${executed.steps.length} `
       + `instructionsExecuted=${executed.instructionsExecuted ?? -1} `
       + `crossings=${executed.crossings} batch=${executed.batchRecords} `
-      + `distinctOpcodes=${distinctOpcodes} contexts=${contexts}`,
+      + `distinctOpcodes=${distinctOpcodes} contexts=${contexts} `
+      // THE NOIR TREE'S OWN NUMBERS, IN THE CONTAINER. Same reason the rung's reason and the step
+      // producer are log events: a figure that lived only in the host's return value is a claim
+      // ABOUT a recording, and this one has to be a property OF one — it is what makes a silent
+      // collapse back to the context-only tree (`noirFrames=0`) visible to a reader of the bytes.
+      + `noirFrames=${noir.framesOpened} noirMaxDepth=${noir.deepest} `
+      + `noirFunctions=${noir.functionNames.size}`,
   );
 
   // M34's records, after the producer's and in the order the caller gives them. The module refuses
@@ -427,6 +506,9 @@ export async function recordAndDownload(options: RecordOptions): Promise<Browser
     stepBatchRecords: executed.batchRecords,
     distinctOpcodes,
     contexts,
+    noirFramesOpened: noir.framesOpened,
+    noirMaxDepth: noir.deepest,
+    noirFunctions: noir.functionNames.size,
     filename,
   };
 }

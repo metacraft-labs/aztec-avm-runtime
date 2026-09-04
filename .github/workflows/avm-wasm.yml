@@ -1840,6 +1840,129 @@ jobs:
           path: artifacts-m20
           retention-days: 30
 
+  noir-call-frames:
+    name: Noir call frames — the tree the recorder writes, and the subtrees a view folds
+    runs-on: eph-linux-x64
+    # THE CHEAPEST JOB IN THIS FILE, ON PURPOSE. It builds no wasm, launches no browser and reaches
+    # no network at run time. `test_noir_frames_open_at_function_boundaries` drives
+    # `ContractSourceMap.framesFor` and `NoirFrameTracker` — the same code `replay/src/recording.ts`
+    # and `browser/src/ct_download.ts` both run — over two things already on disk: the
+    # version-matched FeeJuice artifact from `@aztec/protocol-contracts`, and
+    # `replay/fixtures/published_snapshot_step_positions.json`, which is the published snapshot
+    # container's own decoded step positions.
+    #
+    # IT NEEDS `npm ci` IN replay/ AND NOTHING ELSE. The artifact is what supplies `brillig_locations`
+    # (314 pcs), `location_tree` (155 nodes) and the 726 `function_locations` that NAME a frame, and
+    # the check DIES naming that remedy rather than skipping when it is absent. The pin matters:
+    # §1 asserts `aztec_version` is `5.3.0-nightly.20260819`, because a different nightly is a
+    # different contract with different pcs and would be a green run about nothing.
+    #
+    # It does NOT clone aztec-packages or codetracer-specs. `verification/lib.sh` only SETS
+    # `FORK_ROOT`; nothing on this path reads it.
+    #
+    # STATUS, STATED PLAINLY, the same way every job above states it: no job in this workflow has
+    # ever reached a check — they all still stop at `Generate CI token`, which needs a
+    # repository-level `CI_TOKEN_PROVIDER_PRIVATE_KEY` only the user can set. So this job existing
+    # means the gate is wired and named, not that a run has ever gated anything.
+    timeout-minutes: 30
+    steps:
+      - name: Preflight — is the secrets context populated at all?
+        env:
+          CONTROL_PRESENT: ${{ secrets.GITHUB_TOKEN != '' }}
+          APP_ID_PRESENT: ${{ vars.CI_TOKEN_PROVIDER_APP_ID != '' }}
+          PRIVATE_KEY_PRESENT: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${CONTROL_PRESENT}" != "true" ]; then
+            echo "::error::CONTROL FAILED: secrets.GITHUB_TOKEN is empty, so the secrets context is not being populated at all. Nothing this step says about repository configuration is trustworthy; fix the runner or the workflow before reading the messages below."
+            exit 2
+          fi
+          rc=0
+          if [ "${APP_ID_PRESENT}" != "true" ]; then
+            echo "::error::vars.CI_TOKEN_PROVIDER_APP_ID is empty. Set a REPOSITORY variable: gh variable set CI_TOKEN_PROVIDER_APP_ID --repo metacraft-labs/aztec-avm-runtime --body 3115338"
+            rc=1
+          fi
+          if [ "${PRIVATE_KEY_PRESENT}" != "true" ]; then
+            echo "::error::secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY is empty. Set a REPOSITORY secret: gh secret set CI_TOKEN_PROVIDER_PRIVATE_KEY --repo metacraft-labs/aztec-avm-runtime < ci-app-private-key.pem"
+            rc=1
+          fi
+          exit "$rc"
+
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      # The sibling layout `verification/lib.sh` resolves against. Only this repository is needed
+      # here, but the path is kept identical to every other job so the checks see one layout.
+      - name: Checkout aztec-avm-runtime
+        uses: actions/checkout@v4
+        with:
+          path: aztec-avm-runtime
+
+      - name: Setup Dev Environment
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Assert the gate's inputs are present
+        shell: bash
+        run: |
+          set -euo pipefail
+          for p in \
+            aztec-avm-runtime/replay/fixtures/published_snapshot_step_positions.json \
+            aztec-avm-runtime/tools/run_noir_frames_arms.mjs \
+            aztec-avm-runtime/ct-host/src/noir_frames.ts \
+            aztec-avm-runtime/ct-host/src/frame_fold.ts \
+            aztec-avm-runtime/verification/test_noir_frames_open_at_function_boundaries.sh ; do
+            test -f "$p" || { echo "::error::missing input: $p" >&2; exit 1; }
+          done
+
+      - name: Install the published @aztec packages (FeeJuice.json is the artifact under test)
+        working-directory: aztec-avm-runtime/replay
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tail -20
+
+      - name: Type-check the frame logic
+        working-directory: aztec-avm-runtime
+        shell: bash
+        run: |
+          dev-exec just typecheck-ct-host 2>&1 | tee typecheck-ct-host.log
+          dev-exec just typecheck-replay 2>&1 | tee typecheck-replay.log
+
+      - name: The Noir call-frame gate
+        working-directory: aztec-avm-runtime
+        env:
+          NOIR_FRAMES_WORK: ${{ github.workspace }}/noir-frames-work
+        # See the M7 job: `shell: bash` supplies `-o pipefail`, which the default `bash -e {0}` does
+        # not, so `| tee` cannot swallow a failure.
+        shell: bash
+        run: dev-exec just verify-noir-frames 2>&1 | tee verify-noir-frames.log
+
+      - name: Collect transcripts
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p artifacts
+          cp aztec-avm-runtime/verify-noir-frames.log artifacts/ 2>/dev/null || true
+          cp aztec-avm-runtime/typecheck-*.log artifacts/ 2>/dev/null || true
+          cp "${{ github.workspace }}"/noir-frames-work/noir-frames.json artifacts/ 2>/dev/null || true
+          cp "${{ github.workspace }}"/noir-frames-work/arms.log artifacts/ 2>/dev/null || true
+          ls -la artifacts
+
+      - name: Upload transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: noir-call-frames-transcripts
+          path: artifacts
+          retention-days: 30
+
   browser-gate:
     name: the browser gate — no Node.js dependencies
     runs-on: eph-linux-x64

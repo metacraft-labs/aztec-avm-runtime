@@ -380,11 +380,30 @@ export async function verifyCandidate(
       + `${(err as Error)?.name ?? 'error'} ${String((err as Error)?.message).slice(0, 160)}`);
   }
 
+  // `function_locations` IS CARRIED THROUGH, AND IT STAYS snake_case ON BOTH SHAPES.
+  //
+  // It is what names a Noir frame — `ContractSourceMap.framesFor` answers "which function contains
+  // this offset" out of it, and without it every frame in the call tree would be an anonymous file
+  // basename. Measured on `@aztec/protocol-contracts@5.3.0-nightly.20260819`'s FeeJuice: upstream's
+  // `loadContractArtifact` leaves the key spelled `function_locations` inside each `fileMap` entry
+  // even though the entry's siblings are camelCase, so it survives the snake_case branch's loader
+  // and the camelCase branch's `reviveBuffers` alike — 45 entries on file 17, 726 across the 32
+  // files. `functionLocations` is accepted too rather than assumed absent, because an unrecognised
+  // spelling and an artifact with no functions are the same empty array otherwise.
   const files = new Map<number, SourceFile>();
   for (const [id, entry] of Object.entries(
-    (artifact.fileMap ?? {}) as Record<string, { path: string; source: string }>,
+    (artifact.fileMap ?? {}) as Record<string, {
+      path: string;
+      source: string;
+      function_locations?: { name: string; start: number }[];
+      functionLocations?: { name: string; start: number }[];
+    }>,
   )) {
-    files.set(Number(id), { path: entry.path, source: entry.source });
+    files.set(Number(id), {
+      path: entry.path,
+      source: entry.source,
+      functionLocations: entry.function_locations ?? entry.functionLocations ?? [],
+    });
   }
 
   return {

@@ -82,13 +82,27 @@ export {
   type CtWriterOptions,
 } from './writer.ts';
 
+export { NoirFrameTracker, type FrameSink } from './noir_frames.ts';
+
+export {
+  DEFAULT_FOLD_RULES,
+  foldRuleFor,
+  foldTree,
+  type FoldRule,
+  type FoldedView,
+  type FrameNode,
+} from './frame_fold.ts';
+
 export {
   ContractSourceMap,
   lineColumnOf,
   lineLengths,
   locationsOf,
+  isDummyLocation,
   rungFor,
   type DebugInfoLike,
+  type FunctionLocation,
+  type NoirFrame,
   type NoirLocation,
   type RungVerdict,
   type SourceFile,

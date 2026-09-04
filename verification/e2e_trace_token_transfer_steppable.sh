@@ -171,7 +171,16 @@ assert_ge "…while most steps cost no DA gas at all, which is the opposite of l
 assert_eq "the steps fall into exactly two AVM contexts" "2" "$(st CONTEXT_COUNT)"
 assert_eq "…which is the number of enqueued calls the transaction carried" \
   "$(m27_arm publicOnly transfer.enqueuedPublicCalls)" "$(st CONTEXT_COUNT)"
-assert_eq "…and the recording opened a Call frame for each" "2" "$(m27_arm download recording.callsOpened)"
+# ONE CALL FRAME PER ENQUEUED CALL, STILL — with the Noir function frames subtracted back out.
+#
+# `callsOpened` counts both kinds since the recorder began deriving frames from the artifact's
+# inline call-stack chains. Subtracting rather than re-baselining is what keeps this assertion about
+# what it was always about; `test_noir_frames_open_at_function_boundaries` is where the Noir tree
+# itself is asserted.
+TT_NOIRF="$(m27_arm download recording.noirFramesOpened)"
+note "call frames: $(m27_arm download recording.callsOpened) total, $TT_NOIRF of them Noir functions"
+assert_eq "…and the recording opened one AVM-context Call frame for each" "2" \
+  "$(( $(m27_arm download recording.callsOpened) - TT_NOIRF ))"
 CTX_SIZES="$(st CONTEXTS)"
 note "contexts: $CTX_SIZES"
 assert_eq "…and the two frames are different sizes, so neither is the other counted twice" "2" \

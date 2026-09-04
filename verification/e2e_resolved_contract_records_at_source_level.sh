@@ -171,8 +171,23 @@ CON_PATHS="$(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.arg
 # A NON-EMPTY SCAN BEFORE ANYTHING IS ASSERTED ABOUT ITS CONTENTS (trap 4).
 assert_ge "the reader reported at least one path for the subject" 1 \
   "$(printf '%s\n' "$SUB_PATHS" | grep -c . || true)"
-assert_eq "the subject's container carries TEN paths — the session's own plus nine Noir files" \
-  "10" "$(printf '%s\n' "$SUB_PATHS" | grep -c . || true)"
+# FIFTEEN, AND IT WAS TEN UNTIL THE RECORDER STARTED OPENING NOIR FRAMES.
+#
+# The number is not arbitrary and the change in it is the point, so it is recorded here rather than
+# quietly re-baselined. Until frames were derived from the artifact's inline call-stack chains, the
+# only source files a container could name were the ones the STEPS landed in — the INNERMOST
+# location of each pc, which is what `positionFor` returns. A frame is opened at the CALL SITE, and
+# a call site lives in the CALLER's file, so the tree reaches files no step's innermost position
+# ever pointed at: `storage/map.nr`, `types/src/hash.nr`, `serde/src/serialization.nr` and the
+# vendored `poseidon2.nr` among them.
+#
+# So a rise here is the expected shape of the change and a FALL back to ten would mean the frames
+# stopped being written. `test_noir_frames_open_at_function_boundaries` is what asserts the tree
+# itself; this asserts that the container's path table grew to hold it.
+assert_eq "the subject's container carries FIFTEEN paths — the session's own plus fourteen Noir files, the extra five reached by CALL SITES rather than by steps" \
+  "15" "$(printf '%s\n' "$SUB_PATHS" | grep -c . || true)"
+assert_true "…including a file only a frame's call site can reach" \
+  str_has_sub "$SUB_PATHS" "poseidon2.nr"
 assert_eq "the CONTROL's carries ONE — the session's own, and nothing else" "1" \
   "$(printf '%s\n' "$CON_PATHS" | grep -c . || true)"
 assert_true "the subject's paths include FeeJuice's main.nr" \

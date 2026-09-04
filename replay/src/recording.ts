@@ -113,6 +113,7 @@
 
 import type { ExecutionStep } from '../../node-host/src/steps.ts';
 import type { ContractSourceMap } from '../../ct-host/src/source_map.ts';
+import { NoirFrameTracker } from '../../ct-host/src/noir_frames.ts';
 import type { StepPosition } from '../../ct-host/src/abi.ts';
 
 import type { SourceCorroboration } from './artifact_resolution.ts';
@@ -360,6 +361,16 @@ export type SettledRecording = {
   readonly steps: number;
   readonly distinctOpcodes: number;
   readonly contexts: number;
+  /**
+   * Noir function frames opened from the artifacts' inline call-stack chains. `0` means the tree
+   * collapsed back to one frame per AVM context — the defect this replaced — and is the honest
+   * answer for a transaction whose contracts have no proved artifact.
+   */
+  readonly noirFramesOpened: number;
+  /** Deepest Noir inline stack reached inside a single AVM context. */
+  readonly noirMaxDepth: number;
+  /** Distinct Noir function names the tree contains. */
+  readonly noirFunctions: number;
   readonly metadataKeys: readonly string[];
 };
 
@@ -495,11 +506,56 @@ export function buildSettledRecording(
     });
   }
 
-  // ---- the frames, from the AVM's OWN context ids ---------------------------------------------
-  // A context id is the AVM's identity for an execution frame; a new one is a call and returning to
-  // an id already on the stack is a return. It is the only honest source available: the alternative
-  // the sibling campaign used once was to deal mapped pcs round-robin across enqueued call names,
-  // which produced the right NUMBER of frames and put arbitrary steps in them.
+  // ---- the frames: AVM contexts on the outside, NOIR FUNCTIONS on the inside -------------------
+  //
+  // A context id is the AVM's identity for an EXTERNAL call. It changes once per enqueued call and
+  // not once per function, so a frame loop driven by it alone opens exactly as many frames as there
+  // were external calls. On this campaign's published snapshot — testnet
+  // 0x20ed5b91fae2fc7e564a062434b305d1c250ecad93da70e8e46e7f124d26185f, 108 steps — that is TWO
+  // `Call` records and one `Return` for an execution that ran through some thirty Aztec.nr
+  // functions nested up to ten deep. It is not an under-count at the margin; it is a call tree with
+  // no calls in it, and it was this loop that produced it.
+  //
+  // THE SECOND SIGNAL WAS ALREADY BEING PARSED AND DISCARDED ONE LINE AT A TIME. Every pc a proved
+  // artifact keys resolves to a `CallStackId`, and `location_tree` makes that a PARENT-LINKED CHAIN
+  // of locations — the Noir inline call stack, which is what inlining destroyed and what the
+  // compiler kept a record of anyway. `positionFor` walks the entire chain and returns
+  // `locs[locs.length - 1]`, the innermost, because a step's LINE is the innermost location.
+  // `framesFor` walks the same chain and keeps all of it, and all of it is the frames.
+  //
+  // ---------------------------------------------------------------------------------------------
+  // THE DIFFING RULE, AND THE CASE THAT MAKES IT NON-OBVIOUS.
+  //
+  // Per step the desired Noir stack is `framesFor(pc)`, outermost first, diffed against the open
+  // stack by LONGEST COMMON PREFIX of frame KEYS: close the divergent suffix, open the rest. A frame
+  // key is the CONTAINING FUNCTION, not the location (see `NoirFrame.key`), so stepping between the
+  // statements of one function opens and closes nothing.
+  //
+  // **A STEP WHOSE pc HAS NO CHAIN INHERITS THE PREVIOUS STEP'S STACK. IT DOES NOT CLOSE TO ZERO.**
+  //
+  // `brillig_locations` is SPARSE over the pcs a real execution walks, and the sparsity is not only
+  // at the edges. On the published snapshot 22 of 108 steps resolve to nothing, and 8 of those 22
+  // sit at pcs 192, 197, 202, 207, 212, 217, 226 and 247 — INSIDE the keyed range [130, 1785], with
+  // chained steps on both sides. They are holes in the middle of a function body, not a prologue.
+  // Closing to depth 0 across a hole would write a full unwind and an immediate, identical
+  // re-entry at every one of them: a tree asserting that execution left and re-entered eight nested
+  // functions eight times in the middle of a straight-line body, because a source map had a gap.
+  // Inheriting records what actually happened, which is nothing.
+  //
+  // The inheritance is scoped to the AVM context AND to the contract. Crossing either resets it: an
+  // external call is not inside the previous call's inline stack, and a pc belonging to a different
+  // contract is not keyed by this artifact's map at all.
+  //
+  // ---------------------------------------------------------------------------------------------
+  // EVERY FRAME IS RECORDED. NOTHING IS ELIDED HERE.
+  //
+  // A large minority of the positioned steps on this snapshot are inside poseidon2 hashing, and the
+  // default VIEW of this trace should show that subtree folded. That is a fold, not a filter, and
+  // it belongs to whatever renders the tree: a container that omitted the frames could never be
+  // unfolded, whereas a complete container with a collapsed default is one interaction away from
+  // either. So this loop writes every frame it derives and leaves the initial fold state to the
+  // reader, which can decide it from the frame's own `pathId` — already carried by `writer.call`.
+  // ---------------------------------------------------------------------------------------------
   //
   // L5: A STEP CARRIES A POSITION EXACTLY WHEN ITS CONTRACT HAS A PROVED ARTIFACT THAT KEYS ITS PC.
   // With no proved artifact, `positions[i]` is `undefined` for every i, `push` is called with one
@@ -512,6 +568,12 @@ export function buildSettledRecording(
   const stack: number[] = [];
   const written = new Set<number>();
   let topLevelSeen = 0;
+  // The diffing rule itself is `ct-host`'s, driven from here and from the browser recorder so the
+  // two cannot drift. See `noir_frames.ts` for the rule and for what the inherit case was proved
+  // against.
+  const noir = new NoirFrameTracker(writer);
+  /** Which contract `noir`'s open frames belong to, so a contract change resets them. */
+  let noirContract: string | null = null;
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i]!;
@@ -519,11 +581,15 @@ export function buildSettledRecording(
     if (stack.length === 0 || stack[stack.length - 1] !== step.contextId) {
       const known = stack.lastIndexOf(step.contextId);
       if (known >= 0) {
+        // The Noir frames open inside the contexts being left go first: a frame cannot outlive the
+        // frame it is nested in, and `ct-print` refuses a container whose calls do not nest.
+        noir.closeAll();
         while (stack.length - 1 > known) {
           writer.returnFrame();
           stack.pop();
         }
       } else {
+        noir.closeAll();
         const name = stack.length === 0
           ? `enqueued-call-${topLevelSeen}`
           : `context${step.contextId}`;
@@ -540,6 +606,22 @@ export function buildSettledRecording(
         stack.push(step.contextId);
       }
     }
+
+    // ---- the Noir stack for this step -----------------------------------------------------------
+    // `framesFor` is `null` when this contract has no proved artifact, or has one that does not key
+    // this pc. Both mean "no chain", and the rule for no chain is to INHERIT: `noir` is left exactly
+    // as it stands and neither a call nor a return is written. See the block comment above.
+    const stepContract = normaliseAddress(hexOfAddress(step.contractAddress));
+    if (noirContract !== null && noirContract !== stepContract) {
+      // A different contract's pcs are keyed by a different map; the open frames cannot describe it.
+      noir.closeAll();
+      noirContract = null;
+    }
+    const stepSource = sourceByAddress.get(stepContract);
+    const want = stepSource?.map.framesFor(step.pc) ?? null;
+    if (want !== null) noirContract = stepContract;
+    noir.step(want, step.contractAddress);
+
     written.add(step.opcode);
     writer.push({
       contextId: step.contextId,
@@ -550,6 +632,7 @@ export function buildSettledRecording(
       contractAddress: step.contractAddress,
     }, at);
   }
+  noir.closeAll();
   while (stack.length > 0) {
     writer.returnFrame();
     stack.pop();
@@ -565,7 +648,14 @@ export function buildSettledRecording(
   writer.logEvent(RECORDING_METADATA_KEYS.stepProducer,
     `${REPLAY_STEP_PRODUCER} steps=${steps.length} `
       + `instructionsExecuted=${outcome.instructionsExecuted} `
-      + `distinctOpcodes=${distinctOpcodes} contexts=${contexts}`);
+      + `distinctOpcodes=${distinctOpcodes} contexts=${contexts} `
+      // THE NOIR TREE'S OWN NUMBERS, INSIDE THE CONTAINER. Same reason the rung reasons and the step
+      // producer are log events rather than return values: a figure that lives only in the host's
+      // result is a claim ABOUT a recording, and this one has to be a property OF one. It is what
+      // makes a silent collapse back to the context-only tree (`noirFrames=0`) visible to anyone
+      // reading the bytes, without re-running the recorder.
+      + `noirFrames=${noir.framesOpened} noirMaxDepth=${noir.deepest} `
+      + `noirFunctions=${noir.functionNames.size}`);
 
   // THE MILESTONE'S OWN LIST: block number, transaction hash, node URL, protocol version. Plus the
   // two coordinates that say WHICH state this was run against, because a replay's provenance is not
@@ -659,6 +749,9 @@ export function buildSettledRecording(
     steps: steps.length,
     distinctOpcodes,
     contexts,
+    noirFramesOpened: noir.framesOpened,
+    noirMaxDepth: noir.deepest,
+    noirFunctions: noir.functionNames.size,
     metadataKeys: Object.values(RECORDING_METADATA_KEYS),
   };
 }
