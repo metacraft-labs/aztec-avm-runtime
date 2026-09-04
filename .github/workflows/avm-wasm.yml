@@ -1017,6 +1017,26 @@ jobs:
           path: aztec-packages
           gh-token: ${{ steps.app-token.outputs.token }}
 
+      # WITHOUT THIS, FIVE OF M15's SIX CHECKS CANNOT RUN. `lib_avm_wasm.sh` resolves the four
+      # prepared patches under `$WORKSPACE_ROOT/codetracer-specs/upstream-bugs`, and
+      # `lib_m9_observer.sh` resolves the observer patch in the same tree; M15 builds on both.
+      # The job never cloned the repository that carries them, and on 2026-09-04 -- the first run
+      # that ever reached a check -- said so five times:
+      #
+      #     cannot run: the prepared observer patch is missing:
+      #       .../codetracer-specs/upstream-bugs/aztec-execution-observer-hook/0001-feat-vm2-...patch
+      #
+      # `ref: latest`, not `main`, for the reason spelled out at the M7 job: `latest` is that
+      # repository's default branch and the only one the series is published on, and `main` carries
+      # no `upstream-bugs/` at all.
+      - name: Clone codetracer-specs (the prepared patch series)
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-specs
+          ref: latest
+          path: codetracer-specs
+          gh-token: ${{ steps.app-token.outputs.token }}
+
       - name: Setup Dev Environment
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
@@ -1033,19 +1053,52 @@ jobs:
       - name: Assert M15's own inputs are present
         run: |
           set -euo pipefail
-          # The benchmark, the two hosts, the write-up, and the PREPARED-BUT-NOT-MEASURED chatty
-          # arm. The last three are asserted here so "prepared" cannot decay into "deleted"
-          # without CI noticing; BOUNDARY-SHAPE.md records that they are not compiled.
-          for p in \
-            aztec-avm-runtime/verification/m15/world_state_checkpoint_bench.cpp \
-            aztec-avm-runtime/verification/m15/avm_chatty_dbs.hpp \
-            aztec-avm-runtime/verification/m15/avm_chatty_dbs.cpp \
-            aztec-avm-runtime/verification/m15/avm_reactor_chatty_exports.inc \
-            aztec-avm-runtime/verification/wasm_host/avm_shape_host.mjs \
-            aztec-avm-runtime/verification/wasm_host/_hint_crossings.mjs \
-            aztec-avm-runtime/BOUNDARY-SHAPE.md ; do
+          # EVERY input this job needs, not only the ones this repository happens to carry.
+          #
+          # This list used to hold the seven `aztec-avm-runtime/...` paths at the bottom and
+          # nothing else, and it PASSED on 2026-09-04 in the first run that ever got this far --
+          # while five of M15's six checks then died on `the prepared observer patch is missing`.
+          # A precondition check that omits the precondition that actually fails is worse than no
+          # precondition check: it converts a missing-input fault into a green step followed by a
+          # confusing failure two steps later, and it lends the job an air of having been checked.
+          #
+          # The rule the list now follows: an input is asserted here if a check resolves it,
+          # wherever it lives. The first five come from `codetracer-specs`, which this job did not
+          # clone at all until the step above was added -- `lib_avm_wasm.sh` resolves them under
+          # `$WORKSPACE_ROOT/codetracer-specs/upstream-bugs`, and `lib_m9_observer.sh` resolves the
+          # observer patch there too. The next three are the overlay patches that stack on them,
+          # and M14's patch is needed by `test_checkpoint_cost_characterised`, which prepares
+          # M14's trees inside M15's own work directory.
+          INPUTS="
+            codetracer-specs/upstream-bugs/aztec-merkle-tree-lmdb-split/0001-refactor-crypto-split-crypto_merkle_tree-from-its-LMD.patch
+            codetracer-specs/upstream-bugs/aztec-wasi-sdk-33/0001-build-move-the-wasm-toolchain-from-wasi-sdk-27-to-33.patch
+            codetracer-specs/upstream-bugs/aztec-bytecode-size-shift-32bit/0001-fix-vm2-widen-before-shifting-in-compute_public_bytec.patch
+            codetracer-specs/upstream-bugs/aztec-avm-wasm-cmake/0001-build-wasm-optional-AVM_WASM-and-separate-the-AVM-mod.patch
+            codetracer-specs/upstream-bugs/aztec-execution-observer-hook/0001-feat-vm2-per-instruction-observation-hook-for-the-fas.patch
+            aztec-avm-runtime/verification/m7/0001-test-vm2-AVM_SIM_TESTS-the-simulation-side-test-suit.patch
+            aztec-avm-runtime/verification/m8/0001-test-vm2-AVM_DIFFERENTIAL-a-native-versus-wasm-diffe.patch
+            aztec-avm-runtime/verification/m9/0001-test-vm2-step-records-the-upstream-ExecutionEvent-sea.patch
+            aztec-avm-runtime/verification/m14/0001-feat-world_state_reference-archive-tree-so-the-in-me.patch
+            aztec-avm-runtime/verification/m15/world_state_checkpoint_bench.cpp
+            aztec-avm-runtime/verification/m15/avm_chatty_dbs.hpp
+            aztec-avm-runtime/verification/m15/avm_chatty_dbs.cpp
+            aztec-avm-runtime/verification/m15/avm_reactor_chatty_exports.inc
+            aztec-avm-runtime/verification/wasm_host/avm_shape_host.mjs
+            aztec-avm-runtime/verification/wasm_host/_hint_crossings.mjs
+            aztec-avm-runtime/BOUNDARY-SHAPE.md
+          "
+          n=0
+          for p in $INPUTS; do
             test -f "$p" || { echo "::error::missing M15 input: $p" >&2; exit 1; }
+            n=$((n + 1))
           done
+          # THE COUNT, so that a loop over a list somebody emptied cannot pass silently -- the same
+          # reason the M28 census asserts one. It counts THE LIST THAT WAS JUST CHECKED rather than
+          # re-scanning with globs: the first draft of this step did re-scan, the globs covered
+          # fifteen of the sixteen paths (they missed BOUNDARY-SHAPE.md), and it failed on a
+          # COMPLETE workspace. A second hand-maintained list disagreeing with the first is the
+          # exact defect this step exists to catch, so it does not get to have one.
+          [ "$n" -ge 16 ] || { echo "::error::the input list holds only $n entries, so the check above cannot have been measuring anything" >&2; exit 1; }
 
       - name: Restore the compiler cache
         uses: actions/cache@v4
