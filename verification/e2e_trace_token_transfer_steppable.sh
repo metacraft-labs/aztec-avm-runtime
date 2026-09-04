@@ -178,6 +178,10 @@ assert_eq "…which is the number of enqueued calls the transaction carried" \
 # what it was always about; `test_noir_frames_open_at_function_boundaries` is where the Noir tree
 # itself is asserted.
 TT_NOIRF="$(m27_arm download recording.noirFramesOpened)"
+# See the sibling check: `MISSING` in arithmetic is a bash abort, so it is named first.
+assert_true "the recording reports how many of its frames are Noir functions" \
+  test "$TT_NOIRF" != "MISSING"
+[ "$TT_NOIRF" != "MISSING" ] || TT_NOIRF=0
 note "call frames: $(m27_arm download recording.callsOpened) total, $TT_NOIRF of them Noir functions"
 assert_eq "…and the recording opened one AVM-context Call frame for each" "2" \
   "$(( $(m27_arm download recording.callsOpened) - TT_NOIRF ))"

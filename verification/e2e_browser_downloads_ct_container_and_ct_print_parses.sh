@@ -101,6 +101,12 @@ assert_ge "the recording carries a real number of steps" 32 "$EVENTS"
 # asserting the thing it was written to assert, so the Noir frames are subtracted back out and the
 # original claim survives unchanged: the AVM-context frames are one per enqueued call, still two.
 NOIRF="$(m27_arm download recording.noirFramesOpened)"
+# NAMED BEFORE IT IS USED IN ARITHMETIC. `m27_arm` answers `MISSING` for a field the recording does
+# not carry, and `$((FRAMES - MISSING))` is a bash abort under `set -u` — which is a FAILURE, but an
+# unreadable one. A recorder that stopped deriving Noir frames should say so in a sentence.
+assert_true "the recording reports how many of its frames are Noir functions" \
+  test "$NOIRF" != "MISSING"
+[ "$NOIRF" != "MISSING" ] || NOIRF=0
 note "…of which $NOIRF are Noir function frames, $((FRAMES - NOIRF)) AVM context frames"
 assert_eq "…the AVM-context frames split across the transaction's two enqueued calls" \
   "2" "$((FRAMES - NOIRF))"
