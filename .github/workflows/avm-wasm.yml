@@ -106,6 +106,40 @@ concurrency:
   group: avm-wasm-${{ github.ref }}
   cancel-in-progress: true
 
+# THE COMMITTER IDENTITY, WITHOUT WHICH `git am` AND `git rebase` REFUSE TO COMMIT.
+#
+# The first run that ever reached a check (2026-09-04, after `just` was added to the dev shell)
+# failed in eleven of thirteen jobs for one reason, and it was not any of theirs:
+#
+#     Committer identity unknown
+#     *** Please tell me who you are.
+#     fatal: unable to auto-detect email address (got 'runner@garm-r4vldvaibcyp.(none)')
+#
+# The ephemeral `garm-*` runners have no git identity and their hostname has no domain, so git
+# cannot invent one. Nothing in either workflow set one. Every job that applies the prepared patch
+# series -- eleven of the thirteen here, and the carry job in `carry.yml` -- therefore could not
+# commit, and reported that as the SUBJECT's failure: M8 as "git am ... failed on the avm8 tree"
+# and 28 assertion failures, the carry set as "1 blocked, 4 conflicts". Those conflicts were not
+# real. A red that is really this one wearing a costume cannot be triaged, so this is set before
+# anything else is read.
+#
+# SET HERE, ONCE, RATHER THAN PER JOB. Workflow-level `env:` is inherited by every job and every
+# step, including the ones inside `dev-exec`, so a job added later cannot forget it -- which is the
+# failure mode a per-job `git config --global` step would have kept open. The environment variables
+# are used rather than `git config` because they need no step, no shell, and no working directory,
+# and because they override config rather than depending on where HOME points on a given runner.
+#
+# The AUTHOR pair matters as well as the COMMITTER pair: `git am` takes the author from the patch,
+# but `git rebase` and any `git commit` here would otherwise need one too.
+#
+# IT IS DELIBERATELY NOT A PERSON. These commits are made by CI, inside a throwaway tree, and are
+# never pushed anywhere; attributing them to a human would put a name on work no human did.
+env:
+  GIT_AUTHOR_NAME: aztec-avm-runtime CI
+  GIT_AUTHOR_EMAIL: ci@aztec-avm-runtime.invalid
+  GIT_COMMITTER_NAME: aztec-avm-runtime CI
+  GIT_COMMITTER_EMAIL: ci@aztec-avm-runtime.invalid
+
 jobs:
   vm2-suite-under-wasm:
     name: vm2 suite under wasm32-wasip1
