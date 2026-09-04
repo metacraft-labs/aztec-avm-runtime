@@ -172,6 +172,16 @@ const child = spawn(process.execPath, [
   '--ct-writer', ctWriterPath,
   '--ct', join(outDir, `${found.hash}.ct`),
   '--capture', join(outDir, `${found.hash}.fixture.json`),
+  // THE SOURCE TEXT, WRITTEN OUT AT RECORD TIME. A subject found here is inside the ~1-hour
+  // replayable window and the run that finds it is the only run that will ever have it live; a
+  // publisher that wanted the text later would be asking a pool that has already deleted the body.
+  // `replay_settled_transaction.mjs`'s `--sources` header says why it is a file and not the report.
+  '--sources', join(outDir, `${found.hash}.sources.json`),
+  // THE OTHER HALF OF THE REPLAY'S INPUTS. The JSON-RPC fixture holds the transaction body — the
+  // part the pool deletes — and this holds the artifact candidates, so a re-record a month from now
+  // resolves what THIS run resolved rather than whatever is installed then. Without it a fixture
+  // can reproduce the execution and still not reproduce the container.
+  '--artifacts', join(outDir, `${found.hash}.artifacts.json`),
   '--json',
 ], { stdio: ['ignore', 'pipe', 'inherit'] });
 let stdout = '';

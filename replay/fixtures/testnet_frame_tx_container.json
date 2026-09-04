@@ -1,0 +1,84 @@
+{
+ "format": "rerecordable-container-expectation/1",
+ "provenance": {
+  "chain": "aztec-testnet",
+  "tx": "0x194121a308d02692c542646e2d254bd2b93379a3f5944e5ae480b373530cf64e",
+  "l2BlockNumber": 69040,
+  "capturedBy": "replay/tools/replay_settled_transaction.mjs --capture --artifacts --sources",
+  "capturedAt": "2026-09-04T11:28:46.881Z",
+  "note": "WHAT THIS FILE IS FOR, AND IT IS THE ONLY REASON IT EXISTS. The two fixtures beside it \u2014 testnet_frame_tx.json (the JSON-RPC session, which holds the transaction BODY the node deletes about an hour after it settles) and testnet_frame_tx_artifacts.json (the artifact candidates, which the session does not hold) \u2014 are the COMPLETE input to a re-record. This is what that re-record must produce. A fixture that has never driven a replay is not a fixture, and a re-record whose output nothing is compared against is not a proof; e2e_captured_inputs_rerecord_the_container.sh is where the comparison happens.",
+  "recorderCommit": "26cac143b307c82d853b6cf54955ba35a5b4cd3b"
+ },
+ "container": {
+  "bytes": 200704,
+  "sha256": "894eb7ac56de8d1978120ad0578ea188f6c335404cb74b04a1b91858a18fe59b"
+ },
+ "sourceBundle": {
+  "bytes": 283342,
+  "sha256": "40a4f8c2aae9a8d3087837f2aa3dfbc49184a9802494884ef0bbb02c7923005f",
+  "bundles": 1,
+  "files": 32
+ },
+ "recording": {
+  "bytes": 200704,
+  "events": 459,
+  "steps": 459,
+  "callsOpened": 46,
+  "logEvents": 6,
+  "declaredRung": 3,
+  "distinctOpcodes": 25,
+  "contexts": 2,
+  "stepsPositioned": 86,
+  "stepsUnpositioned": 373,
+  "sourceLevel": false,
+  "contractRungs": [
+   {
+    "address": "0x0000000000000000000000000000000000000000000000000000000000000003",
+    "rung": 2,
+    "reason": "86 of 108 executed step(s) of this contract resolve to a source position; the remaining 22 are in regions the artifact's brillig_locations does not key \u2014 compiled procedures are appended after the main body (avm-transpiler transpile.rs:489,505), SOURCE-MAPPING.md section 2.4 hole 2 \u2014 first at pc 0. The artifact itself is rung 1: 314 pc(s) in [130, 1785] map to source spans over 32 file(s), and avm-transpiler re-keys brillig_locations by AVM byte offset (transpile.rs:1803), so each is a real (path, line, column)",
+    "steps": 108,
+    "positioned": 86,
+    "firstUnpositionedPc": 0,
+    "resolved": true
+   },
+   {
+    "address": "0x2fcd3dd598380bd949f7d6cb9d57e0251e512bde7d05c36f7257bf8db6c3041f",
+    "rung": 3,
+    "reason": "RUNG 3 (BYTECODE) IS THE CEILING FOR A CHAIN-FETCHED CONTRACT, BY PROTOCOL DESIGN AND NOT BY OMISSION. Rungs 1 and 2 need the compiled artifact's debug_symbols, and rung 1 additionally needs its file_map WITH SOURCE TEXT. An Aztec node serves neither: getContractClass returns ContractClassPublic, which is exactly { id, privateFunctionsRoot, version, artifactHash, packedBytecode } \u2014 no debug symbols, no file map, no function table, no source. Upstream's own doc comment on artifactHash says it is \"intended to be used by clients to verify that an OFFCHAIN FETCHED ARTIFACT matches a registered class\", i.e. the chain holds a commitment to the artifact and not the artifact. No method on AztecNode serves one either. THAT OFF-CHAIN RESOLUTION IS BUILT (replay/src/artifact_resolution.ts) AND IT WAS RUN FOR THIS CONTRACT AND PROVED NOTHING: no candidate artifact matched this class's artifactHash, its packedBytecode and its class id, so there is no debug map to position a program counter with and the rung is 3. See ct.source-provenance in this container for which sources were asked and what each answered.",
+    "steps": 351,
+    "positioned": 0,
+    "firstUnpositionedPc": 0,
+    "resolved": false
+   }
+  ]
+ },
+ "artifacts": [
+  {
+   "address": "0x0000000000000000000000000000000000000000000000000000000000000003",
+   "contractClassId": "0x1f85d8b901a87b3fa9b93a44ab569ca2f5eb62412dfd58c894fdfff218be11a4",
+   "resolved": true,
+   "origin": "npm:@aztec/protocol-contracts@5.3.0-nightly.20260819 FeeJuice",
+   "shape": "snake_case",
+   "artifactHash": "0x1a57ff2a8e653094229bd15c028683e08b2086dfeadecac4c6b950c383b3ae1d",
+   "debugDigest": "f87f9cc0f91809b2a0a607484a65ed5de9aa9ee44d83a1b510eb5a9013228e2a",
+   "sourceFiles": 32,
+   "corroboration": "single-distributor",
+   "agreeingDistributors": [
+    "npm"
+   ],
+   "rejected": []
+  },
+  {
+   "address": "0x2fcd3dd598380bd949f7d6cb9d57e0251e512bde7d05c36f7257bf8db6c3041f",
+   "contractClassId": "0x18e71511d56a60456b0e17c109e4227faa28ab4d2fd1799361fe47fa2ea6d32b",
+   "resolved": false,
+   "candidatesConsidered": 0,
+   "rejected": []
+  }
+ ],
+ "verdict": {
+  "reproduced": true,
+  "matched": 10,
+  "mismatched": 0
+ }
+}

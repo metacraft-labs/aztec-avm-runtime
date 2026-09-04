@@ -86,6 +86,40 @@ export L5_FIXTURES
 NOIR_FRAMES_FIXTURES=(published_snapshot_step_positions.json)
 export NOIR_FRAMES_FIXTURES
 
+# A FIFTH KIND, AND IT IS THE ONE THAT EXISTS BECAUSE THE FOURTH CANNOT BE RE-TAKEN.
+#
+# `published_snapshot_step_positions.json` above is a decode of a container whose transaction is
+# gone: `getTxByHash` serves only the active tx pool, so `0x20ed5b91…` can never be replayed and its
+# page is frozen at the recorder that made it. Since `deriveTraceArtifactId` hashes the RECORDER
+# BUILD into the published URL — deliberately, so a stale artifact cannot outlive a bug fix — every
+# recorder improvement is a RE-RECORD and not a re-upload. A transaction with no fixture therefore
+# has a one-hour window in which it can ever benefit from one again.
+#
+# THESE THREE ARE THAT WINDOW MADE PERMANENT, for testnet `0x194121a3…` (block 69040):
+#
+#   testnet_frame_tx.json            the JSON-RPC session — the transaction BODY, the part with the
+#                                    deadline. Same format and same player as L1's and L2's.
+#   testnet_frame_tx_artifacts.json  the artifact CANDIDATES as the providers answered them. NOT a
+#                                    session, so it is declared apart from `L1_ALL_FIXTURES` for
+#                                    L5's reason — the `capturedBy` loop asserts a playback property
+#                                    it does not have. It closes the half the session never held:
+#                                    without it a playback resolves whatever npm installed today,
+#                                    and the artifact decides the rung, the columns, the interned
+#                                    paths and therefore every Noir frame.
+#   testnet_frame_tx_container.json  what the two of them together must produce — sha256, byte
+#                                    count and the declared shape of the recording.
+#
+# They are USED and not merely stored: `e2e_captured_inputs_rerecord_the_container` re-records the
+# subject offline from the first two and compares against the third, with a control that removes the
+# artifact and requires the container to differ. A fixture that has never driven a replay is not a
+# fixture, which is the whole reason the frozen one above is a decode rather than a recording.
+RERECORD_FIXTURES=(
+  testnet_frame_tx.json
+  testnet_frame_tx_artifacts.json
+  testnet_frame_tx_container.json
+)
+export RERECORD_FIXTURES
+
 L1_ALL_FIXTURES=("${L1_FIXTURES[@]}" "${L2_FIXTURES[@]}")
 export L1_ALL_FIXTURES
 
@@ -149,9 +183,16 @@ l1_prepare() {
       git -C "$REPO_ROOT" ls-files --error-unmatch "replay/fixtures/$f"
   done
 
+  # …and so is the re-record set, on the same terms.
+  for f in "${RERECORD_FIXTURES[@]}"; do
+    assert_file "…the declared re-record input $f" "$L1_FIXTURE_DIR/$f"
+    assert_true "…and $f is TRACKED, so the suite runs from a clean checkout" \
+      git -C "$REPO_ROOT" ls-files --error-unmatch "replay/fixtures/$f"
+  done
+
   # The set, not just the members: an undeclared fixture is as much a finding as a missing one.
-  assert_eq "the fixtures on disk are exactly the ones declared here, L1's, L2's, L5's and the frame gate's" \
-    "$(printf '%s\n' "${L1_ALL_FIXTURES[@]}" "${L5_FIXTURES[@]}" "${NOIR_FRAMES_FIXTURES[@]}" | sort | tr '\n' ' ')" \
+  assert_eq "the fixtures on disk are exactly the ones declared here, L1's, L2's, L5's, the frame gate's and the re-record set" \
+    "$(printf '%s\n' "${L1_ALL_FIXTURES[@]}" "${L5_FIXTURES[@]}" "${NOIR_FRAMES_FIXTURES[@]}" "${RERECORD_FIXTURES[@]}" | sort | tr '\n' ' ')" \
     "$(cd "$L1_FIXTURE_DIR" && ls -1 ./*.json 2>/dev/null | sed 's|^\./||' | sort | tr '\n' ' ')"
 }
 

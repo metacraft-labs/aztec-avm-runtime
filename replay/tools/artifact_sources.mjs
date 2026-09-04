@@ -143,3 +143,201 @@ export function liveChainProviders({ chain, fetchImpl, extraReleases = [] } = {}
   if (base !== undefined) providers.push(aztecscanArtifactProvider({ baseUrl: base, fetchImpl }));
   return providers;
 }
+
+// =================================================================================================
+// THE ARTIFACT CAPTURE — THE HALF OF A REPLAY THAT THE JSON-RPC FIXTURE DOES NOT HOLD
+// =================================================================================================
+//
+// ────────────────────────────────────────────────────────────────────────────────────────────────
+// WHY THIS EXISTS, AND IT IS THE DEFECT THAT COST THIS CAMPAIGN A CONTAINER.
+//
+// `settled_fixture.ts` records the JSON-RPC transport, so a captured fixture holds the transaction
+// BODY — the one thing a node serves for about an hour and then deletes. That is the part with a
+// deadline and it was already solved.
+//
+// It is not the whole of what a source-level re-record consumes. `replay_settled_transaction.mjs`
+// resolves each contract's artifact through `liveChainProviders`, and in `--fixture` mode it passes
+// `chain: undefined` on purpose — reaching an explorer from an offline check would make the floor
+// depend on somebody else's uptime. The consequence, stated plainly because it was discovered
+// rather than declared: **a fixture playback resolves whatever the CURRENTLY INSTALLED
+// `@aztec/protocol-contracts` happens to hold, and nothing else.** So
+//
+//   * a transaction against a THIRD-PARTY class re-records with no artifact at all, which drops the
+//     session from rung 1 to rung 3, drops the columns, drops the source positions, and therefore
+//     drops every Noir frame — the container is not the same container, and the difference reads as
+//     a recorder regression rather than as a missing input;
+//   * even for a protocol class, `npm ci` in a fresh worktree resolves the version in
+//     `package.json` TODAY. The recording that produced the published container named
+//     `npm:@aztec/protocol-contracts@5.3.0-nightly.20260819 FeeJuice`; a re-record a month later
+//     against a different nightly either fails `artifact-hash-mismatch` or silently proves a
+//     different debug map, and `debugDigest` is exactly the field `artifactHash` does not commit to.
+//
+// A fixture that cannot reproduce its own container is a fixture that has never been used, and the
+// campaign brief's rule is that such a thing is not a fixture.
+//
+// ────────────────────────────────────────────────────────────────────────────────────────────────
+// WHAT IS CAPTURED: THE CANDIDATES, NOT THE VERDICT.
+//
+// The recorded unit is the `ArtifactCandidate` — `{distributor, origin, raw}` — exactly as the
+// provider answered it, INCLUDING the ones that went on to be rejected. Three consequences, and
+// each is the reason for the choice:
+//
+//   1. **A captured artifact is not trusted for being captured.** Playback feeds the same raw
+//      payloads through the same `verifyCandidate`, so `artifactHash`, `packedBytecode` and the
+//      recomputed class id are re-proved offline against the class the fixture's own JSON-RPC
+//      recording answers. A tampered capture fails by name. This mirrors `artifact_sources.mjs`'s
+//      standing rule that the installed release "is not trusted for being installed".
+//   2. **The rejections are evidence.** `resolveContractArtifact` keeps every rejection because
+//      "three providers answered nothing" and "three providers each answered the wrong release" are
+//      different facts. Dropping the rejected candidates from the capture would make a replayed
+//      resolution report a cleaner world than the live one did.
+//   3. **`corroboration` survives.** It is derived from how many DISTINCT distributors attest the
+//      same `debugDigest`. Capturing only the winner would turn `corroborated` into
+//      `single-distributor` on every playback — a measurement quietly downgraded by the act of
+//      recording it.
+//
+// ────────────────────────────────────────────────────────────────────────────────────────────────
+// A MISS THROWS, FOR `settled_fixture.ts`'s REASON EXACTLY.
+//
+// A captured provider asked for a class it does not carry must NOT answer "no candidates". That
+// answer is indistinguishable from "nobody on earth publishes this artifact", which is the sentence
+// a transaction page prints — a fact about our recording served as a fact about the world. So it
+// throws `ArtifactCaptureMiss`, and `resolveContractArtifact` records the throw as a
+// `provider-error` candidate with the message attached, which is visible in the report rather than
+// silently absent from it.
+
+/** The format tag. A capture that does not carry this exact string is refused, never guessed at. */
+export const ARTIFACT_CAPTURE_FORMAT = 'replay-artifact-candidates/1';
+
+/** Raised when a captured provider is asked for a class the capture does not carry. */
+export class ArtifactCaptureMiss extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ArtifactCaptureMiss';
+  }
+}
+
+/**
+ * Wrap a provider so that everything it answers is kept, keyed by the class it was asked about.
+ *
+ * The recorded shape is the provider's own return value and not a summary of it: the point is that
+ * playback can hand `verifyCandidate` the identical bytes. `raw` goes through `JSON.stringify` on
+ * the way out, which is lossless for every shape either shipped provider produces — the npm
+ * provider reads parsed JSON off disk and the Aztecscan provider returns `response.json()`, so
+ * neither ever holds a live `Buffer` at this layer. (`verifyCandidate` is where Buffers appear, via
+ * `loadContractArtifact` or `reviveBuffers`, and that runs identically on both sides.)
+ */
+export function recordingArtifactProvider(provider, sink) {
+  return async (contractClass) => {
+    const candidates = await provider(contractClass);
+    const bucket = sink.byClassId[contractClass.id] ?? (sink.byClassId[contractClass.id] = {
+      class: {
+        id: contractClass.id,
+        artifactHash: contractClass.artifactHash,
+        privateFunctionsRoot: contractClass.privateFunctionsRoot,
+        packedBytecode: contractClass.packedBytecode,
+      },
+      candidates: [],
+    });
+    for (const c of candidates) {
+      bucket.candidates.push({ distributor: c.distributor, origin: c.origin, raw: c.raw });
+    }
+    return candidates;
+  };
+}
+
+/** A fresh sink for {@link recordingArtifactProvider}. */
+export function artifactCaptureSink() {
+  return { byClassId: {} };
+}
+
+/**
+ * Turn a sink into the committed document, with its provenance.
+ *
+ * `capturedAt` and `txHash` are here for the same reason `FixtureProvenance` requires every field:
+ * an unlabelled capture beside a labelled fixture is the failure mode this repository is shaped to
+ * avoid, and an artifact capture is the more tempting one to leave unlabelled because it looks like
+ * a cache.
+ */
+export function artifactCaptureDocument(sink, provenance) {
+  const classes = Object.entries(sink.byClassId).map(([id, v]) => ({
+    contractClassId: id,
+    class: v.class,
+    candidates: v.candidates,
+  }));
+  return {
+    format: ARTIFACT_CAPTURE_FORMAT,
+    provenance: {
+      ...provenance,
+      capturedBy: 'replay/tools/replay_settled_transaction.mjs --artifacts',
+      note:
+        'Candidate artifacts as the providers answered them at capture time, INCLUDING candidates '
+        + 'that were rejected. Playback re-verifies every one of them through the same '
+        + '`verifyCandidate`; nothing here is trusted for being in this file. See '
+        + '`artifact_sources.mjs` for why the candidates and not the verdict are what is stored.',
+    },
+    classes,
+  };
+}
+
+/** Parse and check a capture document, refusing anything whose shape is not the declared one. */
+export function loadArtifactCapture(parsed, path) {
+  const bad = (why) => {
+    throw new Error(`${path}: ${why}. An artifact capture whose shape is not the declared one is `
+      + 'refused rather than partially read: a capture read as empty is indistinguishable from a '
+      + 'world in which nobody publishes these artifacts.');
+  };
+  if (parsed === null || typeof parsed !== 'object') bad('not a JSON object');
+  if (parsed.format !== ARTIFACT_CAPTURE_FORMAT) {
+    bad(`format is ${JSON.stringify(parsed.format)}, expected ${JSON.stringify(ARTIFACT_CAPTURE_FORMAT)}`);
+  }
+  if (!Array.isArray(parsed.classes)) bad('there is no `classes` array');
+  for (const entry of parsed.classes) {
+    if (typeof entry?.contractClassId !== 'string') bad('a class entry has no `contractClassId`');
+    if (!Array.isArray(entry.candidates)) bad(`class ${entry.contractClassId} has no candidate array`);
+  }
+  if (typeof parsed.provenance?.capturedAt !== 'string') bad('provenance.capturedAt is missing');
+  return parsed;
+}
+
+/**
+ * The provider list for a playback: one provider per recorded distributor, in the recorded order.
+ *
+ * **ONE PROVIDER PER DISTRIBUTOR, NOT ONE PROVIDER FOR EVERYTHING.** `corroboration` counts
+ * distinct distributors, and collapsing every candidate into a single provider would not change
+ * that count — but the ORDER providers are asked in decides which verified candidate wins, and
+ * `resolveContractArtifact`'s winner is "the first verified candidate". Replaying the distributors
+ * separately, in their captured order, reproduces the same winner and therefore the same
+ * `debugDigest`, which is the field that decides what source text the container interns.
+ *
+ * A `provider-error` pseudo-candidate is NOT replayed as a candidate — it was never one. It is
+ * re-raised as the error it recorded, so a playback of a run in which the explorer was down
+ * reports the explorer being down rather than reporting an explorer that held nothing.
+ */
+export function capturedArtifactProviders(capture) {
+  const byClassId = new Map(capture.classes.map(c => [c.contractClassId, c]));
+  const distributors = [...new Set(capture.classes.flatMap(
+    c => c.candidates.map(x => x.distributor)))];
+  // A CAPTURE IN WHICH NOTHING WAS OFFERED STILL GETS ONE PROVIDER, and the reason is the miss
+  // check below. `[]` providers would mean the guard never runs, so a capture taken for a
+  // DIFFERENT transaction would replay as "0 candidates considered" — which is what an honest
+  // unresolvable class looks like. A recording pointed at the wrong subject must not be able to
+  // impersonate a correct recording of an unpublished contract.
+  if (distributors.length === 0) distributors.push('none-offered');
+  return distributors.map(distributor => async (contractClass) => {
+    const entry = byClassId.get(contractClass.id);
+    if (entry === undefined) {
+      throw new ArtifactCaptureMiss(
+        `this artifact capture carries no candidates for class ${contractClass.id}. It holds `
+        + `${byClassId.size} class(es): ${[...byClassId.keys()].join(', ')}. REFUSED rather than `
+        + 'answered as "no artifact": an incomplete capture reported as an empty world would make '
+        + 'the recording declare rung 3 for a contract whose artifact was proved when it was '
+        + 'captured, and the container would differ from the published one for a reason that has '
+        + 'nothing to do with the chain.');
+    }
+    const mine = entry.candidates.filter(c => c.distributor === distributor);
+    const failure = mine.find(c => c.distributor === 'provider-error');
+    if (failure !== undefined) throw new Error(failure.origin);
+    return mine.map(c => ({ distributor: c.distributor, origin: c.origin, raw: c.raw }));
+  });
+}

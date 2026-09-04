@@ -3226,6 +3226,19 @@ verify-l5-source:
 verify-noir-frames:
     @verification/test_noir_frames_open_at_function_boundaries.sh
 
+# THE RE-RECORD. A settled transaction, rebuilt byte for byte from committed inputs, with no chain.
+#
+# This is the check that the ~1-hour replayable window has stopped being able to strand a recording.
+# `deriveTraceArtifactId` hashes the recorder build into the published URL, so a recorder change is
+# a RE-RECORD and never a re-upload; a transaction whose body the node has deleted can therefore
+# never carry an improvement again. `0x20ed5b91…` is exactly that case and `verify-noir-frames`
+# reads a DECODE of it because nothing else is left. This one re-records its subject instead.
+#
+# OFFLINE, and it needs the AVM module, the writer and the reference reader — a missing one is a
+# `die` with a remedy and never a skip, for `verify-l2`'s reason.
+verify-l5-rerecord:
+    @verification/e2e_captured_inputs_rerecord_the_container.sh
+
 verify-l5:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -3233,7 +3246,8 @@ verify-l5:
     for check in \
       test_offchain_artifact_resolution_verified \
       e2e_resolved_contract_records_at_source_level \
-      test_noir_frames_open_at_function_boundaries
+      test_noir_frames_open_at_function_boundaries \
+      e2e_captured_inputs_rerecord_the_container
     do
       echo "=== $check"
       verification/"$check".sh || rc=1

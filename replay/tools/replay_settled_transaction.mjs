@@ -40,8 +40,16 @@ import {
 } from '../src/index.ts';
 import { CtWriter, ContractSourceMap, instantiateCtWriter, resolveTracingConfig,
   WRITER_PATH_A_PURE_RUST } from '../../ct-host/src/index.ts';
-import { artifactCrypto, contractClassPublicLike, liveChainProviders }
-  from './artifact_sources.mjs';
+import {
+  artifactCaptureDocument,
+  artifactCaptureSink,
+  artifactCrypto,
+  capturedArtifactProviders,
+  contractClassPublicLike,
+  liveChainProviders,
+  loadArtifactCapture,
+  recordingArtifactProvider,
+} from './artifact_sources.mjs';
 import { COMPONENTS_VERSION_FIELDS } from '../src/pinned_protocol_version.ts';
 import { createNodeAvmHost } from './node_avm_host.ts';
 import {
@@ -67,6 +75,18 @@ const capturePath = arg('capture');
 // carries the PATHS and the byte counts — enough to assert over — and the text goes to a file the
 // consumer reads only if it is going to publish it.
 const sourcesPath = arg('sources');
+// THE ARTIFACT CAPTURE — the half of a replay's inputs the JSON-RPC fixture does not hold.
+//
+// WITH `--url`   the candidates every provider answered are written here, rejections included.
+// WITH `--fixture` they are READ here and become the ONLY providers, which is what makes an
+//                offline re-record resolve the same artifact — and therefore intern the same
+//                source paths, declare the same rung and open the same Noir frames — as the live
+//                run did, instead of resolving whatever `npm ci` installed this morning.
+//
+// `artifact_sources.mjs`'s capture section states the defect this closes and why the recorded unit
+// is the candidate rather than the verdict. It is OPTIONAL on purpose: L1's and L2's committed
+// fixtures predate it, and a flag that silently changed what they resolve would invalidate them.
+const artifactsPath = arg('artifacts');
 const modulePath = arg('module', process.env.AVM_WASM_PATH);
 const ctOut = arg('ct');
 const ctWriterPath = arg('ct-writer', process.env.CT_WRITER_WASM_PATH
@@ -148,15 +168,38 @@ const outcome = await replaySettledTransaction(host, client, settled, encodeRepl
 // mean either opening at rung 3 and discovering source we cannot use, or opening at rung 1 on
 // speculation and refusing the container at close.
 const artifactResolutions = [];
+const artifactSink = artifactCaptureSink();
 if (ctOut) {
-  const providers = liveChainProviders({
-    // OMITTED FOR A FIXTURE PLAYBACK, ON PURPOSE. `--fixture` is the mode the offline checks run
-    // in, and reaching an explorer from it would make `just verify-l3` depend on somebody else's
-    // uptime — the rule `verify-l1`'s header states. With no chain named the resolver asks the
-    // installed package and nothing else, which is enough for a protocol contract and honestly
-    // reports "no artifact proved" for a third-party one.
-    chain: fixturePath ? undefined : (url.includes('testnet') ? 'aztec-testnet' : 'aztec-mainnet'),
-  });
+  // THREE PROVIDER LISTS, AND WHICH ONE RUNS IS DECIDED BY WHAT THE CALLER SUPPLIED.
+  //
+  //   --artifacts + --fixture   THE CAPTURE, and only the capture. Fully offline, and it resolves
+  //                             what the live run resolved rather than what is installed today.
+  //   --fixture alone           the installed package. The mode L1/L2/L3's committed fixtures were
+  //                             taken in, kept bit-for-bit so their checks do not move.
+  //   --url                     the live providers, wrapped so their answers can be captured.
+  let providers;
+  if (artifactsPath && fixturePath) {
+    const capture = loadArtifactCapture(
+      JSON.parse(await readFile(artifactsPath, 'utf8')), artifactsPath);
+    providers = capturedArtifactProviders(capture);
+    console.error(`replay: artifacts from ${artifactsPath} — ${capture.classes.length} class(es), `
+      + `${capture.classes.reduce((n, c) => n + c.candidates.length, 0)} captured candidate(s), `
+      + `taken ${capture.provenance.capturedAt}. NO NETWORK AND NO INSTALLED PACKAGE: every one of `
+      + 'them is re-verified against the class this fixture\'s own recording answers.');
+  } else {
+    providers = liveChainProviders({
+      // OMITTED FOR A FIXTURE PLAYBACK, ON PURPOSE. `--fixture` is the mode the offline checks run
+      // in, and reaching an explorer from it would make `just verify-l3` depend on somebody else's
+      // uptime — the rule `verify-l1`'s header states. With no chain named the resolver asks the
+      // installed package and nothing else, which is enough for a protocol contract and honestly
+      // reports "no artifact proved" for a third-party one.
+      chain: fixturePath ? undefined : (url.includes('testnet') ? 'aztec-testnet' : 'aztec-mainnet'),
+    });
+    // RECORDED ONLY WHEN A CAPTURE WAS ASKED FOR, so a plain run's provider list is the shipped one
+    // and not a wrapped one. The wrapper is transparent — it returns exactly what it recorded — but
+    // "the check ran against a decorated object" is a sentence worth never having to write.
+    if (artifactsPath) providers = providers.map(p => recordingArtifactProvider(p, artifactSink));
+  }
   for (const contract of settled.contracts) {
     if (!contract.resolved || contract.contractClass === undefined) continue;
     const resolution = await resolveContractArtifact(
@@ -173,6 +216,25 @@ if (ctOut) {
           + `${resolution.artifact.files.size} source file(s))`
         : `NOT PROVED — ${resolution.candidatesConsidered} candidate(s), `
           + `${resolution.rejected.length} rejected`));
+  }
+
+  // ---- THE ARTIFACT CAPTURE, WRITTEN AT RECORD TIME AND NOT AFTERWARDS ------------------------
+  //
+  // It is written HERE — beside the resolution, before the writer, before the step pass, before the
+  // control pass — because everything after this point can fail, and the inputs to a re-record must
+  // survive a run that did not finish. The transaction body has a one-hour deadline; a capture
+  // written only on the happy path would inherit that deadline for no reason.
+  if (artifactsPath && !fixturePath) {
+    const doc = artifactCaptureDocument(artifactSink, {
+      endpoint: url,
+      chain: url.includes('testnet') ? 'aztec-testnet' : 'aztec-mainnet',
+      capturedAt: new Date().toISOString(),
+      txHash: settled.txHash,
+      l2BlockNumber: settled.l2BlockNumber,
+    });
+    await writeFile(artifactsPath, `${JSON.stringify(doc)}\n`);
+    console.error(`replay: wrote ${artifactsPath} — ${doc.classes.length} class(es), `
+      + `${doc.classes.reduce((n, c) => n + c.candidates.length, 0)} candidate(s) as answered`);
   }
 }
 const anythingResolved = artifactResolutions.some(r => r.resolved);
