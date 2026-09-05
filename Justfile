@@ -212,6 +212,13 @@ check-repo-hygiene:
 verify-devshell-runtime:
     @verification/verify_nix_devshell_aztec_avm_runtime.sh
 
+# The dev shell provides every command the WORKFLOWS hand to dev-exec — derived from the workflow
+# text, not from a list kept by hand. `verify-devshell-runtime` above is the hand-kept list: it
+# names eight tools, has never named `just`, and lives in `verify-m0`, which no workflow runs. That
+# is how `just` stayed missing for 141 runs in which no job reached an assertion.
+verify-devshell-commands:
+    @verification/verify_devshell_provides_ci_commands.sh
+
 # The fork's shell configures the wasm preset and compiles barretenberg C++ to wasm32-wasip1.
 verify-devshell-fork:
     @verification/verify_nix_devshell_aztec_packages_fork.sh

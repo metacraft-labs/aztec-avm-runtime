@@ -64,6 +64,14 @@
               pkgs.ccache
               pkgs.pkg-config
 
+              # The command runner every verification set is invoked through. Every
+              # CI job runs `dev-exec just verify-mNN`, so without this the shell
+              # resolves nothing and every job dies at `exec: just: not found`
+              # (exit 127) before reaching a single check. It was never here: from
+              # the first workflow to 2026-09-04 that is 141 runs, 0 successes, and
+              # not one assertion executed.
+              pkgs.just
+
               # Utilities the spike scripts and bootstrap.sh reach for.
               pkgs.git
               pkgs.jq

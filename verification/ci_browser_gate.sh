@@ -322,9 +322,47 @@ PY
 
 # THE COUNT IS ASSERTED, because every predicate below is universally quantified over this set
 # and a scanner that matched nothing would satisfy all of them.
-assert_eq "the workflow declares one setup-dev-env step per job" "12" \
+#
+# IT IS DERIVED FROM THE WORKFLOW RATHER THAN WRITTEN HERE. It used to read `"12"`, and by
+# 2026-09-04 the workflow declared THIRTEEN jobs: `noir-call-frames` landed and the literal did
+# not move. Nothing noticed, because this gate had never run -- `just` was missing from the dev
+# shell, so all 143 runs in this repository's history died at `exec: just: not found` before any
+# assertion. A hand-kept census in a gate that does not run is two silences multiplying.
+#
+# So the invariant is stated as the RELATION it always meant -- one dev-shell step per job -- and
+# the job count is re-derived from the same file on every run. A number that cannot drift out of
+# date does not need anybody to remember it. The anti-vacuity purpose is kept by the FLOOR below
+# rather than by the literal: a scanner that matched nothing now fails on the floor instead of
+# quietly satisfying `0 == 0`.
+JOB_COUNT="$(python3 - "$M28_WORKFLOW" <<'PY'
+import re
+import sys
+
+# Job headers only: two-space keys AFTER the top-level `jobs:` line. Counting them anywhere in the
+# file would also pick up `push:`, `schedule:` and `workflow_dispatch:` under `on:`, which sit at
+# the same indent and take no value.
+lines = open(sys.argv[1], encoding="utf-8").read().split("\n")
+in_jobs, n = False, 0
+for line in lines:
+    if re.match(r"^jobs:\s*$", line):
+        in_jobs = True
+        continue
+    if in_jobs:
+        if re.match(r"^[A-Za-z_]", line):   # a later top-level key ends the jobs block
+            break
+        if re.match(r"^  [A-Za-z0-9_-]+:\s*$", line):
+            n += 1
+print(n)
+PY
+)"
+# THE FLOOR, which is what the literal was really doing: a job scanner that matched nothing would
+# otherwise make every count below agree at zero. Deliberately well under the true count, because
+# its job is to catch a BROKEN SCANNER, not to be a second census that drifts.
+assert_ge "the workflow declares a plausible number of jobs, so the census below has a subject" \
+  10 "$JOB_COUNT"
+assert_eq "the workflow declares one setup-dev-env step per job" "$JOB_COUNT" \
   "$(printf '%s\n' "$STEP_TOKENS" | grep -c . || true)"
-assert_eq "…every one of them asks for the nix dev shell" "12" \
+assert_eq "…every one of them asks for the nix dev shell" "$JOB_COUNT" \
   "$(printf '%s\n' "$STEP_TOKENS" | awk '$3 == "nix"' | grep -c . || true)"
 # THE RESIDUE, NOT THE COUNT: the failing rows are printed, so a failure names the job.
 assert_eq "…and every one of them is handed the CI token, which env-flavor: nix requires" "" \

@@ -42,6 +42,19 @@ concurrency:
   group: carry-${{ github.ref }}
   cancel-in-progress: true
 
+# THE COMMITTER IDENTITY. See the long account at the same place in `avm-wasm.yml`; the short
+# version is that the `garm-*` runners have no git identity and no domain in their hostname, so
+# `git rebase` cannot commit, and `just rebase-upstream-patches` reported that as the carry set's
+# own failure -- "5 patch(es): 1 blocked, 4 conflicts" on 2026-09-04, in the first run that ever
+# got far enough to say anything. None of those four conflicts was real.
+#
+# Set at workflow level so a job added later inherits it rather than having to remember it.
+env:
+  GIT_AUTHOR_NAME: aztec-avm-runtime CI
+  GIT_AUTHOR_EMAIL: ci@aztec-avm-runtime.invalid
+  GIT_COMMITTER_NAME: aztec-avm-runtime CI
+  GIT_COMMITTER_EMAIL: ci@aztec-avm-runtime.invalid
+
 jobs:
   carry-set-still-applies:
     name: the carry set still applies to upstream HEAD
