@@ -73,13 +73,38 @@ note "node: $(node --version 2>/dev/null)"
 # The linux binary that gets loaded there — `build/amd64-linux/nodejs_module.node`, selected by
 # bb.js's own platform.js for `x86_64-linux` — was disassembled: 54,093 ADX and BMI2 instructions
 # (`adcx`, `adox`, `mulx`) plus AVX/AVX2 throughout, and ZERO `cpuid` instructions and ZERO IFUNC
-# relocations. There is no runtime CPU dispatch in it at all, so it unconditionally requires a
-# Broadwell-or-later baseline. If the ephemeral runner's CPU, as the hypervisor exposes it, lacks
-# ADX/BMI2/AVX2, this addon SIGILLs the moment it is loaded and nothing can be measured.
+# relocations. There is no runtime CPU dispatch in it at all.
 #
-# That is a hypothesis about a machine, not about this repository, and the line below is the
-# measurement that settles it. If the flags are present the hypothesis is refuted and the SIGILL is
-# something else; either way the next run says so instead of leaving a bare 132.
+# AND IT IS NOT A PACKAGING ACCIDENT — IT IS BARRETENBERG'S DECLARED BASELINE, WHICH MAKES THIS
+# ONE CAUSE RATHER THAN TWO. `barretenberg/cpp/cmake/arch.cmake` in the fork reads, in full:
+#
+#     if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+#         add_compile_options(-march=skylake)
+#     endif()
+#
+# unconditional, no detection, no dispatch, with upstream's own comment "Target skylake on x86 for
+# AVX2 etc." So EVERY x86_64 barretenberg binary requires a Skylake-class CPU — the npm prebuild
+# loaded here, and equally anything the runner compiles for itself.
+#
+# THE CONTROL, from run 34052439806 on PR #3, which is what turns this from a hypothesis into a
+# reading. With the yarn/92 fault fixed, `native-versus-wasm differential` got all the way through:
+#
+#     ok   the native configure exits 0  [0]
+#     ok   the native build exits 0  [0]
+#     ok   the native build compiles the driver exactly once  [1]
+#     bash: 10496 Illegal instruction   timeout ... "$bin"
+#     FAIL the native driver exits 0  expected [0], got [132]
+#     ok   the wasm driver exits 0 on V8, running the SHIPPED binary unmodified  [0]
+#
+# A binary the runner compiled with its own compiler, moments earlier, is killed by SIGILL on that
+# same runner — while the SAME program built for wasm, where `-march=skylake` does not apply, exits
+# 0. Same logic, same inputs, two ISA baselines, and only the x86 one dies.
+#
+# That is a property of the machine meeting an upstream build choice, not a defect in this
+# repository, and no edit here can fix it: the npm addon above is shipped prebuilt, so even
+# overriding `-march` for our own builds would leave M16 dead. What fixes it is a runner whose CPU
+# has AVX2/BMI2/ADX. The line below is the measurement that names which flag is missing, so the
+# next run reports a cause instead of a bare 132.
 if [ -r /proc/cpuinfo ]; then
   note "cpu: $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
   for feat in adx bmi1 bmi2 avx avx2; do
