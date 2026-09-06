@@ -343,9 +343,18 @@ fi
 # --- the native side and the transcripts every other check reads ------------
 m12_build_native "$M12_TREE"
 native_rc=$?
-assert_eq "cmake --preset default -DAVM_REACTOR=ON exits 0" 0 "${M12_NATIVE_CONFIGURE_RC:-99}"
+assert_eq "the native configure through the default preset exits 0" 0 "${M12_NATIVE_CONFIGURE_RC:-99}"
 assert_eq "ninja avm_differential avm_msgpack_coverage exits 0 natively" 0 "${M12_NATIVE_BUILD_RC:-99}"
-if [ "$native_rc" -ne 0 ]; then
+# WHICH LOG IS PRINTED DEPENDS ON WHICH HALF FAILED, and it did not before. This
+# printed the BUILD log unconditionally, so a failed CONFIGURE — which never
+# writes one — printed nothing at all, and the only thing CI showed was a bare
+# `got [92]` against an assertion whose prose named cmake. That is how run
+# 33941133790 stayed undiagnosed across eight jobs. Neither log is uploaded as
+# an artefact, so this is the only place their contents can be seen.
+if [ "${M12_NATIVE_CONFIGURE_RC:-99}" -ne 0 ]; then
+  echo "--- native CONFIGURE failed (rc=${M12_NATIVE_CONFIGURE_RC:-99}); tail of $M12_TREE/m6-$M12_NATIVE_BUILD.log:"
+  m6_log "$M12_TREE" "$M12_NATIVE_BUILD" | tail -30
+elif [ "$native_rc" -ne 0 ]; then
   m6_build_log "$M12_TREE" "$M12_NATIVE_BUILD" | grep -E '^FAILED:|fatal error:| error: ' | head -20
 fi
 m8_require_artifacts "$(m12_native_bin avm_differential)" "$(m12_native_bin avm_msgpack_coverage)"

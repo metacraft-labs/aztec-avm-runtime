@@ -192,7 +192,11 @@ m15_native_configure_incremental() { # <tree> <bdir> [args...]
     cd "$tree/barretenberg/cpp" || exit 90
     export LD_LIBRARY_PATH="/usr/lib:${LD_LIBRARY_PATH:-}"
     if [ ! -d src/barretenberg/nodejs_module/node_modules ]; then
-      ( cd src/barretenberg/nodejs_module && yarn install ) || exit 92
+      # YARN_ENABLE_IMMUTABLE_INSTALLS: see m6_native_configure in
+      # lib_avm_wasm.sh for why this is set and what happens without it.
+      ( cd src/barretenberg/nodejs_module \
+          && YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install ) \
+        || { echo "### yarn bootstrap FAILED in nodejs_module — cmake was never reached"; exit 92; }
     fi
     cmake --preset default -B "$bdir" -DAVM_TRANSPILER_LIB= \
       -DCMAKE_C_COMPILER="$(command -v clang)" -DCMAKE_CXX_COMPILER="$(command -v clang++)" \

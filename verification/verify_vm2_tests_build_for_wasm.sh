@@ -165,9 +165,15 @@ assert_ge "libvm2_sim.a IS on it" 1 "$(printf '%s\n' "$link_line" | grep -c 'lib
 # --- the native side --------------------------------------------------------
 m7_build_native
 native_rc=$?
-assert_eq "cmake --preset default -DAVM_SIM_TESTS=ON exits 0" 0 "${M7_NATIVE_CONFIGURE_RC:-99}"
+assert_eq "the native configure through the default preset exits 0" 0 "${M7_NATIVE_CONFIGURE_RC:-99}"
 assert_eq "ninja vm2_tests vm2_sim_tests exits 0 natively" 0 "${M7_NATIVE_BUILD_RC:-99}"
-if [ "$native_rc" -ne 0 ]; then
+# See the same block in verify_avm_wasm_import_surface: a failed CONFIGURE
+# writes no build log, so printing the build log unconditionally printed
+# nothing, and the bare `got [92]` was the entire diagnosis available in CI.
+if [ "${M7_NATIVE_CONFIGURE_RC:-99}" -ne 0 ]; then
+  echo "--- native CONFIGURE failed (rc=${M7_NATIVE_CONFIGURE_RC:-99}); tail of $M7_TREE/m6-$M7_NATIVE_BUILD.log:"
+  m6_log "$M7_TREE" "$M7_NATIVE_BUILD" | tail -30
+elif [ "$native_rc" -ne 0 ]; then
   m6_build_log "$M7_TREE" "$M7_NATIVE_BUILD" | grep -E '^FAILED:|error:' | head -20
 fi
 assert_file "upstream's own native vm2_tests is produced" "$(m7_native_bin vm2_tests)"

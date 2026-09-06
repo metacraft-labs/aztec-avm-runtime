@@ -116,7 +116,13 @@ m3_build() {
     cd "$tree/barretenberg/cpp"
     export LD_LIBRARY_PATH="/usr/lib:${LD_LIBRARY_PATH:-}"
     if [ ! -d src/barretenberg/nodejs_module/node_modules ]; then
-      ( cd src/barretenberg/nodejs_module && yarn install )
+      # YARN_ENABLE_IMMUTABLE_INSTALLS: see m6_native_configure in
+      # lib_avm_wasm.sh. Unlike the other bootstrap sites this one does not stop
+      # on failure — the cmake below reports it — but it needs the same setting,
+      # or under CI it installs nothing and the configure fails on a missing
+      # node-addon-api instead.
+      ( cd src/barretenberg/nodejs_module \
+          && YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install )
     fi
     if [ ! -f build-native/build.ninja ]; then
       cmake -B build-native -G Ninja \

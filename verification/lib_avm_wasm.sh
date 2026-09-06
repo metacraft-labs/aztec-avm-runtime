@@ -502,6 +502,38 @@ m6_configure_with_prefix() {
 # met in M3 and M4: nodejs_module's CMakeLists runs `yarn --immutable` at
 # configure time and fails the whole configure if node-addon-api cannot be
 # resolved, and gtest discovery wants the host libstdc++ on LD_LIBRARY_PATH.
+#
+# THE BOOTSTRAP INSTALL IS EXPLICITLY MUTABLE, AND THAT IS THE FIX FOR THE 92.
+# Yarn Berry turns `enableImmutableInstalls` ON BY ITSELF whenever $CI is set in
+# the environment, and every GitHub Actions runner sets CI=true. The dev shell's
+# yarn is 4.14.1 (nixpkgs, through the fork's flake.lock) and writes lockfile
+# format 9; the vendored upstream `yarn.lock` is format 8, written by the
+# yarn@4.13.0 its own package.json names. So the first thing this install wants
+# to do is rewrite that lockfile — silent on a developer machine, refused under
+# CI:
+#
+#     YN0028: -  version: 8
+#     YN0028: +  version: 9
+#     YN0028: The lockfile would have been modified by this install, which is
+#             explicitly forbidden.
+#
+# the subshell exits 1, and this function exits 92 WITHOUT EVER RUNNING CMAKE.
+# That is the whole of run 33941133790: eight native jobs, every one stopped
+# here, each reporting it through an assertion whose prose names a command that
+# was never reached ("cmake --preset default ... exits 0  expected [0], got
+# [92]").
+#
+# This is a BOOTSTRAP of a vendored upstream module's node_modules, so that the
+# `node -p "require('node-addon-api').include"` two lines below it in
+# nodejs_module/CMakeLists.txt can resolve. It is not a lockfile-integrity gate,
+# and nothing in this campaign asserts that upstream's yarn.lock is unchanged.
+# Saying so explicitly is what makes the step do the SAME thing on a runner and
+# on a developer machine — the property that was missing, and the reason every
+# "measured locally" claim about the native side was measured with immutability
+# off and reported as though CI would agree.
+#
+# cmake's own `yarn --immutable` is left exactly as upstream wrote it and still
+# runs; once this install has migrated the tree, that one is a no-op and exits 0.
 # ---------------------------------------------------------------------------
 m6_native_configure() {
   local tree="$1" bdir="$2"; shift 2
@@ -511,7 +543,9 @@ m6_native_configure() {
     cd "$tree/barretenberg/cpp" || exit 90
     export LD_LIBRARY_PATH="/usr/lib:${LD_LIBRARY_PATH:-}"
     if [ ! -d src/barretenberg/nodejs_module/node_modules ]; then
-      ( cd src/barretenberg/nodejs_module && yarn install ) || exit 92
+      ( cd src/barretenberg/nodejs_module \
+          && YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install ) \
+        || { echo "### yarn bootstrap FAILED in nodejs_module — cmake was never reached"; exit 92; }
     fi
     rm -rf "$bdir"
     cmake --preset default -B "$bdir" -DAVM_TRANSPILER_LIB= \
