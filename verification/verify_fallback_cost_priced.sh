@@ -57,6 +57,49 @@ trap 'rm -rf "$SCRATCH"' EXIT
 
 note "node: $(node --version 2>/dev/null)"
 
+# WHY A SIGNAL IS REPORTED AS A SIGNAL, AND WHY THE CPU FLAGS ARE PRINTED HERE.
+#
+# In run 33941133790 both node probes below died with status 132 and produced NOTHING on stdout or
+# stderr, and this check reported it as `expected [1], got [132]` against an assertion about a
+# TypeError. 132 is 128+4 = SIGILL: the process did not fail, it was killed, and no assertion about
+# what it printed can mean anything once that has happened.
+#
+# WHAT KILLS IT. The probes import `@aztec/kv-store/lmdb-v2` and `@aztec/merkle-tree`; that chain
+# reaches `@aztec/foundation` and dlopens `@aztec/bb.js/build/<platform>/nodejs_module.node` —
+# twice, because @aztec/merkle-tree carries its own nested copy of bb.js. Traced on this machine
+# with a `process.dlopen` hook, the loads happen DURING the import chain, before the probe's first
+# `console.log`, which is exactly why CI saw empty output.
+#
+# The linux binary that gets loaded there — `build/amd64-linux/nodejs_module.node`, selected by
+# bb.js's own platform.js for `x86_64-linux` — was disassembled: 54,093 ADX and BMI2 instructions
+# (`adcx`, `adox`, `mulx`) plus AVX/AVX2 throughout, and ZERO `cpuid` instructions and ZERO IFUNC
+# relocations. There is no runtime CPU dispatch in it at all, so it unconditionally requires a
+# Broadwell-or-later baseline. If the ephemeral runner's CPU, as the hypervisor exposes it, lacks
+# ADX/BMI2/AVX2, this addon SIGILLs the moment it is loaded and nothing can be measured.
+#
+# That is a hypothesis about a machine, not about this repository, and the line below is the
+# measurement that settles it. If the flags are present the hypothesis is refuted and the SIGILL is
+# something else; either way the next run says so instead of leaving a bare 132.
+if [ -r /proc/cpuinfo ]; then
+  note "cpu: $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+  for feat in adx bmi1 bmi2 avx avx2; do
+    if grep -q -w "$feat" /proc/cpuinfo 2>/dev/null; then
+      note "cpu flag $feat: present"
+    else
+      note "cpu flag $feat: ABSENT — @aztec/bb.js's amd64-linux addon needs it and does not check for it"
+    fi
+  done
+fi
+
+# Report a signal death as a signal rather than as a status. `kill -l N` names it.
+m16_note_if_signalled() { # <what> <rc> <errfile>
+  [ "$2" -gt 128 ] 2>/dev/null || return 0
+  note "$1 was KILLED by SIG$(kill -l "$(( $2 - 128 ))" 2>/dev/null || echo "?$(( $2 - 128 ))") — it did not exit $2"
+  note "  stdout and stderr below are whatever it managed to write before dying (often nothing)"
+  [ -s "$3" ] && tail -20 "$3" >&2
+  return 0
+}
+
 # ---------------------------------------------------------------------------
 echo "== 1. the artefact being priced is the one pins.json declares"
 # ---------------------------------------------------------------------------
@@ -295,6 +338,7 @@ ADAPTER_ERR="$SCRATCH/adapter.err"
 ( cd "$M16_PROBE_DIR" && node m16_adapter_probe.mjs ) >"$ADAPTER_OUT" 2>"$ADAPTER_ERR"
 ADAPTER_RC=$?
 note "the adapter probe exited $ADAPTER_RC"
+m16_note_if_signalled "the adapter probe" "$ADAPTER_RC" "$ADAPTER_ERR"
 
 assert_eq "the March-2026 package still fails against the June-2026 store" "1" "$ADAPTER_RC"
 assert_contains "and it fails with the exact error M16 records" \
@@ -320,6 +364,7 @@ HAZ="$SCRATCH/hazard.txt"
 ( cd "$M16_PROBE_DIR" && node m16_hazard.mjs ) >"$HAZ" 2>"$SCRATCH/hazard.err"
 HAZ_RC=$?
 if [ "$HAZ_RC" -ne 0 ]; then
+  m16_note_if_signalled "the hazard measurement" "$HAZ_RC" "$SCRATCH/hazard.err"
   tail -20 "$SCRATCH/hazard.err" >&2
   die "the hazard measurement exited $HAZ_RC"
 fi
