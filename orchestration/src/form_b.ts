@@ -190,8 +190,12 @@ export function publicOnlyPrivateExecution(
   publicFunctionCalldata: HashedValues[] = [],
 ): PrivateExecutionResult {
   const entrypoint = new PrivateCallExecutionResult(
-    new Uint8Array(0), // acir
-    new Uint8Array(0), // vk
+    // `acir` and `vk` are declared `Buffer`, not `Uint8Array`, in both the pinned
+    // @aztec/stdlib tarball and upstream's own source at both anchors. TypeScript reports only the
+    // first failing argument of a single-signature call, so the `vk` line below was masked by the
+    // `acir` line above and both must change together.
+    Buffer.alloc(0), // acir
+    Buffer.alloc(0), // vk
     new Map(), // partialWitness
     circuitPublicInputs,
     [], // noteHashLeafIndexMap

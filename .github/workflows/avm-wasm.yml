@@ -1779,6 +1779,36 @@ jobs:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
 
+      # WITHOUT THIS, `just version-gap` CANNOT RESOLVE ITS OWN TIP, AND THAT IS THE WHOLE OF DD-12's RED.
+      # `tools/version_gap.py:85` does `git rev-parse upstream/next` in the fork. The clone above adds
+      # only `origin` (metacraft-labs/aztec-packages); `upstream` is AztecProtocol's repository and
+      # nothing in this workflow ever added it. So run 33941133790 died before it computed anything:
+      #
+      #     version_gap: git rev-parse upstream/next failed: fatal: ambiguous argument 'upstream/next'
+      #     error: recipe `version-gap` failed on line 685 with exit code 1
+      #
+      # Note what is absent from that log: no gap, no threshold line, no header. Exit 1 is the generic
+      # git-plumbing death, NOT the tool's own exit 3 ("over threshold") or exit 2 ("the fork cannot
+      # answer") — so a missing remote was indistinguishable at the exit code from a real drift.
+      # It read as a version-gap failure and it never measured a version gap.
+      #
+      # This is why it was invisible locally: a developer workspace's aztec-packages has BOTH remotes,
+      # so the identical command succeeds there. The measured gap is 67 days against a 180-day
+      # threshold — the check passes on this content once it can run at all.
+      #
+      # `carry.yml` already carries exactly this step for exactly this need; this is that step.
+      # `verify_oracle_version_gap_reported.sh:45` repeats the same bare rev-parse, so `just
+      # verify-m19` would have died the same way at the next step had it been reached.
+      - name: Deepen the fork and add the upstream remote (version_gap.py resolves upstream/next)
+        working-directory: aztec-packages
+        shell: bash
+        run: |
+          git fetch --unshallow 2>/dev/null || true
+          git remote get-url upstream >/dev/null 2>&1 \
+            || git remote add upstream https://github.com/AztecProtocol/aztec-packages.git
+          git fetch upstream next
+          git rev-parse --verify upstream/next
+
       - name: Install diffsim's packages (this is where the NAPI oracle lives)
         working-directory: aztec-avm-runtime/diffsim
         shell: bash
