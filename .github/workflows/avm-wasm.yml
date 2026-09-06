@@ -862,6 +862,30 @@ jobs:
           path: aztec-packages
           gh-token: ${{ steps.app-token.outputs.token }}
 
+      # WITHOUT THIS, `verify_block_level_gap_audit_complete` CANNOT RUN, AND b55fdcb SAID IT COULD.
+      # That commit scanned for exactly this shape, flagged this job, and cleared it on the grounds
+      # that "m6_prepare_tree applies only the patches passed to it, and M14 passes just its own
+      # in-repo patch". That is true and it is not the whole of what M14 resolves: the gap audit
+      # ENUMERATES `$M6_UPSTREAM_BUGS` — `codetracer-specs/upstream-bugs` — to price this
+      # contribution's carry exposure against every other prepared patch, and names one of them
+      # outright. Run 33941133790 is the record, 32 failures out of 131 assertions:
+      #
+      #     verify_block_level_gap_audit_complete.sh: line 236: cd:
+      #       .../codetracer-specs/upstream-bugs: No such file or directory
+      #     awk: fatal: cannot open file `.../codetracer-specs/upstream-bugs/
+      #       aztec-avm-wasm-cmake/0001-build-wasm-optional-AVM_WASM-...patch'
+      #
+      # `ref: latest`, not `main`, for the reason spelled out at the M7 job: `latest` is that
+      # repository's default branch and the only one the series is published on, and `main` carries
+      # no `upstream-bugs/` at all.
+      - name: Clone codetracer-specs (the prepared patch series)
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-specs
+          ref: latest
+          path: codetracer-specs
+          gh-token: ${{ steps.app-token.outputs.token }}
+
       - name: Setup Dev Environment
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
@@ -882,13 +906,22 @@ jobs:
           # the checks rather than in codetracer-specs/upstream-bugs/, because that directory is
           # enumerated by verify_carry_set_complete and every entry in it must equal a branch
           # PUBLISHED on the fork's origin. See WORLD-STATE.md section 6.
+          #
+          # THE LAST TWO ARE THE ONES THIS STEP USED TO OMIT, and the omission is what let the job
+          # walk past a missing sibling checkout into a confusing failure two steps later. The rule
+          # b55fdcb set for the M15 job holds here: an input is asserted if a check resolves it,
+          # wherever it lives. The gap audit resolves the specs directory and names one patch inside
+          # it, so both are listed.
           for p in \
             aztec-avm-runtime/verification/m14/0001-feat-world_state_reference-archive-tree-so-the-in-me.patch \
             aztec-avm-runtime/verification/m14/PR.md \
             aztec-avm-runtime/verification/m14/verify.sh \
-            aztec-avm-runtime/verification/m14/world_state_block_probe.cpp ; do
+            aztec-avm-runtime/verification/m14/world_state_block_probe.cpp \
+            codetracer-specs/upstream-bugs/aztec-avm-wasm-cmake/0001-build-wasm-optional-AVM_WASM-and-separate-the-AVM-mod.patch ; do
             test -f "$p" || { echo "::error::missing M14 input: $p" >&2; exit 1; }
           done
+          test -d codetracer-specs/upstream-bugs \
+            || { echo "::error::missing M14 input: codetracer-specs/upstream-bugs (the gap audit enumerates it)" >&2; exit 1; }
 
       - name: Restore the compiler cache
         uses: actions/cache@v4
@@ -1223,6 +1256,30 @@ jobs:
           path: aztec-packages
           gh-token: ${{ steps.app-token.outputs.token }}
 
+      # WITHOUT THIS, ONE OF M16's TWO CHECKS REFUSES TO RUN, AND b55fdcb SAID IT WOULD NOT.
+      # That commit cleared this job on the grounds that "verify-m16 passes locally at 78
+      # assertions with no specs checkout". The premise is what was wrong: a developer workspace
+      # has codetracer-specs as a SIBLING of this repository, which is precisely where
+      # $WORKSPACE_ROOT resolves it, so the local run had the checkout it was said to be without.
+      # A CI workspace does not, and run 33941133790 said so on the first line of the check:
+      #
+      #     verify_fallback_triggers_recorded_and_evaluated: cannot run: the milestone file is
+      #       not at .../codetracer-specs/Planned-Work/Aztec-AVM-Runtime.milestones.org
+      #
+      # Note the path: it is not under `upstream-bugs/` at all, which is why a scan looking for
+      # prepared-patch resolution did not see it. This job builds nothing and still needs the
+      # repository, because the triggers M16 evaluates are the ones the milestone file records.
+      #
+      # `ref: latest`, not `main`, for the reason spelled out at the M7 job: `latest` is that
+      # repository's default branch and the only one this content is published on.
+      - name: Clone codetracer-specs (the milestone record the triggers are read from)
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-specs
+          ref: latest
+          path: codetracer-specs
+          gh-token: ${{ steps.app-token.outputs.token }}
+
       - name: Setup Dev Environment
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
@@ -1243,13 +1300,19 @@ jobs:
           set -euo pipefail
           # The write-up, the two measurement tools and the two probes. Asserted here so that
           # "measured rather than quoted" cannot decay into a document nothing re-derives.
+          #
+          # THE LAST ONE IS THE ONE THIS STEP USED TO OMIT. It is in a sibling repository rather
+          # than this one, and that is exactly why it was missed — by this step, and by the scan in
+          # b55fdcb. Same rule as the M15 job: an input is asserted if a check resolves it,
+          # wherever it lives.
           for p in \
             aztec-avm-runtime/FALLBACK.md \
             aztec-avm-runtime/verification/_fallback_parser.py \
             aztec-avm-runtime/verification/_fallback_price.py \
             aztec-avm-runtime/verification/lib_m16_fallback.sh \
             aztec-avm-runtime/probe-mt/m16_hazard.mjs \
-            aztec-avm-runtime/probe-mt/m16_adapter_probe.mjs ; do
+            aztec-avm-runtime/probe-mt/m16_adapter_probe.mjs \
+            codetracer-specs/Planned-Work/Aztec-AVM-Runtime.milestones.org ; do
             test -f "$p" || { echo "::error::missing M16 input: $p" >&2; exit 1; }
           done
 
