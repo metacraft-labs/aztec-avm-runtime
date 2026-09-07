@@ -91,6 +91,70 @@ name: AVM_WASM
 # `clone-repo` at refs they name, which is why `clone-siblings` prints
 # "no cross-repo siblings to clone" and succeeds today.
 
+# THE x86_64 BASELINE, AND WHY MOST OF THIS FILE NO LONGER RUNS ON `eph-linux-x64` — 2026-09-07
+#
+# `barretenberg/cpp/cmake/arch.cmake` in the fork reads, in full:
+#
+#     if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+#         add_compile_options(-march=skylake)
+#     endif()
+#
+# unconditional, with upstream's own comment "Target skylake on x86 for AVX2 etc." There is no
+# CPU detection and no runtime dispatch behind it. So EVERY x86_64 barretenberg binary requires
+# a Skylake-class CPU: the ones these jobs compile for themselves, and equally the prebuilt
+# `@aztec/bb.js` amd64-linux `nodejs_module.node`, which disassembles to 54,093 ADX and BMI2
+# instructions (`adcx`, `adox`, `mulx`) plus AVX/AVX2 throughout, with ZERO `cpuid` instructions
+# and ZERO IFUNC relocations.
+#
+# WHAT THAT LOOKS LIKE IN A LOG, AND WHY IT WAS MISREAD FOR SO LONG. The process is not failing,
+# it is being KILLED: exit 132 is 128+4, SIGILL. And it prints NOTHING on stdout or stderr,
+# because the addon is `dlopen`'d during the import chain before the probe's first
+# `console.log`. A check that asserts on what the probe printed then reports something like
+# `expected [1], got [132]` against an assertion about a TypeError, which names neither the
+# signal nor the cause.
+#
+# THE CONTROL, from run 34052439806 on PR #3, is what makes this a reading rather than a
+# hypothesis. `native-versus-wasm differential` got all the way through:
+#
+#     ok   the native configure exits 0  [0]
+#     ok   the native build exits 0  [0]
+#     bash: 10496 Illegal instruction   timeout ... "$bin"
+#     FAIL the native driver exits 0  expected [0], got [132]
+#     ok   the wasm driver exits 0 on V8, running the SHIPPED binary unmodified  [0]
+#
+# A binary the runner compiled with its own compiler moments earlier is killed by SIGILL on that
+# same runner, while the SAME program built for wasm32 — where `-march` does not apply — exits 0.
+# Same logic, same inputs, two ISA baselines, and only the x86 one dies. Measured again in the
+# same run in `block-level world-state coverage` (eight checks, all 132) and in `the Node host`.
+#
+# WHAT FIXES IT, AND WHAT DOES NOT. No edit in this repository fixes it: the npm addon is shipped
+# prebuilt, so even overriding `-march` for our own builds would leave the bb.js-loading jobs
+# dead. What fixes it is a runner whose CPU has AVX2/BMI2/ADX. `runs-on:
+# [self-hosted, x86-64-v3, gpu]` selects the persistent systemd runners on gpu-server-001 and
+# gpu-server-002 (four `mcl` runners each, eight in total, all online and idle at the time of
+# writing). `x86-64-v3` is the AVX2/BMI1/BMI2/FMA level and is the flag that matters; `gpu` is
+# carried as well so that the selector stays pinned to these two hosts if `x86-64-v3` is ever
+# added to a machine that is not one of them.
+#
+# THE ONE THING THE LABEL DOES NOT GUARANTEE. ADX is formally a Broadwell addition and is NOT
+# part of the x86-64-v3 baseline, while `-march=skylake` wants it. In practice any CPU new enough
+# to host an RTX 3090 has it — but "in practice" is not a measurement, so every moved job's FIRST
+# step is a CPU inventory that prints the model name and the adx/bmi1/bmi2/avx/avx2/fma flags. It
+# runs before the CI-token assert so it prints even when the job dies immediately afterwards, and
+# it is what settles this by measurement rather than by inference.
+#
+# WHAT WAS NOT MOVED, AND WHY IT IS NOT AN OVERSIGHT. `noir-call-frames` runs node against node
+# builtins and this repository's own TypeScript only. `browser-gate` builds barretenberg for
+# wasm32 and drives Chromium, and its whole deliverable is asserting the ABSENCE of native
+# dependencies. Neither touches an x86_64 barretenberg artefact, both are green where they are,
+# and moving them would spend capacity on two hosts to buy nothing.
+#
+# AND THE TIMEOUTS WENT UP WITH THE MOVE, DELIBERATELY. `vm2 suite` hit the 120-minute JOB
+# timeout mid-build on a cold ccache in run 34052439806 — GitHub reports that as `cancelled`,
+# which reads as an operator action and is not one. These are different hosts with a different
+# ccache, so the first run here is cold too. The building jobs are budgeted 180 minutes;
+# `fallback-triggers` builds nothing and stays at 30.
+
 on:
   push:
     branches: [dev, main]
@@ -143,13 +207,29 @@ env:
 jobs:
   vm2-suite-under-wasm:
     name: vm2 suite under wasm32-wasip1
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # A cold run is ~35 min (two full barretenberg configures, the native
     # proving-stack build behind upstream's own vm2_tests, three wasm builds and
     # two deliberate build failures). The cap is generous rather than tight so a
     # slow runner reports a real failure instead of a timeout.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -297,7 +377,7 @@ jobs:
 
   native-vs-wasm-differential:
     name: native-versus-wasm differential, including tree roots
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M8. Two builds of ONE differential driver -- x86-64 and wasm32-wasip1 from the same
     # translation unit -- plus upstream's own `world_state_tests`, which carries the seven
     # `MemoryMerkleDBEquivalenceTest` cases that are the standing reference-versus-real fidelity
@@ -341,8 +421,24 @@ jobs:
     # is a substitute for a green run, and this job — like every job in this file — still **has
     # never run** to completion. Nothing downstream of `Generate CI token` has ever executed, so
     # no check in this repository has ever been exercised in the environment it is declared for.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -473,7 +569,7 @@ jobs:
 
   avm-reactor:
     name: avm.wasm reactor, host ABI and size budget
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M12. ONE worktree carrying NINE patches, and two builds inside it: the wasm-avm one, which
     # produces `avm.wasm`, its unpruned control, the msgpack enumeration and `barretenberg.wasm`
     # (built only so the size comparison is a measurement from this tree rather than a figure
@@ -495,8 +591,24 @@ jobs:
     # for the machine to go idle and exits 3 rather than reporting a number measured beside a
     # competing build, so a busy runner fails this job with a distinct status instead of producing
     # a wrong ratio.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -629,7 +741,7 @@ jobs:
 
   avm-contract-db:
     name: shippable contract DB and checkpoint coordination
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M13. ONE worktree carrying TEN patches — the reactor job's nine plus M13's own overlay — and
     # the same two builds inside it. It is a SEPARATE worktree and a separate work directory from
     # the reactor job's on purpose: M13's overlay takes the export list from thirty-nine names to
@@ -646,8 +758,24 @@ jobs:
     #
     # None of M13's six checks times anything, so a busy runner costs time here rather than a wrong
     # number; the reactor job's step-batching caveat does not apply.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -780,7 +908,7 @@ jobs:
 
   world-state-block-coverage:
     name: block-level world-state coverage and the compiler cache
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M14. TWO worktrees of the pinned anchor, and the only difference between them is M14's ONE
     # patch — the archive tree on the in-memory reference world state. Deliberately NOT the
     # AVM_WASM stack: the patch changes a component the AVM does not use, so it is built against
@@ -802,8 +930,24 @@ jobs:
     #
     # None of M14's eight checks times anything, so a busy runner costs time here rather than a
     # wrong number.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -971,7 +1115,7 @@ jobs:
 
   boundary-shape:
     name: the integration shape across the wasm boundary, and the checkpoint cost
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M15. ONE worktree of the pinned anchor carrying M13's TEN patches — M15 adds no eleventh,
     # because the module M12 built and M13 completed already contains BOTH candidate entry points
     # and M12's own REACTOR-ABI.md recorded that "the choice between them is M15's". Plus the two
@@ -990,8 +1134,24 @@ jobs:
     # `CI_TOKEN_PROVIDER_PRIVATE_KEY` only the user can set. So this job existing means it is
     # wired and names the checks — not that a run has ever gated anything. BOUNDARY-SHAPE.md
     # says the same thing in prose.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -1177,7 +1337,7 @@ jobs:
 
   fallback-triggers:
     name: the TypeScript-trees fallback — triggers evaluated, cost priced, not taken
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M16. THIS JOB BUILDS NOTHING AND TAKES NO WORK DIRECTORY, which is what makes it the cheapest
     # job in this workflow and the only one that needs neither the fork's build nor a compiler
     # cache. It does need the fork checked out, because the two checks read the pinned anchor with
@@ -1198,6 +1358,22 @@ jobs:
     # wired and names the checks — not that a run has ever gated anything.
     timeout-minutes: 30
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -1337,7 +1513,7 @@ jobs:
 
   node-host:
     name: the Node host — avm.wasm from TypeScript, and the trap/revert distinction
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M17. It builds what M12's job builds — the same nine-patch tree, the same two build
     # directories — because the host has to be driven against a real module and compared against a
     # real native reference, and it does so in ITS OWN work directory so the two jobs cannot
@@ -1359,8 +1535,24 @@ jobs:
     # top of this file, and the remaining blocker is a repository-level
     # `CI_TOKEN_PROVIDER_PRIVATE_KEY` only the user can set. So this job existing means it is
     # wired and names the checks — not that a run has ever gated anything.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -1506,7 +1698,7 @@ jobs:
 
   orchestration:
     name: TypeScript orchestration over the wasm interpreter
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M18. Four of the five checks build nothing: they read the fork at the TypeScript anchor
     # 3a68d68ac2, the published @aztec/* packages, and orchestration/. The fifth builds what M12's
     # job builds — the same nine-patch tree — in ITS OWN work directory, and runs the whole corpus
@@ -1530,8 +1722,24 @@ jobs:
     # top of this file, and the remaining blocker is a repository-level
     # `CI_TOKEN_PROVIDER_PRIVATE_KEY` only the user can set. So this job existing means it is
     # wired and names the checks — not that a run has ever gated anything.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -1681,7 +1889,7 @@ jobs:
 
   differential-oracle:
     name: three-way differential — wasm AVM vs native C++ AVM vs TypeScript interpreter
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M19. A SEPARATE FAILURE DOMAIN, and that is a requirement rather than a convenience.
     #
     # This job compares the shipped wasm AVM against an oracle that is DELIBERATELY OUT OF DATE:
@@ -1705,8 +1913,24 @@ jobs:
     # still stop at the CI token, DIAGNOSED — see THE CI TOKEN, DIAGNOSED at the top of this
     # file, and the remaining blocker is a repository-level `CI_TOKEN_PROVIDER_PRIVATE_KEY` only
     # the user can set.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -1837,7 +2061,7 @@ jobs:
 
   form-a-external-transactions:
     name: Form A — a transaction whose private half ran elsewhere
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M20. Accept a serialized `Tx` and execute only its public half.
     #
     # WHAT THIS JOB IS ACTUALLY GUARDING, because most of the subject is not ours. Upstream moved
@@ -1861,8 +2085,24 @@ jobs:
     # and the remaining blocker is a repository-level `CI_TOKEN_PROVIDER_PRIVATE_KEY` only the user
     # can set. So this job existing means it is wired and names the checks, not that a run has ever
     # gated anything.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       - name: Assert the CI-token inputs are present
         shell: bash
         env:
