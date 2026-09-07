@@ -286,9 +286,16 @@ PY
     libs=""
     for a in "$bdir"/lib/*.a; do libs="$libs $a"; done
     [ -n "$libs" ] || { echo "### no static libraries in $bdir/lib"; exit 92; }
+    # liblmdb is NOT in $bdir/lib and NOT in the dev shell: barretenberg builds it
+    # with an ExternalProject (cmake/lmdb.cmake) that leaves the archive in the
+    # LMDB checkout, BUILD_IN_SOURCE, under the build directory. Without this -L
+    # the link dies at `cannot find -llmdb`, the probe binary is never produced,
+    # and every downstream check reads exit 90 ("binary not executable") instead.
+    lmdbdir="$bdir/_deps/lmdb/src/lmdb_repo/libraries/liblmdb"
+    [ -f "$lmdbdir/liblmdb.a" ] || { echo "### no liblmdb.a under $lmdbdir"; exit 93; }
     # shellcheck disable=SC2086
     clang++ $flags "$src" -o "$bdir/world_state_block_probe" \
-      -Wl,--start-group $libs -Wl,--end-group -llmdb -lpthread 2>&1
+      -Wl,--start-group $libs -Wl,--end-group -L"$lmdbdir" -llmdb -lpthread 2>&1
     rc=$?
     echo "### probe_cc_rc=$rc"
     exit $rc

@@ -539,6 +539,14 @@ jobs:
         working-directory: aztec-avm-runtime
         env:
           M8_WORK: ${{ github.workspace }}/m8-work
+          # verify_upstream_world_state_reference_gate_green asks the GitHub API
+          # whether avm-wasm.yml has ever run, rather than believing a sentence in
+          # the YAML. `gh` on the self-hosted runners is not logged in to anything,
+          # so without this the check dies at `gh is not authenticated` — and that
+          # is a "cannot run", which the harness counts as a failure. It was the
+          # ONLY red in this job: the other six suites passed, 457 assertions, 0
+          # failures.
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         # See the M7 job: `shell: bash` supplies `-o pipefail`, which the default
         # `bash -e {0}` does not, so `| tee` cannot swallow a divergence.
         shell: bash

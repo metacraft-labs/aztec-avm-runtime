@@ -351,9 +351,14 @@ PY
     libs=""
     for a in "$bdir"/lib/*.a; do libs="$libs $a"; done
     [ -n "$libs" ] || { echo "### no static libraries in $bdir/lib"; exit 92; }
+    # Same missing -L as M14's probe: barretenberg's ExternalProject leaves
+    # liblmdb.a inside the LMDB checkout under the build directory, and it is in
+    # neither $bdir/lib nor the dev shell. See lib_m14_world_state.sh.
+    lmdbdir="$bdir/_deps/lmdb/src/lmdb_repo/libraries/liblmdb"
+    [ -f "$lmdbdir/liblmdb.a" ] || { echo "### no liblmdb.a under $lmdbdir"; exit 93; }
     # shellcheck disable=SC2086
     clang++ $flags "$src" -o "$bdir/$outname" \
-      -Wl,--start-group $libs -Wl,--end-group -llmdb -lpthread 2>&1
+      -Wl,--start-group $libs -Wl,--end-group -L"$lmdbdir" -llmdb -lpthread 2>&1
     rc=$?
     echo "### bench_cc_rc=$rc"
     exit $rc
