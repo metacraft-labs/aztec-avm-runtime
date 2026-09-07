@@ -112,6 +112,53 @@ _repoint_tmpdir_off_ram() {
 }
 _repoint_tmpdir_off_ram
 
+# ---------------------------------------------------------------------------
+# @aztec/bb.js MUST USE ITS WASM BACKEND, BECAUSE ITS NATIVE ONE CANNOT FAIL SAFELY.
+#
+# bb.js ships a prebuilt `bb` binary for all four platforms inside the npm package, at
+# `build/<platform>/bb`, so `findBbBinary()` ALWAYS finds one — there is no "not installed" state
+# to fall back from. On these runners that binary does not run: it is an FHS-linked ELF
+# (`interpreter /lib64/ld-linux-x86-64.so.2`) and the dynamic loader exits 127.
+#
+# That alone would be survivable, because `Barretenberg.new()` documents a fallback — "1.
+# NativeUnixSocket (if bb binary available) 2. Wasm" — but THE FALLBACK DOES NOT COVER THIS CASE.
+# `createAsyncBackend(NativeUnixSocket)` only CONSTRUCTS `BarretenbergNativeSocketAsyncBackend`,
+# and that constructor spawns `bb` without awaiting it, so the call returns successfully and the
+# try/catch around it sees nothing. The spawn's failure surfaces later, on the connection promise,
+# as an UNHANDLED REJECTION that kills the whole node process:
+#
+#     Error: Native backend process exited with code 127
+#         at ChildProcess.<anonymous> (.../bb_backends/node/native_socket.js:96:34)
+#
+# The SYNC path is not affected and that asymmetry is the whole reason this went unnoticed:
+# `BarretenbergSync.new()` reaches `await BarretenbergNativeShmSyncBackend.new(...)`, which IS
+# awaited, so the identical failure is caught and it really does fall back to WASM. Checks whose
+# hashing is synchronous pass on the same runner, in the same job, against the same broken `bb` —
+# `verify-m13` does exactly that. Only `await poseidon2Hash(...)` and its async siblings die, which
+# is what took out five of M20's seven checks while M13 reported "all checks passed".
+#
+# Setting the variable to a path that does not exist is the supported lever, not a trick:
+# `findBbBinary()` reads $BB_BINARY_PATH first and returns null when it is absent, and null makes
+# `createAsyncBackend` throw SYNCHRONOUSLY ("Native backend requires bb binary."), which is the one
+# shape the documented fallback does catch. The WASM backend then produces identical digests —
+# verified by hashing the same input both ways.
+#
+# WASM is also what this repository's architecture already requires: DD-9 forbids the shipped tree
+# from reaching the native AVM, and `verify_differential_containment` asserts our sources never
+# import bb.js at all. Its reach here is upstream's, through @aztec/foundation's crypto.
+#
+# IT RESPECTS AN EXPLICIT CHOICE, like the $TMPDIR guard above: a caller who has set
+# $BB_BINARY_PATH to a `bb` that does work on their host keeps it. And it refuses to guess — if the
+# sentinel somehow exists, the variable is left alone rather than silently pointing bb.js at a real
+# file nobody meant it to spawn.
+_force_bbjs_wasm_backend() {
+  [ -n "${BB_BINARY_PATH:-}" ] && return 0
+  local sentinel="/nonexistent/aztec-avm-runtime-forces-bb-js-onto-its-wasm-backend"
+  [ -e "$sentinel" ] && return 0
+  export BB_BINARY_PATH="$sentinel"
+}
+_force_bbjs_wasm_backend
+
 if [ -z "${TEST_NAME:-}" ]; then
   echo "lib.sh: sourcing script must set TEST_NAME before sourcing" >&2
   exit 1
