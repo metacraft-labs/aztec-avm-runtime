@@ -2257,7 +2257,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          dev-exec just verify-m13 2>&1 | tail -5
+          # `tee` BEFORE `tail`, because the collect step below copies `verify-m13.log` and until
+          # now NOTHING IN THIS JOB EVER WROTE IT — that `cp` has always hit its `|| true`. The
+          # M13 job tees (see `just verify-m13` there); this job was given the same `cp` without
+          # the same `tee`, so the one milestone whose failure blocks every M20 check was also the
+          # one whose transcript was thrown away five lines from the end.
+          dev-exec just verify-m13 2>&1 | tee verify-m13.log | tail -5
           export AVM_WASM_PATH="${M13_WORK}/m13/barretenberg/cpp/build-wasm-avm/bin/avm.wasm"
           test -s "$AVM_WASM_PATH" || { echo "::error::no module at $AVM_WASM_PATH" >&2; exit 1; }
           dev-exec just verify-m20 2>&1 | tee verify-m20.log
@@ -2272,7 +2277,14 @@ jobs:
           set -uo pipefail
           f="${{ github.workspace }}/m20-work/arms.json"
           [ -s "$f" ] || { echo "no arm run to report"; exit 0; }
-          python3 -c '
+          # `dev-exec`, because BARE `python3` IS NOT ON THIS JOB'S PATH — the interpreter lives in
+          # the nix devshell, which is why every other step that needs the toolchain goes through
+          # the wrapper. This step got away with it for as long as it never ran: while the arm run
+          # was crashing, `arms.json` was absent, the `-s` guard above returned early with "no arm
+          # run to report", and `python3` was never reached. Repairing the arm run is what first
+          # made this line execute, and it died `python3: command not found` (exit 127) — a step
+          # with `if: always()` that would fail the job on its own even once M20 is otherwise green.
+          dev-exec python3 -c '
           import json, sys
           doc = json.load(open(sys.argv[1]))
           print("module:", doc["module"])
