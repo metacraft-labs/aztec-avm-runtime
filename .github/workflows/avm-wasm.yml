@@ -2253,6 +2253,31 @@ jobs:
         shell: bash
         run: dev-exec npm ci 2>&1 | tail -20
 
+      # WITHOUT THIS, FIVE OF THE GATE'S CHECKS RUN ZERO ASSERTIONS AND A SIXTH FAILS THREE.
+      # `m27_esbuild` (lib_m27_browser.sh:162) looks in exactly two places —
+      # `spike/node_modules/.bin/esbuild` then `diffsim/node_modules/.bin/esbuild` — and this job
+      # installed neither; it installs `orchestration/` and nothing else. So in run 34052439806:
+      #
+      #     verify_browser_bundle_no_node_builtins:         0 assertion(s), 1 failure(s)
+      #     verify_browser_bundle_no_native_deps:           0 assertion(s), 1 failure(s)
+      #     verify_verification_code_unreachable_from_browser: 0 assertion(s), 1 failure(s)
+      #     verify_browser_entry_points_are_dd5_shaped:     0 assertion(s), 1 failure(s)
+      #
+      # each dying on `cannot run: esbuild is not installed`, and `verify_npm_pack_no_optional_native`
+      # taking three more as `FileNotFoundError: browser/dist/meta.json` — because no bundle is ever
+      # built, so the file the census reads does not exist. Those three read `expected [0], got []`,
+      # which is an EMPTY command substitution rather than a measured zero; a check that reports `[]`
+      # where a count belongs has not found a clean bundle, it has not looked at one.
+      #
+      # `spike/` and not `diffsim/` because that is the order `m27_esbuild` searches, so this is the
+      # one the gate will actually pick up. lib.sh's rule held throughout — every one of these said
+      # "cannot run" and FAILED rather than printing a green zero — so the gate was honest about
+      # being blind. It was blind all the same, and its coverage here was notional.
+      - name: Install spike's packages (this is where the gate's esbuild lives)
+        working-directory: aztec-avm-runtime/spike
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tail -20
+
       - name: Build M27's thirteen-overlay module (poseidon2 and grumpkin out through the reactor)
         working-directory: aztec-avm-runtime
         env:
