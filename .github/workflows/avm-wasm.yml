@@ -880,6 +880,29 @@ jobs:
             test -f "$p" || { echo "::error::missing prepared patch: $p" >&2; exit 1; }
           done
 
+      # WITHOUT THIS, `e2e_deploy_call_revert_roundtrip` CANNOT RUN AND M13 CANNOT PASS.
+      # The check's last act is to hand the deployment logs to `diffsim/decode_deployment_logs.mjs`
+      # — upstream's own reader, deliberately, so the transcript is confirmed by something this
+      # repository did not write. That script is an ESM module importing `@aztec/constants`, and
+      # this job installs nothing: `diffsim/node_modules` does not exist here. In run 34089689342
+      # it died in the artefact, not in the log:
+      #
+      #     Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@aztec/constants'
+      #       imported from .../diffsim/decode_deployment_logs.mjs
+      #
+      # What the log showed was `FAIL upstream's own readers decoded the deployment logs
+      # expected [0], got [1]` and `cannot run: the upstream decode produced nothing` — a missing
+      # dependency wearing the costume of a decode disagreement. The preceding assertion,
+      # `the upstream log decoder is present`, passed: the FILE is in the checkout. Only its
+      # packages are absent, and no check looked for those.
+      #
+      # Same cause and same fix as the browser gate's missing esbuild. The Form A job below runs
+      # `verify-m13` before it reaches M20 and needs it for the same reason.
+      - name: Install diffsim's packages (decode_deployment_logs.mjs imports @aztec/constants)
+        working-directory: aztec-avm-runtime/diffsim
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tail -20
+
       - name: Build avm.wasm with the shippable contract DB and run the M13 checks
         working-directory: aztec-avm-runtime
         env:
@@ -2177,6 +2200,18 @@ jobs:
 
       - name: Install the orchestration's published @aztec packages
         working-directory: aztec-avm-runtime/orchestration
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tail -20
+
+      # This job runs `verify-m13` before it reaches any M20 check, so it needs diffsim's packages
+      # for exactly the reason the contract-DB job above does — the upstream deployment-log decoder
+      # is an ESM module importing `@aztec/constants`. Form A's red in run 34089689342 was NOT its
+      # own: it was `verify-m13: FAILED` on the identical `cannot run: the upstream decode produced
+      # nothing`. That was invisible from the run page because the job also collected the wrong
+      # directory and uploaded an empty artefact (branch avm-reds @ dfe87d8fa fixes the collection);
+      # this fixes what it would have been collecting evidence OF.
+      - name: Install diffsim's packages (verify-m13 runs first and decodes with upstream's reader)
+        working-directory: aztec-avm-runtime/diffsim
         shell: bash
         run: dev-exec npm ci 2>&1 | tail -20
 
