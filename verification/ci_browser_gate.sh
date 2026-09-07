@@ -421,7 +421,13 @@ print("\n".join(out))
 PY
 )"
 rm -f "$WF_BROKEN"
-assert_eq "the same scanner still sees twelve steps in the reverted copy" "12" \
+# THIRTEEN, NOT TWELVE, AND THE NUMBER IS RAISED BECAUSE THE FILE GREW.
+# `noir-call-frames` landed in 255a61e as the workflow's thirteenth job, correctly carrying its own
+# `gh-token:`. Every neighbouring assertion in this section reads the count dynamically and passed
+# at 13; only this control kept a frozen copy of it and failed at `expected [12], got [13]`. The
+# scanner is right and the literal was stale — so the literal moves to meet the scanner, never the
+# other way round.
+assert_eq "the same scanner still sees thirteen steps in the reverted copy" "13" \
   "$(printf '%s\n' "$STEP_TOKENS_BROKEN" | grep -c . || true)"
 assert_eq "…and reports exactly the three jobs run 33489777448 failed in" \
   "browser-gate differential-oracle form-a-external-transactions" \

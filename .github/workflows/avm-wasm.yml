@@ -2034,6 +2034,36 @@ jobs:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
 
+      # WITHOUT THIS, `just version-gap` CANNOT RESOLVE ITS OWN TIP, AND THAT IS THE WHOLE OF DD-12's RED.
+      # `tools/version_gap.py:85` does `git rev-parse upstream/next` in the fork. The clone above adds
+      # only `origin` (metacraft-labs/aztec-packages); `upstream` is AztecProtocol's repository and
+      # nothing in this workflow ever added it. So run 33941133790 died before it computed anything:
+      #
+      #     version_gap: git rev-parse upstream/next failed: fatal: ambiguous argument 'upstream/next'
+      #     error: recipe `version-gap` failed on line 685 with exit code 1
+      #
+      # Note what is absent from that log: no gap, no threshold line, no header. Exit 1 is the generic
+      # git-plumbing death, NOT the tool's own exit 3 ("over threshold") or exit 2 ("the fork cannot
+      # answer") — so a missing remote was indistinguishable at the exit code from a real drift.
+      # It read as a version-gap failure and it never measured a version gap.
+      #
+      # This is why it was invisible locally: a developer workspace's aztec-packages has BOTH remotes,
+      # so the identical command succeeds there. The measured gap is 67 days against a 180-day
+      # threshold — the check passes on this content once it can run at all.
+      #
+      # `carry.yml` already carries exactly this step for exactly this need; this is that step.
+      # `verify_oracle_version_gap_reported.sh:45` repeats the same bare rev-parse, so `just
+      # verify-m19` would have died the same way at the next step had it been reached.
+      - name: Deepen the fork and add the upstream remote (version_gap.py resolves upstream/next)
+        working-directory: aztec-packages
+        shell: bash
+        run: |
+          git fetch --unshallow 2>/dev/null || true
+          git remote get-url upstream >/dev/null 2>&1 \
+            || git remote add upstream https://github.com/AztecProtocol/aztec-packages.git
+          git fetch upstream next
+          git rev-parse --verify upstream/next
+
       - name: Install diffsim's packages (this is where the NAPI oracle lives)
         working-directory: aztec-avm-runtime/diffsim
         shell: bash
@@ -2263,6 +2293,29 @@ jobs:
           cp aztec-avm-runtime/verify-m20.log artifacts-m20/ 2>/dev/null || true
           cp "${{ github.workspace }}"/m20-work/arms.json artifacts-m20/ 2>/dev/null || true
           cp "${{ github.workspace }}"/m20-work/arms.stderr artifacts-m20/ 2>/dev/null || true
+          # M13'S WORK DIRECTORY, BECAUSE THIS JOB RUNS `verify-m13` BEFORE IT REACHES M20 AND
+          # COLLECTED NOTHING FROM IT. In run 34052439806 the job died here:
+          #
+          #     FAIL the host ran the deploy/call/revert roundtrip  expected [0], got [1]
+          #     ok   it produced a transcript  [.../m13-work/e2e.out]
+          #     e2e_deploy_call_revert_roundtrip: cannot run: the transcript is empty
+          #                                       — see .../m13-work/e2e.err
+          #     error: recipe `verify-m13` failed with exit code 1
+          #
+          # The check names the file that explains it, and that file was in `m13-work/` while every
+          # line of this step points at `m20-work/`. Worse, because verify-m13 failed first,
+          # `verify-m20.log` and `m20-work/` were never written either — so all three `cp`s hit
+          # their `|| true`, the directory uploaded EMPTY, and the run's artefact list has no
+          # form-a entry at all. The one job whose failure was undiagnosable is the one that
+          # published nothing.
+          #
+          # The `2>/dev/null || true` on every line is deliberate and stays: a collect step must not
+          # fail a job. But it means a path that is simply WRONG is indistinguishable from a file
+          # that legitimately does not exist, which is why this went unnoticed. `ls -la` below is
+          # the only signal, and an empty listing reads as "nothing to collect".
+          cp "${{ github.workspace }}"/m13-work/*.out artifacts-m20/ 2>/dev/null || true
+          cp "${{ github.workspace }}"/m13-work/*.err artifacts-m20/ 2>/dev/null || true
+          cp aztec-avm-runtime/verify-m13.log artifacts-m20/ 2>/dev/null || true
           ls -la artifacts-m20
 
       - name: Upload the Form A artefacts
@@ -2503,6 +2556,31 @@ jobs:
 
       - name: Install the orchestration's published @aztec packages
         working-directory: aztec-avm-runtime/orchestration
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tail -20
+
+      # WITHOUT THIS, FIVE OF THE GATE'S CHECKS RUN ZERO ASSERTIONS AND A SIXTH FAILS THREE.
+      # `m27_esbuild` (lib_m27_browser.sh:162) looks in exactly two places —
+      # `spike/node_modules/.bin/esbuild` then `diffsim/node_modules/.bin/esbuild` — and this job
+      # installed neither; it installs `orchestration/` and nothing else. So in run 34052439806:
+      #
+      #     verify_browser_bundle_no_node_builtins:         0 assertion(s), 1 failure(s)
+      #     verify_browser_bundle_no_native_deps:           0 assertion(s), 1 failure(s)
+      #     verify_verification_code_unreachable_from_browser: 0 assertion(s), 1 failure(s)
+      #     verify_browser_entry_points_are_dd5_shaped:     0 assertion(s), 1 failure(s)
+      #
+      # each dying on `cannot run: esbuild is not installed`, and `verify_npm_pack_no_optional_native`
+      # taking three more as `FileNotFoundError: browser/dist/meta.json` — because no bundle is ever
+      # built, so the file the census reads does not exist. Those three read `expected [0], got []`,
+      # which is an EMPTY command substitution rather than a measured zero; a check that reports `[]`
+      # where a count belongs has not found a clean bundle, it has not looked at one.
+      #
+      # `spike/` and not `diffsim/` because that is the order `m27_esbuild` searches, so this is the
+      # one the gate will actually pick up. lib.sh's rule held throughout — every one of these said
+      # "cannot run" and FAILED rather than printing a green zero — so the gate was honest about
+      # being blind. It was blind all the same, and its coverage here was notional.
+      - name: Install spike's packages (this is where the gate's esbuild lives)
+        working-directory: aztec-avm-runtime/spike
         shell: bash
         run: dev-exec npm ci 2>&1 | tail -20
 

@@ -254,6 +254,17 @@ export const Attributes: Record<string, string> = new Proxy(Object.create(null),
   get: (_t, prop) => (typeof prop === 'string' ? `aztec.noop.${prop.toLowerCase()}` : undefined),
 });
 
-export function createUpDownCounterWithDefault(): NoopInstrument {
+// THE PLACEHOLDER PARAMETERS ARE THE POINT, and their absence was one of M18's six type errors.
+// Upstream's signature is `(meter, metric, attributes?)` and the vendored public_processor_metrics
+// calls it with two and three arguments at four sites. This file's own stated intent is "the
+// smallest surface the vendored files actually use", and a zero-arity declaration contradicts it —
+// every sibling in this file (NoopMeter.createGauge, createHistogram, createUpDownCounter) already
+// carries optional placeholders. This one did not, and nothing caught it because
+// `just typecheck-orchestration` has never run in CI.
+export function createUpDownCounterWithDefault(
+  _meter?: unknown,
+  _metric?: unknown,
+  _attributes?: unknown,
+): NoopInstrument {
   return new NoopInstrument();
 }
