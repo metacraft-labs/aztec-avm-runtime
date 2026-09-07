@@ -2010,6 +2010,29 @@ jobs:
           cp aztec-avm-runtime/verify-m20.log artifacts-m20/ 2>/dev/null || true
           cp "${{ github.workspace }}"/m20-work/arms.json artifacts-m20/ 2>/dev/null || true
           cp "${{ github.workspace }}"/m20-work/arms.stderr artifacts-m20/ 2>/dev/null || true
+          # M13'S WORK DIRECTORY, BECAUSE THIS JOB RUNS `verify-m13` BEFORE IT REACHES M20 AND
+          # COLLECTED NOTHING FROM IT. In run 34052439806 the job died here:
+          #
+          #     FAIL the host ran the deploy/call/revert roundtrip  expected [0], got [1]
+          #     ok   it produced a transcript  [.../m13-work/e2e.out]
+          #     e2e_deploy_call_revert_roundtrip: cannot run: the transcript is empty
+          #                                       — see .../m13-work/e2e.err
+          #     error: recipe `verify-m13` failed with exit code 1
+          #
+          # The check names the file that explains it, and that file was in `m13-work/` while every
+          # line of this step points at `m20-work/`. Worse, because verify-m13 failed first,
+          # `verify-m20.log` and `m20-work/` were never written either — so all three `cp`s hit
+          # their `|| true`, the directory uploaded EMPTY, and the run's artefact list has no
+          # form-a entry at all. The one job whose failure was undiagnosable is the one that
+          # published nothing.
+          #
+          # The `2>/dev/null || true` on every line is deliberate and stays: a collect step must not
+          # fail a job. But it means a path that is simply WRONG is indistinguishable from a file
+          # that legitimately does not exist, which is why this went unnoticed. `ls -la` below is
+          # the only signal, and an empty listing reads as "nothing to collect".
+          cp "${{ github.workspace }}"/m13-work/*.out artifacts-m20/ 2>/dev/null || true
+          cp "${{ github.workspace }}"/m13-work/*.err artifacts-m20/ 2>/dev/null || true
+          cp aztec-avm-runtime/verify-m13.log artifacts-m20/ 2>/dev/null || true
           ls -la artifacts-m20
 
       - name: Upload the Form A artefacts
