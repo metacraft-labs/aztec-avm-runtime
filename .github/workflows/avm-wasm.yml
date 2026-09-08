@@ -1877,25 +1877,51 @@ jobs:
           cat "$DIST/MANIFEST.txt"
           ls -la "$DIST"
 
-      # THE STRUCTURAL GATE ON WHAT IS ABOUT TO BE PUBLISHED, and it exists because the ONE
-      # `avm.wasm` blob committed to this repository is wrong in precisely the way this asserts
-      # against. `vm2wasm/avm.wasm` (1,259,737 bytes, tracked) has 11 imports and no memory among
-      # them: it EXPORTS `memory` instead. A wasip1 *command* linked the default way does that; a
-      # REACTOR that the node host drives does not, because `node-host/src/loader.ts` and
-      # `verification/wasm_host/avm_reactor_host.mjs` SUPPLY `env.memory`. A module that exports
-      # its memory therefore fails to link against this repository's own loaders, and shipping one
-      # to blocktracer would reproduce that defect downstream where it is far harder to see.
+      # THE STRUCTURAL GATE ON WHAT IS ABOUT TO BE PUBLISHED — and its first version was WRONG, in
+      # a way the first run corrected. That correction is kept here rather than tidied away.
       #
-      # READ THROUGH V8's MODULE REFLECTION, not by parsing the binary, for the reason
-      # `lib_m12_reactor.sh` gives for its own `m12_wasm_module_imports`: what matters is what an
-      # engine sees when it links the module. The magic and version ARE read from the bytes, since
-      # `new WebAssembly.Module` on a non-module throws a message that does not distinguish "not
-      # wasm at all" from "wasm this engine rejects".
+      # WHAT WAS ASSERTED, AND WHY IT SEEMED RIGHT. The one `avm.wasm` blob committed to this
+      # repository, `vm2wasm/avm.wasm` (1,259,737 bytes, tracked), has 11 imports with no memory
+      # among them and EXPORTS `memory` instead. `node-host/src/loader.ts`,
+      # `verification/wasm_host/reactor_lib.mjs` and `browser/src/loader.ts` all SUPPLY
+      # `env.memory` and refuse a module that does not import one — by name, at compile time. So
+      # the first version of this gate asserted "imports a memory AND does not export one".
+      #
+      # WHAT RUN 34232691529 MEASURED. The real artefact does BOTH:
+      #
+      #     imports 12   ->  env.memory (memory) + 11 wasi_snapshot_preview1 functions
+      #     exports 39   ->  memory (memory), _initialize, avm_alloc, avm_free, ...
+      #
+      # `-Wl,--import-memory` makes the module import its memory; it does not stop wasm-ld from
+      # RE-EXPORTING that same imported memory under the name `memory`. Both are true of a correct
+      # reactor, and the gate failed a perfectly good module. "Imports rather than exports" is a
+      # false dichotomy.
+      #
+      # THE DISCRIMINATOR THAT IS ACTUALLY RIGHT is whether the module DEFINES a memory of its own
+      # — the presence of a memory section (id 5). Measured on both artefacts:
+      #
+      #     published avm.wasm      memory section ABSENT   imports env.memory   -> loaders accept
+      #     vm2wasm/avm.wasm        memory section = 1      imports no memory    -> loaders refuse
+      #
+      # In the published module the exported `memory` is index 0, which IS the imported one; there
+      # is no other. That is why `readMemoryImport` (node-host/src/memory.ts) reads only the import
+      # section and needs no export-side rule, and it is the rule reproduced here.
+      #
+      # THE SECOND THING THE FIRST RUN CORRECTED: the ABI export list. `avm_simulate_with_hints`
+      # was asserted and does not exist. The names below were taken from what `node-host/src/` and
+      # `verification/wasm_host/` actually call, counted across those files.
+      #
+      # PARSED FROM THE BYTES *AND* COMPILED BY THE ENGINE, because neither alone is enough. V8's
+      # module reflection — which `lib_m12_reactor.sh` prefers for its own import census, on the
+      # ground that what matters is what an engine sees when it links — cannot see the memory
+      # section at all, so the discriminator above is unreachable through it. Compiling the module
+      # is kept as the linkability control: a module this engine refuses is not publishable
+      # whatever its sections say.
       #
       # `dev-exec node` — `node` is `nodejs_24` in the dev shell (flake.nix), and
       # `verify_devshell_provides_ci_commands` joins the set of commands the workflows hand to
       # `dev-exec` against that shell's PATH, so this spelling is covered by an existing check.
-      - name: Assert the staged avm.wasm is a reactor that IMPORTS its memory
+      - name: Assert the staged avm.wasm is a reactor that imports its memory and defines none
         if: always()
         working-directory: aztec-avm-runtime
         shell: bash
@@ -1926,12 +1952,47 @@ jobs:
           if (magic.join(",") !== "0,97,115,109")
             problems.push(`magic is [${magic}], not \\0asm — this is not a WebAssembly module`);
           const version = bytes.length >= 8 ? bytes.readUInt32LE(4) : -1;
-          if (version !== 1)
-            problems.push(`binary format version is ${version}, not 1`);
+          if (version !== 1) problems.push(`binary format version is ${version}, not 1`);
 
-          // A THROW HERE IS A FINDING, NOT A CRASH. Uncaught, `new WebAssembly.Module` prints a
-          // node stack trace and exits 1 — a red whose log is about this script rather than about
-          // the module. Measured on the committed vm2wasm/avm.wasm under node 20:
+          // A minimal section walker. Only three facts are read from it: whether a memory section
+          // exists, and the module/name/limits of any imported memory. Everything else comes from
+          // the engine below.
+          const leb = (i) => {
+            let r = 0, s = 0, b;
+            do { b = bytes[i++]; r |= (b & 0x7f) << s; s += 7; } while (b & 0x80);
+            return [r, i];
+          };
+          let definedMemories = null;
+          const importedMemories = [];
+          for (let i = 8; i < bytes.length; ) {
+            const id = bytes[i++];
+            let size; [size, i] = leb(i);
+            const end = i + size;
+            if (id === 5) { [definedMemories] = leb(i); }
+            if (id === 2) {
+              let j = i, n; [n, j] = leb(j);
+              for (let k = 0; k < n; k++) {
+                let l; [l, j] = leb(j);
+                const mod = bytes.subarray(j, j + l).toString(); j += l;
+                [l, j] = leb(j);
+                const nm = bytes.subarray(j, j + l).toString(); j += l;
+                const kind = bytes[j++];
+                if (kind === 0) { [, j] = leb(j); }
+                else if (kind === 1) { j += 1; const f = bytes[j++]; [, j] = leb(j); if (f & 1) [, j] = leb(j); }
+                else if (kind === 2) {
+                  const f = bytes[j++];
+                  let min, max = null; [min, j] = leb(j);
+                  if (f & 1) [max, j] = leb(j);
+                  importedMemories.push({ module: mod, name: nm, min, max, shared: (f & 2) !== 0 });
+                } else if (kind === 3) { j += 2; }
+              }
+            }
+            i = end;
+          }
+
+          // THE LINKABILITY CONTROL. A throw here is a finding, not a crash: uncaught, this prints
+          // a node stack and exits 1, a red about this script rather than about the module.
+          // Measured on the committed vm2wasm/avm.wasm under node 20:
           //   CompileError: invalid value type 'noexternref', enable with --experimental-wasm-gc
           // which is a statement about the ARTEFACT and belongs in the annotation.
           let mod;
@@ -1944,35 +2005,51 @@ jobs:
           }
           const imports = WebAssembly.Module.imports(mod);
           const exports = WebAssembly.Module.exports(mod);
-          const importedMemory = imports.filter((i) => i.kind === "memory");
-          const exportedMemory = exports.filter((e) => e.kind === "memory");
 
-          console.log(`path      ${path}`);
-          console.log(`size      ${bytes.length}`);
-          console.log(`version   ${version}`);
-          console.log(`imports   ${imports.length}`);
+          console.log(`path             ${path}`);
+          console.log(`size             ${bytes.length}`);
+          console.log(`version          ${version}`);
+          console.log(`memory section   ${definedMemories === null ? "ABSENT (defines no memory of its own)" : definedMemories}`);
+          console.log(`imports          ${imports.length}`);
           for (const i of imports) console.log(`  import  ${i.module}.${i.name} (${i.kind})`);
-          console.log(`exports   ${exports.length}`);
+          console.log(`exports          ${exports.length}`);
           for (const e of exports) console.log(`  export  ${e.name} (${e.kind})`);
 
-          if (importedMemory.length !== 1)
+          if (definedMemories !== null)
             problems.push(
-              `expected exactly one IMPORTED memory, found ${importedMemory.length}. ` +
-                `A reactor the node host can drive imports env.memory; the committed ` +
-                `vm2wasm/avm.wasm blob does not, and this is the check that would have caught it.`,
+              `the module DEFINES ${definedMemories} memory/memories of its own (a memory section is ` +
+                `present). This is exactly how the committed vm2wasm/avm.wasm blob is wrong: the ` +
+                `three loaders in this repository supply env.memory and refuse a module that owns ` +
+                `its own. Shipping one is what cost blocktracer two mainnet captures on 2026-08-31.`,
             );
-          else if (`${importedMemory[0].module}.${importedMemory[0].name}` !== "env.memory")
-            problems.push(
-              `the memory is imported as ${importedMemory[0].module}.${importedMemory[0].name}, ` +
-                `not env.memory, which is the name node-host/src/loader.ts supplies`,
-            );
-          if (exportedMemory.length !== 0)
-            problems.push(
-              `the module EXPORTS memory (${exportedMemory.map((e) => e.name).join(", ")}). ` +
-                `That is exactly how the committed vm2wasm/avm.wasm blob is wrong; the loaders ` +
-                `here supply the memory and would not link this.`,
-            );
-          for (const want of ["avm_simulate_with_hints", "avm_alloc", "avm_free"])
+          if (importedMemories.length !== 1)
+            problems.push(`expected exactly one IMPORTED memory, found ${importedMemories.length}`);
+          else {
+            const m = importedMemories[0];
+            if (`${m.module}.${m.name}` !== "env.memory")
+              problems.push(
+                `the memory is imported as ${m.module}.${m.name}, not env.memory, which is the ` +
+                  `name node-host/src/loader.ts supplies`,
+              );
+            if (m.shared)
+              problems.push(`the imported memory is SHARED, so this is a -pthread build; the hosts here refuse it`);
+            console.log(`memory import    ${m.module}.${m.name} min=${m.min} max=${m.max} shared=${m.shared}`);
+          }
+
+          // The names `node-host/src/` and `verification/wasm_host/` actually call. An export
+          // disappearing is a finding; this list is not the full 39 and is not meant to be, since
+          // verify_avm_wasm_import_surface already pins the whole surface as identities.
+          for (const want of [
+            "avm_simulate",
+            "avm_simulate_with_hinted_dbs",
+            "avm_alloc",
+            "avm_free",
+            "avm_abi_version",
+            "avm_result_ptr",
+            "avm_result_len",
+            "avm_steps_count",
+            "avm_steps_batch",
+          ])
             if (!exports.some((e) => e.name === want && e.kind === "function"))
               problems.push(`the reactor ABI export ${want} is missing`);
 
@@ -1980,7 +2057,10 @@ jobs:
             for (const p of problems) console.log(`::error::${p}`);
             process.exit(1);
           }
-          console.log("VERDICT: a wasm32 reactor that imports env.memory and exports the reactor ABI — publishable");
+          console.log(
+            "VERDICT: a wasm32 reactor that imports env.memory, defines no memory of its own, " +
+              "and exports the reactor ABI — publishable",
+          );
           MJS
           dev-exec node "${RUNNER_TEMP}/assert_avm_wasm.mjs" \
             "${{ github.workspace }}/avm-wasm-dist/avm.wasm"
