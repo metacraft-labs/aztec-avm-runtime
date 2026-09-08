@@ -91,6 +91,70 @@ name: AVM_WASM
 # `clone-repo` at refs they name, which is why `clone-siblings` prints
 # "no cross-repo siblings to clone" and succeeds today.
 
+# THE x86_64 BASELINE, AND WHY MOST OF THIS FILE NO LONGER RUNS ON `eph-linux-x64` — 2026-09-07
+#
+# `barretenberg/cpp/cmake/arch.cmake` in the fork reads, in full:
+#
+#     if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+#         add_compile_options(-march=skylake)
+#     endif()
+#
+# unconditional, with upstream's own comment "Target skylake on x86 for AVX2 etc." There is no
+# CPU detection and no runtime dispatch behind it. So EVERY x86_64 barretenberg binary requires
+# a Skylake-class CPU: the ones these jobs compile for themselves, and equally the prebuilt
+# `@aztec/bb.js` amd64-linux `nodejs_module.node`, which disassembles to 54,093 ADX and BMI2
+# instructions (`adcx`, `adox`, `mulx`) plus AVX/AVX2 throughout, with ZERO `cpuid` instructions
+# and ZERO IFUNC relocations.
+#
+# WHAT THAT LOOKS LIKE IN A LOG, AND WHY IT WAS MISREAD FOR SO LONG. The process is not failing,
+# it is being KILLED: exit 132 is 128+4, SIGILL. And it prints NOTHING on stdout or stderr,
+# because the addon is `dlopen`'d during the import chain before the probe's first
+# `console.log`. A check that asserts on what the probe printed then reports something like
+# `expected [1], got [132]` against an assertion about a TypeError, which names neither the
+# signal nor the cause.
+#
+# THE CONTROL, from run 34052439806 on PR #3, is what makes this a reading rather than a
+# hypothesis. `native-versus-wasm differential` got all the way through:
+#
+#     ok   the native configure exits 0  [0]
+#     ok   the native build exits 0  [0]
+#     bash: 10496 Illegal instruction   timeout ... "$bin"
+#     FAIL the native driver exits 0  expected [0], got [132]
+#     ok   the wasm driver exits 0 on V8, running the SHIPPED binary unmodified  [0]
+#
+# A binary the runner compiled with its own compiler moments earlier is killed by SIGILL on that
+# same runner, while the SAME program built for wasm32 — where `-march` does not apply — exits 0.
+# Same logic, same inputs, two ISA baselines, and only the x86 one dies. Measured again in the
+# same run in `block-level world-state coverage` (eight checks, all 132) and in `the Node host`.
+#
+# WHAT FIXES IT, AND WHAT DOES NOT. No edit in this repository fixes it: the npm addon is shipped
+# prebuilt, so even overriding `-march` for our own builds would leave the bb.js-loading jobs
+# dead. What fixes it is a runner whose CPU has AVX2/BMI2/ADX. `runs-on:
+# [self-hosted, x86-64-v3, gpu]` selects the persistent systemd runners on gpu-server-001 and
+# gpu-server-002 (four `mcl` runners each, eight in total, all online and idle at the time of
+# writing). `x86-64-v3` is the AVX2/BMI1/BMI2/FMA level and is the flag that matters; `gpu` is
+# carried as well so that the selector stays pinned to these two hosts if `x86-64-v3` is ever
+# added to a machine that is not one of them.
+#
+# THE ONE THING THE LABEL DOES NOT GUARANTEE. ADX is formally a Broadwell addition and is NOT
+# part of the x86-64-v3 baseline, while `-march=skylake` wants it. In practice any CPU new enough
+# to host an RTX 3090 has it — but "in practice" is not a measurement, so every moved job's FIRST
+# step is a CPU inventory that prints the model name and the adx/bmi1/bmi2/avx/avx2/fma flags. It
+# runs before the CI-token assert so it prints even when the job dies immediately afterwards, and
+# it is what settles this by measurement rather than by inference.
+#
+# WHAT WAS NOT MOVED, AND WHY IT IS NOT AN OVERSIGHT. `noir-call-frames` runs node against node
+# builtins and this repository's own TypeScript only. `browser-gate` builds barretenberg for
+# wasm32 and drives Chromium, and its whole deliverable is asserting the ABSENCE of native
+# dependencies. Neither touches an x86_64 barretenberg artefact, both are green where they are,
+# and moving them would spend capacity on two hosts to buy nothing.
+#
+# AND THE TIMEOUTS WENT UP WITH THE MOVE, DELIBERATELY. `vm2 suite` hit the 120-minute JOB
+# timeout mid-build on a cold ccache in run 34052439806 — GitHub reports that as `cancelled`,
+# which reads as an operator action and is not one. These are different hosts with a different
+# ccache, so the first run here is cold too. The building jobs are budgeted 180 minutes;
+# `fallback-triggers` builds nothing and stays at 30.
+
 on:
   push:
     branches: [dev, main]
@@ -143,13 +207,29 @@ env:
 jobs:
   vm2-suite-under-wasm:
     name: vm2 suite under wasm32-wasip1
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # A cold run is ~35 min (two full barretenberg configures, the native
     # proving-stack build behind upstream's own vm2_tests, three wasm builds and
     # two deliberate build failures). The cap is generous rather than tight so a
     # slow runner reports a real failure instead of a timeout.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -297,7 +377,7 @@ jobs:
 
   native-vs-wasm-differential:
     name: native-versus-wasm differential, including tree roots
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M8. Two builds of ONE differential driver -- x86-64 and wasm32-wasip1 from the same
     # translation unit -- plus upstream's own `world_state_tests`, which carries the seven
     # `MemoryMerkleDBEquivalenceTest` cases that are the standing reference-versus-real fidelity
@@ -341,8 +421,24 @@ jobs:
     # is a substitute for a green run, and this job — like every job in this file — still **has
     # never run** to completion. Nothing downstream of `Generate CI token` has ever executed, so
     # no check in this repository has ever been exercised in the environment it is declared for.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -443,6 +539,14 @@ jobs:
         working-directory: aztec-avm-runtime
         env:
           M8_WORK: ${{ github.workspace }}/m8-work
+          # verify_upstream_world_state_reference_gate_green asks the GitHub API
+          # whether avm-wasm.yml has ever run, rather than believing a sentence in
+          # the YAML. `gh` on the self-hosted runners is not logged in to anything,
+          # so without this the check dies at `gh is not authenticated` — and that
+          # is a "cannot run", which the harness counts as a failure. It was the
+          # ONLY red in this job: the other six suites passed, 457 assertions, 0
+          # failures.
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         # See the M7 job: `shell: bash` supplies `-o pipefail`, which the default
         # `bash -e {0}` does not, so `| tee` cannot swallow a divergence.
         shell: bash
@@ -473,7 +577,7 @@ jobs:
 
   avm-reactor:
     name: avm.wasm reactor, host ABI and size budget
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M12. ONE worktree carrying NINE patches, and two builds inside it: the wasm-avm one, which
     # produces `avm.wasm`, its unpruned control, the msgpack enumeration and `barretenberg.wasm`
     # (built only so the size comparison is a measurement from this tree rather than a figure
@@ -495,8 +599,24 @@ jobs:
     # for the machine to go idle and exits 3 rather than reporting a number measured beside a
     # competing build, so a busy runner fails this job with a distinct status instead of producing
     # a wrong ratio.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -629,7 +749,7 @@ jobs:
 
   avm-contract-db:
     name: shippable contract DB and checkpoint coordination
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M13. ONE worktree carrying TEN patches — the reactor job's nine plus M13's own overlay — and
     # the same two builds inside it. It is a SEPARATE worktree and a separate work directory from
     # the reactor job's on purpose: M13's overlay takes the export list from thirty-nine names to
@@ -646,8 +766,24 @@ jobs:
     #
     # None of M13's six checks times anything, so a busy runner costs time here rather than a wrong
     # number; the reactor job's step-batching caveat does not apply.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -744,6 +880,29 @@ jobs:
             test -f "$p" || { echo "::error::missing prepared patch: $p" >&2; exit 1; }
           done
 
+      # WITHOUT THIS, `e2e_deploy_call_revert_roundtrip` CANNOT RUN AND M13 CANNOT PASS.
+      # The check's last act is to hand the deployment logs to `diffsim/decode_deployment_logs.mjs`
+      # — upstream's own reader, deliberately, so the transcript is confirmed by something this
+      # repository did not write. That script is an ESM module importing `@aztec/constants`, and
+      # this job installs nothing: `diffsim/node_modules` does not exist here. In run 34089689342
+      # it died in the artefact, not in the log:
+      #
+      #     Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@aztec/constants'
+      #       imported from .../diffsim/decode_deployment_logs.mjs
+      #
+      # What the log showed was `FAIL upstream's own readers decoded the deployment logs
+      # expected [0], got [1]` and `cannot run: the upstream decode produced nothing` — a missing
+      # dependency wearing the costume of a decode disagreement. The preceding assertion,
+      # `the upstream log decoder is present`, passed: the FILE is in the checkout. Only its
+      # packages are absent, and no check looked for those.
+      #
+      # Same cause and same fix as the browser gate's missing esbuild. The Form A job below runs
+      # `verify-m13` before it reaches M20 and needs it for the same reason.
+      - name: Install diffsim's packages (decode_deployment_logs.mjs imports @aztec/constants)
+        working-directory: aztec-avm-runtime/diffsim
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tail -20
+
       - name: Build avm.wasm with the shippable contract DB and run the M13 checks
         working-directory: aztec-avm-runtime
         env:
@@ -780,7 +939,7 @@ jobs:
 
   world-state-block-coverage:
     name: block-level world-state coverage and the compiler cache
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M14. TWO worktrees of the pinned anchor, and the only difference between them is M14's ONE
     # patch — the archive tree on the in-memory reference world state. Deliberately NOT the
     # AVM_WASM stack: the patch changes a component the AVM does not use, so it is built against
@@ -802,8 +961,24 @@ jobs:
     #
     # None of M14's eight checks times anything, so a busy runner costs time here rather than a
     # wrong number.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -862,6 +1037,30 @@ jobs:
           path: aztec-packages
           gh-token: ${{ steps.app-token.outputs.token }}
 
+      # WITHOUT THIS, `verify_block_level_gap_audit_complete` CANNOT RUN, AND b55fdcb SAID IT COULD.
+      # That commit scanned for exactly this shape, flagged this job, and cleared it on the grounds
+      # that "m6_prepare_tree applies only the patches passed to it, and M14 passes just its own
+      # in-repo patch". That is true and it is not the whole of what M14 resolves: the gap audit
+      # ENUMERATES `$M6_UPSTREAM_BUGS` — `codetracer-specs/upstream-bugs` — to price this
+      # contribution's carry exposure against every other prepared patch, and names one of them
+      # outright. Run 33941133790 is the record, 32 failures out of 131 assertions:
+      #
+      #     verify_block_level_gap_audit_complete.sh: line 236: cd:
+      #       .../codetracer-specs/upstream-bugs: No such file or directory
+      #     awk: fatal: cannot open file `.../codetracer-specs/upstream-bugs/
+      #       aztec-avm-wasm-cmake/0001-build-wasm-optional-AVM_WASM-...patch'
+      #
+      # `ref: latest`, not `main`, for the reason spelled out at the M7 job: `latest` is that
+      # repository's default branch and the only one the series is published on, and `main` carries
+      # no `upstream-bugs/` at all.
+      - name: Clone codetracer-specs (the prepared patch series)
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-specs
+          ref: latest
+          path: codetracer-specs
+          gh-token: ${{ steps.app-token.outputs.token }}
+
       - name: Setup Dev Environment
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
@@ -882,13 +1081,22 @@ jobs:
           # the checks rather than in codetracer-specs/upstream-bugs/, because that directory is
           # enumerated by verify_carry_set_complete and every entry in it must equal a branch
           # PUBLISHED on the fork's origin. See WORLD-STATE.md section 6.
+          #
+          # THE LAST TWO ARE THE ONES THIS STEP USED TO OMIT, and the omission is what let the job
+          # walk past a missing sibling checkout into a confusing failure two steps later. The rule
+          # b55fdcb set for the M15 job holds here: an input is asserted if a check resolves it,
+          # wherever it lives. The gap audit resolves the specs directory and names one patch inside
+          # it, so both are listed.
           for p in \
             aztec-avm-runtime/verification/m14/0001-feat-world_state_reference-archive-tree-so-the-in-me.patch \
             aztec-avm-runtime/verification/m14/PR.md \
             aztec-avm-runtime/verification/m14/verify.sh \
-            aztec-avm-runtime/verification/m14/world_state_block_probe.cpp ; do
+            aztec-avm-runtime/verification/m14/world_state_block_probe.cpp \
+            codetracer-specs/upstream-bugs/aztec-avm-wasm-cmake/0001-build-wasm-optional-AVM_WASM-and-separate-the-AVM-mod.patch ; do
             test -f "$p" || { echo "::error::missing M14 input: $p" >&2; exit 1; }
           done
+          test -d codetracer-specs/upstream-bugs \
+            || { echo "::error::missing M14 input: codetracer-specs/upstream-bugs (the gap audit enumerates it)" >&2; exit 1; }
 
       - name: Restore the compiler cache
         uses: actions/cache@v4
@@ -938,7 +1146,7 @@ jobs:
 
   boundary-shape:
     name: the integration shape across the wasm boundary, and the checkpoint cost
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M15. ONE worktree of the pinned anchor carrying M13's TEN patches — M15 adds no eleventh,
     # because the module M12 built and M13 completed already contains BOTH candidate entry points
     # and M12's own REACTOR-ABI.md recorded that "the choice between them is M15's". Plus the two
@@ -957,8 +1165,24 @@ jobs:
     # `CI_TOKEN_PROVIDER_PRIVATE_KEY` only the user can set. So this job existing means it is
     # wired and names the checks — not that a run has ever gated anything. BOUNDARY-SHAPE.md
     # says the same thing in prose.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -1144,7 +1368,7 @@ jobs:
 
   fallback-triggers:
     name: the TypeScript-trees fallback — triggers evaluated, cost priced, not taken
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M16. THIS JOB BUILDS NOTHING AND TAKES NO WORK DIRECTORY, which is what makes it the cheapest
     # job in this workflow and the only one that needs neither the fork's build nor a compiler
     # cache. It does need the fork checked out, because the two checks read the pinned anchor with
@@ -1165,6 +1389,22 @@ jobs:
     # wired and names the checks — not that a run has ever gated anything.
     timeout-minutes: 30
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -1223,6 +1463,30 @@ jobs:
           path: aztec-packages
           gh-token: ${{ steps.app-token.outputs.token }}
 
+      # WITHOUT THIS, ONE OF M16's TWO CHECKS REFUSES TO RUN, AND b55fdcb SAID IT WOULD NOT.
+      # That commit cleared this job on the grounds that "verify-m16 passes locally at 78
+      # assertions with no specs checkout". The premise is what was wrong: a developer workspace
+      # has codetracer-specs as a SIBLING of this repository, which is precisely where
+      # $WORKSPACE_ROOT resolves it, so the local run had the checkout it was said to be without.
+      # A CI workspace does not, and run 33941133790 said so on the first line of the check:
+      #
+      #     verify_fallback_triggers_recorded_and_evaluated: cannot run: the milestone file is
+      #       not at .../codetracer-specs/Planned-Work/Aztec-AVM-Runtime.milestones.org
+      #
+      # Note the path: it is not under `upstream-bugs/` at all, which is why a scan looking for
+      # prepared-patch resolution did not see it. This job builds nothing and still needs the
+      # repository, because the triggers M16 evaluates are the ones the milestone file records.
+      #
+      # `ref: latest`, not `main`, for the reason spelled out at the M7 job: `latest` is that
+      # repository's default branch and the only one this content is published on.
+      - name: Clone codetracer-specs (the milestone record the triggers are read from)
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-specs
+          ref: latest
+          path: codetracer-specs
+          gh-token: ${{ steps.app-token.outputs.token }}
+
       - name: Setup Dev Environment
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
@@ -1243,13 +1507,19 @@ jobs:
           set -euo pipefail
           # The write-up, the two measurement tools and the two probes. Asserted here so that
           # "measured rather than quoted" cannot decay into a document nothing re-derives.
+          #
+          # THE LAST ONE IS THE ONE THIS STEP USED TO OMIT. It is in a sibling repository rather
+          # than this one, and that is exactly why it was missed — by this step, and by the scan in
+          # b55fdcb. Same rule as the M15 job: an input is asserted if a check resolves it,
+          # wherever it lives.
           for p in \
             aztec-avm-runtime/FALLBACK.md \
             aztec-avm-runtime/verification/_fallback_parser.py \
             aztec-avm-runtime/verification/_fallback_price.py \
             aztec-avm-runtime/verification/lib_m16_fallback.sh \
             aztec-avm-runtime/probe-mt/m16_hazard.mjs \
-            aztec-avm-runtime/probe-mt/m16_adapter_probe.mjs ; do
+            aztec-avm-runtime/probe-mt/m16_adapter_probe.mjs \
+            codetracer-specs/Planned-Work/Aztec-AVM-Runtime.milestones.org ; do
             test -f "$p" || { echo "::error::missing M16 input: $p" >&2; exit 1; }
           done
 
@@ -1274,7 +1544,7 @@ jobs:
 
   node-host:
     name: the Node host — avm.wasm from TypeScript, and the trap/revert distinction
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M17. It builds what M12's job builds — the same nine-patch tree, the same two build
     # directories — because the host has to be driven against a real module and compared against a
     # real native reference, and it does so in ITS OWN work directory so the two jobs cannot
@@ -1296,8 +1566,24 @@ jobs:
     # top of this file, and the remaining blocker is a repository-level
     # `CI_TOKEN_PROVIDER_PRIVATE_KEY` only the user can set. So this job existing means it is
     # wired and names the checks — not that a run has ever gated anything.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -1443,7 +1729,7 @@ jobs:
 
   orchestration:
     name: TypeScript orchestration over the wasm interpreter
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M18. Four of the five checks build nothing: they read the fork at the TypeScript anchor
     # 3a68d68ac2, the published @aztec/* packages, and orchestration/. The fifth builds what M12's
     # job builds — the same nine-patch tree — in ITS OWN work directory, and runs the whole corpus
@@ -1467,8 +1753,24 @@ jobs:
     # top of this file, and the remaining blocker is a repository-level
     # `CI_TOKEN_PROVIDER_PRIVATE_KEY` only the user can set. So this job existing means it is
     # wired and names the checks — not that a run has ever gated anything.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -1592,8 +1894,34 @@ jobs:
           # Not $TMPDIR. Its own directory, not M12's or M17's, so no two jobs rebuild the tree
           # under each other.
           M18_WORK: ${{ github.workspace }}/m18-work
+        # `shell: bash` rather than the default `bash -e {0}`, which has no pipefail: piping into
+        # `tee` would otherwise hand the step `tee`'s status and a failing check would report green.
         shell: bash
-        run: dev-exec just verify-m18 2>&1 | tee verify-m18.log
+        run: |
+          set -euo pipefail
+          # BUILD FIRST, THEN NAME THE MODULE. This step's name has always said "Build avm.wasm";
+          # nothing in it ever did, and `just verify-m18` does not build either.
+          # `verify-halves-compose` is M18's ONE check that does: it points M17's and M12's work
+          # directories at $M18_WORK and drives M12's machinery, leaving the module at
+          # $M18_WORK/m12/barretenberg/cpp/build-wasm-avm/bin/avm.wasm. The five token/block checks
+          # only LOOK — `tb_find_module` (verification/lib_token_blocks.sh:49) tries
+          # $AVM_WASM_PATH, then $TB_WORK, then two hard-coded $HOME/.cache M13/M15 paths that are
+          # populated by OTHER JOBS ON OTHER MACHINES and that nothing here writes.
+          #
+          # So in run 34160613484 the first five checks passed with 283 assertions and the last
+          # five died identically at `cannot run: no built avm.wasm was found`, 0 assertions each.
+          # They had never executed before: the six TypeScript errors fixed in this branch were in
+          # `typecheck-orchestration`, an EARLIER step, so the job had never reached verify-m18.
+          #
+          # Naming the module this job already builds is the whole fix. M12's thirty-nine exports
+          # (lib_m12_reactor.sh:150) include all seven of TB_REQUIRED_EXPORTS, which is why
+          # lib_m22_block.sh:153 already lists this exact path as an acceptable candidate. No
+          # second tree and no second build: verify-m18 re-runs verify-halves-compose, and its
+          # m17_measured record short-circuits once the tree is materialised.
+          dev-exec just verify-halves-compose 2>&1 | tee verify-m18-build.log | tail -5
+          export AVM_WASM_PATH="${M18_WORK}/m12/barretenberg/cpp/build-wasm-avm/bin/avm.wasm"
+          test -s "$AVM_WASM_PATH" || { echo "::error::no module at $AVM_WASM_PATH" >&2; exit 1; }
+          dev-exec just verify-m18 2>&1 | tee verify-m18.log
 
       - name: Collect the round-trip transcript
         if: always()
@@ -1618,7 +1946,7 @@ jobs:
 
   differential-oracle:
     name: three-way differential — wasm AVM vs native C++ AVM vs TypeScript interpreter
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M19. A SEPARATE FAILURE DOMAIN, and that is a requirement rather than a convenience.
     #
     # This job compares the shipped wasm AVM against an oracle that is DELIBERATELY OUT OF DATE:
@@ -1642,8 +1970,24 @@ jobs:
     # still stop at the CI token, DIAGNOSED — see THE CI TOKEN, DIAGNOSED at the top of this
     # file, and the remaining blocker is a repository-level `CI_TOKEN_PROVIDER_PRIVATE_KEY` only
     # the user can set.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       # PREFLIGHT, and it is here because its absence cost this campaign nine
       # milestones of CI. `create-github-app-token` fails with a node stack
       # trace naming only the FIRST input it finds missing, which read for
@@ -1716,8 +2060,49 @@ jobs:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
 
+      # WITHOUT THIS, `just version-gap` CANNOT RESOLVE ITS OWN TIP, AND THAT IS THE WHOLE OF DD-12's RED.
+      # `tools/version_gap.py:85` does `git rev-parse upstream/next` in the fork. The clone above adds
+      # only `origin` (metacraft-labs/aztec-packages); `upstream` is AztecProtocol's repository and
+      # nothing in this workflow ever added it. So run 33941133790 died before it computed anything:
+      #
+      #     version_gap: git rev-parse upstream/next failed: fatal: ambiguous argument 'upstream/next'
+      #     error: recipe `version-gap` failed on line 685 with exit code 1
+      #
+      # Note what is absent from that log: no gap, no threshold line, no header. Exit 1 is the generic
+      # git-plumbing death, NOT the tool's own exit 3 ("over threshold") or exit 2 ("the fork cannot
+      # answer") — so a missing remote was indistinguishable at the exit code from a real drift.
+      # It read as a version-gap failure and it never measured a version gap.
+      #
+      # This is why it was invisible locally: a developer workspace's aztec-packages has BOTH remotes,
+      # so the identical command succeeds there. The measured gap is 67 days against a 180-day
+      # threshold — the check passes on this content once it can run at all.
+      #
+      # `carry.yml` already carries exactly this step for exactly this need; this is that step.
+      # `verify_oracle_version_gap_reported.sh:45` repeats the same bare rev-parse, so `just
+      # verify-m19` would have died the same way at the next step had it been reached.
+      - name: Deepen the fork and add the upstream remote (version_gap.py resolves upstream/next)
+        working-directory: aztec-packages
+        shell: bash
+        run: |
+          git fetch --unshallow 2>/dev/null || true
+          git remote get-url upstream >/dev/null 2>&1 \
+            || git remote add upstream https://github.com/AztecProtocol/aztec-packages.git
+          git fetch upstream next
+          git rev-parse --verify upstream/next
+
       - name: Install diffsim's packages (this is where the NAPI oracle lives)
         working-directory: aztec-avm-runtime/diffsim
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tail -20
+
+      # `verify_differential_containment` walks the SHIPPED import graph, and
+      # `orchestration/node_modules` is what it walks. Without it the check refuses —
+      # "cannot run: the orchestration's packages are not installed and the import graph cannot be
+      # walked" — and `die` prints no FAIL line and no assertion summary, so in run 34160613484 it
+      # vanished from the sweep rather than reading as red. The form-a job already carries this
+      # step; this job was written without it.
+      - name: Install the orchestration's published @aztec packages
+        working-directory: aztec-avm-runtime/orchestration
         shell: bash
         run: dev-exec npm ci 2>&1 | tail -20
 
@@ -1732,9 +2117,34 @@ jobs:
       - name: Build avm.wasm and run the three-way differential
         working-directory: aztec-avm-runtime
         env:
+          # Not $TMPDIR: the build is several gigabytes and a tmpfs /tmp is the wrong place.
+          M12_WORK: ${{ github.workspace }}/m12-work
           M19_WORK: ${{ github.workspace }}/m19-work
         shell: bash
-        run: dev-exec just verify-m19 2>&1 | tee verify-m19.log
+        run: |
+          set -euo pipefail
+          # THIS STEP'S NAME HAS ALWAYS SAID "Build avm.wasm"; NOTHING IN IT EVER DID.
+          # `just verify-m19` does not build — `m19_find_module`
+          # (verification/lib_m19_differential.sh:43) only LOOKS: at $AVM_WASM_PATH, at $M19_WORK,
+          # and at three hard-coded ~/.cache trees belonging to OTHER MILESTONES, which in this
+          # workflow are other jobs on other machines. The job-start hook wipes the workspace, so
+          # on a runner none of the four candidates can exist.
+          #
+          # Run 34160613484 therefore refused four of seven checks with "cannot run: no built
+          # avm.wasm was found" and exited 1 in ELEVEN SECONDS having compared nothing — and `die`
+          # prints neither a FAIL line nor an assertion summary, so the job went red with no
+          # failing assertion anywhere in its log. The two checks that need no module passed.
+          #
+          # This is not the same defect as the `upstream` remote, which cf5afd8 fixed and which is
+          # verified green here: the fetch step above succeeds and verify_oracle_version_gap_reported
+          # passes on the fork's actual tip. This is the cause that was behind it.
+          #
+          # verify_avm_wasm_import_surface is M12's check that BUILDS, and M12's module carries all
+          # fifteen exports lib_m19_differential.sh requires (its own list is thirty-nine).
+          dev-exec just verify-reactor-imports 2>&1 | tee verify-reactor-imports.log | tail -20
+          export AVM_WASM_PATH="${M12_WORK}/m12/barretenberg/cpp/build-wasm-avm/bin/avm.wasm"
+          test -s "$AVM_WASM_PATH" || { echo "::error::no module at $AVM_WASM_PATH" >&2; exit 1; }
+          dev-exec just verify-m19 2>&1 | tee verify-m19.log
 
       - name: THE HEADLINE — differential comparisons, not tests
         if: always()
@@ -1774,7 +2184,7 @@ jobs:
 
   form-a-external-transactions:
     name: Form A — a transaction whose private half ran elsewhere
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, x86-64-v3, gpu]
     # M20. Accept a serialized `Tx` and execute only its public half.
     #
     # WHAT THIS JOB IS ACTUALLY GUARDING, because most of the subject is not ours. Upstream moved
@@ -1798,8 +2208,24 @@ jobs:
     # and the remaining blocker is a repository-level `CI_TOKEN_PROVIDER_PRIVATE_KEY` only the user
     # can set. So this job existing means it is wired and names the checks, not that a run has ever
     # gated anything.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
+      # THE FIRST STEP IN THE JOB, ON PURPOSE — it prints even when the job dies at the CI token
+      # or part-way through a build, which is exactly when the reading is wanted. See
+      # THE x86_64 BASELINE at the top of this file for what is being measured and why.
+      - name: CPU inventory — the flags -march=skylake requires, measured rather than assumed
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+          for feat in adx bmi1 bmi2 avx avx2 fma; do
+            if grep -q -w "$feat" /proc/cpuinfo; then
+              echo "  cpu flag $feat: present"
+            else
+              echo "  cpu flag $feat: ABSENT — barretenberg's x86_64 baseline needs it and never checks for it"
+            fi
+          done
       - name: Assert the CI-token inputs are present
         shell: bash
         env:
@@ -1869,6 +2295,18 @@ jobs:
         shell: bash
         run: dev-exec npm ci 2>&1 | tail -20
 
+      # This job runs `verify-m13` before it reaches any M20 check, so it needs diffsim's packages
+      # for exactly the reason the contract-DB job above does — the upstream deployment-log decoder
+      # is an ESM module importing `@aztec/constants`. Form A's red in run 34089689342 was NOT its
+      # own: it was `verify-m13: FAILED` on the identical `cannot run: the upstream decode produced
+      # nothing`. That was invisible from the run page because the job also collected the wrong
+      # directory and uploaded an empty artefact (branch avm-reds @ dfe87d8fa fixes the collection);
+      # this fixes what it would have been collecting evidence OF.
+      - name: Install diffsim's packages (verify-m13 runs first and decodes with upstream's reader)
+        working-directory: aztec-avm-runtime/diffsim
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tail -20
+
       - name: Build avm.wasm with M13's resident DBs and run the M20 checks
         working-directory: aztec-avm-runtime
         env:
@@ -1881,7 +2319,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          dev-exec just verify-m13 2>&1 | tail -5
+          # `tee` BEFORE `tail`, because the collect step below copies `verify-m13.log` and until
+          # now NOTHING IN THIS JOB EVER WROTE IT — that `cp` has always hit its `|| true`. The
+          # M13 job tees (see `just verify-m13` there); this job was given the same `cp` without
+          # the same `tee`, so the one milestone whose failure blocks every M20 check was also the
+          # one whose transcript was thrown away five lines from the end.
+          dev-exec just verify-m13 2>&1 | tee verify-m13.log | tail -5
           export AVM_WASM_PATH="${M13_WORK}/m13/barretenberg/cpp/build-wasm-avm/bin/avm.wasm"
           test -s "$AVM_WASM_PATH" || { echo "::error::no module at $AVM_WASM_PATH" >&2; exit 1; }
           dev-exec just verify-m20 2>&1 | tee verify-m20.log
@@ -1896,7 +2339,14 @@ jobs:
           set -uo pipefail
           f="${{ github.workspace }}/m20-work/arms.json"
           [ -s "$f" ] || { echo "no arm run to report"; exit 0; }
-          python3 -c '
+          # `dev-exec`, because BARE `python3` IS NOT ON THIS JOB'S PATH — the interpreter lives in
+          # the nix devshell, which is why every other step that needs the toolchain goes through
+          # the wrapper. This step got away with it for as long as it never ran: while the arm run
+          # was crashing, `arms.json` was absent, the `-s` guard above returned early with "no arm
+          # run to report", and `python3` was never reached. Repairing the arm run is what first
+          # made this line execute, and it died `python3: command not found` (exit 127) — a step
+          # with `if: always()` that would fail the job on its own even once M20 is otherwise green.
+          dev-exec python3 -c '
           import json, sys
           doc = json.load(open(sys.argv[1]))
           print("module:", doc["module"])
@@ -1917,6 +2367,29 @@ jobs:
           cp aztec-avm-runtime/verify-m20.log artifacts-m20/ 2>/dev/null || true
           cp "${{ github.workspace }}"/m20-work/arms.json artifacts-m20/ 2>/dev/null || true
           cp "${{ github.workspace }}"/m20-work/arms.stderr artifacts-m20/ 2>/dev/null || true
+          # M13'S WORK DIRECTORY, BECAUSE THIS JOB RUNS `verify-m13` BEFORE IT REACHES M20 AND
+          # COLLECTED NOTHING FROM IT. In run 34052439806 the job died here:
+          #
+          #     FAIL the host ran the deploy/call/revert roundtrip  expected [0], got [1]
+          #     ok   it produced a transcript  [.../m13-work/e2e.out]
+          #     e2e_deploy_call_revert_roundtrip: cannot run: the transcript is empty
+          #                                       — see .../m13-work/e2e.err
+          #     error: recipe `verify-m13` failed with exit code 1
+          #
+          # The check names the file that explains it, and that file was in `m13-work/` while every
+          # line of this step points at `m20-work/`. Worse, because verify-m13 failed first,
+          # `verify-m20.log` and `m20-work/` were never written either — so all three `cp`s hit
+          # their `|| true`, the directory uploaded EMPTY, and the run's artefact list has no
+          # form-a entry at all. The one job whose failure was undiagnosable is the one that
+          # published nothing.
+          #
+          # The `2>/dev/null || true` on every line is deliberate and stays: a collect step must not
+          # fail a job. But it means a path that is simply WRONG is indistinguishable from a file
+          # that legitimately does not exist, which is why this went unnoticed. `ls -la` below is
+          # the only signal, and an empty listing reads as "nothing to collect".
+          cp "${{ github.workspace }}"/m13-work/*.out artifacts-m20/ 2>/dev/null || true
+          cp "${{ github.workspace }}"/m13-work/*.err artifacts-m20/ 2>/dev/null || true
+          cp aztec-avm-runtime/verify-m13.log artifacts-m20/ 2>/dev/null || true
           ls -la artifacts-m20
 
       - name: Upload the Form A artefacts
@@ -2157,6 +2630,56 @@ jobs:
 
       - name: Install the orchestration's published @aztec packages
         working-directory: aztec-avm-runtime/orchestration
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tail -20
+
+      # WITHOUT THIS, FIVE OF THE GATE'S CHECKS RUN ZERO ASSERTIONS AND A SIXTH FAILS THREE.
+      # `m27_esbuild` (lib_m27_browser.sh:162) looks in exactly two places —
+      # `spike/node_modules/.bin/esbuild` then `diffsim/node_modules/.bin/esbuild` — and this job
+      # installed neither; it installs `orchestration/` and nothing else. So in run 34052439806:
+      #
+      #     verify_browser_bundle_no_node_builtins:         0 assertion(s), 1 failure(s)
+      #     verify_browser_bundle_no_native_deps:           0 assertion(s), 1 failure(s)
+      #     verify_verification_code_unreachable_from_browser: 0 assertion(s), 1 failure(s)
+      #     verify_browser_entry_points_are_dd5_shaped:     0 assertion(s), 1 failure(s)
+      #
+      # each dying on `cannot run: esbuild is not installed`, and `verify_npm_pack_no_optional_native`
+      # taking three more as `FileNotFoundError: browser/dist/meta.json` — because no bundle is ever
+      # built, so the file the census reads does not exist. Those three read `expected [0], got []`,
+      # which is an EMPTY command substitution rather than a measured zero; a check that reports `[]`
+      # where a count belongs has not found a clean bundle, it has not looked at one.
+      #
+      # `spike/` and not `diffsim/` because that is the order `m27_esbuild` searches, so this is the
+      # one the gate will actually pick up. lib.sh's rule held throughout — every one of these said
+      # "cannot run" and FAILED rather than printing a green zero — so the gate was honest about
+      # being blind. It was blind all the same, and its coverage here was notional.
+      - name: Install spike's packages (this is where the gate's esbuild lives)
+        working-directory: aztec-avm-runtime/spike
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tail -20
+
+      # THE SAME DEFECT AS THE STEP ABOVE, ONE TREE OVER — and the reason the step above says
+      # "spike/ and not diffsim/" is about ESBUILD, not about these. The gate's POSITIVE CONTROLS
+      # resolve from `diffsim/`: verify_browser_bundle_no_native_deps §6 asserts @aztec/native,
+      # @aztec/world-state and @aztec/telemetry-client ARE installed there and walks the graph from
+      # them, and verify_verification_code_unreachable_from_browser §5 walks
+      # diffsim/src/differential/three_way.test.ts. Both exist to prove the walker can answer the
+      # OTHER way — that it reports a native package when a graph really reaches one.
+      #
+      # Without diffsim/node_modules the bare specifiers do not resolve and the walks return 0 and
+      # 17 modules, so in run 34160613484 six control assertions reported an absence that is this
+      # job's own omission rather than a property of the tree:
+      #
+      #     FAIL @aztec/native IS installed in diffsim/   missing directory [.../diffsim/node_modules/@aztec/native]
+      #     FAIL …and it is a real walk rather than an empty one   expected >= 50, got [0]
+      #     FAIL the walker DOES report @aztec/native when a graph really reaches it   expected [1], got [0]
+      #     FAIL …and it is a real walk, not an empty one   expected >= 500, got [17]
+      #
+      # A control that reads 0 because nothing was installed is not evidence the detector works; it
+      # is the detector never having been asked. `spike/` declares the same three packages but is
+      # not a substitute — diffsim's own test file is the entry point the second check names.
+      - name: Install diffsim's packages (this is where the gate's POSITIVE controls resolve)
+        working-directory: aztec-avm-runtime/diffsim
         shell: bash
         run: dev-exec npm ci 2>&1 | tail -20
 

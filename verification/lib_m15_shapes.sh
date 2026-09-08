@@ -192,7 +192,11 @@ m15_native_configure_incremental() { # <tree> <bdir> [args...]
     cd "$tree/barretenberg/cpp" || exit 90
     export LD_LIBRARY_PATH="/usr/lib:${LD_LIBRARY_PATH:-}"
     if [ ! -d src/barretenberg/nodejs_module/node_modules ]; then
-      ( cd src/barretenberg/nodejs_module && yarn install ) || exit 92
+      # YARN_ENABLE_IMMUTABLE_INSTALLS: see m6_native_configure in
+      # lib_avm_wasm.sh for why this is set and what happens without it.
+      ( cd src/barretenberg/nodejs_module \
+          && YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install ) \
+        || { echo "### yarn bootstrap FAILED in nodejs_module — cmake was never reached"; exit 92; }
     fi
     cmake --preset default -B "$bdir" -DAVM_TRANSPILER_LIB= \
       -DCMAKE_C_COMPILER="$(command -v clang)" -DCMAKE_CXX_COMPILER="$(command -v clang++)" \
@@ -321,7 +325,11 @@ m15_build_bench() { # <tree> <build-dir-name>
   local log="$tree/m15-bench.log"
   m6_in_devshell '
     tree="$1"; src="$2"; bdir="$3"; outname="$4"
-    cd "$tree/barretenberg/cpp" || exit 90
+    # 94, NOT 90. Three separate things spelled 90 and the assertion could not tell them apart:
+    # this cd, the cd to FORK_ROOT inside m6_in_devshell, and the binary-not-executable return
+    # in m15_run_bench. Run 34160613484 reported 90 here and it was read as the third, which
+    # does not even run in this path.
+    cd "$tree/barretenberg/cpp" || { echo "### cannot cd to $tree/barretenberg/cpp"; exit 94; }
     flags="$(python3 - "$bdir/compile_commands.json" <<PY
 import json, shlex, sys
 db = json.load(open(sys.argv[1]))
@@ -347,9 +355,14 @@ PY
     libs=""
     for a in "$bdir"/lib/*.a; do libs="$libs $a"; done
     [ -n "$libs" ] || { echo "### no static libraries in $bdir/lib"; exit 92; }
+    # Same missing -L as M14's probe: barretenberg's ExternalProject leaves
+    # liblmdb.a inside the LMDB checkout under the build directory, and it is in
+    # neither $bdir/lib nor the dev shell. See lib_m14_world_state.sh.
+    lmdbdir="$bdir/_deps/lmdb/src/lmdb_repo/libraries/liblmdb"
+    [ -f "$lmdbdir/liblmdb.a" ] || { echo "### no liblmdb.a under $lmdbdir"; exit 93; }
     # shellcheck disable=SC2086
     clang++ $flags "$src" -o "$bdir/$outname" \
-      -Wl,--start-group $libs -Wl,--end-group -llmdb -lpthread 2>&1
+      -Wl,--start-group $libs -Wl,--end-group -L"$lmdbdir" -llmdb -lpthread 2>&1
     rc=$?
     echo "### bench_cc_rc=$rc"
     exit $rc

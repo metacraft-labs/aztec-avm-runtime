@@ -161,7 +161,19 @@ for arm in base ext; do
   assert_eq "$arm: and world_state_reference built" "0" "$M14_NATIVE_BUILD_RC"
   assert_file "$arm: the library is on disk" "$t/barretenberg/cpp/$M14_NATIVE_BUILD/lib/libworld_state_reference.a"
   m15_build_bench "$t"
-  assert_eq "$arm: the benchmark compiled against that tree" "0" "$?"
+  M15_BENCH_CC_RC=$?
+  # M14'S CALLER DOES THIS AND M15'S NEVER DID, WHICH IS WHY THIS ASSERTION HAS BEEN A BARE
+  # NUMBER. `m15_build_bench` sends every word of its own diagnosis — the `### bench_cc_rc=`
+  # line, `### no static libraries in`, `### no liblmdb.a under`, the compile-database error,
+  # and the whole of clang's stderr — to `$tree/m15-bench.log`, and NOTHING IN THIS REPOSITORY
+  # EVER READS THAT FILE. The artefact step collects `m15-work/*.txt`, not this. So run
+  # 34160613484 reported `expected [0], got [90]` with no compiler output anywhere, and 90 is
+  # ambiguous besides: it is `cd` failing in this library, `cd $FORK_ROOT` failing inside
+  # `m6_in_devshell`, and `m15_run_bench`'s "binary not executable", all at once. cf.
+  # verify_block_level_gap_audit_complete.sh, which tails M14's probe log on failure.
+  assert_eq "$arm: the benchmark compiled against that tree" "0" "$M15_BENCH_CC_RC"
+  [ "$M15_BENCH_CC_RC" -eq 0 ] || note "$arm: bench build rc=$M15_BENCH_CC_RC; tail of $t/m15-bench.log:
+$(tail -30 "$t/m15-bench.log" 2>/dev/null || echo '(the log does not exist — the devshell wrapper never ran the script)')"
   assert_file "$arm: and its binary is there" "$(m15_bench_bin "$t")"
 done
 # The two binaries are not the same program, which is what makes comparing them a comparison. This

@@ -22,7 +22,15 @@ cd "$tree/barretenberg/cpp" || exit 90
 export LD_LIBRARY_PATH="/usr/lib:${LD_LIBRARY_PATH:-}"
 
 if [ ! -d src/barretenberg/nodejs_module/node_modules ]; then
-  ( cd src/barretenberg/nodejs_module && yarn install ) || exit 92
+  # YARN_ENABLE_IMMUTABLE_INSTALLS: see m6_native_configure in
+  # verification/lib_avm_wasm.sh for why this is set and what happens without
+  # it. Short version: Yarn Berry turns immutable installs on by itself when $CI
+  # is set, the dev shell's yarn 4.14.1 wants to migrate upstream's format-8
+  # lockfile to format 9, and an immutable install refuses (YN0028) — so on a
+  # runner this exits 92 and cmake below is never reached.
+  ( cd src/barretenberg/nodejs_module \
+      && YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install ) \
+    || { echo "### yarn bootstrap FAILED in nodejs_module — cmake was never reached"; exit 92; }
 fi
 
 echo "### tree: $tree"

@@ -109,8 +109,21 @@ export class GuardedMerkleTreeOperations implements MerkleTreeWriteOperations {
   public getRevision(): WorldStateRevision {
     return this.target.getRevision();
   }
+  // THE SIXTH OF M18'S SIX TYPE ERRORS, and the only one not about this repository's own code.
+  // `getIpcPath` is a real method on upstream's `MerkleTreeWriteOperations` — this vendored file is
+  // a faithful copy of a revision that has it, and `resident_merkle_operations.ts` implements it
+  // too (as a deliberate refusal: the world state is resident, so there is no IPC path to give).
+  // The PINNED @aztec/stdlib tarball that `just typecheck-orchestration` resolves is older and its
+  // interface does not declare it, so `this.target.getIpcPath()` is TS2339 against the pin while
+  // being correct against the source this file was taken from.
+  //
+  // Deleting the method would be the wrong repair twice over: it would diverge this vendored copy
+  // from upstream, and `wasm_avm_public_tx_simulator.ts` and `avm_inputs.ts` both document reading
+  // an IPC path through this surface. So the pin gap is narrowed HERE, at the one delegation that
+  // spans it, rather than widened into the class's declared interface. When the pin moves forward
+  // to a stdlib that declares `getIpcPath`, this cast becomes redundant and can go.
   public getIpcPath(): string {
-    return this.target.getIpcPath();
+    return (this.target as MerkleTreeWriteOperations & { getIpcPath(): string }).getIpcPath();
   }
   getSiblingPath<ID extends MerkleTreeId>(treeId: ID, index: bigint): Promise<SiblingPath<TreeHeights[ID]>> {
     return this.guardAndPush(() => this.target.getSiblingPath(treeId, index));

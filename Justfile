@@ -1092,6 +1092,7 @@ verify-m12:
     #!/usr/bin/env bash
     set -uo pipefail
     rc=0
+    precond=0
     for check in \
       verify_avm_wasm_import_surface \
       verify_avm_wasm_size_budget \
@@ -1102,14 +1103,31 @@ verify-m12:
       test_prepared_tree_rejects_stale_inputs
     do
       echo "=== $check"
-      verification/"$check".sh || rc=1
+      verification/"$check".sh
+      st=$?
+      case "$st" in
+        0) ;;
+        # test_avm_reactor_step_stream_batching spends 3 on m9_require_idle_machine's
+        # PRECONDITION — the machine was too busy to take a timing on. Same triage as
+        # verify-m9, and for the same reason: collapsing it into 1 is exactly what makes
+        # this target print a bare "FAILED" with no FAIL line anywhere above it, which is
+        # this campaign's dominant defect. The target still exits non-zero.
+        3|4) echo "verify-m12: $check exited $st — a measurement PRECONDITION, not a failure" >&2
+             precond=1 ;;
+        *) echo "verify-m12: $check FAILED (exit $st)" >&2
+           rc=1 ;;
+      esac
     done
     if [ "$rc" -ne 0 ]; then
       echo "verify-m12: FAILED" >&2
+      exit 1
+    elif [ "${precond:-0}" -ne 0 ]; then
+      echo "verify-m12: PRECONDITION UNMET — no check failed, and at least one could not measure" >&2
+      exit 4
     else
       echo "verify-m12: all checks passed"
     fi
-    exit "$rc"
+    exit 0
 
 # ---------------------------------------------------------------------------
 # M13 — the shippable contract DB and checkpoint coordination.

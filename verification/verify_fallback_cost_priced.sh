@@ -57,6 +57,74 @@ trap 'rm -rf "$SCRATCH"' EXIT
 
 note "node: $(node --version 2>/dev/null)"
 
+# WHY A SIGNAL IS REPORTED AS A SIGNAL, AND WHY THE CPU FLAGS ARE PRINTED HERE.
+#
+# In run 33941133790 both node probes below died with status 132 and produced NOTHING on stdout or
+# stderr, and this check reported it as `expected [1], got [132]` against an assertion about a
+# TypeError. 132 is 128+4 = SIGILL: the process did not fail, it was killed, and no assertion about
+# what it printed can mean anything once that has happened.
+#
+# WHAT KILLS IT. The probes import `@aztec/kv-store/lmdb-v2` and `@aztec/merkle-tree`; that chain
+# reaches `@aztec/foundation` and dlopens `@aztec/bb.js/build/<platform>/nodejs_module.node` —
+# twice, because @aztec/merkle-tree carries its own nested copy of bb.js. Traced on this machine
+# with a `process.dlopen` hook, the loads happen DURING the import chain, before the probe's first
+# `console.log`, which is exactly why CI saw empty output.
+#
+# The linux binary that gets loaded there — `build/amd64-linux/nodejs_module.node`, selected by
+# bb.js's own platform.js for `x86_64-linux` — was disassembled: 54,093 ADX and BMI2 instructions
+# (`adcx`, `adox`, `mulx`) plus AVX/AVX2 throughout, and ZERO `cpuid` instructions and ZERO IFUNC
+# relocations. There is no runtime CPU dispatch in it at all.
+#
+# AND IT IS NOT A PACKAGING ACCIDENT — IT IS BARRETENBERG'S DECLARED BASELINE, WHICH MAKES THIS
+# ONE CAUSE RATHER THAN TWO. `barretenberg/cpp/cmake/arch.cmake` in the fork reads, in full:
+#
+#     if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+#         add_compile_options(-march=skylake)
+#     endif()
+#
+# unconditional, no detection, no dispatch, with upstream's own comment "Target skylake on x86 for
+# AVX2 etc." So EVERY x86_64 barretenberg binary requires a Skylake-class CPU — the npm prebuild
+# loaded here, and equally anything the runner compiles for itself.
+#
+# THE CONTROL, from run 34052439806 on PR #3, which is what turns this from a hypothesis into a
+# reading. With the yarn/92 fault fixed, `native-versus-wasm differential` got all the way through:
+#
+#     ok   the native configure exits 0  [0]
+#     ok   the native build exits 0  [0]
+#     ok   the native build compiles the driver exactly once  [1]
+#     bash: 10496 Illegal instruction   timeout ... "$bin"
+#     FAIL the native driver exits 0  expected [0], got [132]
+#     ok   the wasm driver exits 0 on V8, running the SHIPPED binary unmodified  [0]
+#
+# A binary the runner compiled with its own compiler, moments earlier, is killed by SIGILL on that
+# same runner — while the SAME program built for wasm, where `-march=skylake` does not apply, exits
+# 0. Same logic, same inputs, two ISA baselines, and only the x86 one dies.
+#
+# That is a property of the machine meeting an upstream build choice, not a defect in this
+# repository, and no edit here can fix it: the npm addon above is shipped prebuilt, so even
+# overriding `-march` for our own builds would leave M16 dead. What fixes it is a runner whose CPU
+# has AVX2/BMI2/ADX. The line below is the measurement that names which flag is missing, so the
+# next run reports a cause instead of a bare 132.
+if [ -r /proc/cpuinfo ]; then
+  note "cpu: $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+  for feat in adx bmi1 bmi2 avx avx2; do
+    if grep -q -w "$feat" /proc/cpuinfo 2>/dev/null; then
+      note "cpu flag $feat: present"
+    else
+      note "cpu flag $feat: ABSENT — @aztec/bb.js's amd64-linux addon needs it and does not check for it"
+    fi
+  done
+fi
+
+# Report a signal death as a signal rather than as a status. `kill -l N` names it.
+m16_note_if_signalled() { # <what> <rc> <errfile>
+  [ "$2" -gt 128 ] 2>/dev/null || return 0
+  note "$1 was KILLED by SIG$(kill -l "$(( $2 - 128 ))" 2>/dev/null || echo "?$(( $2 - 128 ))") — it did not exit $2"
+  note "  stdout and stderr below are whatever it managed to write before dying (often nothing)"
+  [ -s "$3" ] && tail -20 "$3" >&2
+  return 0
+}
+
 # ---------------------------------------------------------------------------
 echo "== 1. the artefact being priced is the one pins.json declares"
 # ---------------------------------------------------------------------------
@@ -295,6 +363,7 @@ ADAPTER_ERR="$SCRATCH/adapter.err"
 ( cd "$M16_PROBE_DIR" && node m16_adapter_probe.mjs ) >"$ADAPTER_OUT" 2>"$ADAPTER_ERR"
 ADAPTER_RC=$?
 note "the adapter probe exited $ADAPTER_RC"
+m16_note_if_signalled "the adapter probe" "$ADAPTER_RC" "$ADAPTER_ERR"
 
 assert_eq "the March-2026 package still fails against the June-2026 store" "1" "$ADAPTER_RC"
 assert_contains "and it fails with the exact error M16 records" \
@@ -320,6 +389,7 @@ HAZ="$SCRATCH/hazard.txt"
 ( cd "$M16_PROBE_DIR" && node m16_hazard.mjs ) >"$HAZ" 2>"$SCRATCH/hazard.err"
 HAZ_RC=$?
 if [ "$HAZ_RC" -ne 0 ]; then
+  m16_note_if_signalled "the hazard measurement" "$HAZ_RC" "$SCRATCH/hazard.err"
   tail -20 "$SCRATCH/hazard.err" >&2
   die "the hazard measurement exited $HAZ_RC"
 fi

@@ -386,8 +386,12 @@ fixed = ("      - name: Setup Dev Environment\n"
          "          env-flavor: nix\n"
          "          gh-token: ${{ steps.app-token.outputs.token }}\n")
 broken = fixed.replace("          gh-token: ${{ steps.app-token.outputs.token }}\n", "")
-# The last three occurrences are differential-oracle, form-a-external-transactions and
-# browser-gate, in file order — the three jobs the run failed in.
+# THIS IS A POSITIONAL MUTATION, NOT A NAMED ONE: it strips the token from whichever three
+# occurrences come LAST in file order, so the expected set below moves whenever a job lands near
+# the end of the workflow. In file order the last three are now form-a-external-transactions
+# (2123), noir-call-frames (2341) and browser-gate (2464) — `noir-call-frames` landed in 255a61e
+# and displaced `differential-oracle` (1921) out of the window. That is the same commit whose
+# thirteenth job made the count below stale; cf5afd8 moved the count and left this list behind.
 parts = src.split(fixed)
 if len(parts) >= 4:
     src = fixed.join(parts[:-3]) + broken.join([parts[-4]] + list(parts[-3:]))
@@ -421,10 +425,16 @@ print("\n".join(out))
 PY
 )"
 rm -f "$WF_BROKEN"
-assert_eq "the same scanner still sees twelve steps in the reverted copy" "12" \
+# THIRTEEN, NOT TWELVE, AND THE NUMBER IS RAISED BECAUSE THE FILE GREW.
+# `noir-call-frames` landed in 255a61e as the workflow's thirteenth job, correctly carrying its own
+# `gh-token:`. Every neighbouring assertion in this section reads the count dynamically and passed
+# at 13; only this control kept a frozen copy of it and failed at `expected [12], got [13]`. The
+# scanner is right and the literal was stale — so the literal moves to meet the scanner, never the
+# other way round.
+assert_eq "the same scanner still sees thirteen steps in the reverted copy" "13" \
   "$(printf '%s\n' "$STEP_TOKENS_BROKEN" | grep -c . || true)"
-assert_eq "…and reports exactly the three jobs run 33489777448 failed in" \
-  "browser-gate differential-oracle form-a-external-transactions" \
+assert_eq "…and names exactly the three jobs whose token the mutation removed" \
+  "browser-gate form-a-external-transactions noir-call-frames" \
   "$(printf '%s\n' "$STEP_TOKENS_BROKEN" | awk '$4 != "yes" { print $1 }' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ *$//')"
 
 echo "== 5. no check in the gate can report success without having run"

@@ -323,6 +323,13 @@ assert_true "but M7's FIFTH is not M9's fifth — the observer patch is inserted
 # ---------------------------------------------------------------------------
 LOCKDIR="$SCRATCH/lockdir"
 mkdir -p "$LOCKDIR"
+# `require_work_dir` reports the directory it refuses as `pwd -P` of it, so the refusal names the
+# CANONICAL path. $LOCKDIR is not necessarily canonical: on the self-hosted runners the work root
+# arrives as `/var/lib/github-runner-work/mcl-001//.cache/...`, doubled slash and all, and grepping
+# for that spelling against a message carrying the collapsed one fails while everything it is meant
+# to check is working. Keep passing the UNCANONICALISED $LOCKDIR to the holder and the taker — that
+# is what exercises the canonicalisation — and match on this.
+LOCKDIR_CANON="$(cd "$LOCKDIR" && pwd -P)"
 LOCKLIB="$VERIFY_DIR/lib.sh"
 holder="$SCRATCH/lock-holder.sh"
 taker="$SCRATCH/lock-taker.sh"
@@ -385,7 +392,7 @@ TAKER_RC=$?
 assert_eq "an INDEPENDENT second run is refused, and not with a zero status" "1" "$TAKER_RC"
 assert_eq "it took nothing" "0" "$(grep -c 'taker-took-it' "$SCRATCH/taker.out" || true)"
 assert_true "the refusal names the directory" \
-  grep -q "another run already holds this work directory: $LOCKDIR" "$SCRATCH/taker.err"
+  grep -q "another run already holds this work directory: $LOCKDIR_CANON" "$SCRATCH/taker.err"
 assert_true "and names who holds it, by pid and by check" \
   grep -qE "held by: pid $HOLDER_PID  check lock_holder" "$SCRATCH/taker.err"
 assert_true "and says what goes wrong when two runs share one, so the reader can act on it" \
