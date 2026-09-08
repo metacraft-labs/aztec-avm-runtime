@@ -325,7 +325,11 @@ m15_build_bench() { # <tree> <build-dir-name>
   local log="$tree/m15-bench.log"
   m6_in_devshell '
     tree="$1"; src="$2"; bdir="$3"; outname="$4"
-    cd "$tree/barretenberg/cpp" || exit 90
+    # 94, NOT 90. Three separate things spelled 90 and the assertion could not tell them apart:
+    # this cd, the cd to FORK_ROOT inside m6_in_devshell, and the binary-not-executable return
+    # in m15_run_bench. Run 34160613484 reported 90 here and it was read as the third, which
+    # does not even run in this path.
+    cd "$tree/barretenberg/cpp" || { echo "### cannot cd to $tree/barretenberg/cpp"; exit 94; }
     flags="$(python3 - "$bdir/compile_commands.json" <<PY
 import json, shlex, sys
 db = json.load(open(sys.argv[1]))

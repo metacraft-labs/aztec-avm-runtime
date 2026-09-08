@@ -174,7 +174,11 @@ m6_in_devshell() {
   local script="$1"; shift
   local st raw
   st="$(mktemp)"; raw="$(mktemp)"
-  ( cd "$FORK_ROOT" || exit 90
+  # The 90 is kept — callers compare against 0, and changing it would be a wider edit than this
+  # is worth — but it now SAYS which 90 it is. It goes to stderr, which the caller's own
+  # redirection carries, because this subshell's stdout is filtered by the sentinel awk below and
+  # anything printed before the sentinel is discarded by design.
+  ( cd "$FORK_ROOT" || { echo "### m6_in_devshell: cannot cd to FORK_ROOT=$FORK_ROOT" >&2; exit 90; }
     nix develop --command bash -uo pipefail \
       -c "printf '%s\n' '$M6_SENTINEL'; $script" bash "$@"
     echo $? >"$st" ) >"$raw"
