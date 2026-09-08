@@ -1694,6 +1694,11 @@ jobs:
         run: dev-exec npm ci 2>&1 | tail -20
 
       - name: Build avm.wasm and run the node-host checks
+        # The id is read by the publication manifest below. These runners are PERSISTENT, so a
+        # module left in the build directory by an earlier run outlives a build that failed today;
+        # recording this step's outcome beside the binary is what lets a consumer tell the two
+        # apart instead of trusting a file that happens to exist.
+        id: build-m17
         working-directory: aztec-avm-runtime
         env:
           # Not $TMPDIR: the builds are several gigabytes and a tmpfs /tmp is the wrong place. Its
@@ -1725,6 +1730,272 @@ jobs:
         with:
           name: node-host
           path: artifacts-m17
+          retention-days: 30
+
+      # -----------------------------------------------------------------------------------------
+      # THE ARTEFACT ITSELF — the step this workflow has never had.
+      #
+      # MEASURED, 2026-09-08, over the COMPLETE population. Every workflow run this repository has
+      # ever recorded was enumerated with
+      #     gh api repos/metacraft-labs/aztec-avm-runtime/actions/runs --paginate
+      # which returned 164 runs: 131 of AVM_WASM (workflow id 340399221), 31 of `Downstream carry`,
+      # 2 of `CI token probe`. Of the 131: 62 failure, 69 cancelled, 0 SUCCESS — on `dev` (121
+      # runs: 56 failure, 65 cancelled), on `fix/cmake-preset-92` (6), on `fix/devshell-just` (3)
+      # and on `fix/mga-main-to-dev` (1). Not one run, on any branch, ever.
+      #
+      # AND IT IS WORSE THAN A RED JOB. Grepping every collect step in this file for a `*.wasm`
+      # glob returns nothing. Every artifact this workflow uploads is a transcript, a log or a
+      # `measured.env`. So the runs whose BUILD was green — this job succeeded at run 34223523142
+      # on `gpu-server-001-mcl-003`, with `verify-m17: all checks passed` — still left `avm.wasm`
+      # on the runner's disk and discarded it with the workspace. Downstream (blocktracer's
+      # follower, whose `avmWasm` therefore defaults to null) had nothing to point at. A transcript
+      # of a run that loaded the module is not the module.
+      #
+      # WHY THIS JOB AND NOT M12'S, WHOSE SUBJECT `avm.wasm` NOMINALLY IS. Both build the same
+      # nine-patch tree and both write the same `bin/avm.wasm`. This one is the one that is GREEN.
+      # Publishing from a job that passes is the difference between an artefact and a hope, and
+      # nothing here is weakened or skipped to arrange that — M12's job is left exactly as it is,
+      # red, and can publish too on the day it goes green.
+      #
+      # THE PATH IS READ FROM A MEASUREMENT, NOT GUESSED. `m17-measured.env`, downloaded from the
+      # `node-host` artifact of run 34223523142, records it verbatim:
+      #
+      #     M17_WASM=<workspace>/m17-work/m12/barretenberg/cpp/build-wasm-avm/bin/avm.wasm
+      #     M17_IMPORT_COUNT=12
+      #     M17_MIN_PAGES=130
+      #
+      # which is `lib_m12_reactor.sh`'s `m12_wasm_bin` evaluated with `M12_WORK` pointed at
+      # `M17_WORK` — the M17->M12->M9->M8->M7->M6 chain `lib_m17_node_host.sh` sets up.
+      #
+      # IT PRINTS WHAT EXPLAINS ITS OWN FAILURE. A collect step that finds nothing and says nothing
+      # is how this campaign has repeatedly turned a red into an unreadable one. If no module is
+      # there, this step lists the build directory it looked in AND every `*.wasm` anywhere under
+      # the work directory, so the red distinguishes "the build never ran" from "the build ran and
+      # produced nothing" from "it landed somewhere else".
+      - name: Stage avm.wasm and its provenance for publication
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          BIN="${{ github.workspace }}/m17-work/m12/barretenberg/cpp/build-wasm-avm/bin"
+          DIST="${{ github.workspace }}/avm-wasm-dist"
+          # THESE RUNNERS ARE PERSISTENT — the workspace, and everything staged in it, survives to
+          # the next run. Without this the artifact would silently accumulate, and a build that
+          # produced nothing today would publish yesterday's module. The `case` is a guard: an
+          # empty `github.workspace` would otherwise make this `rm -rf /avm-wasm-dist`.
+          case "$DIST" in
+            */avm-wasm-dist) rm -rf -- "$DIST" ;;
+            *) echo "::error::refusing to clear an unexpected staging path: '$DIST'"; exit 1 ;;
+          esac
+          mkdir -p "$DIST"
+
+          # `avm.wasm*` and NOT `*.wasm`, and the narrowing is deliberate rather than timid. The
+          # same `bin/` holds the two size CONTROLS the budget check measures against
+          # (`avm-unpruned.wasm` 1.9 MB, `avm-nogc.wasm` 2.7 MB), the unstripped
+          # `avm-reactor-debug.wasm` at 10 MB, and `barretenberg.wasm` at 18 MB — 34 MB of things
+          # no consumer wants, uploaded on every run, with the one file that matters buried among
+          # them. This glob is the deliverable and its gzip, nothing else; REACTOR-ABI.md already
+          # records the controls' sizes, and their own sizes go in the manifest below without
+          # shipping them. It is still a GLOB, so a `.gz` that stops being produced is visible
+          # rather than a hard-coded path that starts failing.
+          shopt -s nullglob
+          modules=("$BIN"/avm.wasm*)
+          shopt -u nullglob
+
+          if [ "${#modules[@]}" -eq 0 ]; then
+            echo "::error::no avm.wasm* under $BIN — there is nothing to publish. The listings below are the evidence, so this red says WHICH of the three things went wrong."
+            echo "--- ls -la $BIN"
+            ls -la "$BIN" 2>&1 || echo "(that build directory does not exist)"
+            echo "--- every *.wasm anywhere under the M17 work directory"
+            # `-exec ls -la {} +` and NOT `-printf`: `-printf` is a GNU extension, and when it is
+            # unavailable `find` fails with `unknown primary`, which a trailing `|| echo "(no work
+            # directory)"` then reports as an ABSENT DIRECTORY. That is this campaign's recurring
+            # defect — a diagnostic that fails and prints the wrong explanation — inside the very
+            # step whose job is to explain a failure. The status is captured and named instead.
+            W="${{ github.workspace }}/m17-work"
+            if [ -d "$W" ]; then
+              find "$W" -name '*.wasm' -exec ls -la {} + 2>&1 | head -50
+              echo "(find exited $?)"
+            else
+              echo "(there is no work directory at $W, so the build never started)"
+            fi
+            exit 1
+          fi
+
+          # The glob could match only `avm.wasm.gz`. The module itself is the deliverable, so its
+          # absence is named rather than left to `if-no-files-found`, which cannot tell a
+          # half-empty artifact from a full one.
+          if [ ! -f "$BIN/avm.wasm" ]; then
+            echo "::error::the glob matched ${modules[*]} but not $BIN/avm.wasm itself — the module is the deliverable"
+            ls -la "$BIN" 2>&1
+            exit 1
+          fi
+
+          cp -v "${modules[@]}" "$DIST"/
+
+          # PROVENANCE, so a downloaded module can be tied back to the tree that produced it. A
+          # bare binary in a zip is not a supply chain.
+          {
+            echo "# avm.wasm publication manifest — .github/workflows/avm-wasm.yml, job node-host"
+            echo "repository      ${{ github.repository }}"
+            echo "run_id          ${{ github.run_id }}"
+            echo "run_attempt     ${{ github.run_attempt }}"
+            echo "ref             ${{ github.ref }}"
+            echo "commit          ${{ github.sha }}"
+            echo "runner          ${RUNNER_NAME:-unknown}"
+            echo "staged_at       $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            # NOT the same thing as staged_at, and the difference is the point: on a persistent
+            # runner a module can predate the run that publishes it.
+            echo "module_mtime    $(date -u -r "$BIN/avm.wasm" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)"
+            echo "build_outcome   ${{ steps.build-m17.outcome }}"
+            echo "aztec_packages  $(git -C "${{ github.workspace }}/aztec-packages" rev-parse HEAD 2>/dev/null || echo unknown)"
+            echo "prepared_tree   $(git -C "${{ github.workspace }}/m17-work/m12" rev-parse HEAD 2>/dev/null || echo unknown)"
+            echo "cmake_preset    wasm-avm (build-wasm-avm)"
+            echo "# sizes in the same bin/, recorded rather than shipped — the size budget's own"
+            echo "# controls and the artefact they are compared against (see REACTOR-ABI.md)."
+            for sib in avm.wasm avm.wasm.gz avm-unpruned.wasm avm-nogc.wasm avm-reactor-debug.wasm barretenberg.wasm; do
+              if [ -f "$BIN/$sib" ]; then
+                echo "size.$sib $(stat -c %s "$BIN/$sib")"
+              else
+                echo "size.$sib absent"
+              fi
+            done
+          } > "$DIST/MANIFEST.txt"
+
+          # The M17 measurement and the import census travel WITH the binary, so a consumer can
+          # check the module it holds against the numbers the job asserted about it.
+          cp "${{ github.workspace }}/m17-work/m17-measured.env" "$DIST/" 2>/dev/null || true
+          cp "${{ github.workspace }}/m17-work/node-host.imports" "$DIST/" 2>/dev/null || true
+
+          # avm.wasm is byte-reproducible across build directories (REACTOR-ABI.md records the
+          # property and verify_avm_wasm_size_budget re-derives the gzip with `gzip -9 -n`), so
+          # these hashes are pinnable — which is what a `fetchurl` in a consumer's flake needs.
+          ( cd "$DIST" && shopt -s nullglob && sha256sum -- avm.wasm* > SHA256SUMS )
+          echo "--- SHA256SUMS"
+          cat "$DIST/SHA256SUMS"
+          echo "--- MANIFEST.txt"
+          cat "$DIST/MANIFEST.txt"
+          ls -la "$DIST"
+
+      # THE STRUCTURAL GATE ON WHAT IS ABOUT TO BE PUBLISHED, and it exists because the ONE
+      # `avm.wasm` blob committed to this repository is wrong in precisely the way this asserts
+      # against. `vm2wasm/avm.wasm` (1,259,737 bytes, tracked) has 11 imports and no memory among
+      # them: it EXPORTS `memory` instead. A wasip1 *command* linked the default way does that; a
+      # REACTOR that the node host drives does not, because `node-host/src/loader.ts` and
+      # `verification/wasm_host/avm_reactor_host.mjs` SUPPLY `env.memory`. A module that exports
+      # its memory therefore fails to link against this repository's own loaders, and shipping one
+      # to blocktracer would reproduce that defect downstream where it is far harder to see.
+      #
+      # READ THROUGH V8's MODULE REFLECTION, not by parsing the binary, for the reason
+      # `lib_m12_reactor.sh` gives for its own `m12_wasm_module_imports`: what matters is what an
+      # engine sees when it links the module. The magic and version ARE read from the bytes, since
+      # `new WebAssembly.Module` on a non-module throws a message that does not distinguish "not
+      # wasm at all" from "wasm this engine rejects".
+      #
+      # `dev-exec node` — `node` is `nodejs_24` in the dev shell (flake.nix), and
+      # `verify_devshell_provides_ci_commands` joins the set of commands the workflows hand to
+      # `dev-exec` against that shell's PATH, so this spelling is covered by an existing check.
+      - name: Assert the staged avm.wasm is a reactor that IMPORTS its memory
+        if: always()
+        working-directory: aztec-avm-runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "${RUNNER_TEMP}/assert_avm_wasm.mjs" <<'MJS'
+          import { readFileSync } from "node:fs";
+
+          const path = process.argv[2];
+          // `if: always()` means this step also runs when STAGING failed, and an unguarded
+          // readFileSync then prints a node ENOENT stack — a red about this script rather than
+          // about the artefact, and one that reads as if the check itself is broken. Say which
+          // it is.
+          let bytes;
+          try {
+            bytes = readFileSync(path);
+          } catch (e) {
+            console.log(
+              `::error::there is nothing staged at ${path}, so the module could not be checked. ` +
+                `Read the staging step above: it lists the build directory and every *.wasm under ` +
+                `the work directory. (${e.code ?? e})`,
+            );
+            process.exit(1);
+          }
+          const problems = [];
+
+          const magic = Array.from(bytes.subarray(0, 4));
+          if (magic.join(",") !== "0,97,115,109")
+            problems.push(`magic is [${magic}], not \\0asm — this is not a WebAssembly module`);
+          const version = bytes.length >= 8 ? bytes.readUInt32LE(4) : -1;
+          if (version !== 1)
+            problems.push(`binary format version is ${version}, not 1`);
+
+          // A THROW HERE IS A FINDING, NOT A CRASH. Uncaught, `new WebAssembly.Module` prints a
+          // node stack trace and exits 1 — a red whose log is about this script rather than about
+          // the module. Measured on the committed vm2wasm/avm.wasm under node 20:
+          //   CompileError: invalid value type 'noexternref', enable with --experimental-wasm-gc
+          // which is a statement about the ARTEFACT and belongs in the annotation.
+          let mod;
+          try {
+            mod = new WebAssembly.Module(bytes);
+          } catch (e) {
+            console.log(`::error::the engine refuses to compile this module: ${e}`);
+            console.log(`  path ${path}, size ${bytes.length}, version ${version}`);
+            process.exit(1);
+          }
+          const imports = WebAssembly.Module.imports(mod);
+          const exports = WebAssembly.Module.exports(mod);
+          const importedMemory = imports.filter((i) => i.kind === "memory");
+          const exportedMemory = exports.filter((e) => e.kind === "memory");
+
+          console.log(`path      ${path}`);
+          console.log(`size      ${bytes.length}`);
+          console.log(`version   ${version}`);
+          console.log(`imports   ${imports.length}`);
+          for (const i of imports) console.log(`  import  ${i.module}.${i.name} (${i.kind})`);
+          console.log(`exports   ${exports.length}`);
+          for (const e of exports) console.log(`  export  ${e.name} (${e.kind})`);
+
+          if (importedMemory.length !== 1)
+            problems.push(
+              `expected exactly one IMPORTED memory, found ${importedMemory.length}. ` +
+                `A reactor the node host can drive imports env.memory; the committed ` +
+                `vm2wasm/avm.wasm blob does not, and this is the check that would have caught it.`,
+            );
+          else if (`${importedMemory[0].module}.${importedMemory[0].name}` !== "env.memory")
+            problems.push(
+              `the memory is imported as ${importedMemory[0].module}.${importedMemory[0].name}, ` +
+                `not env.memory, which is the name node-host/src/loader.ts supplies`,
+            );
+          if (exportedMemory.length !== 0)
+            problems.push(
+              `the module EXPORTS memory (${exportedMemory.map((e) => e.name).join(", ")}). ` +
+                `That is exactly how the committed vm2wasm/avm.wasm blob is wrong; the loaders ` +
+                `here supply the memory and would not link this.`,
+            );
+          for (const want of ["avm_simulate_with_hints", "avm_alloc", "avm_free"])
+            if (!exports.some((e) => e.name === want && e.kind === "function"))
+              problems.push(`the reactor ABI export ${want} is missing`);
+
+          if (problems.length) {
+            for (const p of problems) console.log(`::error::${p}`);
+            process.exit(1);
+          }
+          console.log("VERDICT: a wasm32 reactor that imports env.memory and exports the reactor ABI — publishable");
+          MJS
+          dev-exec node "${RUNNER_TEMP}/assert_avm_wasm.mjs" \
+            "${{ github.workspace }}/avm-wasm-dist/avm.wasm"
+
+      # `if-no-files-found: error` is the whole point: a publication step that silently uploads an
+      # empty artifact is the same failure as having no publication step, which is the state this
+      # workflow has been in for all 131 of its runs. `if: always()` so that a job which fails
+      # AFTER the build still ships the module it built.
+      - name: Publish avm.wasm
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: avm-wasm
+          path: avm-wasm-dist
+          if-no-files-found: error
           retention-days: 30
 
   orchestration:
