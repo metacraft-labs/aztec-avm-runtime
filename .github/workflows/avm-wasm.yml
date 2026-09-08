@@ -1894,8 +1894,34 @@ jobs:
           # Not $TMPDIR. Its own directory, not M12's or M17's, so no two jobs rebuild the tree
           # under each other.
           M18_WORK: ${{ github.workspace }}/m18-work
+        # `shell: bash` rather than the default `bash -e {0}`, which has no pipefail: piping into
+        # `tee` would otherwise hand the step `tee`'s status and a failing check would report green.
         shell: bash
-        run: dev-exec just verify-m18 2>&1 | tee verify-m18.log
+        run: |
+          set -euo pipefail
+          # BUILD FIRST, THEN NAME THE MODULE. This step's name has always said "Build avm.wasm";
+          # nothing in it ever did, and `just verify-m18` does not build either.
+          # `verify-halves-compose` is M18's ONE check that does: it points M17's and M12's work
+          # directories at $M18_WORK and drives M12's machinery, leaving the module at
+          # $M18_WORK/m12/barretenberg/cpp/build-wasm-avm/bin/avm.wasm. The five token/block checks
+          # only LOOK — `tb_find_module` (verification/lib_token_blocks.sh:49) tries
+          # $AVM_WASM_PATH, then $TB_WORK, then two hard-coded $HOME/.cache M13/M15 paths that are
+          # populated by OTHER JOBS ON OTHER MACHINES and that nothing here writes.
+          #
+          # So in run 34160613484 the first five checks passed with 283 assertions and the last
+          # five died identically at `cannot run: no built avm.wasm was found`, 0 assertions each.
+          # They had never executed before: the six TypeScript errors fixed in this branch were in
+          # `typecheck-orchestration`, an EARLIER step, so the job had never reached verify-m18.
+          #
+          # Naming the module this job already builds is the whole fix. M12's thirty-nine exports
+          # (lib_m12_reactor.sh:150) include all seven of TB_REQUIRED_EXPORTS, which is why
+          # lib_m22_block.sh:153 already lists this exact path as an acceptable candidate. No
+          # second tree and no second build: verify-m18 re-runs verify-halves-compose, and its
+          # m17_measured record short-circuits once the tree is materialised.
+          dev-exec just verify-halves-compose 2>&1 | tee verify-m18-build.log | tail -5
+          export AVM_WASM_PATH="${M18_WORK}/m12/barretenberg/cpp/build-wasm-avm/bin/avm.wasm"
+          test -s "$AVM_WASM_PATH" || { echo "::error::no module at $AVM_WASM_PATH" >&2; exit 1; }
+          dev-exec just verify-m18 2>&1 | tee verify-m18.log
 
       - name: Collect the round-trip transcript
         if: always()
@@ -2069,6 +2095,17 @@ jobs:
         shell: bash
         run: dev-exec npm ci 2>&1 | tail -20
 
+      # `verify_differential_containment` walks the SHIPPED import graph, and
+      # `orchestration/node_modules` is what it walks. Without it the check refuses —
+      # "cannot run: the orchestration's packages are not installed and the import graph cannot be
+      # walked" — and `die` prints no FAIL line and no assertion summary, so in run 34160613484 it
+      # vanished from the sweep rather than reading as red. The form-a job already carries this
+      # step; this job was written without it.
+      - name: Install the orchestration's published @aztec packages
+        working-directory: aztec-avm-runtime/orchestration
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tail -20
+
       - name: THE VERSION GAP (DD-12)
         working-directory: aztec-avm-runtime
         shell: bash
@@ -2080,9 +2117,34 @@ jobs:
       - name: Build avm.wasm and run the three-way differential
         working-directory: aztec-avm-runtime
         env:
+          # Not $TMPDIR: the build is several gigabytes and a tmpfs /tmp is the wrong place.
+          M12_WORK: ${{ github.workspace }}/m12-work
           M19_WORK: ${{ github.workspace }}/m19-work
         shell: bash
-        run: dev-exec just verify-m19 2>&1 | tee verify-m19.log
+        run: |
+          set -euo pipefail
+          # THIS STEP'S NAME HAS ALWAYS SAID "Build avm.wasm"; NOTHING IN IT EVER DID.
+          # `just verify-m19` does not build — `m19_find_module`
+          # (verification/lib_m19_differential.sh:43) only LOOKS: at $AVM_WASM_PATH, at $M19_WORK,
+          # and at three hard-coded ~/.cache trees belonging to OTHER MILESTONES, which in this
+          # workflow are other jobs on other machines. The job-start hook wipes the workspace, so
+          # on a runner none of the four candidates can exist.
+          #
+          # Run 34160613484 therefore refused four of seven checks with "cannot run: no built
+          # avm.wasm was found" and exited 1 in ELEVEN SECONDS having compared nothing — and `die`
+          # prints neither a FAIL line nor an assertion summary, so the job went red with no
+          # failing assertion anywhere in its log. The two checks that need no module passed.
+          #
+          # This is not the same defect as the `upstream` remote, which cf5afd8 fixed and which is
+          # verified green here: the fetch step above succeeds and verify_oracle_version_gap_reported
+          # passes on the fork's actual tip. This is the cause that was behind it.
+          #
+          # verify_avm_wasm_import_surface is M12's check that BUILDS, and M12's module carries all
+          # fifteen exports lib_m19_differential.sh requires (its own list is thirty-nine).
+          dev-exec just verify-reactor-imports 2>&1 | tee verify-reactor-imports.log | tail -20
+          export AVM_WASM_PATH="${M12_WORK}/m12/barretenberg/cpp/build-wasm-avm/bin/avm.wasm"
+          test -s "$AVM_WASM_PATH" || { echo "::error::no module at $AVM_WASM_PATH" >&2; exit 1; }
+          dev-exec just verify-m19 2>&1 | tee verify-m19.log
 
       - name: THE HEADLINE — differential comparisons, not tests
         if: always()
@@ -2593,6 +2655,31 @@ jobs:
       # being blind. It was blind all the same, and its coverage here was notional.
       - name: Install spike's packages (this is where the gate's esbuild lives)
         working-directory: aztec-avm-runtime/spike
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tail -20
+
+      # THE SAME DEFECT AS THE STEP ABOVE, ONE TREE OVER — and the reason the step above says
+      # "spike/ and not diffsim/" is about ESBUILD, not about these. The gate's POSITIVE CONTROLS
+      # resolve from `diffsim/`: verify_browser_bundle_no_native_deps §6 asserts @aztec/native,
+      # @aztec/world-state and @aztec/telemetry-client ARE installed there and walks the graph from
+      # them, and verify_verification_code_unreachable_from_browser §5 walks
+      # diffsim/src/differential/three_way.test.ts. Both exist to prove the walker can answer the
+      # OTHER way — that it reports a native package when a graph really reaches one.
+      #
+      # Without diffsim/node_modules the bare specifiers do not resolve and the walks return 0 and
+      # 17 modules, so in run 34160613484 six control assertions reported an absence that is this
+      # job's own omission rather than a property of the tree:
+      #
+      #     FAIL @aztec/native IS installed in diffsim/   missing directory [.../diffsim/node_modules/@aztec/native]
+      #     FAIL …and it is a real walk rather than an empty one   expected >= 50, got [0]
+      #     FAIL the walker DOES report @aztec/native when a graph really reaches it   expected [1], got [0]
+      #     FAIL …and it is a real walk, not an empty one   expected >= 500, got [17]
+      #
+      # A control that reads 0 because nothing was installed is not evidence the detector works; it
+      # is the detector never having been asked. `spike/` declares the same three packages but is
+      # not a substitute — diffsim's own test file is the entry point the second check names.
+      - name: Install diffsim's packages (this is where the gate's POSITIVE controls resolve)
+        working-directory: aztec-avm-runtime/diffsim
         shell: bash
         run: dev-exec npm ci 2>&1 | tail -20
 

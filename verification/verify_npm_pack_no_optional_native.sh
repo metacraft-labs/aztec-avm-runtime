@@ -76,15 +76,21 @@ HARNESS="diffsim drift probe-mt pxe-ref spike"
 echo "== 1. the shipped packages are exactly the three, measured over the tree"
 
 FOUND="$(cd "$REPO_ROOT" && git ls-files '*/package.json' | sed 's|/package.json$||' | LC_ALL=C sort | tr '\n' ' ')"
-# THE DECLARED LIST DELIBERATELY OMITS `replay`, AND THAT IS RECORDED RATHER THAN ABSORBED.
-# `replay/package.json` is the L0 track's fifth tree and this check has been red on it since M33.
-# The final-four pass added `pxe-ref` — upstream's own PXE, installed as M21's reference half and
-# shipped nowhere — and declared it here. Adding `replay` in the same edit would have turned another
-# track's standing red green as a side effect of this pass's own work, which is the collision
-# `CAMPAIGN-BRIEF.md` records this campaign paying for three times. So the pin names what this
-# campaign owns and the failure it reports is L0's, by name.
-assert_eq "the tracked package.json files are the three shipped plus the five harness trees" \
-  "ct-host diffsim drift node-host orchestration probe-mt pxe-ref spike " "$FOUND"
+# `replay` IS NOW DECLARED, AND IT IS A THIRD CATEGORY RATHER THAN A SIXTH HARNESS TREE.
+# The omission was deliberate while it belonged to another track: `replay/package.json` is the L0
+# track's tree, added in 541bf5f, and this check stood red on it from M33 so that the failure it
+# reported was L0's by name rather than absorbed by a pass that did not own it. That deferral is
+# now spent — it is the browser gate's blocking red, and the tree it names really is tracked, so
+# the literal moves to meet the tree exactly as the `13` on ci_browser_gate.sh's step count did.
+#
+# `replay` is NOT added to $HARNESS below, and that is the point of the wording. HARNESS drives the
+# "each declares a DD-9 package" loop, and `replay/package.json` declares NONE of @aztec/native,
+# @aztec/world-state or @aztec/telemetry-client — it is a private, ships-nowhere L0 node client
+# whose dependencies are @aztec/foundation, @aztec/protocol-contracts and @aztec/stdlib. Putting it
+# in HARNESS would fail that loop and would also be a false claim about what separates the harness
+# trees from the shipped ones. It is tracked, it is not shipped, and it is not a DD-9 harness.
+assert_eq "the tracked package.json files are the three shipped, the five harness trees, and replay" \
+  "ct-host diffsim drift node-host orchestration probe-mt pxe-ref replay spike " "$FOUND"
 for p in $SHIPPED; do
   assert_file "the shipped package $p has a manifest" "$REPO_ROOT/$p/package.json"
   assert_eq "…named under the runtime's own scope" "@aztec-avm-runtime/$p" \
