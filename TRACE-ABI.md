@@ -364,9 +364,24 @@ else can resolve is a local file wearing a pin's clothes.
 - **The module has zero wasm imports**, so it instantiates under a bare
   `WebAssembly.instantiate(bytes, {})` with no WASI shim, no `wasm-bindgen` and no glue file.
   `ct-host` has **no npm dependencies** and imports no Node module in its trace path.
-- **263,211 bytes** for the writer plus this ABI, release, `opt-level = "z"`, LTO,
+- **264,281 bytes** for the writer plus this ABI, release, `opt-level = "z"`, LTO,
   `panic = "abort"`, one codegen unit, stripped. Two clean builds (`rm -rf target`) are
-  byte-identical, sha256 `e94baceb…`.
+  byte-identical, sha256 `350f666f…`.
+
+  *Re-derived on 2026-09-10, when M41 put the writer behind a seam. The move is **263,211 ->
+  264,281**, and it is TWO separate movements which are stated separately because only one of them
+  is a change to this repository:*
+
+  - ***+317 with no source change at all.** A build of this crate at the commit that last recorded
+    263,211, in this environment, measures **263,528**. Nothing under `ct-writer/` has been touched
+    since — `git log ct-writer/src/lib.rs` stops at M40 — so the difference is the toolchain, and it
+    is recorded rather than absorbed into the figure below. A number that moved for a reason nobody
+    named is a number the next reader cannot use.*
+  - ***+753 for the seam itself,** 263,528 -> 264,281. `ct_writer_kind()` now answers from the
+    active backend rather than from a literal, and every writer call goes through
+    `CtWriterBackend`, whose error type is an owned `String` so a backend can say WHY it refused
+    rather than picking from a fixed list. The import count is unchanged at **0** and the export
+    count at **39**. See `WRITER-SEAM.md`.*
 
   *Re-derived on 2026-09-02, when M40 added the source-step surface: **262,693 -> 263,211, +518
   (+0.20 %)**, and the import count is unchanged at **0**. The growth is TWO exports —

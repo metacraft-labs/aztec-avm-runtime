@@ -2931,3 +2931,23 @@ Format spec: `~/ah/dev/agent-harbor/ah-lib/specs/Milestones-Files.md`.
   manual step via `submit/pr<N>-*.sh`; there are five such scripts.
 - **PR #22815** (Emscripten migration) is open and would delete what patch 2
   changes. Patches 1, 3, 4 are unaffected but for one shared file.
+- **The writer is a SEAM now, and the default did not move.** `ct-writer` has two feature-selected
+  backends — `path-a` (the pure-Rust `CtfsTraceWriter`, the default) and `path-b` (the Nim writer,
+  cross-compiled by `ct-writer/build.rs` at the new `trace_format_nim_writer` anchor) — and
+  `ct_writer_kind()` answers from the backend rather than from a literal, so the two builds
+  disagree. Both serve all **38** ABI functions, both report **0 imports and 39 exports**, both
+  instantiate against a literal `{}`, and Path B has been driven in a real headless Chrome.
+  **NEITHER OF THE TWO PINNED READERS READS BOTH CONTAINERS**: the reader anchor reads Path A's and
+  misreads Path B's without refusing, and the reader at the writer anchor reads Path B's and
+  REFUSES Path A's by name (`meta.dat` schema version 3 versus 4). That, and not anything about the
+  writers, is why the default is still Path A — flipping it needs a decision about the reader
+  anchor, which `pins.json` deliberately holds at a commit so
+  `test_ct_container_roundtrip_ct_print`'s difference stays at one. Everything measured is in
+  `WRITER-SEAM.md`, re-derived on the artefacts.
+- **A column delta is not a column, and the difference was invisible.** The Nim ABI's
+  `register_delta_column` takes a DELTA from a step that already sits at column 1, so passing the
+  column itself puts every step one column to the right. Nothing refuses that — a column one over
+  is a real position in a real line — and the container has exactly the right number of steps. It
+  was found by `e2e_runtime_traces_through_nim_writer` comparing the positions read back against
+  the positions the driver ASKED FOR, and by nothing else. A step COUNT would have passed. **When a
+  check can compare against what was requested rather than against a total, it must.**
