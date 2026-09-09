@@ -28,6 +28,21 @@
 #
 #   ct-split-probe @ pins.json trace_format_nim.commit          -- opens the SPLIT streams
 #
+# AND A FOURTH AND FIFTH, BECAUSE M41 PUT A SECOND WRITER IN THE TREE AND THE READER ANCHOR DOES
+# NOT REACH IT.
+#
+#   ct-print-writer       @ pins.json trace_format_nim_writer.commit
+#   ct-split-probe-writer @ pins.json trace_format_nim_writer.commit
+#
+# The reader anchor names 2026-08-20 and the writer anchor names 2026-09-09. A Path B container is
+# written by the LATER tree, and its split streams carry an index layout the earlier reader does
+# not know: `ct-split-probe` at the reader anchor reports `steps.dat: index file too small for
+# trailer` and cannot find `values.off` or `events.off` at all. That is not a defect in either
+# revision -- it is what two anchors nineteen days apart means -- but it is a fact about what can
+# read this runtime's containers, and a fact stated by a binary is worth more than one stated in a
+# comment. Both are built so `verify_container_equivalence_characterised` can measure the
+# difference in BOTH directions rather than assert it in one.
+#
 # is `verification/ct_split_probe.nim` compiled inside the SAME archived tree, so it is the
 # reference reader at the pinned revision and not a re-implementation. It calls `openNewTrace`
 # directly, which is the v4 split-stream reader `ct-print` declines to use here.
@@ -62,20 +77,20 @@ for a in "$@"; do
   esac
 done
 
-read -r REV CONTROL <<<"$(python3 - "$REPO_ROOT/pins.json" <<'PY'
-import json, sys
-a = json.load(open(sys.argv[1], encoding="utf-8"))["anchors"].get("trace_format_nim") or {}
-print(a.get("commit", ""), a.get("control_commit", ""))
-PY
-)" || die "pins.json could not be read"
+read -r REV CONTROL WRITER <<<"$(python3 "$HERE/_ct_print_anchors.py" "$REPO_ROOT/pins.json")" \
+  || die "pins.json could not be read"
 
 for v in "$REV" "$CONTROL"; do
   case "$v" in [0-9a-f][0-9a-f]*) : ;; *) die "pins.json's trace_format_nim anchor is incomplete (commit='$REV' control_commit='$CONTROL')" ;; esac
 done
+case "$WRITER" in
+  [0-9a-f][0-9a-f]*) : ;;
+  *) die "pins.json declares no anchors.trace_format_nim_writer.commit; M41 added that role and this script builds a reader at it" ;;
+esac
 [ "$REV" != "$CONTROL" ] || die "the reader and its control are the same commit; the comparison would be vacuous"
 
 [ -e "$NIM_REPO/.git" ] || die "no codetracer-trace-format-nim checkout at $NIM_REPO"
-for v in "$REV" "$CONTROL"; do
+for v in "$REV" "$CONTROL" "$WRITER"; do
   git -C "$NIM_REPO" cat-file -e "$v^{commit}" 2>/dev/null || die "$NIM_REPO does not have $v"
 done
 # The control MUST be the fix's parent, or the one-commit claim is not what is being built.
@@ -88,6 +103,22 @@ command -v nix >/dev/null 2>&1 || die "nix is required to resolve zstd's headers
 INC="$(nix build --no-link --print-out-paths nixpkgs#zstd.dev 2>/dev/null)/include"
 LIB="$(nix build --no-link --print-out-paths nixpkgs#zstd.out 2>/dev/null)/lib"
 [ -f "$INC/zstd.h" ] || die "zstd.h is not at $INC (nixpkgs#zstd.dev did not resolve)"
+
+# WHICH NIM BACKEND `cc` IS, ASKED RATHER THAN ASSUMED.
+#
+# This script used to pass `--cc:clang` with `--clang.exe:$(command -v cc)`, on the stated
+# assumption that `cc` is the nixpkgs clang wrapper. On a host where `cc` is GCC that produces a
+# clang command line driven by gcc, and every compile dies with
+# `gcc: error: unrecognized command-line option '-ferror-limit=3'` -- a message that names a flag
+# nobody wrote and points at nothing a reader can act on. The `--cc:` family only has to match the
+# compiler's FLAG DIALECT, so it is derived from what the compiler says it is.
+host_nim_cc() { # <path-to-cc>
+  if "$1" --version 2>&1 | head -1 | grep -qiE 'clang'; then
+    printf 'clang\n'
+  else
+    printf 'gcc\n'
+  fi
+}
 
 build_one() { # <rev> <tree-dir> <out-binary>
   local rev="$1" tree="$2" out="$3"
@@ -107,14 +138,15 @@ build_one() { # <rev> <tree-dir> <out-binary>
   # rather than hard-coding a store path. The failure this prevents is not subtle once seen, and it
   # was invisible for as long as the build's output was suppressed — which is the second half of the
   # fix below.
-  local hostcc
+  local hostcc nimcc
   hostcc="$(command -v cc)" || die "no host C compiler on PATH (cc)"
+  nimcc="$(host_nim_cc "$hostcc")"
   # THE OUTPUT IS KEPT, NOT DISCARDED. `>/dev/null 2>&1` with a `die` that says "re-run without the
   # output suppressed to see why" is a diagnostic that requires the reader to do the work again by
   # hand; this campaign's own rule is that a check that dies must say why on the first run. The log
   # goes beside the binary so the next failure is one `cat` away.
   ( cd "$tree" && nim c -d:release --mm:arc -p:src \
-      --cc:clang --clang.exe:"$hostcc" --clang.linkerexe:"$hostcc" \
+      "--cc:$nimcc" "--$nimcc.exe:$hostcc" "--$nimcc.linkerexe:$hostcc" \
       --passC:"-I$INC" --passL:"-L$LIB" \
       -o:"$out" src/codetracer_ct_print.nim ) >"$out.build.log" 2>&1 \
     || die "building ct-print at $rev failed; the compiler's own output is in $out.build.log:
@@ -142,11 +174,15 @@ build_probe() { # <rev> <tree-dir> <out-binary>
   [ -f "$REPO_ROOT/verification/ct_split_probe.nim" ] || die "verification/ct_split_probe.nim is missing"
   cp "$REPO_ROOT/verification/ct_split_probe.nim" "$tree/ct_split_probe.nim" \
     || die "could not copy the probe into $tree"
+  local hostcc nimcc
+  hostcc="$(command -v cc)" || die "no host C compiler on PATH (cc)"
+  nimcc="$(host_nim_cc "$hostcc")"
   ( cd "$tree" && nim c -d:release --mm:arc -p:src \
-      --cc:clang --clang.exe:"$(command -v cc)" --clang.linkerexe:"$(command -v cc)" \
+      "--cc:$nimcc" "--$nimcc.exe:$hostcc" "--$nimcc.linkerexe:$hostcc" \
       --passC:"-I$INC" --passL:"-L$LIB" \
-      -o:"$out" ct_split_probe.nim ) >"$WORK/ct-split-probe.build.log" 2>&1 \
-    || die "building ct-split-probe at $rev failed; see $WORK/ct-split-probe.build.log"
+      -o:"$out" ct_split_probe.nim ) >"$(dirname "$out")/$(basename "$out").build.log" 2>&1 \
+    || die "building ct-split-probe at $rev failed; see $(dirname "$out")/$(basename "$out").build.log:
+$(tail -20 "$(dirname "$out")/$(basename "$out").build.log" 2>/dev/null)"
   [ -x "$out" ] || die "the build reported success but $out is not there"
   printf '%s\n' "$rev" >"$out.rev"
   say "built $(basename "$out") @ ${rev:0:10} ($(wc -c <"$out") bytes)"
@@ -156,4 +192,13 @@ mkdir -p "$WORK" || die "could not create $WORK"
 build_one "$REV" "$WORK/src-tree" "$WORK/ct-print"
 build_one "$CONTROL" "$WORK/src-tree-pre" "$WORK/ct-print-pre"
 build_probe "$REV" "$WORK/src-tree" "$WORK/ct-split-probe"
+# The writer anchor's reader. Skipped when the two anchors coincide, because building one tree
+# twice under two names would let a check compare a binary with itself and read the agreement as
+# evidence.
+if [ "$WRITER" != "$REV" ]; then
+  build_one "$WRITER" "$WORK/src-tree-writer" "$WORK/ct-print-writer"
+  build_probe "$WRITER" "$WORK/src-tree-writer" "$WORK/ct-split-probe-writer"
+else
+  say "the writer anchor is the reader anchor; not building a second copy of one tree"
+fi
 printf '%s\n' "$WORK"

@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 # build_ct_writer_wasm.sh — materialise the trace-format dependency and build `ct_writer.wasm`.
 #
-#   verification/build_ct_writer_wasm.sh [--native-tests] [--force]
+#   verification/build_ct_writer_wasm.sh [--native-tests] [--force] [--path-b]
+#
+# `--path-b` builds DD-7's Path B -- the Nim writer, materialised and cross-compiled by
+# `ct-writer/build.rs` at the `trace_format_nim_writer` anchor -- instead of Path A. It is a
+# different module, so it goes in a different target directory: sharing one would make each build
+# clobber the other's artefact, and a check that then read "the module" would be comparing one
+# module with itself and reading the agreement as evidence.
+#
+# `--native-tests` is refused together with `--path-b`, and refused by name. The Path B feature
+# builds only for wasm32 (see `ct-writer/build.rs` for why the second host toolchain was declined),
+# so a host `cargo test` under it fails inside a build script with a message about a target, four
+# crates away from the flag that caused it.
 #
 # Not a check: it prints no assertions and is invoked BY checks (`m24_require_module`). Modelled
 # on `build_avm_wasm.sh`, which does the same job for the AVM.
@@ -43,13 +54,20 @@ say() { printf 'build_ct_writer_wasm: %s\n' "$*"; }
 
 NATIVE_TESTS=0
 FORCE=0
+PATH_B=0
 for a in "$@"; do
   case "$a" in
     --native-tests) NATIVE_TESTS=1 ;;
     --force) FORCE=1 ;;
+    --path-b) PATH_B=1 ;;
     *) die "unknown argument [$a]" ;;
   esac
 done
+if [ "$PATH_B" = 1 ] && [ "$NATIVE_TESTS" = 1 ]; then
+  die "--path-b and --native-tests cannot be combined: the path-b feature builds only for wasm32,
+     so a host \`cargo test\` under it dies inside ct-writer/build.rs with a message about a
+     target rather than about this flag. Run the native tests against Path A."
+fi
 
 # ---- the pinned revision ---------------------------------------------------
 REV="$(python3 - "$REPO_ROOT/pins.json" <<'PY'
@@ -108,7 +126,15 @@ done
 # deep, which reads like a broken branch rather than a missing tool.
 command -v nix >/dev/null 2>&1 || die "nix is required (the rust wasm toolchain is not in either dev shell)"
 
-OUT="$CT_WRITER_DIR/target/wasm32-unknown-unknown/release/aztec_ct_writer.wasm"
+if [ "$PATH_B" = 1 ]; then
+  TARGET_DIR="${M41_PATH_B_TARGET:-$HOME/.cache/aztec-m41-writer/target-path-b}"
+  FEATURES="--no-default-features --features path-b"
+else
+  TARGET_DIR="$CT_WRITER_DIR/target"
+  FEATURES=""
+fi
+mkdir -p "$TARGET_DIR" || die "could not create $TARGET_DIR"
+OUT="$TARGET_DIR/wasm32-unknown-unknown/release/aztec_ct_writer.wasm"
 
 build_script='
 set -euo pipefail
@@ -116,7 +142,7 @@ export PATH="$CARGO_HOME/bin:$PATH"
 rustup -q toolchain install stable --profile minimal >/dev/null 2>&1 || true
 rustup -q target add wasm32-unknown-unknown >/dev/null 2>&1 || true
 cd "$CT_WRITER_DIR"
-cargo build --release --target wasm32-unknown-unknown
+cargo build --release --target wasm32-unknown-unknown --target-dir "$TARGET_DIR" $FEATURES
 '
 if [ "$NATIVE_TESTS" = 1 ]; then
   # `--test-threads=1` because the module state is global — wasm is single-threaded and this
@@ -128,10 +154,18 @@ cargo test --release -- --test-threads=1
 '
 fi
 
+# `nim` and `nix` must survive into the build shell: `ct-writer/build.rs` runs both under
+# `--path-b`, and `nix shell` does not remove them from PATH -- but `PATH` is what the inner
+# `bash -c` inherits, so it is passed explicitly rather than assumed.
 CT_WRITER_DIR="$CT_WRITER_DIR" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" \
+  TARGET_DIR="$TARGET_DIR" FEATURES="$FEATURES" PATH="$PATH" \
   nix shell nixpkgs#rustup nixpkgs#capnproto --command bash -c "$build_script" \
   || die "the wasm build failed"
 
 [ -f "$OUT" ] || die "the build reported success but $OUT does not exist"
-say "built $OUT ($(wc -c <"$OUT") bytes) against trace_format ${REV:0:10}"
+if [ "$PATH_B" = 1 ]; then
+  say "built $OUT ($(wc -c <"$OUT") bytes) -- PATH B, the Nim writer, against the trace_format_nim_writer anchor"
+else
+  say "built $OUT ($(wc -c <"$OUT") bytes) against trace_format ${REV:0:10}"
+fi
 printf '%s\n' "$OUT"
