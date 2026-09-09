@@ -299,7 +299,16 @@ fn session() -> Option<&'static mut Session> {
     unsafe { (*(&raw mut SESSION)).as_mut() }
 }
 
-fn set_error(msg: &str) {
+/// Record the reason the module last refused something.
+///
+/// `pub(crate)` so a BACKEND can use it. Several of `CtWriterBackend`'s methods return `()` —
+/// they mirror writer calls that cannot fail on Path A — and a Path B implementation of one of
+/// them CAN fail, at the C ABI boundary, on a string that will not cross or an encoder that
+/// refuses. Returning nothing and doing nothing would drop a value out of a container with no
+/// record anywhere that it had been asked for, which is this campaign's silent-wrong-answer shape.
+/// Writing here means the host reads it through `ct_last_error_ptr` exactly as it reads every
+/// other refusal.
+pub(crate) fn set_error(msg: &str) {
     unsafe {
         let slot = &raw mut ERROR;
         *slot = msg.to_string();

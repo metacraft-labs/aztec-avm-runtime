@@ -23,8 +23,8 @@ a shortfall — §6 says which measurement and what would change it.
 
 | | Path A | Path B |
 |---|---:|---:|
-| bytes | **264,281** | **770,913** |
-| sha256 (first 16) | `350f666fe5a55256` | `bd453534cf2d1a80` |
+| bytes | **264,281** | **771,318** |
+| sha256 (first 16) | `5d661d3c3e6a7ba0` | `234372f6f588c568` |
 | wasm imports | **0** | **0** |
 | exports | **39** = the 38 ABI functions + `memory` | **39**, the same set |
 | instantiates against a literal `{}` | yes | yes |
@@ -37,7 +37,7 @@ FFI, Rust-only with `ruzstd`, Rust-only with C libzstd, and this one — and lin
 reads as a regression that does not exist. What the row above compares is the ONLY pair that is
 comparable: two builds of ONE crate, on one target, differing in one feature flag.
 
-Path B is **506,632 bytes larger** than Path A as the runtime ships today. That is the honest
+Path B is **507,037 bytes larger** than Path A as the runtime ships today. That is the honest
 number and it is a cost, not an artefact: Path A links `ruzstd`, Path B links a cross-built C
 libzstd (537,888 bytes of `libzstd.a`) plus the Nim writer (1,330,000 bytes of
 `libct_nim_writer.a`) before `--gc-sections`. What Path B buys for it is §5 and §6.
@@ -76,7 +76,7 @@ so a `cargo build` of the shipped configuration is unchanged by its existence.
 
 **Reproducible: measured, twice.** Deleting the materialised tree, its stamp and the whole target
 directory and rebuilding from scratch produced a **byte-identical module**
-(`bd453534cf2d1a80…`) both times.
+(`234372f6f588c568…`) both times.
 
 **Pinned, and pinned two different ways because the two are different problems.**
 

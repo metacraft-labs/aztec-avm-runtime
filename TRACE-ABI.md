@@ -366,7 +366,7 @@ else can resolve is a local file wearing a pin's clothes.
   `ct-host` has **no npm dependencies** and imports no Node module in its trace path.
 - **264,281 bytes** for the writer plus this ABI, release, `opt-level = "z"`, LTO,
   `panic = "abort"`, one codegen unit, stripped. Two clean builds (`rm -rf target`) are
-  byte-identical, sha256 `350f666f…`.
+  byte-identical, sha256 `5d661d3c…`.
 
   *Re-derived on 2026-09-10, when M41 put the writer behind a seam. The move is **263,211 ->
   264,281**, and it is TWO separate movements which are stated separately because only one of them

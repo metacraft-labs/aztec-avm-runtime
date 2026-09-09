@@ -379,7 +379,7 @@ difference stays at one. M41 was told not to move it. **The default therefore st
 
 | | Path A | Path B |
 |---|---:|---:|
-| module bytes | 264,281 | 770,913 |
+| module bytes | 264,281 | 771,318 |
 | imports / exports | 0 / 39 | 0 / 39 |
 | container from the shared driver | 176,128 | 143,360 |
 
@@ -388,6 +388,6 @@ same environment). A separate **+317** had already accumulated between the figur
 §7 recorded and a HEAD build here, with no source change under `ct-writer/` — toolchain drift,
 stated separately rather than folded in.
 
-Path B is **506,632 bytes larger** than Path A as shipped. Stated without a comparison to any
+Path B is **507,037 bytes larger** than Path A as shipped. Stated without a comparison to any
 other module shape: seven distinct shapes have been measured in this campaign and lining up the
 wrong two reads as a regression that does not exist.

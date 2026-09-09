@@ -29,6 +29,7 @@ use core::ffi::{c_char, c_int, c_void};
 use std::path::Path;
 
 use crate::backend::{CT_WRITER_KIND_PATH_B_NIM, CtWriterBackend, TypeKind, Value};
+use crate::set_error;
 
 type Handle = *mut c_void;
 type Encoder = *mut c_void;
@@ -368,16 +369,25 @@ impl CtWriterBackend for NimBackend {
         };
         // A type name that cannot cross is a caller error this module cannot make: the two names
         // it interns are `"None"` and `"Field"`, both literals. `0` is returned rather than
-        // panicking because a panic in a `panic = "abort"` wasm module is a trap with no message.
+        // panicking because a panic in a `panic = "abort"` wasm module is a trap with no message —
+        // and the reason is RECORDED, because a `0` returned silently is a real type id in a real
+        // table and nothing downstream could tell it from an intern that worked.
         match CStr::new(lang_type) {
             Ok(c) => unsafe { trace_writer_ensure_type_id(self.handle, k, c.ptr()) as u64 },
-            Err(_) => 0,
+            Err(e) => {
+                set_error(&e);
+                0
+            }
         }
     }
 
     fn ensure_function_id(&mut self, name: &str, path: &Path, line: i64) -> u64 {
-        let (Ok(c_name), Ok(c_path)) = (CStr::new(name), CStr::path(path)) else {
-            return 0;
+        let (c_name, c_path) = match (CStr::new(name), CStr::path(path)) {
+            (Ok(n), Ok(p)) => (n, p),
+            (Err(e), _) | (_, Err(e)) => {
+                set_error(&e);
+                return 0;
+            }
         };
         unsafe {
             trace_writer_ensure_function_id(self.handle, c_name.ptr(), c_path.ptr(), line) as u64
@@ -385,8 +395,9 @@ impl CtWriterBackend for NimBackend {
     }
 
     fn register_special_event(&mut self, metadata: &str, content: &str) {
-        let (Ok(m), Ok(c)) = (CStr::new(metadata), CStr::new(content)) else {
-            return;
+        let (m, c) = match (CStr::new(metadata), CStr::new(content)) {
+            (Ok(m), Ok(c)) => (m, c),
+            (Err(e), _) | (_, Err(e)) => return set_error(&e),
         };
         unsafe {
             trace_writer_register_special_event(
@@ -400,8 +411,14 @@ impl CtWriterBackend for NimBackend {
 
     fn register_call(&mut self, function_id: u64, arg: Option<(&str, Value<'_>)>) {
         if let Some((name, v)) = arg {
-            if let (Ok(c_name), Ok((ptr, len))) = (CStr::new(name), self.encode(v)) {
-                unsafe { trace_writer_register_call_arg(self.handle, c_name.ptr(), ptr, len) };
+            match (CStr::new(name), self.encode(v)) {
+                (Ok(c_name), Ok((ptr, len))) => unsafe {
+                    trace_writer_register_call_arg(self.handle, c_name.ptr(), ptr, len)
+                },
+                // The frame is opened anyway, WITHOUT the argument, and the reason is recorded. A
+                // frame missing an argument is a visible loss; no frame at all would leave
+                // `ct_return` with nothing to close and desynchronise every later frame.
+                (Err(e), _) | (_, Err(e)) => set_error(&e),
             }
         }
         unsafe { trace_writer_register_call(self.handle, function_id as usize) };
@@ -415,7 +432,10 @@ impl CtWriterBackend for NimBackend {
     }
 
     fn register_path_with_line_lengths(&mut self, path: &Path, line_lengths: &[u32]) {
-        let Ok(c_path) = CStr::path(path) else { return };
+        let c_path = match CStr::path(path) {
+            Ok(p) => p,
+            Err(e) => return set_error(&e),
+        };
         let ptr = if line_lengths.is_empty() {
             core::ptr::null()
         } else {
@@ -432,7 +452,10 @@ impl CtWriterBackend for NimBackend {
     }
 
     fn register_step(&mut self, path: &Path, line: i64) {
-        let Ok(c_path) = CStr::path(path) else { return };
+        let c_path = match CStr::path(path) {
+            Ok(p) => p,
+            Err(e) => return set_error(&e),
+        };
         unsafe { trace_writer_register_step(self.handle, c_path.ptr(), line) };
     }
 
@@ -461,8 +484,13 @@ impl CtWriterBackend for NimBackend {
     }
 
     fn register_variable(&mut self, name: &str, value: Value<'_>) {
-        let (Ok(c_name), Ok((ptr, len))) = (CStr::new(name), self.encode(value)) else {
-            return;
+        // A value that cannot cross is DROPPED, and the reason is recorded. `CtWriterBackend`'s
+        // `register_variable` returns nothing because the Path A call it mirrors cannot fail; the
+        // C ABI boundary can. Dropping a value with no record anywhere that it had been asked for
+        // is the silent-wrong-answer shape, and `ct_last_error_ptr` is where a host already looks.
+        let (c_name, ptr, len) = match (CStr::new(name), self.encode(value)) {
+            (Ok(n), Ok((p, l))) => (n, p, l),
+            (Err(e), _) | (_, Err(e)) => return set_error(&e),
         };
         unsafe { trace_writer_register_variable_cbor(self.handle, c_name.ptr(), ptr, len) };
     }
