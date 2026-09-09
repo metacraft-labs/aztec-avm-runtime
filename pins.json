@@ -407,9 +407,9 @@
       "declared_in": "flake.lock"
     },
     "nim": {
-      "version": "2.2.4",
-      "declared_in": "pins.json",
-      "why_here_and_not_a_flake": "No nixpkgs attribute names the Nim compiler this workspace builds Nim code with, so ct-writer/build.rs takes `nim` from PATH. That is not the same as unpinned: build.rs REFUSES a `nim --version` that does not match this string rather than building Path B with an undeclared compiler, so the failure is a sentence naming both versions instead of a module built by something nobody chose. Everything else the Path B build needs -- clang, llvm-ar, lld, the wasi-libc headers and the zstd source -- is resolved with `nix build --inputs-from <repo>`, which pins against THIS repository's flake.lock rather than the invoking user's flake registry. The two answer differently on this host, measured, which is what makes the first one a pin rather than a spelling."
+      "version": "2.2.10",
+      "declared_in": "flake.nix",
+      "why_here_and_not_a_flake": "SUPERSEDED, and the correction is recorded rather than overwritten. This field used to say that no nixpkgs attribute named the Nim compiler this workspace uses, so `ct-writer/build.rs` took `nim` from PATH and refused a version that did not match. THAT WAS THE DEFECT, not the remedy: an agent's own shell inherits the WORKSPACE's .envrc and has nim on PATH, while `direnv exec <this repo>` -- the shell the sweep and every CI job use -- replaces PATH entirely and does not. The same check therefore passed by hand and died in the sweep, and M41's first sweep lost three of its seven checks to exactly that, with `nim is required` in the log. M19's wasm-opt finding and M25's system-node finding are the same defect; this is its third instance. `nim` is in flake.nix now, so the version is nixpkgs' as this repository's own flake.lock pins it, and this entry RECORDS that version rather than declaring it. build.rs still refuses a mismatch, which is now a guard against a shell nobody meant to be in rather than the pin itself. Everything else the Path B build needs -- clang, llvm-ar, lld, the wasi-libc headers and the zstd source -- is resolved with `nix build --inputs-from <repo>`, which pins against the same flake.lock rather than the invoking user's flake registry; measured, the two resolve different clang store paths on this host."
     }
   },
   "history": [

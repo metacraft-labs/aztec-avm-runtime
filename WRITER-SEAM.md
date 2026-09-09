@@ -23,8 +23,8 @@ a shortfall — §6 says which measurement and what would change it.
 
 | | Path A | Path B |
 |---|---:|---:|
-| bytes | **264,281** | **771,318** |
-| sha256 (first 16) | `5d661d3c3e6a7ba0` | `234372f6f588c568` |
+| bytes | **264,281** | **745,114** |
+| sha256 (first 16) | `5d661d3c3e6a7ba0` | `ae2b0c7e9c50c796` |
 | wasm imports | **0** | **0** |
 | exports | **39** = the 38 ABI functions + `memory` | **39**, the same set |
 | instantiates against a literal `{}` | yes | yes |
@@ -37,9 +37,9 @@ FFI, Rust-only with `ruzstd`, Rust-only with C libzstd, and this one — and lin
 reads as a regression that does not exist. What the row above compares is the ONLY pair that is
 comparable: two builds of ONE crate, on one target, differing in one feature flag.
 
-Path B is **507,037 bytes larger** than Path A as the runtime ships today. That is the honest
+Path B is **480,833 bytes larger** than Path A as the runtime ships today. That is the honest
 number and it is a cost, not an artefact: Path A links `ruzstd`, Path B links a cross-built C
-libzstd (537,888 bytes of `libzstd.a`) plus the Nim writer (1,330,000 bytes of
+libzstd (537,888 bytes of `libzstd.a`) plus the Nim writer (1,262,700 bytes of
 `libct_nim_writer.a`) before `--gc-sections`. What Path B buys for it is §5 and §6.
 
 **No host symbols leak.** The libc surface the Nim C output needs — `malloc`, `free`, `calloc`,
@@ -76,7 +76,7 @@ so a `cargo build` of the shipped configuration is unchanged by its existence.
 
 **Reproducible: measured, twice.** Deleting the materialised tree, its stamp and the whole target
 directory and rebuilding from scratch produced a **byte-identical module**
-(`234372f6f588c568…`) both times.
+(`ae2b0c7e9c50c796…`) both times.
 
 **Pinned, and pinned two different ways because the two are different problems.**
 
@@ -85,10 +85,18 @@ directory and rebuilding from scratch produced a **byte-identical module**
   `flake.lock` rather than the invoking user's flake registry. The two answer differently on this
   host: `nixpkgs#llvmPackages.clang-unwrapped` resolves to `603yaax3…` unpinned and `lfjzqzpn…`
   pinned. That difference is what makes the second one a pin rather than a spelling.
-- **`nim` comes from `PATH`**, because no nixpkgs attribute names the compiler this workspace
-  builds Nim code with. It is not therefore unpinned: `pins.json`'s new `toolchain.nim.version`
-  declares **2.2.4**, and `build.rs` REFUSES a `nim --version` that does not match rather than
-  building Path B with an undeclared compiler.
+- **`nim` is in this repository's own dev shell**, at nixpkgs' **2.2.10** as the same
+  `flake.lock` pins it, and `pins.json`'s `toolchain.nim` records that version so `build.rs` can
+  refuse a mismatch.
+
+  *It was NOT, in the first version of this work, and that is worth recording rather than
+  quietly fixing.* `build.rs` took `nim` from `PATH` and refused a version that did not match,
+  which reads like a pin and is not one: an agent's own shell inherits the WORKSPACE's `.envrc`
+  and has `nim` on `PATH`, while `direnv exec <this repo>` — the shell the sweep and every CI job
+  use — replaces `PATH` entirely and did not. Three of M41's seven checks passed by hand and died
+  in the sweep with `nim is required`. M19's `wasm-opt` finding and M25's system-node finding are
+  the same defect and this is its third instance; the remedy is the same one, which is to put the
+  tool in the shell.
 
 ---
 
@@ -180,6 +188,27 @@ and it is the reason the runtime's default is unchanged:
 about the reader anchor, taken with the roundtrip check's one-commit rationale in view. Nothing
 else in this milestone is in the way. Both modules build, both are exercised, and the switch is one
 line of `pins.json`-adjacent configuration once that decision exists.
+
+### The v4 flag day, which is the same fact from a third side
+
+The workspace moved `meta.dat` to version **4** and current readers refuse **3** by name.
+Re-derived here, in the two materialised trees this crate builds from:
+
+- `ct-writer/build-wasm-deps/ctf/codetracer_trace_writer/src/meta_dat.rs:31` —
+  `pub const META_DAT_VERSION: u16 = 3;` (the `trace_format` anchor, `592fa42cbf`, Path A)
+- `ct-writer/build-wasm-deps/ctf-nim/src/codetracer_trace_writer/meta_dat.nim:121` —
+  `MetaDatVersion*: uint16 = 4` (the `trace_format_nim_writer` anchor, Path B)
+
+**So the containers this runtime ships today are v3 and are unreadable by current tooling**, and
+Path B's are v4 and read correctly — not merely "open": `e2e_runtime_traces_through_nim_writer`
+compares every step's `(path, line, column)` read back against the position the driver asked for,
+and all eight match. That predicate is the whole point of the version bump: the superseded encode
+put every step ONE LINE HIGH with no error, because the address lands inside the trace's own space
+and nothing can refuse it.
+
+**The pinned writer's constant is NOT bumped, and must not be.** `wasm/ctfs-writer` carries the old
+encode; stamping v4 on old-convention addresses converts a loud refusal into a silent one-line-high
+read, which is strictly worse than the current state. The remedy is the switch, not the stamp.
 
 **A second, independent statement of the same fact, from the other side of the join:**
 `noir/Cargo.toml`'s own comment on the `codetracer_trace_writer` line says the pure-Rust writer

@@ -72,6 +72,22 @@
               # not one assertion executed.
               pkgs.just
 
+              # The Nim compiler. It is here because THREE MILESTONES' CHECKS CANNOT RUN
+              # WITHOUT IT and the shell did not provide it: `build_ct_print.sh` builds the
+              # reference `ct-print` readers a container is verified with, and `ct-writer`'s
+              # `build.rs` compiles the Nim writer for DD-7's Path B. Both die with
+              # `nim is required` under `direnv exec`, which is the shell the sweep and every CI
+              # job use.
+              #
+              # It was invisible for as long as it was, because an agent's own shell inherits the
+              # WORKSPACE's `.envrc` and has `nim` on PATH, while `direnv exec <this repo>`
+              # replaces PATH entirely and does not. So the same check passes by hand and dies in
+              # the sweep — M19's `wasm-opt` finding and M25's system-node finding are the same
+              # defect, and this is its third instance. The version is nixpkgs', pinned by this
+              # repository's own `flake.lock`, and `pins.json`'s `toolchain.nim` records it so
+              # `build.rs` can refuse a different one rather than build with it.
+              pkgs.nim
+
               # Utilities the spike scripts and bootstrap.sh reach for.
               pkgs.git
               pkgs.jq
