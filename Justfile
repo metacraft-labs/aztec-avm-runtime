@@ -3816,3 +3816,69 @@ verify-m39:
     # THE STATUS IS RETURNED. A recipe that summarises a status and does not exit with it can never
     # be one of a sweep's non-zero exits — M37's review found exactly that in two recipes.
     exit "$rc"
+
+# ---------------------------------------------------------------------------
+# M41 — the runtime writes through the Nim writer (DD-7's Path B)
+#
+#   just verify-writer-path-selectable      verify_writer_path_is_selectable
+#   just verify-abi-functions-served        verify_all_abi_functions_served
+#   just verify-nim-writer-zero-imports     verify_nim_writer_module_is_zero_import
+#   just verify-ruzstd-defect-absent        verify_ruzstd_checksum_defect_absent_from_shipped_path
+#   just verify-in-memory-reader            verify_in_memory_reader_reachable_from_browser
+#   just verify-container-equivalence       verify_container_equivalence_characterised
+#   just e2e-runtime-traces-through-nim-writer
+#
+# EVERY ONE OF THESE BUILDS BOTH MODULES. `ct-writer` is one crate with two feature-selected
+# backends, and the Path B build materialises the Nim source, cross-builds libzstd and runs `nim c`
+# — so the first check in a cold tree pays for all of them, and `just ct-writer-build --path-b`
+# exists to pay it deliberately rather than inside a check.
+# ---------------------------------------------------------------------------
+
+ct-writer-build-path-b:
+    @verification/build_ct_writer_wasm.sh --path-b
+
+verify-writer-path-selectable:
+    @verification/verify_writer_path_is_selectable.sh
+
+verify-abi-functions-served:
+    @verification/verify_all_abi_functions_served.sh
+
+verify-nim-writer-zero-imports:
+    @verification/verify_nim_writer_module_is_zero_import.sh
+
+verify-ruzstd-defect-absent:
+    @verification/verify_ruzstd_checksum_defect_absent_from_shipped_path.sh
+
+verify-in-memory-reader:
+    @verification/verify_in_memory_reader_reachable_from_browser.sh
+
+verify-container-equivalence:
+    @verification/verify_container_equivalence_characterised.sh
+
+e2e-runtime-traces-through-nim-writer:
+    @verification/e2e_runtime_traces_through_nim_writer.sh
+
+verify-m41:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for check in \
+      verify_writer_path_is_selectable \
+      verify_all_abi_functions_served \
+      verify_nim_writer_module_is_zero_import \
+      verify_ruzstd_checksum_defect_absent_from_shipped_path \
+      verify_in_memory_reader_reachable_from_browser \
+      verify_container_equivalence_characterised \
+      e2e_runtime_traces_through_nim_writer
+    do
+      echo "=== $check"
+      verification/"$check".sh || rc=1
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "verify-m41: FAILED" >&2
+    else
+      echo "verify-m41: all checks passed"
+    fi
+    # THE STATUS IS RETURNED. A recipe that summarises a status and does not exit with it can never
+    # be one of a sweep's non-zero exits — M37's review found exactly that in two recipes.
+    exit "$rc"
