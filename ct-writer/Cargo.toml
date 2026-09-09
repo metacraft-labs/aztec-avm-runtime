@@ -29,8 +29,35 @@ crate-type = ["cdylib", "rlib"]
 # single-instantiation check asserts it appears exactly once in the lock file all the same,
 # because "we did not name it twice" is not evidence about what cargo resolved.
 [dependencies]
-codetracer_trace_types = { path = "build-wasm-deps/ctf/codetracer_trace_types" }
-codetracer_trace_writer = { path = "build-wasm-deps/ctf/codetracer_trace_writer" }
+codetracer_trace_types = { path = "build-wasm-deps/ctf/codetracer_trace_types", optional = true }
+codetracer_trace_writer = { path = "build-wasm-deps/ctf/codetracer_trace_writer", optional = true }
+
+# ---------------------------------------------------------------------------
+# THE PATH A / PATH B SEAM.
+#
+# DD-7 named two writers and this crate could express only one of them: there was no `[features]`
+# block, no `cfg`, and `CtfsTraceWriter` was hard-linked at the type level in two places. M41
+# CREATED this seam rather than flipping one.
+#
+# `path-b` WINS WHEN BOTH ARE ON, and the precedence is declared here rather than left for a reader
+# to derive from `cfg` polarity in `backend.rs`. Cargo features are additive — nothing can turn
+# `path-a` off — so "both on" is a state that arises without anyone asking for it, and the build
+# must have an answer.
+#
+# The Path A dependencies are OPTIONAL and gated on `path-a`, which is not tidiness: with them
+# unconditional, a `--no-default-features --features path-b` build would still compile and link the
+# entire pure-Rust writer into a module that never calls it, and the size figure that build reports
+# would be a figure about two writers. `verify_ruzstd_checksum_defect_absent_from_shipped_path`
+# measures the result rather than trusting this comment: it asserts the Path B module contains no
+# `ruzstd` at all, with the Path A module as the control that says the search can find one.
+#
+# `path-b` names no dependency at all. Its writer is not a crate: it is Nim source, materialised
+# and compiled by `build.rs` at the revision `pins.json` declares as `trace_format_nim_writer`, and
+# linked as a static library. That is why the feature list looks lopsided.
+[features]
+default = ["path-a"]
+path-a = ["dep:codetracer_trace_types", "dep:codetracer_trace_writer"]
+path-b = []
 
 [profile.release]
 opt-level = "z"

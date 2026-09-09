@@ -60,12 +60,24 @@
 //! runtime has no source column to record (`emit()` is rung 3, `Line(pc)`) — so it fires in the
 //! host (`ct-host/src/config.ts`). `ct_writer_kind()` records which path wrote the container.
 
-use codetracer_trace_types::{
-    CallRecord, EventLogKind, Line, TraceLowLevelEvent, TypeId, TypeKind, ValueRecord,
-};
-use codetracer_trace_writer::ctfs_writer::CtfsTraceWriter;
-use codetracer_trace_writer::trace_writer::TraceWriter;
-use std::path::{Path, PathBuf};
+mod backend;
+#[cfg(feature = "path-b")]
+mod backend_nim;
+#[cfg(all(feature = "path-a", not(feature = "path-b")))]
+mod backend_rust;
+
+// Neither feature is not a configuration: this crate is an event ABI over a writer, and with no
+// writer selected every one of the thirty-eight entry points would compile to a refusal. Failing
+// at the manifest is a sentence a developer can act on; a module that built and refused
+// everything is one nobody would read until a container came back empty.
+#[cfg(not(any(feature = "path-a", feature = "path-b")))]
+compile_error!(
+    "ct-writer needs a writer: enable `path-a` (the pure-Rust CtfsTraceWriter, the default) or \
+     `path-b` (the Nim writer). With both on, `path-b` is used."
+);
+
+use backend::{ActiveBackend, CtWriterBackend, TypeKind, Value};
+use std::path::PathBuf;
 
 // ---------------------------------------------------------------------------
 // The wire record.
@@ -180,8 +192,10 @@ const CT_ERR_BAD_RUNG: i32 = -9;
 /// M26: `ct_return` with no frame open. A host bug, refused rather than ignored.
 const CT_ERR_NO_FRAME: i32 = -10;
 
-/// Which writer produced the container. Recorded rather than inferred — DD-7's second half.
-const CT_WRITER_KIND_PATH_A_PURE_RUST: u32 = 1;
+// Which writer produced the container is recorded rather than inferred — DD-7's second half. The
+// two values live in `backend.rs` beside the trait, so a third backend adds its value where the
+// trait it implements is declared rather than where one caller happens to read it.
+pub use backend::{CT_WRITER_KIND_PATH_A_PURE_RUST, CT_WRITER_KIND_PATH_B_NIM};
 
 // ---------------------------------------------------------------------------
 // §9.2's SOURCE-MAPPING LADDER, AS THREE NUMBERS THE MODULE ENFORCES.
@@ -240,10 +254,10 @@ struct Position {
 }
 
 struct Session {
-    writer: CtfsTraceWriter,
+    writer: ActiveBackend,
     path: PathBuf,
-    type_id: TypeId,
-    field_type_id: TypeId,
+    type_id: u64,
+    field_type_id: u64,
     columns_requested: bool,
     events: u64,
     /// Paths interned through `ct_intern_path`, in id order. Index is the id a host quotes.
@@ -263,7 +277,7 @@ struct Session {
     /// can be asked which KIND of step it is made of rather than only how many it has.
     source_steps: u64,
     /// The `None` type, needed for a frame's return value. Interned at open, like `type_id`.
-    none_type_id: TypeId,
+    none_type_id: u64,
 }
 
 static mut SESSION: Option<Session> = None;
@@ -328,18 +342,30 @@ pub extern "C" fn ct_record_size() -> usize {
     CT_RECORD_SIZE
 }
 
-/// Which writer path produced the container. `1` is DD-7's Path A, the pure-Rust `CtfsTraceWriter`.
+/// Which writer path produced the container. `1` is DD-7's Path A, the pure-Rust
+/// `CtfsTraceWriter`; `2` is Path B, the Nim writer behind its C ABI.
+///
+/// The value comes from the BACKEND rather than from a constant in this function, so a module
+/// built the other way cannot report the wrong one. That is what makes the field a measurement:
+/// `verify_writer_path_is_selectable` builds both modules and asserts they disagree here, and a
+/// literal would make the two agree no matter which writer had run.
 #[unsafe(no_mangle)]
 pub extern "C" fn ct_writer_kind() -> u32 {
-    CT_WRITER_KIND_PATH_A_PURE_RUST
+    ActiveBackend::kind()
 }
 
 unsafe fn read_str(ptr: *const u8, len: usize) -> Result<String, i32> {
     if ptr.is_null() && len != 0 {
         return Err(CT_ERR_NULL);
     }
-    let bytes = if len == 0 { &[][..] } else { unsafe { core::slice::from_raw_parts(ptr, len) } };
-    core::str::from_utf8(bytes).map(|s| s.to_string()).map_err(|_| CT_ERR_BAD_UTF8)
+    let bytes = if len == 0 {
+        &[][..]
+    } else {
+        unsafe { core::slice::from_raw_parts(ptr, len) }
+    };
+    core::str::from_utf8(bytes)
+        .map(|s| s.to_string())
+        .map_err(|_| CT_ERR_BAD_UTF8)
 }
 
 // ---------------------------------------------------------------------------
@@ -400,34 +426,38 @@ pub unsafe extern "C" fn ct_writer_open(
         }
     };
 
-    let mut writer = CtfsTraceWriter::new_in_memory(&program, &[]);
-    if !recording_id.is_empty() {
-        writer.set_recording_id(recording_id);
-    }
-    // DD-7: the request is made to the writer so that the WRITER decides it cannot honour it.
-    // Deciding that here, from a constant, would make `ct_dropped_column_awareness` a literal
+    let path = PathBuf::from(&source);
+    let workdir_path = if workdir.is_empty() {
+        PathBuf::from("/")
+    } else {
+        PathBuf::from(&workdir)
+    };
+    // DD-7: the column request is made to the WRITER so that the writer decides it cannot honour
+    // it. Deciding that here, from a constant, would make `ct_dropped_column_awareness` a literal
     // this module printed rather than a signal it read — which is this campaign's oldest defect
     // family, and the reason `dropped_column_awareness()` exists in the writer at all.
-    if want_columns != 0 {
-        TraceWriter::enable_column_aware_steps(&mut writer);
-        TraceWriter::enable_column_breakpoints_support(&mut writer);
-        TraceWriter::enable_column_motions_support(&mut writer);
-    }
-    if writer.begin_writing_trace_events(Path::new("trace")).is_err() {
-        set_error("the writer refused to begin");
-        return CT_ERR_WRITER;
-    }
-
-    let path = PathBuf::from(&source);
-    let workdir_path = if workdir.is_empty() { PathBuf::from("/") } else { PathBuf::from(&workdir) };
-    TraceWriter::set_workdir(&mut writer, &workdir_path);
-    TraceWriter::start(&mut writer, &path, Line(1));
+    let mut writer = match ActiveBackend::open(
+        &program,
+        &recording_id,
+        want_columns != 0,
+        &workdir_path,
+        &path,
+    ) {
+        Ok(w) => w,
+        Err(e) => {
+            // The backend's own words, not a summary of them. The two backends refuse for
+            // different reasons — Path B refuses an empty recording id that Path A accepts —
+            // and a host that saw only "the writer refused" could not act on either.
+            set_error(&e);
+            return CT_ERR_WRITER;
+        }
+    };
     // The `None` type is interned FIRST, so it is type id 0 — which is what `NONE_TYPE_ID` is and
     // what a reader expects a `ValueRecord::None` to point at. M26 needs it for a frame's return
     // value; interning it lazily at the first `ct_return` would give it a different id in a
     // recording that happens to have returned before it recorded anything else.
-    let none_type_id = TraceWriter::ensure_type_id(&mut writer, TypeKind::None, "None");
-    let type_id = TraceWriter::ensure_type_id(&mut writer, TypeKind::Int, "Field");
+    let none_type_id = writer.ensure_type_id(TypeKind::None, "None");
+    let type_id = writer.ensure_type_id(TypeKind::Int, "Field");
     // OQ-4: the SAME `(TypeKind::Int, "Field")` the Noir tracer registers
     // (`noir/tooling/tracer/src/tracer_glue.rs:371`), reused rather than a second type, because
     // the cross-half requirement is about the type table as much as about the value.
@@ -511,12 +541,8 @@ pub unsafe extern "C" fn ct_declare_rung(
         return CT_OK;
     }
     let content = format!("{} rung={} reason={}", hex32(&address), rung, reason);
-    TraceWriter::register_special_event(
-        &mut s.writer,
-        EventLogKind::TraceLogEvent,
-        CT_RUNG_EVENT_METADATA,
-        &content,
-    );
+    s.writer
+        .register_special_event(CT_RUNG_EVENT_METADATA, &content);
     s.rungs.push(RungDeclaration {
         address,
         rung,
@@ -585,12 +611,7 @@ pub unsafe extern "C" fn ct_log_event(
             return CT_ERR_NO_SESSION;
         }
     };
-    TraceWriter::register_special_event(
-        &mut s.writer,
-        EventLogKind::TraceLogEvent,
-        &metadata,
-        &content,
-    );
+    s.writer.register_special_event(&metadata, &content);
     s.log_events += 1;
     set_error("");
     CT_OK
@@ -692,27 +713,13 @@ pub unsafe extern "C" fn ct_call(
             }
         }
     };
-    let fid = TraceWriter::ensure_function_id(&mut s.writer, &name, &path, Line(line as i64));
-    let args = match address {
-        Some(a) => {
-            let field_type = s.field_type_id;
-            let arg = TraceWriter::arg(
-                &mut s.writer,
-                "contractAddress",
-                ValueRecord::String { text: hex32(&a), type_id: field_type },
-            );
-            // `ctfs_sink.rs`'s override: a non-toplevel call's arguments are emitted as `Value`
-            // events before the `Call`, because the writer's default would otherwise not record
-            // them at all on this path.
-            TraceWriter::add_event(&mut s.writer, TraceLowLevelEvent::Value(arg.clone()));
-            vec![arg]
-        }
-        None => vec![],
-    };
-    TraceWriter::add_event(
-        &mut s.writer,
-        TraceLowLevelEvent::Call(CallRecord { function_id: fid, args }),
-    );
+    let fid = s.writer.ensure_function_id(&name, &path, line as i64);
+    let field_type = s.field_type_id;
+    let hex = address.map(|a| hex32(&a));
+    let arg = hex
+        .as_deref()
+        .map(|h| ("contractAddress", Value::Str(h, field_type)));
+    s.writer.register_call(fid, arg);
     s.call_depth += 1;
     s.calls_opened += 1;
     set_error("");
@@ -738,7 +745,7 @@ pub extern "C" fn ct_return() -> i32 {
         return CT_ERR_NO_FRAME;
     }
     let none_type = s.none_type_id;
-    TraceWriter::register_return(&mut s.writer, ValueRecord::None { type_id: none_type });
+    s.writer.register_return(none_type);
     s.call_depth -= 1;
     set_error("");
     CT_OK
@@ -821,7 +828,8 @@ pub unsafe extern "C" fn ct_intern_path(
     if let Some(i) = s.paths.iter().position(|p| *p == buf) {
         return i as i32;
     }
-    let _ = CtfsTraceWriter::register_path_with_line_lengths(&mut s.writer, &buf, &line_lengths);
+    s.writer
+        .register_path_with_line_lengths(&buf, &line_lengths);
     s.paths.push(buf);
     set_error("");
     (s.paths.len() - 1) as i32
@@ -884,8 +892,12 @@ pub extern "C" fn ct_source_step(path_id: u32, line: u32, column: u32) -> i32 {
         return CT_ERR_BAD_LENGTH;
     }
     let path = s.paths[path_id as usize].clone();
-    let col = if column == 0 { None } else { Some(Line(column as i64)) };
-    TraceWriter::register_step_with_column(&mut s.writer, &path, Line(line as i64), col);
+    let col = if column == 0 {
+        None
+    } else {
+        Some(column as i64)
+    };
+    s.writer.register_step_with_column(&path, line as i64, col);
     s.positioned += 1;
     s.events += 1;
     s.source_steps += 1;
@@ -930,7 +942,11 @@ pub unsafe extern "C" fn ct_positions(ptr: *const u8, len: usize) -> i32 {
         return CT_ERR_BAD_LENGTH;
     }
     let n = len / CT_POSITION_SIZE;
-    let buf = if len == 0 { &[][..] } else { unsafe { core::slice::from_raw_parts(ptr, len) } };
+    let buf = if len == 0 {
+        &[][..]
+    } else {
+        unsafe { core::slice::from_raw_parts(ptr, len) }
+    };
     let s = match session() {
         Some(s) => s,
         None => {
@@ -952,10 +968,16 @@ pub unsafe extern "C" fn ct_positions(ptr: *const u8, len: usize) -> i32 {
         // A line of 0 is the host saying "this step has no mapping" and is the ONE case where a
         // path_id is not required to name anything.
         if line != 0 && path_id >= path_count {
-            set_error("ct_positions: a position record names a path id this session never interned");
+            set_error(
+                "ct_positions: a position record names a path id this session never interned",
+            );
             return CT_ERR_BAD_PATH_ID;
         }
-        staged.push(Position { path_id, line, column: at(POS_OFF_COLUMN) });
+        staged.push(Position {
+            path_id,
+            line,
+            column: at(POS_OFF_COLUMN),
+        });
     }
     for p in staged {
         s.positions.push_back(p);
@@ -1043,8 +1065,8 @@ pub extern "C" fn ct_writer_close() -> *const u8 {
     }
     let positioned = s.positioned;
     let unpositioned = s.unpositioned;
-    if s.writer.finish_writing_trace_events().is_err() {
-        set_error("the writer refused to finish");
+    if let Err(e) = s.writer.finish() {
+        set_error(&e);
         return core::ptr::null();
     }
     let bytes = match s.writer.take_container_bytes() {
@@ -1117,7 +1139,15 @@ pub extern "C" fn ct_last_error_len() -> usize {
 // ---------------------------------------------------------------------------
 
 #[inline(always)]
-fn emit(s: &mut Session, context_id: u32, pc: u32, opcode: u32, l2_gas: u64, da_gas: u64, address: &[u8]) {
+fn emit(
+    s: &mut Session,
+    context_id: u32,
+    pc: u32,
+    opcode: u32,
+    l2_gas: u64,
+    da_gas: u64,
+    address: &[u8],
+) {
     // M25 SETTLED OQ-5 AND THIS IS WHERE THE ANSWER LANDS.
     //
     // `avm-transpiler` re-keys a contract's `brillig_locations` by AVM pc on the way through
@@ -1135,8 +1165,13 @@ fn emit(s: &mut Session, context_id: u32, pc: u32, opcode: u32, l2_gas: u64, da_
     let positioned = match s.positions.pop_front() {
         Some(p) if p.line != 0 => {
             let path = s.paths[p.path_id as usize].clone();
-            let column = if p.column == 0 { None } else { Some(Line(p.column as i64)) };
-            TraceWriter::register_step_with_column(&mut s.writer, &path, Line(p.line as i64), column);
+            let column = if p.column == 0 {
+                None
+            } else {
+                Some(p.column as i64)
+            };
+            s.writer
+                .register_step_with_column(&path, p.line as i64, column);
             true
         }
         // A queued record whose line is 0 is the host saying "no mapping for THIS step", which is
@@ -1144,12 +1179,12 @@ fn emit(s: &mut Session, context_id: u32, pc: u32, opcode: u32, l2_gas: u64, da_
         // did not, every later step in the batch would take the wrong position.
         Some(_) => {
             let path = s.path.clone();
-            TraceWriter::register_step(&mut s.writer, &path, Line(pc as i64));
+            s.writer.register_step(&path, pc as i64);
             false
         }
         None => {
             let path = s.path.clone();
-            TraceWriter::register_step(&mut s.writer, &path, Line(pc as i64));
+            s.writer.register_step(&path, pc as i64);
             false
         }
     };
@@ -1168,26 +1203,14 @@ fn emit(s: &mut Session, context_id: u32, pc: u32, opcode: u32, l2_gas: u64, da_
             }
         }
     }
-    TraceWriter::register_variable_with_full_value(
-        &mut s.writer,
-        "opcode",
-        ValueRecord::Int { i: opcode as i64, type_id: s.type_id },
-    );
-    TraceWriter::register_variable_with_full_value(
-        &mut s.writer,
-        "contextId",
-        ValueRecord::Int { i: context_id as i64, type_id: s.type_id },
-    );
-    TraceWriter::register_variable_with_full_value(
-        &mut s.writer,
-        "l2Gas",
-        ValueRecord::Int { i: l2_gas as i64, type_id: s.type_id },
-    );
-    TraceWriter::register_variable_with_full_value(
-        &mut s.writer,
-        "daGas",
-        ValueRecord::Int { i: da_gas as i64, type_id: s.type_id },
-    );
+    s.writer
+        .register_variable("opcode", Value::Int(opcode as i64, s.type_id));
+    s.writer
+        .register_variable("contextId", Value::Int(context_id as i64, s.type_id));
+    s.writer
+        .register_variable("l2Gas", Value::Int(l2_gas as i64, s.type_id));
+    s.writer
+        .register_variable("daGas", Value::Int(da_gas as i64, s.type_id));
     // OQ-4, SETTLED BY MEASUREMENT AND NOT BY PREFERENCE — see `SOURCE-MAPPING.md` §3.
     //
     // M24 recorded this as `contractAddressLow`, the low 64 bits, and said so. The replacement is
@@ -1204,10 +1227,9 @@ fn emit(s: &mut Session, context_id: u32, pc: u32, opcode: u32, l2_gas: u64, da_
     // all five on every run so the day the reader is fixed, this comment goes red rather than
     // stale. `Raw` also survives, and is not used: `Raw` is Noir's escape hatch for values it
     // CANNOT represent (`"()"`, `"fn"`), and an address is not one of those.
-    TraceWriter::register_variable_with_full_value(
-        &mut s.writer,
+    s.writer.register_variable(
         "contractAddress",
-        ValueRecord::String { text: hex32(address), type_id: s.field_type_id },
+        Value::Str(&hex32(address), s.field_type_id),
     );
     s.events += 1;
 }
@@ -1266,7 +1288,11 @@ unsafe fn ingest_impl(ptr: *const u8, len: usize) -> i32 {
         return CT_ERR_BAD_LENGTH;
     }
     let n = len / CT_RECORD_SIZE;
-    let buf = if len == 0 { &[][..] } else { unsafe { core::slice::from_raw_parts(ptr, len) } };
+    let buf = if len == 0 {
+        &[][..]
+    } else {
+        unsafe { core::slice::from_raw_parts(ptr, len) }
+    };
     let s = match session() {
         Some(s) => s,
         None => {
@@ -1276,20 +1302,43 @@ unsafe fn ingest_impl(ptr: *const u8, len: usize) -> i32 {
     };
     for i in 0..n {
         let r = &buf[i * CT_RECORD_SIZE..(i + 1) * CT_RECORD_SIZE];
-        let reserved = u32::from_le_bytes([r[OFF_RESERVED], r[OFF_RESERVED + 1], r[OFF_RESERVED + 2], r[OFF_RESERVED + 3]]);
+        let reserved = u32::from_le_bytes([
+            r[OFF_RESERVED],
+            r[OFF_RESERVED + 1],
+            r[OFF_RESERVED + 2],
+            r[OFF_RESERVED + 3],
+        ]);
         if reserved != 0 {
             set_error("ct_ingest: the reserved word of a record is not zero");
             return CT_ERR_RESERVED_NOT_ZERO;
         }
-        let context_id = u32::from_le_bytes([r[OFF_CONTEXT_ID], r[OFF_CONTEXT_ID + 1], r[OFF_CONTEXT_ID + 2], r[OFF_CONTEXT_ID + 3]]);
+        let context_id = u32::from_le_bytes([
+            r[OFF_CONTEXT_ID],
+            r[OFF_CONTEXT_ID + 1],
+            r[OFF_CONTEXT_ID + 2],
+            r[OFF_CONTEXT_ID + 3],
+        ]);
         let pc = u32::from_le_bytes([r[OFF_PC], r[OFF_PC + 1], r[OFF_PC + 2], r[OFF_PC + 3]]);
-        let opcode = u32::from_le_bytes([r[OFF_OPCODE], r[OFF_OPCODE + 1], r[OFF_OPCODE + 2], r[OFF_OPCODE + 3]]);
+        let opcode = u32::from_le_bytes([
+            r[OFF_OPCODE],
+            r[OFF_OPCODE + 1],
+            r[OFF_OPCODE + 2],
+            r[OFF_OPCODE + 3],
+        ]);
         let mut g = [0u8; 8];
         g.copy_from_slice(&r[OFF_L2_GAS..OFF_L2_GAS + 8]);
         let l2_gas = u64::from_le_bytes(g);
         g.copy_from_slice(&r[OFF_DA_GAS..OFF_DA_GAS + 8]);
         let da_gas = u64::from_le_bytes(g);
-        emit(s, context_id, pc, opcode, l2_gas, da_gas, &r[OFF_ADDRESS..OFF_ADDRESS + ADDRESS_LEN]);
+        emit(
+            s,
+            context_id,
+            pc,
+            opcode,
+            l2_gas,
+            da_gas,
+            &r[OFF_ADDRESS..OFF_ADDRESS + ADDRESS_LEN],
+        );
     }
     n as i32
 }
@@ -1333,7 +1382,11 @@ pub unsafe extern "C" fn ct_nop_step(
     da_gas: u64,
     address_ptr: *const u8,
 ) -> i32 {
-    let first = if address_ptr.is_null() { 0u64 } else { (unsafe { *address_ptr }) as u64 };
+    let first = if address_ptr.is_null() {
+        0u64
+    } else {
+        (unsafe { *address_ptr }) as u64
+    };
     unsafe {
         NOP_CALLS = NOP_CALLS.wrapping_add(1);
         NOP_RECORDS = NOP_RECORDS
@@ -1353,19 +1406,34 @@ pub unsafe extern "C" fn ct_nop_ingest(ptr: *const u8, len: usize) -> i32 {
         return CT_ERR_BAD_LENGTH;
     }
     let n = len / CT_RECORD_SIZE;
-    let buf = if len == 0 { &[][..] } else { unsafe { core::slice::from_raw_parts(ptr, len) } };
+    let buf = if len == 0 {
+        &[][..]
+    } else {
+        unsafe { core::slice::from_raw_parts(ptr, len) }
+    };
     let mut acc = 0u64;
     for i in 0..n {
         let r = &buf[i * CT_RECORD_SIZE..(i + 1) * CT_RECORD_SIZE];
-        let context_id = u32::from_le_bytes([r[OFF_CONTEXT_ID], r[OFF_CONTEXT_ID + 1], r[OFF_CONTEXT_ID + 2], r[OFF_CONTEXT_ID + 3]]);
+        let context_id = u32::from_le_bytes([
+            r[OFF_CONTEXT_ID],
+            r[OFF_CONTEXT_ID + 1],
+            r[OFF_CONTEXT_ID + 2],
+            r[OFF_CONTEXT_ID + 3],
+        ]);
         let pc = u32::from_le_bytes([r[OFF_PC], r[OFF_PC + 1], r[OFF_PC + 2], r[OFF_PC + 3]]);
-        let opcode = u32::from_le_bytes([r[OFF_OPCODE], r[OFF_OPCODE + 1], r[OFF_OPCODE + 2], r[OFF_OPCODE + 3]]);
+        let opcode = u32::from_le_bytes([
+            r[OFF_OPCODE],
+            r[OFF_OPCODE + 1],
+            r[OFF_OPCODE + 2],
+            r[OFF_OPCODE + 3],
+        ]);
         let mut g = [0u8; 8];
         g.copy_from_slice(&r[OFF_L2_GAS..OFF_L2_GAS + 8]);
         let l2_gas = u64::from_le_bytes(g);
         g.copy_from_slice(&r[OFF_DA_GAS..OFF_DA_GAS + 8]);
         let da_gas = u64::from_le_bytes(g);
-        acc ^= context_id as u64 ^ pc as u64 ^ opcode as u64 ^ l2_gas ^ da_gas ^ r[OFF_ADDRESS] as u64;
+        acc ^=
+            context_id as u64 ^ pc as u64 ^ opcode as u64 ^ l2_gas ^ da_gas ^ r[OFF_ADDRESS] as u64;
     }
     unsafe {
         NOP_CALLS = NOP_CALLS.wrapping_add(1);
@@ -1430,10 +1498,14 @@ mod tests {
         let wd = b"/aztec";
         unsafe {
             ct_writer_open(
-                program.as_ptr(), program.len(),
-                rid.as_ptr(), rid.len(),
-                src.as_ptr(), src.len(),
-                wd.as_ptr(), wd.len(),
+                program.as_ptr(),
+                program.len(),
+                rid.as_ptr(),
+                rid.len(),
+                src.as_ptr(),
+                src.len(),
+                wd.as_ptr(),
+                wd.len(),
                 want_columns,
             )
         }
@@ -1476,8 +1548,16 @@ mod tests {
         assert!(!p.is_null());
         let per_event = unsafe { core::slice::from_raw_parts(p, ct_container_len()) }.to_vec();
 
-        assert_eq!(batched.len(), per_event.len(), "the two ABIs produced different container sizes");
-        assert_eq!(&batched[..5], &[0xC0, 0xDE, 0x72, 0xAC, 0xE2], "missing the CTFS magic");
+        assert_eq!(
+            batched.len(),
+            per_event.len(),
+            "the two ABIs produced different container sizes"
+        );
+        assert_eq!(
+            &batched[..5],
+            &[0xC0, 0xDE, 0x72, 0xAC, 0xE2],
+            "missing the CTFS magic"
+        );
     }
 
     /// THIS TEST ASSERTED THE OPPOSITE UNTIL THE `trace_format` ANCHOR MOVED, AND NOTHING RAN IT.
@@ -1496,7 +1576,11 @@ mod tests {
         let r = record(1);
         assert_eq!(unsafe { ct_ingest(r.as_ptr(), r.len()) }, 1);
         assert!(!ct_writer_close().is_null());
-        assert_eq!(ct_columns_requested(), 1, "the module must record that columns were asked of it");
+        assert_eq!(
+            ct_columns_requested(),
+            1,
+            "the module must record that columns were asked of it"
+        );
         assert_eq!(
             ct_dropped_column_awareness(),
             0,
@@ -1527,7 +1611,10 @@ mod tests {
         assert_eq!(unsafe { ct_ingest(r.as_ptr(), r.len()) }, CT_ERR_BAD_LENGTH);
         let mut d = record(1);
         d[OFF_RESERVED] = 1;
-        assert_eq!(unsafe { ct_ingest(d.as_ptr(), d.len()) }, CT_ERR_RESERVED_NOT_ZERO);
+        assert_eq!(
+            unsafe { ct_ingest(d.as_ptr(), d.len()) },
+            CT_ERR_RESERVED_NOT_ZERO
+        );
         assert!(!ct_writer_close().is_null());
     }
 
@@ -1561,14 +1648,22 @@ mod tests {
         a[0] = 0x2f; // most significant
         a[31] = 0x0c; // least significant
         let h = hex32(&a);
-        assert_eq!(h.len(), 66, "0x plus 64 hex characters, always, with no leading-zero stripping");
+        assert_eq!(
+            h.len(),
+            66,
+            "0x plus 64 hex characters, always, with no leading-zero stripping"
+        );
         assert!(h.starts_with("0x2f"), "byte 0 is the MOST significant: {h}");
         assert!(h.ends_with("0c"), "byte 31 is the LEAST significant: {h}");
         // The negative control for the two assertions above: a byte-order flip would satisfy
         // neither, and this is the value it would produce.
         let mut flipped = a;
         flipped.reverse();
-        assert_ne!(hex32(&flipped), h, "big-endian and little-endian must not render alike");
+        assert_ne!(
+            hex32(&flipped),
+            h,
+            "big-endian and little-endian must not render alike"
+        );
     }
 
     /// The rung-1 path end to end: intern a path, queue a position, ingest a step, and read back
@@ -1577,7 +1672,11 @@ mod tests {
     fn a_positioned_step_satisfies_a_rung_one_declaration() {
         let _g = serial();
         unsafe { assert_eq!(open(1), CT_OK) };
-        assert_eq!(unsafe { intern("/aztec/token.nr") }, 0, "the first interned path is id 0");
+        assert_eq!(
+            unsafe { intern("/aztec/token.nr") },
+            0,
+            "the first interned path is id 0"
+        );
         let r = record(1);
         let mut addr = [0u8; ADDRESS_LEN];
         addr.copy_from_slice(&r[OFF_ADDRESS..]);
@@ -1591,7 +1690,11 @@ mod tests {
         assert!(!ct_writer_close().is_null());
         assert_eq!(ct_steps_positioned(), 1);
         assert_eq!(ct_steps_unpositioned(), 0);
-        assert_eq!(ct_rung_violations(), 0, "a rung-1 contract whose steps all carry positions");
+        assert_eq!(
+            ct_rung_violations(),
+            0,
+            "a rung-1 contract whose steps all carry positions"
+        );
         assert_eq!(ct_rung_violation_pc(), u32::MAX);
     }
 
@@ -1612,8 +1715,16 @@ mod tests {
         assert!(!ct_writer_close().is_null());
         assert_eq!(ct_steps_positioned(), 0);
         assert_eq!(ct_steps_unpositioned(), 1);
-        assert_eq!(ct_rung_violations(), 1, "a rung-1 contract that produced an unpositioned step");
-        assert_eq!(ct_rung_violation_pc(), 3, "record(1)'s pc is 1*3, and it is the first offender");
+        assert_eq!(
+            ct_rung_violations(),
+            1,
+            "a rung-1 contract that produced an unpositioned step"
+        );
+        assert_eq!(
+            ct_rung_violation_pc(),
+            3,
+            "record(1)'s pc is 1*3, and it is the first offender"
+        );
     }
 
     /// A rung-3 declaration over the SAME unpositioned step is not a violation. Without this arm
@@ -1649,7 +1760,11 @@ mod tests {
         steps.extend_from_slice(&record(2));
         assert_eq!(unsafe { ct_ingest(steps.as_ptr(), steps.len()) }, 2);
         assert!(!ct_writer_close().is_null());
-        assert_eq!(ct_steps_positioned(), 1, "exactly the one whose line was non-zero");
+        assert_eq!(
+            ct_steps_positioned(),
+            1,
+            "exactly the one whose line was non-zero"
+        );
         assert_eq!(ct_steps_unpositioned(), 1);
         assert_eq!(ct_positions_pending(), 0);
     }
@@ -1660,17 +1775,26 @@ mod tests {
         unsafe { assert_eq!(open(0), CT_OK) };
         // An id nothing has interned.
         let p = position(7, 1, 1);
-        assert_eq!(unsafe { ct_positions(p.as_ptr(), p.len()) }, CT_ERR_BAD_PATH_ID);
+        assert_eq!(
+            unsafe { ct_positions(p.as_ptr(), p.len()) },
+            CT_ERR_BAD_PATH_ID
+        );
         assert_eq!(ct_positions_pending(), 0, "a refused batch queues nothing");
         // A short buffer.
         let mut short = p.to_vec();
         short.truncate(CT_POSITION_SIZE - 1);
-        assert_eq!(unsafe { ct_positions(short.as_ptr(), short.len()) }, CT_ERR_BAD_LENGTH);
+        assert_eq!(
+            unsafe { ct_positions(short.as_ptr(), short.len()) },
+            CT_ERR_BAD_LENGTH
+        );
         // A dirty reserved word.
         assert_eq!(unsafe { intern("/aztec/token.nr") }, 0);
         let mut dirty = position(0, 1, 1);
         dirty[POS_OFF_RESERVED] = 1;
-        assert_eq!(unsafe { ct_positions(dirty.as_ptr(), dirty.len()) }, CT_ERR_RESERVED_NOT_ZERO);
+        assert_eq!(
+            unsafe { ct_positions(dirty.as_ptr(), dirty.len()) },
+            CT_ERR_RESERVED_NOT_ZERO
+        );
         // …and a rung outside the ladder.
         let addr = [3u8; ADDRESS_LEN];
         assert_eq!(unsafe { declare(&addr, 0) }, CT_ERR_BAD_RUNG);
@@ -1684,8 +1808,14 @@ mod tests {
     #[test]
     fn the_record_layout_figures_are_four_and_sixty() {
         assert_eq!(CT_RECORD_SIZE, 64);
-        assert_eq!(CT_RECORD_FIELD_BYTES, 60, "not the 56 the module doc and TRACE-ABI.md said");
-        assert_eq!(CT_RECORD_RESERVED_BYTES, 4, "not the 8 the module doc and TRACE-ABI.md said");
+        assert_eq!(
+            CT_RECORD_FIELD_BYTES, 60,
+            "not the 56 the module doc and TRACE-ABI.md said"
+        );
+        assert_eq!(
+            CT_RECORD_RESERVED_BYTES, 4,
+            "not the 8 the module doc and TRACE-ABI.md said"
+        );
         assert_eq!(CT_POSITION_SIZE, 16);
         assert_eq!(ct_record_size(), CT_RECORD_SIZE);
         assert_eq!(ct_position_size(), CT_POSITION_SIZE);
@@ -1746,7 +1876,11 @@ mod tests {
             unsafe { ct_call(name.as_ptr(), name.len(), u32::MAX, 9, addr.as_ptr()) },
             CT_OK
         );
-        assert_eq!(ct_call_depth(), 2, "the second call NESTS rather than replacing");
+        assert_eq!(
+            ct_call_depth(),
+            2,
+            "the second call NESTS rather than replacing"
+        );
         assert_eq!(ct_calls_opened(), 2);
         let r = record(1);
         assert_eq!(unsafe { ct_ingest(r.as_ptr(), r.len()) }, 1);
@@ -1755,9 +1889,17 @@ mod tests {
         assert_eq!(ct_return(), CT_OK);
         assert_eq!(ct_call_depth(), 0);
         assert_eq!(ct_calls_opened(), 2, "closing does not un-open");
-        assert_eq!(ct_return(), CT_ERR_NO_FRAME, "and the floor is still the floor");
+        assert_eq!(
+            ct_return(),
+            CT_ERR_NO_FRAME,
+            "and the floor is still the floor"
+        );
         assert!(!ct_writer_close().is_null());
-        assert_eq!(ct_call_depth(), 0, "the depth belongs to the session, which is gone");
+        assert_eq!(
+            ct_call_depth(),
+            0,
+            "the depth belongs to the session, which is gone"
+        );
         assert_eq!(ct_calls_opened(), 0);
     }
 
@@ -1807,6 +1949,10 @@ mod tests {
         );
         assert_eq!(ct_log_event_count(), 2);
         assert!(!ct_writer_close().is_null());
-        assert_eq!(ct_log_event_count(), 0, "the count belongs to the session, which is gone");
+        assert_eq!(
+            ct_log_event_count(),
+            0,
+            "the count belongs to the session, which is gone"
+        );
     }
 }
