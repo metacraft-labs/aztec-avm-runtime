@@ -481,3 +481,17 @@ an OQ-6 benchmark M24 owns. What it buys is real — ruzstd leaves the shipped p
 
 m26's durable fix is written in WRITER-SEAM 9e: the probe must materialise from the object store,
 blocked today by a Noir worktree resolving those crates by relative path.
+
+## Sweep 4 — the final one
+
+After the control redesign and the schema-agnostic decoder, after the last commit, under
+`direnv exec`: **TOTAL 13,195, 42 milestones, delta −354, 25 of 42 exit 0, no hole. m41 = 169
+rc=0 and m24 = 356, both exactly at reference.** m24's 350 → 356 is M41's own and was declared in
+the reference *before* the sweep ran.
+
+Four sweeps in all, and **the seven moves are identical in every one**: m11 +9, m25 +1, m27 +2,
+m28 +8, m38 −43, m39 −125, m26 −206. Sweep 1 found this milestone's `nim`-in-the-shell defect
+(m41 at 73); sweeps 2 and 3 agreed at 13,184 and 13,188; this is the fourth.
+
+`carry/*.json` checksummed before and after all four; `exposure.json` and `rebase.json` came back
+changed every time, restored from HEAD, re-verified, never staged.

@@ -3034,6 +3034,11 @@ Format spec: `~/ah/dev/agent-harbor/ah-lib/specs/Milestones-Files.md`.
   build has no `CC_wasm32_unknown_unknown`, so it dies inside `zstd-sys` on `cover.c` with the host
   `gcc`. The real remedy is for the probe to materialise from the object store like every other
   consumer here, which it cannot while a Noir worktree resolves those crates by relative path.
+- **M41's FINAL sweep: 13,195, delta −354, m41 = 169 and m24 = 356, both exactly at reference.**
+  Four sweeps were taken and the seven moves are identical in all four. m24's 350 → 356 is M41's
+  own and was DECLARED in the reference before the sweep ran: `test_ct_container_roundtrip_ct_print`'s
+  control was redesigned from an identity to a property. The figures below are the second sweep's
+  and the accounting is unchanged.
 - **M41's sweep: 13,184, delta −354, and ONE of the seven moves is M41's own.** Measured M0–M41 on
   2026-09-10, **after M41's last commit**, `setsid`-detached under `direnv exec` — this
   repository's own dev shell — one milestone at a time, `TMPDIR` and the log under `~/.cache`, **84

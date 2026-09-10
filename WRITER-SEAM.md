@@ -499,9 +499,15 @@ Measured M0–M41 on 2026-09-10, **after this milestone's last commit**, `setsid
 `direnv exec` — this repository's own dev shell — one milestone at a time with nothing else
 running. 84 markers for 42 milestones, no hole.
 
-> **TOTAL 13,184 · 42 milestones · delta −354 against 13,538 · 25 of 42 exit 0**
+> **TOTAL 13,195 · 42 milestones · delta −354 against 13,549 · 25 of 42 exit 0**
 >
-> **m41 = 164, rc=0, exactly its reference.** m24 = 350, unchanged.
+> **m41 = 169, rc=0, exactly its reference. m24 = 356, exactly its reference** — moved from 350 by
+> this milestone's own control redesign, declared in the reference before the sweep ran.
+>
+> *Four sweeps were taken. The first measured m41 at 73 and found this milestone's `nim`-in-the-shell
+> defect; the second and third agreed at 13,184/13,188 with m41 at its then-reference; this is the
+> fourth, after the control redesign and the schema-agnostic decoder. The seven moves are the same
+> seven in every one of them.*
 
 Every unit accounted in both directions — **+9 +1 −206 +2 +8 −43 −125 = −354**:
 
