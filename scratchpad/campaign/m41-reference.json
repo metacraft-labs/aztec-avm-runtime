@@ -38,9 +38,18 @@
     "  m24 verify_trace_event_abi_batched_faster 91/14, the stale benchmark table -- 91/15 at HEAD before M41 too",
     "  m26/m38/m39 lost assertions to probe and arm-report failures that are NOT nim: the OQ-7",
     "      shared-writer probe would not build, and the Noir private-trace arms reported zero steps",
-    "  m32/m34/m35/m36/m37/m40 reds at their reference COUNTS, so a pinned list moved rather than a structure"
+    "  m32/m34/m35/m36/m37/m40 reds at their reference COUNTS, so a pinned list moved rather than a structure",
+    "",
+    "SECOND PASS. m41 is 169 (27+20+16+14+27+45+20): verify_container_equivalence_characterised",
+    "gained one assertion -- the two split probes must be different BUILDS, or every",
+    "'read by whichever can read it' is one reader agreeing with itself.",
+    "m24 moves 350 -> 356 AND IT IS M41's: test_ct_container_roundtrip_ct_print's control was",
+    "redesigned from an identity (must be the reader's parent) to a PROPERTY (must not read",
+    "this container), because the schema bump and the reader fix stopped being adjacent. The",
+    "six are the environment ruled out by name (127/126/124/signal), the outcome classified,",
+    "and the identity reduced to different-commits + ancestor."
   ],
-  "_total": 13542,
+  "_total": 13549,
   "m0": 156,
   "m1": 181,
   "m2": 293,
@@ -65,7 +74,7 @@
   "m21": 451,
   "m22": 349,
   "m23": 512,
-  "m24": 350,
+  "m24": 356,
   "m25": 455,
   "m26": 341,
   "m27": 345,
@@ -82,5 +91,5 @@
   "m38": 150,
   "m39": 205,
   "m40": 145,
-  "m41": 168
+  "m41": 169
 }

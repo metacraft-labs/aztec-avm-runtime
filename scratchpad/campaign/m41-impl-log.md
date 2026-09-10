@@ -444,3 +444,40 @@ refusal for a silence.
 
 Sweep 3 (after the default was restored): **TOTAL 13,188, m41 = 168 rc=0 at reference, delta -354,
 the same seven moves as sweep 2.**
+
+## The coupled move, and the two things found under it
+
+The coordinator scoped M24's roundtrip control back in. Redesigned it property-first:
+"did not run" ruled out by name (127/126/124/signal), outcome classified REFUSED or SILENT,
+identity reduced to different-commits + ancestor + both-published. Green.
+
+**Then the real blocker appeared underneath**: M24's content assertions counted `type == "Step"`,
+the LEGACY events.log schema. Path B containers have no events.log, so ct-print takes the
+split-stream path and emits `kind: "step"` — every assertion read ZERO from a perfectly decoded
+container. Fixed with a shared schema-agnostic decoder (`_ct_decode_rows.py`) that reports which
+shape it read. Kept regardless of writer.
+
+Coupled move (`default = path-b` AND reader anchor -> 0638684686, because a v4 reader refuses the
+v3 container the old default writes):
+
+| milestone | baseline | coupled |
+|---|---|---|
+| m40 | 145/12 | 145/**10** (better) |
+| m24 | 356/15 | 356/43 |
+| m25 | 456/0  | 456/49 |
+
+Does not clear. The residue is M24's/M25's constants describing **Path A's container shape** —
+N steps, one Call, one Function, first step at pc 0, five vars on step 0 — all off by the Nim
+writer's start-step and absent toplevel frame, which are §5's catalogued differences. Re-expressing
+them re-decides what M24 measures. Also found: the reader anchor is used to read containers from
+OTHER producers, some legitimately v3, so advancing it is not only about our own output.
+
+**`CC_wasm32_unknown_unknown` is three exports** and they are now set in the build script, inert at
+the current pin (module still 264,281 / sha 5d661d3c / 0 imports, m24 and m26 at baseline). With
+`trace_format` moved to c8802c5: module 498,409 (+234,128), compressor becomes C libzstd, **m26
+135/4 -> 341/1** (the -206 recovered), m24 356/17. One pin move plus four named document figures.
+Not taken: it changes the shipped Path A module for a writer we are moving off, and its verdict is
+an OQ-6 benchmark M24 owns. What it buys is real — ruzstd leaves the shipped path.
+
+m26's durable fix is written in WRITER-SEAM 9e: the probe must materialise from the object store,
+blocked today by a Noir worktree resolving those crates by relative path.

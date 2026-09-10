@@ -192,6 +192,12 @@ mkdir -p "$WORK" || die "could not create $WORK"
 build_one "$REV" "$WORK/src-tree" "$WORK/ct-print"
 build_one "$CONTROL" "$WORK/src-tree-pre" "$WORK/ct-print-pre"
 build_probe "$REV" "$WORK/src-tree" "$WORK/ct-split-probe"
+# A split probe at the CONTROL revision too. `ct-print` diverts any container carrying an
+# `events.log` to its legacy combined-stream reader, so neither `ct-print` binary ever touches the
+# split streams; the probes are the only readers here that do. Having one at each revision is what
+# lets a check read a container with whichever of the two CAN read it, and say which — rather than
+# reading both with one reader and attributing the difference to a writer.
+build_probe "$CONTROL" "$WORK/src-tree-pre" "$WORK/ct-split-probe-pre"
 # The writer anchor's reader. Skipped when the two anchors coincide, because building one tree
 # twice under two names would let a check compare a binary with itself and read the agreement as
 # evidence.

@@ -152,17 +152,44 @@ PY
 # ---------------------------------------------------------------------------
 
 M41_READERS=""
-export M41_READERS
+M41_PROBE_NEW=""
+M41_PROBE_OLD=""
+M41_PRINT_NEW=""
+M41_PRINT_OLD=""
+export M41_READERS M41_PROBE_NEW M41_PROBE_OLD M41_PRINT_NEW M41_PRINT_OLD
 m41_require_readers() {
   local work
   work="${M24_CTPRINT_WORK:-$HOME/.cache/aztec-m24-ctprint}"
   m41_bounded 3600 "building the ct-print readers" "$REPO_ROOT/verification/build_ct_print.sh" \
     || die "the ct-print readers could not be built; its output is in $M41_LAST_LOG"
   local b
-  for b in ct-print ct-split-probe ct-print-writer ct-split-probe-writer; do
+  for b in ct-print ct-print-pre ct-split-probe ct-split-probe-pre; do
     [ -x "$work/$b" ] || die "build_ct_print.sh reported success but $work/$b is not there"
   done
   M41_READERS="$work"
+  # THE TWO PROBES ARE RESOLVED BY ROLE, NOT BY FILE NAME.
+  #
+  # M41's checks need an OLDER reader and a NEWER one, because the two writers produce containers
+  # under different `meta.dat` schema versions and each is readable by one of them. Which build
+  # holds which role depends on where `pins.json`'s reader anchor sits, and that anchor is expected
+  # to move — so the roles are looked up rather than spelled. `ct-split-probe` is always the
+  # anchor's own revision and `ct-split-probe-pre` is always its control, which is by construction
+  # the older of the two.
+  # OLDER is the READER anchor's build; NEWER is the WRITER anchor's when the two anchors differ,
+  # and the reader anchor's own when they coincide. `build_ct_print.sh` does not build a second
+  # copy of one tree, so the fallback is not laziness — it is the only correct answer when there is
+  # only one revision to have. A check that then compares a reader with itself would be reading
+  # agreement as evidence, so `verify_container_equivalence_characterised` asserts the two probes
+  # are DIFFERENT FILES before it uses them.
+  M41_PROBE_OLD="$work/ct-split-probe"
+  M41_PRINT_OLD="$work/ct-print"
+  if [ -x "$work/ct-split-probe-writer" ]; then
+    M41_PROBE_NEW="$work/ct-split-probe-writer"
+    M41_PRINT_NEW="$work/ct-print-writer"
+  else
+    M41_PROBE_NEW="$work/ct-split-probe"
+    M41_PRINT_NEW="$work/ct-print"
+  fi
 }
 
 # m41_probe <reader> <container> — one probe run, output on stdout, bounded.

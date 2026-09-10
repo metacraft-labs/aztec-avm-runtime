@@ -44,6 +44,12 @@ TAB=$'\t'
 m41_require_path_a
 m41_require_path_b
 m41_require_readers
+# The two probes must be two BINARIES, or every "read by whichever can read it" below is one
+# reader agreeing with itself. They coincide exactly when the reader anchor has caught up with the
+# writer anchor, which is a real state and a legitimate one — but it is not one this comparison can
+# run in, so it is named rather than absorbed.
+assert_false "the two probes are different builds, so the comparison has two readers" \
+  test "$M41_PROBE_OLD" = "$M41_PROBE_NEW"
 
 m41_drive "$M41_PATH_A" path-a
 m41_drive "$M41_PATH_B" path-b
@@ -54,13 +60,16 @@ m41_drive "$M41_PATH_B" path-b
 for arm in path-a path-b; do
   CT="$M41_WORK/$arm/container.ct"
   assert_file "the $arm arm produced a container" "$CT"
-  m41_probe "$M41_READERS/ct-split-probe" "$CT" >"$M41_WORK/$arm/probe-reader.tsv"
-  m41_probe "$M41_READERS/ct-split-probe-writer" "$CT" >"$M41_WORK/$arm/probe-writer.tsv"
-  m41_bounded "$M41_READER_TIMEOUT" "ct-print at the reader anchor over $arm" \
-    "$M41_READERS/ct-print" --full "$CT" || true
+  # `reader`/`writer` in these file names are the OLDER and NEWER readers, resolved by role in
+  # `m41_require_readers`. Which revision holds which role depends on where the reader anchor sits,
+  # and that anchor moves; the roles do not.
+  m41_probe "$M41_PROBE_OLD" "$CT" >"$M41_WORK/$arm/probe-reader.tsv"
+  m41_probe "$M41_PROBE_NEW" "$CT" >"$M41_WORK/$arm/probe-writer.tsv"
+  m41_bounded "$M41_READER_TIMEOUT" "the older ct-print over $arm" \
+    "$M41_PRINT_OLD" --full "$CT" || true
   cp "$M41_LAST_LOG" "$M41_WORK/$arm/full-reader.json"
-  m41_bounded "$M41_READER_TIMEOUT" "ct-print at the writer anchor over $arm" \
-    "$M41_READERS/ct-print-writer" --full "$CT" || true
+  m41_bounded "$M41_READER_TIMEOUT" "the newer ct-print over $arm" \
+    "$M41_PRINT_NEW" --full "$CT" || true
   cp "$M41_LAST_LOG" "$M41_WORK/$arm/full-writer.json"
 done
 

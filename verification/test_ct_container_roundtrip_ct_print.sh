@@ -108,27 +108,15 @@ rc_fixed=$?
 assert_eq "ct-print at the pinned revision reads the container (exit 0)" "0" "$rc_fixed"
 assert_ge "and produced a substantial amount of JSON" "1000" "$(wc -c <"$OUT_FILE" 2>/dev/null || echo 0)"
 
-DECODED="$(python3 - "$OUT_FILE" <<'PY'
-import json, sys
-from collections import Counter
-try:
-    d = json.load(open(sys.argv[1], encoding="utf-8"))
-except Exception as e:
-    print("PROBLEM\t%s" % e); raise SystemExit(0)
-c = Counter(e.get("type") for e in d.get("events", []))
-print("PROGRAM\t%s" % d.get("metadata", {}).get("program", "MISSING"))
-print("WORKDIR\t%s" % d.get("metadata", {}).get("workdir", "MISSING"))
-print("PATHS\t%d" % len(d.get("paths", [])))
-print("PATH0\t%s" % (d.get("paths") or ["MISSING"])[0])
-for k in ("Step", "Value", "Path", "Function", "Call", "VariableName", "Type"):
-    print("COUNT_%s\t%d" % (k, c.get(k, 0)))
-steps = [e for e in d.get("events", []) if e.get("type") == "Step"]
-print("FIRSTLINE\t%s" % (steps[0].get("line") if steps else "MISSING"))
-print("LASTLINE\t%s" % (steps[-1].get("line") if steps else "MISSING"))
-names = sorted({e.get("name") for e in d.get("events", []) if e.get("type") == "VariableName"})
-print("VARNAMES\t%s" % ",".join(str(n) for n in names))
-PY
-)" || die "the decoded container could not be summarised"
+# THE DECODE IS FLATTENED BY A SHARED READER THAT UNDERSTANDS BOTH OF `ct-print`'s SHAPES.
+#
+# It has two, and which one comes back is decided by WHICH WRITER produced the container: a
+# container carrying an `events.log` goes to the legacy combined-stream reader and one without it
+# to the split-stream reader, and they emit different JSON. Counting `type == "Step"` — which this
+# block did inline — reports ZERO of everything for the other shape, with no error anywhere.
+# See `_ct_decode_rows.py` for the mapping and for the one row that is not a rename.
+DECODED="$(python3 "$REPO_ROOT/verification/_ct_decode_rows.py" "$OUT_FILE")" \
+  || die "the decoded container could not be summarised"
 [ -n "$DECODED" ] || die "the container summary is empty"
 assert_not_contains "the JSON ct-print produced is well formed" "PROBLEM" "$DECODED"
 
@@ -161,46 +149,135 @@ assert_eq "the last step's line is the last event's pc" \
   "$(m24_arm 'd["roundtrip"]["lastPc"]')" "$(dv LASTLINE)"
 
 # ---------------------------------------------------------------------------
-# THE CONTROL: the SAME reader one commit earlier must NOT read it.
+# THE CONTROL: A READER THAT DEMONSTRABLY CANNOT READ THIS CONTAINER.
+#
+# ---------------------------------------------------------------------------
+# WHY THIS IS A PROPERTY AND NOT A GRAPH POSITION ANY MORE
+# ---------------------------------------------------------------------------
+#
+# This control used to be specified twice over: it had to REFUSE the container, and it had to BE
+# the reader commit's parent. Those two were the same requirement for as long as the reader fix and
+# the container's format were one commit apart, and pinning the identity was a convenient way to
+# get the property.
+#
+# THEY CAME APART. `meta.dat` moved to schema version 4, and the commit that made the reader
+# understand it is not adjacent to the commit that made a container need it. Measured, on the
+# revision this anchor would otherwise advance to: `git diff --name-only <control> <reader>` is
+# three files — a nimble file, the writer FFI and one test — and NOT ONE OF THEM IS A READER. A
+# control chosen by graph position is therefore a control that reads the container perfectly well,
+# which is no control at all; and the identity assertion would fail for a reader that was correct.
+#
+# So the property is asserted directly. **A control chosen for what it DOES survives the next
+# bump; one chosen for where it SITS breaks at every non-adjacent fix.**
+#
+# ---------------------------------------------------------------------------
+# "DID NOT RUN" IS NOT "REFUSED", AND A CHECK THAT ONLY ASKS "DID IT FAIL?" CANNOT TELL
+# ---------------------------------------------------------------------------
+#
+# A missing binary exits 127, a non-executable one 126, a hung one is killed at 124, and a build
+# that never happened leaves no binary at all. Every one of those "fails", and a control asserted
+# as `rc != 0` would count them as evidence that this container is discriminating. They are
+# evidence about this check's own environment.
+#
+# So the outcome is CLASSIFIED, and only two classifications are accepted:
+#
+#   REFUSED  the control ran, exited non-zero, and said why in its own words
+#   SILENT   the control ran, exited ZERO, and produced a decode that fails the very content
+#            predicate the reader passes
+#
+# The second is the one this campaign should be most alert to and the old formulation could not
+# express: a reader that answers a container it does not understand, with nothing in it. Both are
+# valid controls — what neither can be is "the binary was not there".
 # ---------------------------------------------------------------------------
 PRE_OUT="$M24_WORK/roundtrip.ct-print-pre.txt"
-m24_run_bounded "$M24_READER_TIMEOUT" "ct-print before the fix" \
+
+assert_file "the control reader was built" "$READERS/ct-print-pre"
+assert_true "and is executable, so a 126 below would be a finding and not a setup error" \
+  test -x "$READERS/ct-print-pre"
+
+m24_run_bounded "$M24_READER_TIMEOUT" "the control reader" \
   "$READERS/ct-print-pre" --full "$CT" >"$PRE_OUT" 2>&1
 rc_pre=$?
-assert_eq "ct-print at the fix's PARENT refuses the container (exit 1)" "1" "$rc_pre"
-# AND FOR THE REASON THAT IS STILL TRUE AFTER THE ANCHOR MOVED, WHICH IS NOT THE ONE IT WAS.
-#
-# `baea074` fixes TWO independent mismatches and its message names both: the Rust writer prefixes
-# `events.log` with the 8-byte CodeTracer file header the Nim writer omits, and its chunks were
-# streaming-encoder frames with no pledged content size. The `trace_format` move retired the
-# SECOND — every frame pledges now, asserted stream by stream at the end of this file — and did
-# not touch the first. So what the parent still refuses over is the HEADER PREFIX, and this
-# assertion said "the unpledged-frame reason" until the anchor-move review renamed it. The
-# message text is unchanged and is still what is pinned; only the cause it is attributed to moved.
-assert_true "and refuses it for the events.log header-prefix reason, by its own words" \
-  str_has_sub "$(cat "$PRE_OUT" 2>/dev/null)" 'chunk compressed data extends beyond events.log'
-assert_false "the pre-fix reader produced no container JSON at all" \
-  str_has_sub "$(cat "$PRE_OUT" 2>/dev/null)" '"metadata"'
 
-# The two readers differ by ONE COMMIT, and that is the claim. Asserted from pins.json and from
-# git, so a control_commit that drifted away from being the fix's parent is a failure.
+# The environment, ruled out by name before the outcome is read as evidence.
+assert_false "the control was FOUND — 127 would mean this check tested nothing" \
+  test "$rc_pre" -eq 127
+assert_false "and was EXECUTABLE — 126 likewise" test "$rc_pre" -eq 126
+assert_false "and RAN TO COMPLETION — 124 is the bound firing, not a refusal" \
+  test "$rc_pre" -eq 124
+assert_false "and did not die on a signal" test "$rc_pre" -ge 128
+
+# Did it decode this container? The predicate is the SAME one the reader passed above: the step
+# count equals the events the host wrote. Read from the control's own output.
+PRE_STEPS="$(python3 - "$PRE_OUT" <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    print("NODECODE"); raise SystemExit(0)
+ev = d.get("events")
+if not isinstance(ev, list):
+    print("NODECODE"); raise SystemExit(0)
+print(sum(1 for e in ev if (e.get("type") == "Step" or e.get("kind") == "step")))
+PY
+)"
+EXPECT_STEPS="$(m24_arm 'd["roundtrip"]["events"]')"
+
+if [ "$rc_pre" -ne 0 ]; then
+  CONTROL_OUTCOME=REFUSED
+elif [ "$PRE_STEPS" = "NODECODE" ] || [ "$PRE_STEPS" != "$EXPECT_STEPS" ]; then
+  CONTROL_OUTCOME=SILENT
+else
+  CONTROL_OUTCOME=READ_IT
+fi
+note "the control reader exited $rc_pre and decoded [$PRE_STEPS] steps where the reader decoded $EXPECT_STEPS — $CONTROL_OUTCOME"
+
+assert_false "THE CONTROL DID NOT READ THIS CONTAINER, which is the whole of its job" \
+  test "$CONTROL_OUTCOME" = READ_IT
+assert_true "and the way it failed is one this check can name" \
+  bash -c '[ "$1" = REFUSED ] || [ "$1" = SILENT ]' _ "$CONTROL_OUTCOME"
+
+# Whichever way it failed, it failed ABOUT THIS CONTAINER. A refusal says so in words; a silent
+# decode is pinned to the number it got wrong, so "it produced fewer steps" cannot be satisfied by
+# a control that produced no output at all — `NODECODE` and a wrong count are distinguished above
+# and both are reported.
+case "$CONTROL_OUTCOME" in
+  REFUSED)
+    assert_ge "the refusal says something, rather than exiting silently" 1 \
+      "$(wc -c <"$PRE_OUT" 2>/dev/null || echo 0)"
+    assert_false "and it is a refusal rather than a decode" \
+      str_has_sub "$(cat "$PRE_OUT" 2>/dev/null)" '"metadata"'
+    ;;
+  SILENT)
+    assert_false "the silent decode does NOT carry the step count the reader recovered" \
+      test "$PRE_STEPS" = "$EXPECT_STEPS"
+    assert_ge "and the reader recovered a non-trivial number of steps, so the gap is real" 1 \
+      "$EXPECT_STEPS"
+    ;;
+esac
+
+# ---------------------------------------------------------------------------
+# The two readers are DIFFERENT revisions, both pinned and both published. That is all the
+# identity this check needs: which commits they are is `pins.json`'s business, and what they DO is
+# asserted above.
+# ---------------------------------------------------------------------------
 FIX="$(m24_pin trace_format_nim commit)"
 CONTROL="$(m24_pin trace_format_nim control_commit)"
 assert_true "pins.json declares the reader commit" str_has_re "$FIX" '^[0-9a-f]{40}$'
 assert_true "pins.json declares its control commit" str_has_re "$CONTROL" '^[0-9a-f]{40}$'
+assert_false "and they are not the same commit, which would make the control a copy of the reader" \
+  test "$FIX" = "$CONTROL"
 NIM_REPO="$WORKSPACE_ROOT/codetracer-trace-format-nim"
 assert_dir "the trace-format-nim checkout is present" "$NIM_REPO"
-assert_eq "the control commit IS the reader commit's parent — a one-commit difference" \
-  "$CONTROL" "$(git -C "$NIM_REPO" rev-parse "$FIX^" 2>/dev/null || echo MISSING)"
 assert_eq "the built reader is the pinned revision" "$FIX" \
   "$(cat "$READERS/ct-print.rev" 2>/dev/null | tr -d '[:space:]')"
 assert_eq "the built control is the pinned control revision" "$CONTROL" \
   "$(cat "$READERS/ct-print-pre.rev" 2>/dev/null | tr -d '[:space:]')"
-assert_true "the one commit between them is the reader fix, by its subject" \
-  str_has_sub "$(git -C "$NIM_REPO" log -1 --format=%s "$FIX" 2>/dev/null)" \
-  'read an events.log written by the Rust CtfsTraceWriter'
-assert_ge "and it adds the unknown-size frame decompressor" "1" \
-  "$(git -C "$NIM_REPO" show "$FIX" 2>/dev/null | grep -c '^+.*decompressFrameOfUnknownSize' || true)"
+# The control is the OLDER of the two — an ancestor. Not "the parent": the property above is what
+# makes it a control, and an ancestry test is the weakest identity claim that still rules out a
+# control taken from an unrelated branch.
+assert_true "and the control is an ancestor of the reader, not a commit from somewhere else" \
+  git -C "$NIM_REPO" merge-base --is-ancestor "$CONTROL" "$FIX"
 
 # BOTH PINNED COMMITS ARE PUBLISHED. See `m24_published_refcount` in lib_m24_ct_writer.sh: M24
 # pinned this reader — and its control — to commits that existed only on a local branch on one
@@ -211,8 +288,6 @@ assert_ge "the pinned reader commit is reachable from a PUBLISHED remote ref" "1
   "$(m24_published_refcount "$NIM_REPO" "$FIX")"
 assert_ge "and so is the control commit the difference is measured against" "1" \
   "$(m24_published_refcount "$NIM_REPO" "$CONTROL")"
-
-# ---------------------------------------------------------------------------
 # THE CONTROL FOR THE CONTROL: the pre-fix reader is not simply broken.
 #
 # Without this, "ct-print-pre exits 1" is satisfied by a binary that exits 1 on everything, and

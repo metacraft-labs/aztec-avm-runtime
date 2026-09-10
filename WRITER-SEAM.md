@@ -388,6 +388,111 @@ next person meets the reason rather than the symptom.
 
 ---
 
+## 9c. The coupled move: the control redesigned, the anchor advanced, and what was left
+
+M24's roundtrip control was **over-specified** — it pinned the control commit's *identity* (must be
+the reader's parent) to obtain a *property* (must not read this container), and those came apart
+when the schema bump and the reader fix stopped being adjacent. **It is a property now**, and the
+redesign landed and is green:
+
+* the control is run, and `127` / `126` / `124` / a signal are ruled out **by name** before its
+  outcome is read as evidence — a missing binary "fails" too, and a check that only asks *did it
+  fail?* counts that as proof the container is discriminating;
+* the outcome is **classified** as `REFUSED` (ran, non-zero, said why) or `SILENT` (ran, exited
+  zero, and produced a decode that fails the very predicate the reader passes) — and `READ_IT`
+  fails. The second class is the one the old formulation could not express and the one this
+  campaign should fear most;
+* identity is reduced to what it is for: the two are **different** commits, both pinned, both
+  published, and the control is an **ancestor** — the weakest claim that still rules out a control
+  from an unrelated branch.
+
+**And a second, larger blocker was found underneath it.** M24's content assertions counted
+`type == "Step"` — the **legacy `events.log` schema**. `ct-print` diverts a container carrying an
+`events.log` to its legacy reader and everything else to the split-stream reader, and the two emit
+different JSON. The pure-Rust writer emits an `events.log`; the Nim writer does not. So under Path
+B every content assertion read **zero**, from a container the reader had decoded perfectly.
+
+That is fixed and kept: `verification/_ct_decode_rows.py` emits the same rows from either shape and
+reports which it read. It is a silent-zero defect removed regardless of which writer ships.
+
+**Then the coupled move was made** — `default = ["path-b"]` *and* the reader anchor advanced to
+`0638684686`, because a v4 reader refuses the v3 container the old default writes, so neither moves
+alone. Measured:
+
+| milestone | baseline | coupled move |
+|---|---|---|
+| m40 | 145 / 12 | 145 / **10** — *better than baseline* |
+| m24 | 356 / 15 | 356 / **43** |
+| m25 | 456 / 0 | 456 / **49** |
+
+**It does not clear, and the residue is not a defect in either writer.** What remains is that
+M24's and M25's content assertions are *constants describing Path A's container shape*: exactly N
+steps, exactly one `Call`, exactly one `Function`, the first step at pc 0, five variables on step 0.
+The Nim writer's `start()` emits a step and interns no top-level function, so every one of those is
+off by the start-step and the toplevel frame — **differences already catalogued with reasons in §5**.
+Re-expressing them in terms of whichever writer ships is re-deciding what M24 measures, and that is
+M24's to decide.
+
+**One more thing the move surfaced:** the reader anchor is not only "the reader for our own
+containers" — several checks use it to read containers from *other* producers, some legitimately
+v3, and `test_fr_rendering_matches_noir_tracer`'s string arm went from read to refused. Advancing
+that anchor is therefore not only about this runtime's own output.
+
+So the default is `path-a`, the anchor is unmoved, and **both fixes above are kept** because both
+are improvements under either writer.
+
+## 9d. `CC_wasm32_unknown_unknown`: it is three exports, and it is now set
+
+The question was whether the `trace_format` move to `c8802c5` — which would clear m26's −206 — is
+blocked by a missing C toolchain or by something structural. **Three exports.** The dev shell
+already ships wasi-sdk 33 and exports `WASI_SDK_PATH`; `cc-rs` wants `CC_<target>`, `AR_<target>`
+and `CFLAGS_<target>`, and with none set it falls back to the host `gcc` and dies compiling
+`cover.c` for a target it cannot emit.
+
+**They are set in `build_ct_writer_wasm.sh` now, and they are inert at the current pin** — measured:
+the module is still **264,281 bytes, sha `5d661d3c`, 0 imports**, and m24 and m26 are exactly at
+baseline. Nothing compiles C until a pin selects the C backend.
+
+**With the pin moved, measured in full:**
+
+| | at `592fa42cbf` | at `c8802c5` |
+|---|---|---|
+| module | 264,281 B | **498,409 B** (+234,128) |
+| compressor | `ruzstd` | **C libzstd** |
+| m26 | 135 / 4 | **341 / 1** — the −206 recovered |
+| m24 | 356 / 15 | 356 / 17 |
+
+**It is one pin move and four document figures**, all named: `TRACE-ABI.md` §7's byte count and
+sha, §2's benchmark table (which needs a fresh OQ-6 run and is *already* 15-red on stale numbers),
+one m26 figure, and one `test_single_trace_types_instantiation` assertion about which manifest names
+`codetracer_ctfs`.
+
+**It is not taken here**, and the reason is scope rather than difficulty: it changes the shipped
+Path A module by +234 KB and its container encoding, for the writer this milestone exists to move
+off, and its verdict is an OQ-6 benchmark M24 owns. **What it buys is real and should not be lost:
+it removes `ruzstd` — the decoder that returns 4,194,304 bytes of wrong data where C libzstd
+refuses — from the shipped path**, which is one of the two facts the user's decision rested on.
+
+## 9e. m26's durable fix, and where the next drift will send someone
+
+The refusal is a **worktree that drifted**, not a stale declaration: `592fa42cbf` is exactly the
+revision the shipped module is built from, and `ctf-wt-wasm` moved off it when earlier M41 work
+advanced `wasm/ctfs-writer`. The precondition — never build against a revision the pin does not
+declare — is this repository's own rule and should stay.
+
+**The durable fix is for `build_oq7_shared_writer_probe.sh` to materialise
+`codetracer-trace-format` at the pinned revision out of the object store**, the way
+`build_ct_writer_wasm.sh` and `ct-writer/build.rs` already do. It cannot today: the Noir worktree
+resolves those crates by a **relative path in its own `Cargo.toml`**, so the tree it builds against
+is whatever sits at that path — and this milestone may not edit a Noir worktree.
+
+Two ways out, both outside M41: teach the probe to materialise into a scratch tree and point the
+Noir build at it (a `[patch]` or a temporary checkout), or move the `trace_format` pin as §9d
+measures. **Until one is taken, every advance of `wasm/ctfs-writer` reddens m26 again**, and this
+paragraph is where that drift should send its reader.
+
+---
+
 ## 10. The sweep
 
 Measured M0–M41 on 2026-09-10, **after this milestone's last commit**, `setsid`-detached under

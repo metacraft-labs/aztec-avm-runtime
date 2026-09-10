@@ -115,8 +115,8 @@ assert_true "and the same bytes" \
 # 3. THE PREDICATE. Every step is where the driver asked for it.
 # ---------------------------------------------------------------------------
 FULL="$M41_WORK/browser-full.json"
-m41_bounded "$M41_READER_TIMEOUT" "ct-print at the writer anchor" \
-  "$M41_READERS/ct-print-writer" --full "$BROWSER_DIR/container.ct" \
+m41_bounded "$M41_READER_TIMEOUT" "the newer ct-print" \
+  "$M41_PRINT_NEW" --full "$BROWSER_DIR/container.ct" \
   || die "the reader at the writer anchor could not decode the browser's container:
 $(tail -5 "$M41_LAST_LOG" 2>/dev/null)"
 cp "$M41_LAST_LOG" "$FULL"

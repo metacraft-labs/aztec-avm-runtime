@@ -49,19 +49,34 @@ codetracer_trace_writer = { path = "build-wasm-deps/ctf/codetracer_trace_writer"
 # version 3 while Path B stamps 4. Size is not the reason for anything here — Path B's module is
 # 480,833 bytes larger and that was known when the decision was taken.
 #
-# THE FLIP WAS MADE AND MEASURED. `default = ["path-b"]`, every M41 check green at 169, and then:
+# THE FLIP WAS MADE AND MEASURED TWICE, and the second time the blockers under it were fixed first.
+#
+# First attempt — `default = ["path-b"]` alone, every M41 check green:
 #
 #   m24  350 assertions, 14 failures -> 350, 58   (+44)
 #   m25  456 assertions,  0 failures -> 456, 15   (+15)
 #   m40  145 assertions, 12 failures -> 145, 26   (+14)
 #   m38  107,  4  and  m39  80, 10   -> UNCHANGED
 #
-# Every assertion COUNT is unchanged, so nothing structural moved; one class of assertion started
-# failing, and it is one class: **this repository verifies every container it writes with the
-# `ct-print` pinned at `trace_format_nim`, which is a version-3-era reader.** On M24's own 4.6 MB
-# container that reader reports 0 events, an empty program and 1,830 steps where there are 250,001
-# — and it does NOT refuse, it answers. The reader built at the `trace_format_nim_writer` anchor
-# reads the same bytes completely.
+# Second attempt — the reader anchor advanced WITH it (a v4 reader refuses the v3 container the old
+# default writes, so neither moves alone), M24's roundtrip control redesigned property-first, and
+# `ct-print`'s two output schemas reconciled by a shared decoder:
+#
+#   m40  145, 12 -> 145, 10   (BETTER than baseline)
+#   m24  356, 15 -> 356, 43
+#   m25  456,  0 -> 456, 49
+#
+# Every assertion COUNT is unchanged in both, so nothing structural moved. The FIRST attempt failed
+# on one thing: this repository verifies every container it writes with a version-3-era `ct-print`,
+# which on M24's own 4.6 MB Path B container reports 0 events, an empty program and 1,830 steps
+# where there are 250,001 — and does NOT refuse, it answers.
+#
+# What remains after the SECOND attempt is not a defect in either writer. M24's and M25's content
+# assertions are CONSTANTS DESCRIBING PATH A'S CONTAINER SHAPE — exactly N steps, exactly one
+# `Call`, exactly one `Function`, the first step at pc 0, five variables on step 0. The Nim
+# writer's `start()` emits a step and interns no top-level function, so every one of them is off by
+# the start-step and the toplevel frame, and both are differences `WRITER-SEAM.md` §5 already
+# catalogues WITH REASONS. Re-expressing them is re-deciding what M24 measures.
 #
 # So the flip is blocked on a PIN, not on a writer, and the pin is the one M41 was told not to
 # move: `trace_format_nim` names a commit deliberately so `test_ct_container_roundtrip_ct_print`'s
@@ -69,10 +84,15 @@ codetracer_trace_writer = { path = "build-wasm-deps/ctf/codetracer_trace_writer"
 # forward makes the control `8cfb1bb`, which READS a v4 container, so the check's "the parent must
 # not read it" arm has to be re-designed rather than re-pointed.
 #
-# **The default therefore stays `path-a`, and this is a one-line change the moment that decision
-# is taken.** Shipping v3 is a LOUD failure downstream — current readers refuse it by name —
-# whereas shipping v4 today would leave this repository unable to verify its own containers at
-# all, which trades a refusal for a silence. `WRITER-SEAM.md` §6 and §10 carry the measurement.
+# **The default therefore stays `path-a`.** Shipping v3 is a LOUD failure downstream — current
+# readers refuse it by name — whereas shipping v4 today would leave this repository verifying its
+# own containers against writer-specific constants that do not describe them, which trades a
+# refusal for a silence.
+#
+# Everything the two attempts left behind is KEPT, because all of it is an improvement under either
+# writer: the property-first control, the schema-agnostic decoder, both explicit build arms, and
+# the C toolchain exports. `WRITER-SEAM.md` §9, §9c, §9d and §9e carry the full measurement and the
+# named follow-ups.
 #
 # `path-b` WINS WHEN BOTH ARE ON, and that precedence is declared here rather than left for a
 # reader to derive from `cfg` polarity in `backend.rs`. Cargo features are additive — nothing can

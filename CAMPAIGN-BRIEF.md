@@ -63,6 +63,33 @@ so would "the container parses", "the positions are in range", and every predica
 the container alone. **When a check can compare against the request rather than against a total,
 it must** — a total is satisfied by the right number of wrong answers.
 
+### A control chosen for where it SITS breaks; one chosen for what it DOES survives
+**One instance, and it expired exactly as predicted.** M24's roundtrip control was specified twice
+over — it had to REFUSE the container, and it had to BE the reader commit's parent. Those were the
+same requirement only while the reader fix and the container's format were adjacent commits. A
+schema bump landed that was not adjacent to the reader fix, and the two came apart: the commit the
+identity assertion demands reads the container perfectly well, so it is no control at all, while
+the identity assertion itself would fail for a reader that is correct.
+
+The property is asserted directly now. And the guard the redesign needed: **"did not run" is not
+"refused"** — a missing binary exits 127, a non-executable one 126, a killed one 124, and a control
+asserted as `rc != 0` counts every one of them as evidence. Those are ruled out by name, and the
+outcome is classified as REFUSED (ran, non-zero, said why) or SILENT (ran, exited zero, decoded
+something that fails the predicate the reader passes) — the second being the class the old
+formulation could not express.
+
+### One tool, two output schemas, and a check can only be written against one of them
+**One instance, and it read ZERO of everything without an error anywhere.** `ct-print` diverts a
+container carrying an `events.log` to its legacy combined-stream reader and every other container
+to the split-stream reader, and the two emit different JSON — `{"type": "Step"}` against
+`{"kind": "step"}`. Which one a check gets back is decided by WHICH WRITER produced the container.
+M24's content assertions counted `type == "Step"` and reported 0 steps, 0 calls, 0 functions for a
+container the reader had decoded completely.
+
+`verification/_ct_decode_rows.py` emits the same rows from either shape and reports which it read.
+**When a tool has more than one output schema, the schema is part of the interface** — and a check
+that pins one of them is a check that silently reports nothing the day the other arrives.
+
 ### An assertion must be capable of failing
 **Fifty-eight instances.** (**M40 added the 57th and the 58th, and BOTH were found by aborting a
 sweep to read its own checks — which is now the fourth pass running in which the only work a sweep

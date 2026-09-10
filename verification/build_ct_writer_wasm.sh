@@ -159,6 +159,22 @@ esac
 mkdir -p "$TARGET_DIR" || die "could not create $TARGET_DIR"
 OUT="$TARGET_DIR/wasm32-unknown-unknown/release/aztec_ct_writer.wasm"
 
+# THE C TOOLCHAIN FOR `wasm32-unknown-unknown`, WHICH CARGO CANNOT STATE AND THE BUILD SCRIPT MUST.
+#
+# `zstd-sys` compiles C when the trace-format tree selects the C libzstd backend, and `cc-rs` looks
+# for `CC_<target>` / `AR_<target>` / `CFLAGS_<target>`. With none set it falls back to the host
+# `gcc`, which dies compiling `cover.c` for a target it cannot emit — four crates deep, with a
+# message about a C file and nothing about a toolchain.
+#
+# The dev shell already ships wasi-sdk 33 and exports `WASI_SDK_PATH`, so this is three lines. No
+# sysroot and no wasi-libc include path: `zstd-sys` ships its own `wasm-shim/` and turns it on for
+# this triple. Overridable, so a caller with another toolchain is not fought.
+if [ -n "${WASI_SDK_PATH:-}" ]; then
+  export CC_wasm32_unknown_unknown="${CC_wasm32_unknown_unknown:-$WASI_SDK_PATH/bin/clang}"
+  export AR_wasm32_unknown_unknown="${AR_wasm32_unknown_unknown:-$WASI_SDK_PATH/bin/llvm-ar}"
+  export CFLAGS_wasm32_unknown_unknown="${CFLAGS_wasm32_unknown_unknown:---target=wasm32-unknown-unknown}"
+fi
+
 build_script='
 set -euo pipefail
 export PATH="$CARGO_HOME/bin:$PATH"
@@ -190,6 +206,9 @@ fi
 # `bash -c` inherits, so it is passed explicitly rather than assumed.
 CT_WRITER_DIR="$CT_WRITER_DIR" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" \
   TARGET_DIR="$TARGET_DIR" FEATURES="$FEATURES" PATH="$PATH" \
+  CC_wasm32_unknown_unknown="${CC_wasm32_unknown_unknown:-}" \
+  AR_wasm32_unknown_unknown="${AR_wasm32_unknown_unknown:-}" \
+  CFLAGS_wasm32_unknown_unknown="${CFLAGS_wasm32_unknown_unknown:-}" \
   nix shell nixpkgs#rustup nixpkgs#capnproto --command bash -c "$build_script" \
   || die "the wasm build failed"
 
