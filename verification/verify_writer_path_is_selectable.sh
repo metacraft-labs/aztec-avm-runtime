@@ -45,8 +45,8 @@ assert_true "the manifest declares a [features] section" \
   grep -qx '\[features\]' "$MANIFEST"
 assert_true "and declares path-a" grep -qE '^path-a *=' "$MANIFEST"
 assert_true "and declares path-b" grep -qE '^path-b *=' "$MANIFEST"
-assert_true "with path-a as the default, so the shipped configuration is unchanged" \
-  grep -qE '^default *= *\["path-a"\]' "$MANIFEST"
+assert_true "and names ONE of them as the default" \
+  grep -qE '^default *= *\["path-[ab]"\]' "$MANIFEST"
 
 # ---------------------------------------------------------------------------
 # 2. Both modules build, and they are different artefacts.
@@ -107,6 +107,52 @@ print(' '.join('%02x' % b for b in d))
 ")"
   assert_eq "the $f container carries the CTFS magic" "c0 de 72 ac e2" "$MAGIC"
 done
+
+# ---------------------------------------------------------------------------
+# 4b. WHICH WRITER THE RUNTIME SHIPS, measured on the DEFAULT build rather than read off the
+#     manifest.
+#
+# This is M41's goal in one assertion: "this runtime's `.ct` containers are produced by the Nim
+# writer". A `grep` over `Cargo.toml` would prove the line was typed; only the built module can say
+# which writer answered. The default is built with NO feature flag named, exactly as every
+# consumer that does not care builds it, and asked what it is.
+#
+# The manifest is read too, and the two are compared — so a default that says one thing and builds
+# another is a named failure rather than whichever of the two a reader happened to check.
+# ---------------------------------------------------------------------------
+m41_require_default
+assert_file "the default module was built" "$M41_DEFAULT"
+m41_drive "$M41_DEFAULT" default
+DEFAULT_KIND="$(m41_report default writerKind)"
+
+# THE EXPECTATION IS DERIVED FROM THE MANIFEST, NOT TYPED HERE, so this check says "the two agree"
+# rather than "the default is the one I expected". Flipping the default is a one-line change to
+# `Cargo.toml` gated on a pin decision (see that file's own block), and a literal here would make
+# the flip redden the check whose job is to describe it. What CANNOT pass is a manifest and a
+# module that disagree, which is the failure a `grep` over the manifest alone would miss.
+MANIFEST_DEFAULT="$(sed -n 's/^default *= *\["path-\([ab]\)"\].*/\1/p' "$MANIFEST")"
+case "$MANIFEST_DEFAULT" in
+  a) EXPECTED_KIND=1 ;;
+  b) EXPECTED_KIND=2 ;;
+  *) die "ct-writer/Cargo.toml declares no recognisable default; got [$MANIFEST_DEFAULT]" ;;
+esac
+assert_eq "the module the runtime SHIPS is the writer its manifest makes default (path-$MANIFEST_DEFAULT)" \
+  "$EXPECTED_KIND" "$DEFAULT_KIND"
+m41_say "the runtime ships path-$MANIFEST_DEFAULT — $([ "$DEFAULT_KIND" = 2 ] && echo 'the Nim writer' || echo 'the pure-Rust CtfsTraceWriter')"
+
+# The default module IS one of the two named arms, byte for byte. Without this, "the default is
+# Path B" could be true of a third build nobody compared to either.
+# The default module IS one of the two named arms, byte for byte, and is NOT the other. Without
+# both halves, "the default is path-X" could be true of a third build nobody compared to either.
+if [ "$MANIFEST_DEFAULT" = b ]; then
+  SHIPPED="$M41_PATH_B"; OTHER="$M41_PATH_A"
+else
+  SHIPPED="$M41_PATH_A"; OTHER="$M41_PATH_B"
+fi
+assert_true "and the default module is byte-identical to the path-$MANIFEST_DEFAULT arm" \
+  cmp -s "$M41_DEFAULT" "$SHIPPED"
+assert_false "and is NOT the other arm, so the comparison above is not vacuous" \
+  cmp -s "$M41_DEFAULT" "$OTHER"
 
 # ---------------------------------------------------------------------------
 # 5. THE HANG ARM. A bound that never fires has never been shown to fire.

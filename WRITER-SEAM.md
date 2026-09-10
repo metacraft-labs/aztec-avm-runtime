@@ -186,8 +186,9 @@ and it is the reason the runtime's default is unchanged:
 
 **What would flip the default**, stated so the next reader does not have to derive it: a decision
 about the reader anchor, taken with the roundtrip check's one-commit rationale in view. Nothing
-else in this milestone is in the way. Both modules build, both are exercised, and the switch is one
-line of `pins.json`-adjacent configuration once that decision exists.
+else in this milestone is in the way. **§9 makes that concrete — the flip was made, built and
+measured, and costs +73 failing assertions in three milestones, every one of them the pinned
+reader answering with nothing.**
 
 ### The v4 flag day, which is the same fact from a third side
 
@@ -269,7 +270,71 @@ reddened on its own assertion.
 
 ---
 
-## 9. The sweep
+## 9. The flip was made and measured, and then made again in reverse
+
+M41's goal is that this runtime writes through the Nim writer. **`default = ["path-b"]` was set,
+built and measured** rather than argued about. Every M41 check went green at 169 assertions, the
+default module reported kind 2, and the container it produced was v4 and read completely by the
+reader at the writer anchor.
+
+Then the rest of the suite was measured, and this is the whole result:
+
+| milestone | default `path-a` | default `path-b` | Δ failures |
+|---|---|---|---:|
+| m24 | 350 assertions, 14 failures | 350, **58** | **+44** |
+| m25 | 456, 0 | 456, **15** | **+15** |
+| m40 | 145, 12 | 145, **26** | **+14** |
+| m26 | 135, 4 | 135, 4 | 0 |
+| m29 | 127, 0 | 127, 0 | 0 |
+| m38 | 107, 4 | 107, 4 | **0** |
+| m39 | 80, 10 | 80, 10 | **0** |
+
+**Every assertion COUNT is unchanged.** Nothing structural moved; one class of assertion started
+failing, and it is one class.
+
+### It does NOT clear m38 and m39, and that refutes the obvious hypothesis
+
+The natural reading of those two reds was that they are this runtime writing v3 into readers that
+now refuse it. **Measured, they are identical under both defaults** — 107/4 and 80/10 either way.
+Whatever they are, they are not the shipped writer's version. The earlier attribution stands.
+
+### What the +73 is, and it is one thing
+
+**This repository verifies every container it writes with the `ct-print` pinned at
+`trace_format_nim`, which is a version-3-era reader.** On M24's own 4.6 MB container, produced by
+the Path B module:
+
+| reader | events | program | steps |
+|---|---:|---|---:|
+| `ct-print` @ `baea074019` — the **reader anchor** | **0** | `''` | 1,830 |
+| `ct-print-writer` @ `0638684686` — the **writer anchor** | **250,001** | `aztec-avm-runtime` | **250,001** |
+
+The pinned reader **does not refuse** — it answers, with nothing. So under a `path-b` default this
+repository would be shipping containers its own suite cannot verify, and m25's and m40's content
+assertions fail not because a record is wrong but because the reader hands back no records at all.
+
+### Why the default is `path-a` anyway, which is a pin decision and not a writer one
+
+The flip is blocked on `trace_format_nim`, and that is the one pin M41 was told not to move. Its
+rationale is specific: it names a commit rather than a tip so
+`test_ct_container_roundtrip_ct_print`'s reader difference stays at **one** commit, with the
+control being that commit's parent. Moving it to the writer anchor makes the control `8cfb1bb`,
+which **reads** a v4 container — so the check's "the parent must not read it" arm has to be
+re-designed rather than re-pointed. That is M24's work, not M41's.
+
+**And the failure modes are not symmetric.** Shipping v3 today is a **loud** failure downstream:
+current readers refuse it by name, saying which version and why. Shipping v4 today would leave
+this repository unable to verify its own containers at all — trading a refusal for a silence,
+which is the direction this campaign's rules run against.
+
+**So it is one line, gated on one decision**, and everything else is in place: both arms build,
+both are exercised, the checks derive which writer ships from the manifest rather than asserting
+it, and the crate's native tests are pinned to the arm that can host them. `just
+ct-writer-build --path-b` produces the shipped-shape Path B module today.
+
+---
+
+## 10. The sweep
 
 Measured M0–M41 on 2026-09-10, **after this milestone's last commit**, `setsid`-detached under
 `direnv exec` — this repository's own dev shell — one milestone at a time with nothing else

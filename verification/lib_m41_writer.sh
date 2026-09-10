@@ -36,10 +36,15 @@ export CARGO_HOME="${CARGO_HOME:-$HOME/.cache/aztec-m24-cargo}"
 M41_CRATE="$REPO_ROOT/ct-writer"
 M41_HOST="$REPO_ROOT/ct-host"
 M41_DRIVER="$REPO_ROOT/verification/ct_writer_drive.mjs"
-M41_PATH_A="$M41_CRATE/target/wasm32-unknown-unknown/release/aztec_ct_writer.wasm"
+M41_PATH_A_TARGET="$M41_WORK/target-path-a"
+M41_PATH_A="$M41_PATH_A_TARGET/wasm32-unknown-unknown/release/aztec_ct_writer.wasm"
+# The DEFAULT arm — whichever writer `ct-writer/Cargo.toml` ships. Built and asserted separately
+# from the two explicit arms, because "the runtime writes through the Nim writer" is a claim about
+# THIS module and not about the one a check asked for by name.
+M41_DEFAULT="$M41_CRATE/target/wasm32-unknown-unknown/release/aztec_ct_writer.wasm"
 M41_PATH_B_TARGET="$M41_WORK/target-path-b"
 M41_PATH_B="$M41_PATH_B_TARGET/wasm32-unknown-unknown/release/aztec_ct_writer.wasm"
-export M41_CRATE M41_HOST M41_DRIVER M41_PATH_A M41_PATH_B M41_PATH_B_TARGET
+export M41_CRATE M41_HOST M41_DRIVER M41_PATH_A M41_PATH_A_TARGET M41_PATH_B M41_PATH_B_TARGET M41_DEFAULT
 
 M41_BUILD_TIMEOUT="${M41_BUILD_TIMEOUT:-3600}"
 M41_DRIVE_TIMEOUT="${M41_DRIVE_TIMEOUT:-300}"
@@ -91,10 +96,18 @@ m41_require_path_a() {
     M41_PATH_A="$CT_WRITER_WASM"
     return 0
   fi
-  m41_bounded "$M41_BUILD_TIMEOUT" "the Path A build" \
-    "$REPO_ROOT/verification/build_ct_writer_wasm.sh" \
+  M41_PATH_A_TARGET="$M41_PATH_A_TARGET" m41_bounded "$M41_BUILD_TIMEOUT" "the Path A build" \
+    "$REPO_ROOT/verification/build_ct_writer_wasm.sh" --path-a \
     || die "the Path A module could not be built; its output is in $M41_LAST_LOG"
   [ -f "$M41_PATH_A" ] || die "the Path A build reported success but $M41_PATH_A is not there"
+}
+
+# The DEFAULT module: whichever writer the crate ships, with no feature flag named.
+m41_require_default() {
+  m41_bounded "$M41_BUILD_TIMEOUT" "the default build" \
+    "$REPO_ROOT/verification/build_ct_writer_wasm.sh" \
+    || die "the default module could not be built; its output is in $M41_LAST_LOG"
+  [ -f "$M41_DEFAULT" ] || die "the default build reported success but $M41_DEFAULT is not there"
 }
 
 m41_require_path_b() {

@@ -39,10 +39,46 @@ codetracer_trace_writer = { path = "build-wasm-deps/ctf/codetracer_trace_writer"
 # block, no `cfg`, and `CtfsTraceWriter` was hard-linked at the type level in two places. M41
 # CREATED this seam rather than flipping one.
 #
-# `path-b` WINS WHEN BOTH ARE ON, and the precedence is declared here rather than left for a reader
-# to derive from `cfg` polarity in `backend.rs`. Cargo features are additive — nothing can turn
-# `path-a` off — so "both on" is a state that arises without anyone asking for it, and the build
-# must have an answer.
+# ---------------------------------------------------------------------------
+# THE DEFAULT IS `path-a`, AND FLIPPING IT WAS TRIED AND MEASURED RATHER THAN DECLINED.
+#
+# M41's goal is that this runtime writes through the Nim writer, and `path-b` is the writer that
+# should win on the merits: `ruzstd`, which Path A links, returns 4,194,304 bytes of wrong data
+# where C libzstd refuses a frame corrupted under a content checksum; Path A has no in-memory
+# reader, which a browser needs because it holds bytes and no path; and Path A stamps `meta.dat`
+# version 3 while Path B stamps 4. Size is not the reason for anything here — Path B's module is
+# 480,833 bytes larger and that was known when the decision was taken.
+#
+# THE FLIP WAS MADE AND MEASURED. `default = ["path-b"]`, every M41 check green at 169, and then:
+#
+#   m24  350 assertions, 14 failures -> 350, 58   (+44)
+#   m25  456 assertions,  0 failures -> 456, 15   (+15)
+#   m40  145 assertions, 12 failures -> 145, 26   (+14)
+#   m38  107,  4  and  m39  80, 10   -> UNCHANGED
+#
+# Every assertion COUNT is unchanged, so nothing structural moved; one class of assertion started
+# failing, and it is one class: **this repository verifies every container it writes with the
+# `ct-print` pinned at `trace_format_nim`, which is a version-3-era reader.** On M24's own 4.6 MB
+# container that reader reports 0 events, an empty program and 1,830 steps where there are 250,001
+# — and it does NOT refuse, it answers. The reader built at the `trace_format_nim_writer` anchor
+# reads the same bytes completely.
+#
+# So the flip is blocked on a PIN, not on a writer, and the pin is the one M41 was told not to
+# move: `trace_format_nim` names a commit deliberately so `test_ct_container_roundtrip_ct_print`'s
+# reader difference stays at ONE commit, and its control is that commit's parent. Moving it
+# forward makes the control `8cfb1bb`, which READS a v4 container, so the check's "the parent must
+# not read it" arm has to be re-designed rather than re-pointed.
+#
+# **The default therefore stays `path-a`, and this is a one-line change the moment that decision
+# is taken.** Shipping v3 is a LOUD failure downstream — current readers refuse it by name —
+# whereas shipping v4 today would leave this repository unable to verify its own containers at
+# all, which trades a refusal for a silence. `WRITER-SEAM.md` §6 and §10 carry the measurement.
+#
+# `path-b` WINS WHEN BOTH ARE ON, and that precedence is declared here rather than left for a
+# reader to derive from `cfg` polarity in `backend.rs`. Cargo features are additive — nothing can
+# turn `path-a` off — so "both on" is a state that arises without anyone asking for it, and the
+# build must have an answer.
+# ---------------------------------------------------------------------------
 #
 # The Path A dependencies are OPTIONAL and gated on `path-a`, which is not tidiness: with them
 # unconditional, a `--no-default-features --features path-b` build would still compile and link the

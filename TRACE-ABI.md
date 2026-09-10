@@ -368,6 +368,12 @@ else can resolve is a local file wearing a pin's clothes.
   `panic = "abort"`, one codegen unit, stripped. Two clean builds (`rm -rf target`) are
   byte-identical, sha256 `5d661d3c…`.
 
+  *This is the module the runtime SHIPS, which since M41 is a CHOICE rather than the only
+  possibility: `ct-writer` has two feature-selected writers and this figure is the `path-a`
+  default. The Path B module measures **745,114 bytes**, and the two are NOT comparable with
+  anything else in this campaign's seven module shapes — `WRITER-SEAM.md` §2 compares them as the
+  only pair that can be, two builds of one crate on one target differing in one flag.*
+
   *Re-derived on 2026-09-10, when M41 put the writer behind a seam. The move is **263,211 ->
   264,281**, and it is TWO separate movements which are stated separately because only one of them
   is a change to this repository:*

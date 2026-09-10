@@ -34,6 +34,35 @@ load).
 
 Each of these is a defect that shipped, not a precaution.
 
+### Two arms that both report NOTHING agree, and an equivalence check will call that a pass
+**Second instance, and the first was found the same way — by making the number move.** M41's
+`verify_container_equivalence_characterised` asserted "the two containers agree on
+`eventsWritten`", over a driver that read `ct_events_written()` **after** `ct_writer_close()`.
+That counter answers from the SESSION and the close takes the session apart, so every run of every
+module reported **0** — and 0 equals 0, so the assertion passed while measuring nothing at all. It
+was found by a check in a DIFFERENT milestone asserting the same field against a figure that could
+not be zero.
+
+The rule is not "read counters before the close". It is: **an equality between two producers is
+only evidence if at least one side is independently known to be non-trivial.** Every equality of
+that shape in this campaign now carries a companion assertion that pins one side to a value the
+other cannot accidentally match — here, the driver's own step count, asserted against the module's
+counter and against the reader's decode, three producers for one fact.
+
+### A DELTA is not a COORDINATE, and a container full of wrong positions cannot be refused
+**One instance, and it is the reason a check compares against what was ASKED FOR.** The Nim
+writer's C ABI takes a column as a DELTA from a step that already sits at its line's start — which
+in a column-aware trace is column 1, not column 0. M41's Path B backend passed the column itself,
+and every step in every container came out **one column to the right**: the right number of steps,
+all readable, every one at a real position in a real line. No reader can object to that, and none
+did.
+
+It was found by `e2e_runtime_traces_through_nim_writer` comparing each step's `(path, line,
+column)` read back against the position the driver **asked for**. A step COUNT would have passed;
+so would "the container parses", "the positions are in range", and every predicate that looks at
+the container alone. **When a check can compare against the request rather than against a total,
+it must** — a total is satisfied by the right number of wrong answers.
+
 ### An assertion must be capable of failing
 **Fifty-eight instances.** (**M40 added the 57th and the 58th, and BOTH were found by aborting a
 sweep to read its own checks — which is now the fourth pass running in which the only work a sweep
@@ -2951,6 +2980,20 @@ Format spec: `~/ah/dev/agent-harbor/ah-lib/specs/Milestones-Files.md`.
   was found by `e2e_runtime_traces_through_nim_writer` comparing the positions read back against
   the positions the driver ASKED FOR, and by nothing else. A step COUNT would have passed. **When a
   check can compare against what was requested rather than against a total, it must.**
+- **M41 FLIPPED THE DEFAULT TO PATH B, MEASURED IT, AND PUT IT BACK — and the measurement is the
+  useful part.** Every M41 check green at 169, the default module reporting the Nim writer, and
+  then: **m24 14 failures → 58, m25 0 → 15, m40 12 → 26, and m38/m39 UNCHANGED at 4 and 10.**
+  Every assertion COUNT unchanged, so one class of assertion started failing and it is one class:
+  **this repository verifies every container it writes with a `ct-print` pinned at a
+  version-3-era commit**, and on M24's own 4.6 MB Path B container that reader reports 0 events
+  and an empty program *without refusing*, where the reader at the writer anchor reads all
+  250,001. **m38/m39 staying put refutes the obvious hypothesis** that those reds are the runtime
+  writing v3 into readers that refuse it — they are not. The flip is therefore blocked on
+  `trace_format_nim`, the one pin M41 was told not to move, and moving it re-designs
+  `test_ct_container_roundtrip_ct_print`'s control rather than re-pointing it. **Shipping v3 is a
+  LOUD failure and shipping v4 today would be a SILENT one**, which is the direction this file's
+  rules run against, so the default stays and the flip is one line gated on one decision.
+  `WRITER-SEAM.md` §9.
 - **M41's sweep: 13,184, delta −354, and ONE of the seven moves is M41's own.** Measured M0–M41 on
   2026-09-10, **after M41's last commit**, `setsid`-detached under `direnv exec` — this
   repository's own dev shell — one milestone at a time, `TMPDIR` and the log under `~/.cache`, **84

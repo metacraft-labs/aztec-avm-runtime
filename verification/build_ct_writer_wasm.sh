@@ -54,15 +54,26 @@ say() { printf 'build_ct_writer_wasm: %s\n' "$*"; }
 
 NATIVE_TESTS=0
 FORCE=0
-PATH_B=0
+# `` = the crate's DEFAULT, which is what the runtime ships; `a` and `b` name a path explicitly.
+#
+# BOTH ARMS ARE EXPLICIT AND THE DEFAULT IS A THIRD THING, deliberately. When `path-a` was the
+# default, "no flag" and "--path-a" were the same build and one spelling could stand for both.
+# Flipping the default to `path-b` would have made every unflagged caller silently build the OTHER
+# writer — including `m41_require_path_a`, whose whole job is to produce the module the comparison
+# calls Path A. A check comparing a module with itself reports agreement, and agreement is what it
+# was looking for.
+ARM=""
 for a in "$@"; do
   case "$a" in
     --native-tests) NATIVE_TESTS=1 ;;
     --force) FORCE=1 ;;
-    --path-b) PATH_B=1 ;;
+    --path-a) ARM=a ;;
+    --path-b) ARM=b ;;
     *) die "unknown argument [$a]" ;;
   esac
 done
+PATH_B=0
+[ "$ARM" = b ] && PATH_B=1
 if [ "$PATH_B" = 1 ] && [ "$NATIVE_TESTS" = 1 ]; then
   die "--path-b and --native-tests cannot be combined: the path-b feature builds only for wasm32,
      so a host \`cargo test\` under it dies inside ct-writer/build.rs with a message about a
@@ -126,13 +137,25 @@ done
 # deep, which reads like a broken branch rather than a missing tool.
 command -v nix >/dev/null 2>&1 || die "nix is required (the rust wasm toolchain is not in either dev shell)"
 
-if [ "$PATH_B" = 1 ]; then
-  TARGET_DIR="${M41_PATH_B_TARGET:-$HOME/.cache/aztec-m41-writer/target-path-b}"
-  FEATURES="--no-default-features --features path-b"
-else
-  TARGET_DIR="$CT_WRITER_DIR/target"
-  FEATURES=""
-fi
+case "$ARM" in
+  b)
+    TARGET_DIR="${M41_PATH_B_TARGET:-$HOME/.cache/aztec-m41-writer/target-path-b}"
+    FEATURES="--no-default-features --features path-b"
+    ;;
+  a)
+    # Its own target directory for the same reason Path B has one: two modules that overwrite each
+    # other are one module a check can compare with itself.
+    TARGET_DIR="${M41_PATH_A_TARGET:-$HOME/.cache/aztec-m41-writer/target-path-a}"
+    FEATURES="--no-default-features --features path-a"
+    ;;
+  *)
+    # The DEFAULT — whatever `ct-writer/Cargo.toml` says the runtime ships. Every consumer that
+    # does not care which writer wrote a container builds this one, and `TRACE-ABI.md` §7's byte
+    # count is a figure about it.
+    TARGET_DIR="$CT_WRITER_DIR/target"
+    FEATURES=""
+    ;;
+esac
 mkdir -p "$TARGET_DIR" || die "could not create $TARGET_DIR"
 OUT="$TARGET_DIR/wasm32-unknown-unknown/release/aztec_ct_writer.wasm"
 
@@ -145,12 +168,20 @@ cd "$CT_WRITER_DIR"
 cargo build --release --target wasm32-unknown-unknown --target-dir "$TARGET_DIR" $FEATURES
 '
 if [ "$NATIVE_TESTS" = 1 ]; then
+  # `--no-default-features --features path-a`, AND IT IS NOT A PREFERENCE. These tests run on the
+  # HOST, and Path B builds only for wasm32 — `ct-writer/build.rs` refuses any other target by
+  # name, so a host `cargo test` under the default feature set dies inside a build script with a
+  # message about a target rather than about the tests. What they exercise is this module's own
+  # bookkeeping — the session, the position FIFO, the rung table, the counters, the refusals —
+  # which is identical under both backends because none of it is behind the seam. Path A is
+  # therefore the arm that can host them, not the arm they are about.
+  #
   # `--test-threads=1` because the module state is global — wasm is single-threaded and this
   # module has no lock. The tests take a serialising guard of their own as well; belt and braces,
   # because a test added later without the guard would otherwise fail intermittently and be
   # written off as a flake.
   build_script="$build_script"'
-cargo test --release -- --test-threads=1
+cargo test --release --no-default-features --features path-a -- --test-threads=1
 '
 fi
 
@@ -163,9 +194,9 @@ CT_WRITER_DIR="$CT_WRITER_DIR" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOM
   || die "the wasm build failed"
 
 [ -f "$OUT" ] || die "the build reported success but $OUT does not exist"
-if [ "$PATH_B" = 1 ]; then
-  say "built $OUT ($(wc -c <"$OUT") bytes) -- PATH B, the Nim writer, against the trace_format_nim_writer anchor"
-else
-  say "built $OUT ($(wc -c <"$OUT") bytes) against trace_format ${REV:0:10}"
-fi
+case "$ARM" in
+  b) say "built $OUT ($(wc -c <"$OUT") bytes) -- PATH B, the Nim writer, against the trace_format_nim_writer anchor" ;;
+  a) say "built $OUT ($(wc -c <"$OUT") bytes) -- PATH A, the pure-Rust writer, against trace_format ${REV:0:10}" ;;
+  *) say "built $OUT ($(wc -c <"$OUT") bytes) -- the crate's DEFAULT arm" ;;
+esac
 printf '%s\n' "$OUT"

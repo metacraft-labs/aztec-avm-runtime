@@ -94,8 +94,21 @@ assert_true "the module exports its own linear memory" \
 # against themselves.
 assert_eq "the module declares a 64-byte event record" "64" \
   "$(printf '%s\n' "$REPORT" | sed -n 's/^RECORDSIZE\t//p')"
-assert_eq "the module identifies itself as DD-7's Path A (kind 1)" "1" \
-  "$(printf '%s\n' "$REPORT" | sed -n 's/^WRITERKIND\t//p')"
+# WHICH WRITER, DERIVED FROM THE MANIFEST RATHER THAN TYPED HERE.
+#
+# This assertion read `1` as a literal, from before there was a second writer to be. M41 made the
+# writer a build-time choice, and a literal here would mean that flipping the default reddens a
+# check in a milestone that has nothing to say about which writer is shipped — while a build whose
+# manifest and module DISAGREED would still pass, because nothing compared them. The expectation
+# comes from `ct-writer/Cargo.toml`'s `default` now, so this asserts the two AGREE.
+CT_DEFAULT_ARM="$(sed -n 's/^default *= *\["path-\([ab]\)"\].*/\1/p' "$M24_CRATE/Cargo.toml")"
+case "$CT_DEFAULT_ARM" in
+  a) CT_EXPECTED_KIND=1 ;;
+  b) CT_EXPECTED_KIND=2 ;;
+  *) die "ct-writer/Cargo.toml declares no recognisable default feature; got [$CT_DEFAULT_ARM]" ;;
+esac
+assert_eq "the module identifies itself as the writer the manifest makes default (path-$CT_DEFAULT_ARM)" \
+  "$CT_EXPECTED_KIND" "$(printf '%s\n' "$REPORT" | sed -n 's/^WRITERKIND\t//p')"
 assert_ge "the module starts with a plausible amount of linear memory" "1" \
   "$(printf '%s\n' "$REPORT" | sed -n 's/^MEMPAGES\t//p')"
 assert_ge "the module is a plausible size for the writer plus this ABI" "100000" \
