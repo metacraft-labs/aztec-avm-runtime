@@ -3,8 +3,13 @@
     "The M0-M41 reference for the SECOND sweep. M0-M40 are M40's own sweep, measured 2026-09-02 and",
     "quoted in CAMPAIGN-BRIEF.md, unchanged. m41 is 164, measured by running `just verify-m41` under",
     "`direnv exec` -- THIS repository's own dev shell, which is the shell the sweep uses --",
-    "immediately before this sweep started: 23 + 20 + 16 + 14 + 27 + 44 + 20.",
-    "",
+    "`direnv exec` -- THIS repository's own dev shell -- immediately before this sweep started:",
+    "27 + 20 + 16 + 14 + 27 + 44 + 20 = 168. It was 164 before the default-flip experiment, which",
+    "left five extra assertions in verify_writer_path_is_selectable about the DEFAULT build --",
+    "which writer the runtime ships, measured on the module rather than read off the manifest,",
+    "and asserted byte-identical to one named arm and not the other. m24 is expected UNMOVED at",
+    "350: the flip is reverted, and its only red is verify_trace_event_abi_batched_faster, whose",
+    "failure count varies 14/15 run to run because it re-measures medians.",
     "THE FIRST SWEEP MEASURED m41 AT 73, AND THE 91 MISSING WERE A DEFECT IN THIS MILESTONE.",
     "Three of the seven checks build Nim -- two through `build_ct_print.sh`, one through",
     "`ct-writer/build.rs` -- and this repository's dev shell did not provide `nim`. An agent's own",
@@ -35,7 +40,7 @@
     "      shared-writer probe would not build, and the Noir private-trace arms reported zero steps",
     "  m32/m34/m35/m36/m37/m40 reds at their reference COUNTS, so a pinned list moved rather than a structure"
   ],
-  "_total": 13538,
+  "_total": 13542,
   "m0": 156,
   "m1": 181,
   "m2": 293,
@@ -77,5 +82,5 @@
   "m38": 150,
   "m39": 205,
   "m40": 145,
-  "m41": 164
+  "m41": 168
 }
