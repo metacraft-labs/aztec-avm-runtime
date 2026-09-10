@@ -69,16 +69,30 @@ m41_require_path_b
 m41_drive "$M41_PATH_A" path-a
 m41_drive "$M41_PATH_B" path-b
 
+# THE THIRTY-EIGHT ARE ASSERTED AS A SUBSET, AND EVERY EXTRA IS NAMED.
+#
+# `39` was the count until M41 advanced the `trace_format` pin: the writer's compressor became C
+# libzstd, and `zstd-sys`'s wasm shim re-exports eight `rust_zstd_wasm_shim_*` symbols that Rust's
+# allocator resolved. Path A has them; Path B does not, because its own libc shim is a static C
+# archive and archive symbols are resolved without being exported.
+#
+# So the count is not relaxed — it is DECOMPOSED. Every export is one of the thirty-eight, or
+# `memory`, or a shim symbol matched by its prefix, and anything else fails by name. That still
+# catches an export appearing, which this campaign holds to be as much a finding as one
+# disappearing.
 for arm in path-a path-b; do
   EXPORTS="$(m41_report "$arm" moduleExports | python3 -c 'import json,sys; print("\n".join(sorted(json.load(sys.stdin))))')"
   COUNT="$(printf '%s\n' "$EXPORTS" | grep -c .)"
-  assert_eq "the $arm module exports the thirty-eight and memory, and nothing else" "39" "$COUNT"
+  SHIM="$(printf '%s\n' "$EXPORTS" | grep -c '^rust_zstd_wasm_shim_' || true)"
+  m41_say "$arm: $COUNT exports = 38 ABI + memory + $SHIM compressor-shim"
+  assert_eq "the $arm module exports the thirty-eight, memory, and $SHIM shim symbols — nothing else" \
+    "$(( 39 + SHIM ))" "$COUNT"
   # `LC_ALL=C`, and it is not decoration: the extractor sorts in Python's byte order and a
   # locale-aware `sort` puts `ct_positions` before `ct_position_size` because it collates
   # underscores away. Two identical sets then compare unequal, and the failure reads as a missing
   # export rather than as two orderings.
-  MINUS_MEMORY="$(printf '%s\n' "$EXPORTS" | grep -vx 'memory' | LC_ALL=C sort)"
-  assert_eq "and its export set IS abi.ts's set" "$TS_NAMES" "$MINUS_MEMORY"
+  MINUS_MEMORY="$(printf '%s\n' "$EXPORTS" | grep -vx 'memory' | grep -v '^rust_zstd_wasm_shim_' | LC_ALL=C sort)"
+  assert_eq "and what remains after memory and the shim IS abi.ts's set" "$TS_NAMES" "$MINUS_MEMORY"
 done
 
 # ---------------------------------------------------------------------------
@@ -92,7 +106,7 @@ assert_not_contains "a fabricated export name is NOT found, so the search is a s
 # report it — in the ABSENCE direction, which is the one a set comparison can get wrong by being
 # a subset test.
 WITHOUT_ONE="$(printf '%s\n' "$TS_NAMES" | grep -vx 'ct_source_step')"
-MODULE_SET="$(m41_report path-b moduleExports | python3 -c 'import json,sys; print("\n".join(sorted(n for n in json.load(sys.stdin) if n != "memory")))')"
+MODULE_SET="$(m41_report path-b moduleExports | python3 -c 'import json,sys; print("\n".join(sorted(n for n in json.load(sys.stdin) if n != "memory" and not n.startswith("rust_zstd_wasm_shim_"))))')"
 assert_false "a set with one real name removed does NOT compare equal to the module's" \
   test "$WITHOUT_ONE" = "$MODULE_SET"
 MISSING="$(LC_ALL=C comm -13 <(printf '%s\n' "$WITHOUT_ONE") <(printf '%s\n' "$MODULE_SET"))"

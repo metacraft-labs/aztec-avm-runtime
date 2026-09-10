@@ -495,3 +495,32 @@ m28 +8, m38 −43, m39 −125, m26 −206. Sweep 1 found this milestone's `nim`-
 
 `carry/*.json` checksummed before and after all four; `exposure.json` and `rebase.json` came back
 changed every time, restored from HEAD, re-verified, never staged.
+
+## The pin move — taken by the user, executed here
+
+`trace_format` 592fa42cbf -> c8802c548f. Re-derived after the move:
+
+| | before | after |
+|---|---|---|
+| shipped module | 264,281 B | 498,409 B |
+| `ruzstd` in the module | 9 | **0** |
+| imports / exports | 0 / 39 | 0 / **47** |
+| benchmark container | 4,694,016 B | **1,630,208 B** |
+| m26 | 135 / 4 | **341 / 0** |
+| m24 | 356 / 15 | **356 / 0** |
+| m25, m27, m28, m29, m38, m39, m40, m41 | — | unchanged |
+
+**The export growth was NOT priced.** Eight `rust_zstd_wasm_shim_*` symbols. Reported rather than
+netted; both checks that asserted a total now name them by prefix.
+
+**m24's 15 -> 0 is a side effect**: TRACE-ABI.md section 2's table was stale before this milestone
+began, and the move made re-deriving it unavoidable.
+
+**My own ruzstd check lost its control** — it used Path A as the positive control that the search
+can find `ruzstd`, and Path A no longer contains it. The control is now a constructed blob, so
+"absent from both modules" cannot be satisfied by a search that finds nothing.
+
+Four figures re-derived: TRACE-ABI section 7 (bytes + sha + the new export line), section 2's whole
+arm table and section 8's run 12, JOIN-SHAPE section 7's module figure, and
+test_single_trace_types_instantiation's manifest needle (which now matches the dependency and its
+path rather than the whole line, because the line grew `default-features = false`).

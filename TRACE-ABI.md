@@ -7,7 +7,7 @@
 **THE MEASUREMENT DOES NOT HAVE A STABLE SIGN, AND THAT IS THE RESULT.** Run eleven times — once in
 the system engine and ten times in this repository's dev shell — `perEvent - batched` came out
 **+0.20 %**, **+1.09 %**, **-0.58 %**, **-0.09 %**, **+0.96 %**, **+0.98 %**, **+0.85 %**,
-**+0.74 %**, **+1.34 %**, **+1.21 %** and **+1.07 %**. Every one is inside the declared **margin of 3 %**; runs 2, 3 and 4 were taken on the *same engine, the
+**+0.74 %**, **+1.34 %**, **+1.21 %**, **+1.07 %** and **+2.01 %**. Every one is inside the declared **margin of 3 %**; runs 2, 3 and 4 were taken on the *same engine, the
 same module and the same binary*, and two of those have 95 % intervals that do not overlap and
 point opposite ways. So the honest statement is not "the batched ABI is about one per cent faster"
 — it is that **the difference is smaller than the run-to-run variation of the instrument that
@@ -101,11 +101,18 @@ silently.
 
 | arm | median (µs) | min (µs) | crossings | container (B) |
 |---|---|---|---|---|
-| `batched` | 628,918 | 616,616 | 25 | 4,694,016 |
-| `perEvent` | 634,878 | 621,511 | 100,000 | 4,694,016 |
-| `control` | 628,989 | 614,727 | 25 | 4,694,016 |
-| `nopBatched` | 4,748 | 4,513 | 25 | 159,744 |
-| `nopPerEvent` | 5,617 | 4,934 | 100,000 | 159,744 |
+| `batched` | 469,849 | 457,093 | 25 | 1,630,208 |
+| `perEvent` | 478,596 | 465,719 | 100,000 | 1,630,208 |
+| `control` | 470,932 | 456,765 | 25 | 1,630,208 |
+| `nopBatched` | 4,757 | 4,538 | 25 | 159,744 |
+| `nopPerEvent` | 5,644 | 5,013 | 100,000 | 159,744 |
+
+*Every figure in this table moved when the `trace_format` pin advanced to `c8802c548f` and the
+writer's compressor became C libzstd. **The container is the headline: 4,694,016 → 1,630,208
+bytes, 65 % smaller for the same 100,000 events**, which is what a real Zstandard implementation
+does that `ruzstd`'s `Fastest`-only encoder could not. Every timing arm got faster in absolute
+terms with it — there is less to write. The RATIO §2 exists to measure is unmoved and is still
+inside the margin; see run 12 in §8.*
 
 | comparison | median | 95 % interval | reads as |
 |---|---|---|---|
@@ -364,15 +371,30 @@ else can resolve is a local file wearing a pin's clothes.
 - **The module has zero wasm imports**, so it instantiates under a bare
   `WebAssembly.instantiate(bytes, {})` with no WASI shim, no `wasm-bindgen` and no glue file.
   `ct-host` has **no npm dependencies** and imports no Node module in its trace path.
-- **264,281 bytes** for the writer plus this ABI, release, `opt-level = "z"`, LTO,
+- **498,409 bytes** for the writer plus this ABI, release, `opt-level = "z"`, LTO,
   `panic = "abort"`, one codegen unit, stripped. Two clean builds (`rm -rf target`) are
-  byte-identical, sha256 `5d661d3c…`.
+  byte-identical, sha256 `ff959191…`.
 
   *This is the module the runtime SHIPS, which since M41 is a CHOICE rather than the only
   possibility: `ct-writer` has two feature-selected writers and this figure is the `path-a`
   default. The Path B module measures **745,114 bytes**, and the two are NOT comparable with
   anything else in this campaign's seven module shapes — `WRITER-SEAM.md` §2 compares them as the
   only pair that can be, two builds of one crate on one target differing in one flag.*
+
+  ***264,281 → 498,409 when the `trace_format` pin advanced to `c8802c548f`**, and the +234,128
+  bytes were taken deliberately: that revision makes the Zstandard backend a cargo feature and the
+  default is C libzstd, so **`ruzstd` left the shipped module** — measured, the string appears 0
+  times where it appeared 9. It is the decoder that returns 4,194,304 bytes of wrong data with no
+  error where C libzstd refuses a frame corrupted under a content checksum, and it had been in the
+  module this runtime ships the whole time. The container it produces is 65 % smaller (§2), and
+  the imports are still **0**.*
+
+- **47 exports, not 39**, and the eight beyond the ABI's thirty-eight and `memory` are named:
+  `rust_zstd_wasm_shim_{malloc,calloc,free,memcmp,memcpy,memmove,memset,qsort}`. They are
+  `zstd-sys`'s wasm shim re-exporting what Rust's allocator resolved, and they arrived with the
+  same pin move. **This was not predicted when that move was priced** — it is a change to the
+  module's public surface, and it is recorded rather than absorbed. The checks that count exports
+  name them individually now, so a forty-eighth export by any other name still fails.
 
   *Re-derived on 2026-09-10, when M41 put the writer behind a seam. The move is **263,211 ->
   264,281**, and it is TWO separate movements which are stated separately because only one of them
@@ -466,9 +488,10 @@ nuisance. None is wrong; they are what this measurement does.
 | 8 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M26's module, + frames) | +0.74 % | [+0.11, +1.36] % | -0.16 % | +18.40 % | ~7.9 ns |
 | 9 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **the SAME module as run 8**) | +1.34 % | [+0.67, +2.00] % | -0.17 % | +17.24 % | ~7.7 ns |
 | 10 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, the SAME module as runs 8 and 9) | +1.21 % | [+0.58, +1.85] % | -0.35 % | +18.71 % | ~8.7 ns |
-| 11 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M40's module, source steps) | **+1.07 %** | **[+0.36, +1.78] %** | +0.22 % | +21.21 % | ~8.7 ns |
+| 11 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M40's module, source steps) | +1.07 % | [+0.36, +1.78] % | +0.22 % | +21.21 % | ~8.7 ns |
+| 12 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M41's module, **C libzstd**) | **+2.01 %** | **[+1.28, +2.75] %** | +0.51 % | +17.86 % | ~8.7 ns |
 
-Run 11 is the one §2 tabulates, because it is the one `arms.tsv` currently holds and the one the
+Run 12 is the one §2 tabulates, because it is the one `arms.tsv` currently holds and the one the
 check compares this file against. **Runs 2, 3 and 4 are the same engine, the same module and the
 same binary**, and runs 2 and 3 have disjoint intervals with opposite signs — which is why §2 says
 the sign is not stable rather than quoting any one run's interval as a precision. **Runs 5 to 8

@@ -225,8 +225,11 @@ this milestone.
 
 - The join surface added **2,854 bytes** to the module, 259,839 → 262,693, and **no imports**: the
   count is still 0 and the module still instantiates under a bare
-  `WebAssembly.instantiate(bytes, {})`. **The module is **263,211 bytes** today**, because M40 added
-  a source-step surface of two exports (+518) for a private half's steps — see `BOTH-HALVES.md` §3.
+  `WebAssembly.instantiate(bytes, {})`. **The module is **498,409 bytes** today**, because M40 added
+  a source-step surface of two exports (+518) for a private half's steps — see `BOTH-HALVES.md` §3
+  — and because M41 advanced the `trace_format` pin, which made the writer's compressor C libzstd
+  and took `ruzstd` out of the shipped module (+234,128 bytes, and eight more exports, every one
+  named in `TRACE-ABI.md` §7).
   `TRACE-ABI.md` §7 re-derives the CURRENT figure from the built artefact on every run and so does
   this line, which is why the delta above is stated as a historical measurement rather than as an
   arithmetic that has to keep coming out: a later milestone growing the module must not be able to

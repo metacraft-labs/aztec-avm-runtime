@@ -47,9 +47,20 @@
     "redesigned from an identity (must be the reader's parent) to a PROPERTY (must not read",
     "this container), because the schema bump and the reader fix stopped being adjacent. The",
     "six are the environment ruled out by name (127/126/124/signal), the outcome classified,",
-    "and the identity reduced to different-commits + ancestor."
+    "and the identity reduced to different-commits + ancestor.",
+    "",
+    "THIRD PASS -- the user took option 1 and `trace_format` moved 592fa42cbf -> c8802c548f.",
+    "m41 is 171: verify_ruzstd_checksum_defect_absent_from_shipped_path gained TWO, because its",
+    "control was Path A -- the module that used to contain ruzstd -- and ruzstd has now left",
+    "that module too. The control is a constructed blob now, so 'absent from both' cannot be",
+    "satisfied by a search that finds nothing.",
+    "m26 IS EXPECTED BACK AT ITS ORIGINAL 341 (it read 135 in sweeps 1-4 because the ctf-wt-wasm",
+    "worktree had drifted past the pin; the pin has now caught up with the worktree).",
+    "m24 stays 356 but its FAILURES should go 15 -> 0: the move changed the benchmark numbers",
+    "enough that TRACE-ABI section 2's table had to be re-derived, and it had been stale since",
+    "before this milestone began."
   ],
-  "_total": 13549,
+  "_total": 13551,
   "m0": 156,
   "m1": 181,
   "m2": 293,
@@ -91,5 +102,5 @@
   "m38": 150,
   "m39": 205,
   "m40": 145,
-  "m41": 169
+  "m41": 171
 }

@@ -60,8 +60,28 @@ A_RUZSTD="$(count_needle "$M41_PATH_A" ruzstd)"
 B_RUZSTD="$(count_needle "$M41_PATH_B" ruzstd)"
 m41_say "the string 'ruzstd' appears $A_RUZSTD times in the Path A module and $B_RUZSTD in Path B"
 
-assert_ge "THE CONTROL: the search DOES find ruzstd in the Path A module" 1 "$A_RUZSTD"
-assert_eq "and finds it ZERO times in the Path B module" "0" "$B_RUZSTD"
+# THE CONTROL USED TO BE PATH A, AND PATH A IS NO LONGER A CONTROL — WHICH IS THE POINT.
+#
+# This check was written when the Path A module linked `ruzstd`: the same search finding it there
+# and not in Path B was what said the search worked. M41 advanced the `trace_format` pin, the
+# writer's compressor became C libzstd, and **the decoder left the shipped module** — 9 occurrences
+# to 0. So the assertion is now that it is in NEITHER, and the control has to be built rather than
+# borrowed, or "absent from both" would be equally true of a search that can find nothing.
+CONTROL_BLOB="$M41_WORK/ruzstd-needle-control.bin"
+mkdir -p "$M41_WORK"
+python3 - "$CONTROL_BLOB" <<'CTLPY'
+import sys
+# A blob shaped like the panic-location strings a Rust module carries, so the control is a
+# realistic subject for the search and not a bare word in an empty file.
+open(sys.argv[1], "wb").write(
+    b"\x00\x01/build/ruzstd-0.7.3/src/frame_decoder.rs\x00padding\x00"
+)
+CTLPY
+assert_file "the control blob was written" "$CONTROL_BLOB"
+assert_ge "THE CONTROL: the search finds ruzstd in a blob that contains it" 1 \
+  "$(count_needle "$CONTROL_BLOB" ruzstd)"
+assert_eq "and finds it ZERO times in the SHIPPED module" "0" "$A_RUZSTD"
+assert_eq "and ZERO times in the Path B module" "0" "$B_RUZSTD"
 
 # The needle is shown to be a needle rather than a word that never occurs anywhere: a string both
 # modules DO contain must be found in both, or "zero" above could be a property of the reader.

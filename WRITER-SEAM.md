@@ -23,12 +23,12 @@ a shortfall — §6 says which measurement and what would change it.
 
 | | Path A | Path B |
 |---|---:|---:|
-| bytes | **264,281** | **745,114** |
-| sha256 (first 16) | `5d661d3c3e6a7ba0` | `ae2b0c7e9c50c796` |
+| bytes | **498,409** | **745,114** |
+| sha256 (first 16) | `ff959191157a338a` | `ae2b0c7e9c50c796` |
 | wasm imports | **0** | **0** |
-| exports | **39** = the 38 ABI functions + `memory` | **39**, the same set |
 | instantiates against a literal `{}` | yes | yes |
 | container from the shared driver | 176,128 bytes | 143,360 bytes |
+| wasm exports | **47** = 38 ABI + `memory` + 8 compressor shim | **39** = 38 ABI + `memory` |
 | `ct_writer_kind()` | 1 | 2 |
 
 **The size figure is stated without a comparison, deliberately.** Seven distinct module shapes have
@@ -37,12 +37,24 @@ FFI, Rust-only with `ruzstd`, Rust-only with C libzstd, and this one — and lin
 reads as a regression that does not exist. What the row above compares is the ONLY pair that is
 comparable: two builds of ONE crate, on one target, differing in one feature flag.
 
-Path B is **480,833 bytes larger** than Path A as the runtime ships today. That is the honest
-number and it is a cost, not an artefact: Path A links `ruzstd`, Path B links a cross-built C
-libzstd (537,888 bytes of `libzstd.a`) plus the Nim writer (1,262,700 bytes of
-`libct_nim_writer.a`) before `--gc-sections`. What Path B buys for it is §5 and §6.
+Path B is **246,705 bytes larger** than Path A as the runtime ships today. *That gap was 480,833
+until the `trace_format` pin advanced and Path A's compressor became C libzstd too — most of what
+looked like Path B's cost was the two arms compressing with different libraries, which is the
+comparison §2 exists to refuse.* Both now link a real Zstandard: Path A through `zstd-sys`, Path B
+through a cross-built `libzstd.a` (537,888 bytes) plus the Nim writer (1,262,700 bytes of
+`libct_nim_writer.a`) before `--gc-sections`. What Path B still buys is §5 and §6.
 
-**No host symbols leak.** The libc surface the Nim C output needs — `malloc`, `free`, `calloc`,
+**And `ruzstd` is in NEITHER of them now.** It was Path A's, and the fact that Path A linked it was
+one of the two grounds the user's decision rested on. That ground has been removed on its own terms
+rather than by the switch: §9d.
+
+**Path A's export surface grew with the pin, and Path B's did not.** Path A carries eight
+`rust_zstd_wasm_shim_*` symbols — `zstd-sys` re-exporting what Rust's allocator resolved — because
+that shim is built with default visibility. Path B's equivalent libc surface is a static C archive,
+and archive symbols are resolved without being exported. Both are named by the checks rather than
+counted, so a further export by any other name fails.
+
+**No host symbols leak from Path B.** The libc surface the Nim C output needs — `malloc`, `free`, `calloc`,
 `realloc`, `strlen`, `exit`, the refusing stdio, `getentropy`, `ct_host_unix_ms` — lives in
 `ct-writer/src/nim_host_shim.c` and is linked from a static ARCHIVE, which the linker resolves
 without exporting. A Rust implementation would have exported every one of them: `#[no_mangle]`
@@ -450,8 +462,8 @@ and `CFLAGS_<target>`, and with none set it falls back to the host `gcc` and die
 `cover.c` for a target it cannot emit.
 
 **They are set in `build_ct_writer_wasm.sh` now, and they are inert at the current pin** — measured:
-the module is still **264,281 bytes, sha `5d661d3c`, 0 imports**, and m24 and m26 are exactly at
-baseline. Nothing compiles C until a pin selects the C backend.
+the module was still **264,281 bytes, sha `5d661d3c`, 0 imports**, and m24 and m26 were exactly
+at baseline. Nothing compiles C until a pin selects the C backend.
 
 **With the pin moved, measured in full:**
 
@@ -467,11 +479,34 @@ sha, §2's benchmark table (which needs a fresh OQ-6 run and is *already* 15-red
 one m26 figure, and one `test_single_trace_types_instantiation` assertion about which manifest names
 `codetracer_ctfs`.
 
-**It is not taken here**, and the reason is scope rather than difficulty: it changes the shipped
-Path A module by +234 KB and its container encoding, for the writer this milestone exists to move
-off, and its verdict is an OQ-6 benchmark M24 owns. **What it buys is real and should not be lost:
-it removes `ruzstd` — the decoder that returns 4,194,304 bytes of wrong data where C libzstd
-refuses — from the shipped path**, which is one of the two facts the user's decision rested on.
+### IT WAS TAKEN. The user chose it, on these measurements.
+
+`trace_format` is `c8802c548f` now. What it cost and what it bought, re-derived after the move:
+
+| | before | after |
+|---|---|---|
+| shipped module | 264,281 B | **498,409 B** (+234,128, accepted) |
+| `ruzstd` in the module | 9 occurrences | **0** |
+| wasm imports | 0 | **0** |
+| **wasm exports** | 39 | **47** |
+| benchmark container (100,000 events) | 4,694,016 B | **1,630,208 B** (−65 %) |
+| m26 | 135 / 4 | **341 / 0** |
+| m24 | 356 / 15 | **356 / 0** |
+
+**The export growth was not on the table when this move was priced, and it is reported rather than
+netted against the gain.** Eight `rust_zstd_wasm_shim_*` symbols enter the module's public surface.
+The two checks that asserted a total now name each of them by prefix, so a forty-eighth export
+called anything else still fails — the property the total was standing in for is kept, and the
+change is visible rather than absorbed.
+
+**m24's 15 → 0 is a side effect worth naming.** `TRACE-ABI.md` §2's benchmark table had been stale
+*before this milestone touched anything*; the move changed the numbers enough that re-deriving it
+was unavoidable, and re-deriving it cleared a pre-existing red. The container figure is the one to
+read: **4,694,016 → 1,630,208 bytes for the same 100,000 events**, which is what a real Zstandard
+does that `ruzstd`'s `Fastest`-only encoder could not.
+
+**Nothing else moved.** m27, m28, m29, m38 and m39 measure exactly what they measured before, and
+m25 is green at 456 once the shim exports are named.
 
 ## 9e. m26's durable fix, and where the next drift will send someone
 

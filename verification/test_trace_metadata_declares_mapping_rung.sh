@@ -102,10 +102,25 @@ assert_eq "every one of the thirty-six is present in the built module" "0" \
 # THE RESIDUE IS PRINTED, NOT COUNTED. A module export no list names is a finding — it is either a
 # surface the host does not require or a list that has gone stale.
 note "unlisted exports: $(m25_arm 'd["surface"]["unlistedExports"]')"
-assert_eq "…and the module exports nothing the two lists do not name" "0" \
-  "$(m25_arm 'len(d["surface"]["unlistedExports"])')"
-assert_eq "the module's exported function count equals the union" \
-  "$(m25_arm 'd["surface"]["allRequiredExports"]')" "$(m25_arm 'd["surface"]["exportedFunctions"]')"
+# THE UNLISTED EXPORTS ARE NAMED, NOT COUNTED TO ZERO.
+#
+# They were zero until M41 advanced the `trace_format` pin and the writer's compressor became C
+# libzstd: `zstd-sys` ships a wasm shim that re-exports what Rust's allocator resolved, and eight
+# `rust_zstd_wasm_shim_*` symbols appear in the module. That is a real change to the module's
+# public surface, and asserting `0` again would mean either deleting the assertion or pretending
+# the change did not happen. Each is matched BY NAME instead, so a forty-eighth export called
+# anything else still fails — which is the property the `0` was standing in for.
+UNEXPECTED_EXPORTS="$(m25_arm 'd["surface"]["unlistedExports"]' | tr -c 'A-Za-z0-9_' ' ' \
+  | tr ' ' '\n' | grep -v '^$' | grep -v '^rust_zstd_wasm_shim_' | tr '\n' ' ' | sed 's/ *$//')"
+assert_eq "…and every export the two lists do not name is zstd-sys's wasm shim, by name" \
+  "" "$UNEXPECTED_EXPORTS"
+# The ABI's own thirty-eight, plus however many of the shim's the compressor brought. Stated as a
+# sum rather than as one number, so the two move independently: an ABI function lost still fails
+# here even if a shim symbol arrives in the same build.
+SHIM_EXPORTS="$(m25_arm 'd["surface"]["unlistedExports"]' | grep -o 'rust_zstd_wasm_shim_' | grep -c . || true)"
+assert_eq "the module's exported function count is the union plus the compressor shim's" \
+  "$(( $(m25_arm 'd["surface"]["allRequiredExports"]') + SHIM_EXPORTS ))" \
+  "$(m25_arm 'd["surface"]["exportedFunctions"]')"
 
 # ===========================================================================
 # PART 2 — THE RUNG IS IN THE CONTAINER

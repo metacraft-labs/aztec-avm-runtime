@@ -141,9 +141,17 @@ assert_eq "and does NOT declare codetracer_ctfs at all — it arrives as the wri
 assert_eq "both declared paths point into the SAME materialised checkout" "2" \
   "$(printf '%s\n' "$MANIFEST" | grep -c 'path = "build-wasm-deps/ctf/' || true)"
 # And the writer's own manifest is where ctfs comes from, read rather than assumed.
-assert_true "the writer's own manifest is what names codetracer_ctfs" \
+# THE NEEDLE IS THE DEPENDENCY AND ITS PATH, NOT THE WHOLE LINE.
+#
+# It was the whole line — `{ path = "../codetracer_ctfs" }` — until the `trace_format` pin advanced
+# and that manifest grew `default-features = false` on the same declaration, to make the Zstandard
+# backend choice expressible. The claim this assertion exists for is *where `codetracer_ctfs`
+# comes from*, and that is the path; the attributes after it are the dependent crate's business and
+# will grow again. A needle that has to be rewritten whenever an unrelated attribute is added is a
+# needle that gets deleted rather than fixed.
+assert_true "the writer's own manifest is what names codetracer_ctfs, at the sibling path" \
   str_has_sub "$(cat "$M24_CRATE/build-wasm-deps/ctf/codetracer_trace_writer/Cargo.toml")" \
-  'codetracer_ctfs = { path = "../codetracer_ctfs" }'
+  'codetracer_ctfs = { path = "../codetracer_ctfs"'
 
 # ---------------------------------------------------------------------------
 # THE TWO NEGATIVE CONTROLS.

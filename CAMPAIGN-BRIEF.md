@@ -3034,6 +3034,20 @@ Format spec: `~/ah/dev/agent-harbor/ah-lib/specs/Milestones-Files.md`.
   build has no `CC_wasm32_unknown_unknown`, so it dies inside `zstd-sys` on `cover.c` with the host
   `gcc`. The real remedy is for the probe to materialise from the object store like every other
   consumer here, which it cannot while a Noir worktree resolves those crates by relative path.
+- **`ruzstd` IS OUT OF THE SHIPPED PATH.** The user took M41's option 1 and `trace_format` moved
+  `592fa42cbf → c8802c548f`, making the writer's Zstandard backend a cargo feature that defaults to
+  C libzstd. Measured on the built module: the string appears **0 times where it appeared 9**. That
+  is the decoder which returns **4,194,304 bytes of wrong data with no error** where C libzstd
+  refuses a frame corrupted under a content checksum, and it had been in the module this runtime
+  ships the whole time. Cost, accepted: **264,281 → 498,409 bytes**. Bought, besides the decoder:
+  the 100,000-event container **4,694,016 → 1,630,208 bytes**, **m26 135/4 → 341/0**, and **m24
+  356/15 → 356/0** because the move forced a re-derivation of `TRACE-ABI.md` §2's table that had
+  been stale before this milestone began. Nothing else moved.
+- **AND THE MOVE COST ONE THING NOBODY PRICED: the module's EXPORTS went 39 → 47.** Eight
+  `rust_zstd_wasm_shim_*` symbols — `zstd-sys` re-exporting what Rust's allocator resolved. It is
+  recorded rather than netted against the gain, and the two checks that asserted a total now name
+  each of the eight by prefix, so a forty-eighth export called anything else still fails. *When a
+  pin move is priced, price the module's SURFACE and not only its size.*
 - **M41's FINAL sweep: 13,195, delta −354, m41 = 169 and m24 = 356, both exactly at reference.**
   Four sweeps were taken and the seven moves are identical in all four. m24's 350 → 356 is M41's
   own and was DECLARED in the reference before the sweep ran: `test_ct_container_roundtrip_ct_print`'s
