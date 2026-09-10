@@ -534,6 +534,25 @@ Measured M0–M41 on 2026-09-10, **after this milestone's last commit**, `setsid
 `direnv exec` — this repository's own dev shell — one milestone at a time with nothing else
 running. 84 markers for 42 milestones, no hole.
 
+> **TOTAL 13,403 · 42 milestones · delta −148 against 13,551 · 26 of 42 exit 0**
+>
+> **m41 = 171, m24 = 356 AND m26 = 341, all three exactly at reference and all three rc=0.**
+> m24 and m26 both went GREEN with the `trace_format` move; the delta improved by **+208**.
+>
+> Six moves remain and every unit accounts: **+9 +1 +2 +8 −43 −125 = −148**. m11 is the upstream
+> move; m25, m27 and m28 are L-track check edits; m38 and m39 are unchanged under either writer.
+>
+> **m9 is the one new non-zero exit and it is the campaign's documented flake, not this move.**
+> Re-measured alone on a quiet host it reproduces at **807 assertions — exactly its reference — with
+> 8 failures**, and the failing arm is its own CONTROL: two copies of the *same* binary compare at
+> −1.10 % with a 95 % interval of [−3.21 %, +0.79 %], outside the ±2 % budget, which is the check
+> declaring it cannot resolve at this scale rather than finding a regression. And it cannot be this
+> move: **none of m9's four checks references `ct-writer`, `trace_format`, `zstd` or `ct_writer` —
+> zero occurrences in all four.**
+
+> *(The figures below are the previous sweep's, kept because the accounting they describe is what
+> the `trace_format` move changed.)*
+>
 > **TOTAL 13,195 · 42 milestones · delta −354 against 13,549 · 25 of 42 exit 0**
 >
 > **m41 = 169, rc=0, exactly its reference. m24 = 356, exactly its reference** — moved from 350 by

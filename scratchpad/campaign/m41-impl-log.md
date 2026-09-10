@@ -524,3 +524,19 @@ Four figures re-derived: TRACE-ABI section 7 (bytes + sha + the new export line)
 arm table and section 8's run 12, JOIN-SHAPE section 7's module figure, and
 test_single_trace_types_instantiation's manifest needle (which now matches the dependency and its
 path rather than the whole line, because the line grew `default-features = false`).
+
+## Sweep 5 — after the pin move
+
+**TOTAL 13,403, 42 milestones, delta −148, 26 of 42 exit 0, no hole.** m41 = 171, m24 = 356 and
+m26 = 341 — all three exactly at reference and all three rc=0. The delta improved **+208** on
+sweep 4's −354.
+
+Six moves, every unit accounted: +9 +1 +2 +8 −43 −125 = −148.
+
+**m9 is the one new non-zero exit and it is the documented flake.** Re-measured alone: 807
+assertions (exactly its reference), 8 failures, and the failing arm is its own control — two copies
+of the SAME binary at −1.10 %, CI [−3.21 %, +0.79 %], outside ±2 %. The check says in its own words
+that it cannot attribute. And it cannot be the pin move: none of m9's four checks mentions
+`ct-writer`, `trace_format`, `zstd` or `ct_writer` at all.
+
+`carry/*.json` checksummed before and after; two came back changed, restored, never staged.
