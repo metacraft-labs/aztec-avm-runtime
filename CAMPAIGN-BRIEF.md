@@ -2951,3 +2951,31 @@ Format spec: `~/ah/dev/agent-harbor/ah-lib/specs/Milestones-Files.md`.
   was found by `e2e_runtime_traces_through_nim_writer` comparing the positions read back against
   the positions the driver ASKED FOR, and by nothing else. A step COUNT would have passed. **When a
   check can compare against what was requested rather than against a total, it must.**
+- **M41's sweep: 13,184, delta −354, and ONE of the seven moves is M41's own.** Measured M0–M41 on
+  2026-09-10, **after M41's last commit**, `setsid`-detached under `direnv exec` — this
+  repository's own dev shell — one milestone at a time, `TMPDIR` and the log under `~/.cache`, **84
+  markers for 42 milestones, NO HOLE**, 25 of 42 exit 0. **m41 measures 164, exactly its
+  reference**, and m24 measures 350, unchanged.
+
+  Every unit accounted in both directions: **+9 +1 −206 +2 +8 −43 −125 = −354**, and each is
+  attributed rather than absorbed. **m11 +9** is the upstream move, the standing condition. **m25
+  +1, m27 +2, m28 +8** are check edits in the eleven L-track commits this milestone rebased onto —
+  `e2e_trace_token_transfer_steppable.sh`, the browser chunk budget, and M28's derived job census.
+  **m38 −43 and m39 −125** are the workspace's v3→v4 flag day reaching this repository's Noir
+  arms: they report zero steps and unreadable frame fields, from sibling repositories nothing here
+  changed. **m26 −206 IS M41's**, and is recorded as such: `build_oq7_shared_writer_probe.sh`
+  refuses by name because `ctf-wt-wasm` sits on `wasm/ctfs-writer` at `c8802c5` while `pins.json`'s
+  `trace_format` declares `592fa42cbf` — earlier M41 work moved that branch and deliberately did
+  not move the pin. **The refusal is the check working**: it declines to build against a revision
+  the pin does not declare, rather than building and reporting a number about the wrong tree.
+- **THE FIRST SWEEP MEASURED m41 AT 73 AND THE 91 MISSING WERE M41'S OWN DEFECT, WHICH IS THE
+  SWEEP WORKING.** Three of its seven checks build Nim, and this repository's dev shell did not
+  provide `nim` — `ct-writer/build.rs` took it from `PATH` and refused a version that did not
+  match, which reads like a pin and is not one. An agent's own shell inherits the WORKSPACE's
+  `.envrc` and has `nim`; `direnv exec <this repo>` replaces `PATH` and did not. So the same three
+  checks passed by hand and died in the sweep with `nim is required`. **M19's `wasm-opt` finding
+  and M25's system-node finding are the same defect and this is its third instance.** `nim` is in
+  `flake.nix` now, at nixpkgs' 2.2.10 as this repository's own `flake.lock` pins it, and
+  `pins.json`'s `toolchain.nim` records that version rather than declaring it. *A tool a check
+  needs belongs in the shell the check is run in; a version assertion over `PATH` only tells you
+  which shell you were in.*

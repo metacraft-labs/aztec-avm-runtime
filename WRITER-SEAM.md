@@ -266,3 +266,54 @@ assertion with the arm that gives it meaning — a writer that does NOT call the
 DIFFERENT, valid id — because without that arm the assertion cannot tell a working setter from a
 no-op on a host whose stubs mint a constant. Three mutation arms were run against it and each
 reddened on its own assertion.
+
+---
+
+## 9. The sweep
+
+Measured M0–M41 on 2026-09-10, **after this milestone's last commit**, `setsid`-detached under
+`direnv exec` — this repository's own dev shell — one milestone at a time with nothing else
+running. 84 markers for 42 milestones, no hole.
+
+> **TOTAL 13,184 · 42 milestones · delta −354 against 13,538 · 25 of 42 exit 0**
+>
+> **m41 = 164, rc=0, exactly its reference.** m24 = 350, unchanged.
+
+Every unit accounted in both directions — **+9 +1 −206 +2 +8 −43 −125 = −354**:
+
+| milestone | move | whose |
+|---|---:|---|
+| m11 | +9 | the upstream move, the campaign's standing condition |
+| m25 | +1 | `e2e_trace_token_transfer_steppable.sh`, edited by an L-track commit this milestone rebased onto |
+| m27 | +2 | the browser chunk budget, same eleven commits |
+| m28 | +8 | M28's derived job census, same eleven commits |
+| m38 | −43 | the v3→v4 flag day reaching this repository's Noir arms — zero steps, unreadable frame fields, from sibling repositories nothing here changed |
+| m39 | −125 | the same |
+| **m26** | **−206** | **M41's own, and recorded as such** |
+
+**m26 is the one to read carefully.** `build_oq7_shared_writer_probe.sh` refuses by name:
+
+```
+the Noir worktree resolves its writer crates at .../ctf-wt-wasm (c8802c548f…)
+and pins.json's trace_format is 592fa42cbf…
+```
+
+Earlier M41 work moved `wasm/ctfs-writer` forward to `c8802c5` — the Path A compressor fix — and
+deliberately did **not** move the runtime's pin with it. **The refusal is the check working**: it
+declines to build against a revision the pin does not declare rather than building and reporting a
+number about the wrong tree. The remedy is a pin decision, not a repair: moving `trace_format` to
+`c8802c5` picks up the compressor fix at a measured **+234,429 bytes** of module and does **not**
+address §6's v3 problem, because that branch still carries the superseded encode.
+
+### What the FIRST sweep found, which was M41's own defect
+
+It measured m41 at **73** against 164. Three of the seven checks build Nim — two through
+`build_ct_print.sh`, one through `ct-writer/build.rs` — and this repository's dev shell did not
+provide `nim`. They passed by hand and died in the sweep with `nim is required`, because an agent's
+own shell inherits the workspace's `.envrc` and `direnv exec <this repo>` replaces `PATH`. `nim` is
+in `flake.nix` now. *A tool a check needs belongs in the shell the check is run in; a version
+assertion over `PATH` only tells you which shell you were in.*
+
+**A sweep is a writer.** `carry/*.json` checksummed before and `sha256sum -c` after, both runs:
+`exposure.json` and `rebase.json` came back changed, were restored from HEAD, all four re-verified
+OK, and neither was staged.

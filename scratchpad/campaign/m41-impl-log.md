@@ -391,3 +391,19 @@ stated separately rather than folded in.
 Path B is **480,833 bytes larger** than Path A as shipped. Stated without a comparison to any
 other module shape: seven distinct shapes have been measured in this campaign and lining up the
 wrong two reads as a regression that does not exist.
+
+## The sweep
+
+Two sweeps. The FIRST measured m41 at **73** against 164 and the 91 missing were this milestone's
+own defect: three checks build Nim and this repository's dev shell did not provide it. `nim` went
+into `flake.nix`; the figures were re-derived under the pinned 2.2.10, which builds a SMALLER
+module (771,318 -> 745,114).
+
+The SECOND, after that commit: **TOTAL 13,184, 42 milestones, delta -354, 25 of 42 exit 0, no
+hole. m41 = 164, rc=0, exactly its reference.** Moves: m11 +9 (upstream), m25 +1 / m27 +2 / m28 +8
+(L-track check edits in the eleven commits rebased onto), m38 -43 / m39 -125 (the v3->v4 flag day
+in sibling repos), **m26 -206 (M41's own** -- the OQ-7 probe refuses because `wasm/ctfs-writer`
+moved to `c8802c5` while the pin declares `592fa42cbf`, which is the check working**)**.
+
+`carry/*.json` checksummed before and after both runs; `exposure.json` and `rebase.json` came back
+changed both times, restored from HEAD, re-verified, never staged.
