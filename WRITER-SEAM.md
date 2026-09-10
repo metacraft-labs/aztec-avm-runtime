@@ -327,10 +327,64 @@ current readers refuse it by name, saying which version and why. Shipping v4 tod
 this repository unable to verify its own containers at all — trading a refusal for a silence,
 which is the direction this campaign's rules run against.
 
+### The reader anchor cannot simply be re-pointed, and that is measured too
+
+The obvious remedy — move `trace_format_nim` to the writer anchor — does not work, and the reason
+is arithmetic rather than preference. `test_ct_container_roundtrip_ct_print` asserts two things
+about that anchor at once:
+
+1. the control reader **must NOT read** the container, and
+2. `control_commit` **IS the reader commit's parent** — a one-commit difference, asserted against
+   `git rev-parse "$FIX^"`.
+
+Move the anchor to `0638684686` and the control becomes its parent, `8cfb1bb`. **That parent reads
+a v4 container.** Measured without building it: `git diff --name-only 8cfb1bb 0638684686` is three
+files — the nimble file, `codetracer_trace_writer_ffi.nim`, and one test — and **no reader file
+differs at all**, so a reader built there behaves exactly as `ct-print-writer` does, and
+`ct-print-writer` reads v4 completely.
+
+So there is **no commit that is simultaneously the new reader's parent and unable to read a v4
+container**, because the version bump and the fix this anchor names are not adjacent. The
+demonstration has to be re-designed rather than re-pointed, and its design is M24's.
+
 **So it is one line, gated on one decision**, and everything else is in place: both arms build,
 both are exercised, the checks derive which writer ships from the manifest rather than asserting
 it, and the crate's native tests are pinned to the arm that can host them. `just
 ct-writer-build --path-b` produces the shipped-shape Path B module today.
+
+---
+
+## 9b. m26, and why its refusal is not a stale declaration
+
+`build_oq7_shared_writer_probe.sh` refuses:
+
+```
+the Noir worktree resolves its writer crates at .../ctf-wt-wasm (c8802c548f…)
+and pins.json's trace_format is 592fa42cbf…
+```
+
+**The precondition is correct and should stay.** It is this repository's own rule — never build
+against a revision the pin does not declare — applied to the one dependency that is resolved by
+relative path out of a sibling checkout rather than materialised from an object store.
+
+**What drifted is the WORKTREE, not the declaration.** `592fa42cbf` is exactly the revision the
+shipped Path A module is built from, pinned deliberately at a commit rather than a branch tip.
+`ctf-wt-wasm` is a worktree of `codetracer-trace-format` sitting on `wasm/ctfs-writer`, and earlier
+M41 work moved that branch forward to `c8802c5`.
+
+**Moving the pin to `c8802c5` was tried and measured.** It does not build: that commit makes the
+Zstandard backend a cargo feature with C libzstd as the default, and the Path A wasm build has no
+`CC_wasm32_unknown_unknown` configured, so it dies inside `zstd-sys` compiling `cover.c` with the
+host `gcc`. Making it work means selecting a backend explicitly and either accepting **+234,429
+bytes** of module or opting out — a compressor migration for the writer this milestone exists to
+move off.
+
+**So the remedy is neither of the two obvious ones.** It is for the probe to materialise
+`codetracer-trace-format` at the pinned revision out of the object store, the way
+`build_ct_writer_wasm.sh` and `ct-writer/build.rs` already do — which it cannot do today because
+the Noir worktree resolves those crates by a relative path in its own manifest. That is a change in
+a Noir worktree, which this milestone is not permitted to touch, and it is recorded here so the
+next person meets the reason rather than the symptom.
 
 ---
 

@@ -2993,7 +2993,20 @@ Format spec: `~/ah/dev/agent-harbor/ah-lib/specs/Milestones-Files.md`.
   `test_ct_container_roundtrip_ct_print`'s control rather than re-pointing it. **Shipping v3 is a
   LOUD failure and shipping v4 today would be a SILENT one**, which is the direction this file's
   rules run against, so the default stays and the flip is one line gated on one decision.
-  `WRITER-SEAM.md` §9.
+  `WRITER-SEAM.md` §9. **And the anchor cannot simply be RE-POINTED**: the roundtrip check asserts
+  its control is the reader commit's PARENT *and* that the control cannot read the container, and
+  the writer anchor's parent `8cfb1bb` differs from it in three files none of which is a reader —
+  so it reads v4 fine. No commit satisfies both. The demonstration needs re-designing, and its
+  design is M24's.
+- **m26's −206 is a WORKTREE that drifted, not a declaration that went stale, and moving the pin
+  was tried.** `build_oq7_shared_writer_probe.sh` refuses because `ctf-wt-wasm` sits on
+  `wasm/ctfs-writer` at `c8802c5` while `pins.json` declares `592fa42cbf` — which is exactly the
+  revision the shipped Path A module is built from, pinned at a commit on purpose. The precondition
+  is this file's own rule and should stay. **Moving the pin to `c8802c5` does not build**: that
+  commit makes the Zstandard backend a cargo feature defaulting to C libzstd, and the Path A wasm
+  build has no `CC_wasm32_unknown_unknown`, so it dies inside `zstd-sys` on `cover.c` with the host
+  `gcc`. The real remedy is for the probe to materialise from the object store like every other
+  consumer here, which it cannot while a Noir worktree resolves those crates by relative path.
 - **M41's sweep: 13,184, delta −354, and ONE of the seven moves is M41's own.** Measured M0–M41 on
   2026-09-10, **after M41's last commit**, `setsid`-detached under `direnv exec` — this
   repository's own dev shell — one milestone at a time, `TMPDIR` and the log under `~/.cache`, **84

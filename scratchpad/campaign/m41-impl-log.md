@@ -407,3 +407,40 @@ moved to `c8802c5` while the pin declares `592fa42cbf`, which is the check worki
 
 `carry/*.json` checksummed before and after both runs; `exposure.json` and `rebase.json` came back
 changed both times, restored from HEAD, re-verified, never staged.
+
+## The flip, measured in both directions, and the two pins it turns on
+
+`default = ["path-b"]` was set, built and measured. Every M41 check green at 169; the default
+module reported the Nim writer; its container was v4 and read whole by the writer-anchor reader.
+Then the rest of the suite:
+
+| milestone | path-a | path-b | delta |
+|---|---|---|---:|
+| m24 | 350 / 14 | 350 / 58 | +44 |
+| m25 | 456 / 0 | 456 / 15 | +15 |
+| m40 | 145 / 12 | 145 / 26 | +14 |
+| m38 | 107 / 4 | 107 / 4 | **0** |
+| m39 | 80 / 10 | 80 / 10 | **0** |
+
+**m38/m39 unchanged refutes the hypothesis that those reds are this runtime writing v3.** Every
+assertion COUNT unchanged; one class started failing. That class is one pinned reader: on M24's own
+4.6 MB Path B container, `ct-print` @ `baea074019` answers 0 events / empty program / 1,830 steps
+where there are 250,001, and does not refuse; `ct-print-writer` @ `0638684686` reads all of it.
+
+**Two pins, both measured, neither movable by this milestone:**
+
+- `trace_format_nim` cannot be RE-POINTED. The roundtrip check asserts the control is the reader's
+  PARENT *and* cannot read the container. The writer anchor's parent `8cfb1bb` differs in three
+  files, none a reader, so it reads v4. No commit satisfies both; the demonstration needs
+  re-designing and that design is M24's.
+- `trace_format` cannot move to `c8802c5`: it makes the zstd backend a feature defaulting to C
+  libzstd, and the Path A wasm build has no `CC_wasm32_unknown_unknown`, so it dies in `zstd-sys`
+  on `cover.c` under the host gcc. Making it work is a compressor migration for the writer this
+  milestone exists to move off.
+
+So the default stays `path-a` and the flip is one line. Shipping v3 is a LOUD failure downstream;
+shipping v4 today would leave this repository unable to verify its own containers, which trades a
+refusal for a silence.
+
+Sweep 3 (after the default was restored): **TOTAL 13,188, m41 = 168 rc=0 at reference, delta -354,
+the same seven moves as sweep 2.**
