@@ -542,6 +542,10 @@ running. 84 markers for 42 milestones, no hole.
 > Six moves remain and every unit accounts: **+9 +1 +2 +8 −43 −125 = −148**. m11 is the upstream
 > move; m25, m27 and m28 are L-track check edits; m38 and m39 are unchanged under either writer.
 >
+> **m9 CAME BACK GREEN on the next sweep — 807 / 0 — with no relevant change between the two runs,
+> which settles the attribution by repetition rather than by argument.** The paragraph below is
+> what the red run measured.
+>
 > **m9 is the one new non-zero exit and it is the campaign's documented flake, not this move.**
 > Re-measured alone on a quiet host it reproduces at **807 assertions — exactly its reference — with
 > 8 failures**, and the failing arm is its own CONTROL: two copies of the *same* binary compare at

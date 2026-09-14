@@ -540,3 +540,14 @@ that it cannot attribute. And it cannot be the pin move: none of m9's four check
 `ct-writer`, `trace_format`, `zstd` or `ct_writer` at all.
 
 `carry/*.json` checksummed before and after; two came back changed, restored, never staged.
+
+## Sweep 6 — after the `<toplevel>` fix
+
+**TOTAL 13,403, 42 milestones, delta −148, 15 non-zero exits, no hole.** m24 = 356/0, m26 = 341/0,
+m41 = 171/0, all at reference. Same six moves: +9 +1 +2 +8 −43 −125 = −148.
+
+**m9 is 807 / 0 — green.** It was 807 / 8 in sweep 5 with nothing relevant changed between the two
+runs, which settles by repetition what its own control had already said: the instrument could not
+resolve, and it was not the pin move.
+
+Failing assertions 93 → 85, entirely m9's eight.
