@@ -91,18 +91,6 @@ CATALOGUE = {
         "step for it. The driver makes 7 step-producing calls, so 7 and 8 are both explicable and "
         "neither is a dropped or duplicated event."
     ),
-    "probe.FUNCTION_COUNT": (
-        "Path A interns two functions and Path B one. The Rust writer's `start` interns a "
-        "top-level function for the entry point; the Nim writer's does not, so the only function "
-        "in Path B's table is the one `ct_call` interned."
-    ),
-    "probe.CALL_COUNT": (
-        "The same cause as `probe.FUNCTION_COUNT`: Path A's `start` opens a top-level frame, so "
-        "its call stream carries that frame plus the one `ct_call` opened, and Path B's carries "
-        "only the latter. `ct_calls_opened()` -- the MODULE's own count of frames this session "
-        "opened -- is 1 in both, which is the assertion that says the difference is the writer's "
-        "and not the driver's."
-    ),
     "probe.VALUE_COUNT": (
         "One value record per step, so this tracks `probe.STEP_COUNT` exactly. The extra record in "
         "Path B belongs to the start-step and is empty."

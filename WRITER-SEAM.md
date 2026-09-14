@@ -575,6 +575,55 @@ Every unit accounted in both directions — **+9 +1 −206 +2 +8 −43 −125 = 
 | m39 | −125 | the same |
 | **m26** | **−206** | **M41's own, and recorded as such** |
 
+## 5b. `start()` — a spec gap, a bug of mine, and a finding
+
+The `function/call 2 vs 1` difference §5 used to catalogue **was a bug in this crate**, not a
+property of the Nim writer. `backend_nim.rs` called the low-level `trace_writer_start`, which emits
+the entry step and nothing else; the safe Rust wrapper around the same ABI does three things and
+says it *"Mirrors AbstractTraceWriter::start"* — interns `<toplevel>`, opens its call, interns the
+`None` type. Calling the raw symbol skipped the first two, so Path B's containers had **no call-tree
+root**.
+
+Fixed, mirroring the wrapper rather than inventing a second version of it. The equivalence
+comparison went **48 facts agreeing to 50**, and `probe.FUNCTION_COUNT` and `probe.CALL_COUNT` are
+no longer catalogued differences — they are agreements. The catalogue's stale-entry arm is what
+made removing them safe: deleting the two reasons first turned the check red, and the fix turned it
+green.
+
+**Underneath it was a spec gap, now closed.** `codetracer-trace-format-spec` mentioned `<toplevel>`
+**zero times** in seven files and said only *"Start recording at the entry point"*. The two
+reference writers read that in opposite directions and neither was wrong by its own documentation:
+the pure-Rust `AbstractTraceWriter::start` registers `<toplevel>` and its call and emits **no
+step**; the Nim C ABI's `trace_writer_start` emits **the step** and registers no `<toplevel>`.
+`trace-events.md` now pins all three records and their order, and says `<toplevel>` must be
+`function_id` 0 / `call_key` 0 / depth 0 because readers root the call tree there.
+
+### The entry step is implemented, measured, and NOT landed — three reasons
+
+A red-green test for it exists (`codetracer_trace_writer/tests/start_records_the_entry_step.rs`,
+three cases including the counting control) and the one-line fix makes it pass. It is held, and
+each reason is a measurement:
+
+1. **Seven in-repo constants break, all of the shape `N → N+1`**: `Expected 9 step events, got 10`,
+   `19 → 20`, `999 → 1000`, `47 → 48`, plus one IO-attribution index. *(Two further failures are a
+   worktree artefact — tests that read sibling recorder repos by relative path — not the change.)*
+2. **The two branches are divergent.** `codetracer-trace-format`'s mainline is `dev`;
+   `pins.json` follows `wasm/ctfs-writer`, which is **8 commits ahead of the merge base and does not
+   have `dev` as an ancestor**. Landing on mainline does not reach this runtime; landing where the
+   runtime looks is not mainline. It needs both, and that is a decision about that repository.
+3. **It does not make m24/m25's constants pass — it makes them fail for BOTH writers.** Those
+   constants read *"the decoded step count equals the events the host wrote"*, which encodes *no
+   entry step*. Once both writers obey the spec, both produce `events + 1`, and the constant is
+   wrong for both rather than right for both. The spec's own text is what says so: *a recording
+   holds one more step than the recorder emitted*.
+
+### And it is not what blocks the flip
+
+Measured with the `<toplevel>` fix in and the default flipped: m24 **356 / 52**, and the dominant
+failure is unchanged — `the decoded step count … got 0`, `the program name … got []`. **The v3-era
+reader still cannot read a v4 container.** Closing the writer divergence was worth doing on its own
+terms; it moves the flip no closer.
+
 **m26 is the one to read carefully.** `build_oq7_shared_writer_probe.sh` refuses by name:
 
 ```
