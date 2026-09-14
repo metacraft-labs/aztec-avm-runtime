@@ -400,6 +400,85 @@ next person meets the reason rather than the symptom.
 
 ---
 
+## 5c. The branch divergence is gone, and `start()` is spec-conformant on both sides
+
+The three reasons §5b gave for holding the entry step are answered, and two of them by doing the
+work rather than by re-deciding.
+
+**`wasm/ctfs-writer` is merged into `dev` and is now retirable.** It had been off mainline long
+enough to diverge — 27 commits on `dev`, 8 on the branch, `dev` not an ancestor. One file
+conflicted, `ctfs_writer.rs`, and it was a semantic split rather than a rewrite: `dev` retired the
+`meta.json` / `paths.json` sidecars while the branch added the recording-id selection, on adjacent
+lines. Taking either side whole would have silently undone the other. The resolution keeps both,
+and **both intents were verified by their own checks rather than by a clean `git status`**:
+
+| check | result | whose intent |
+|---|---|---|
+| `in_memory_container` | 4/4, incl. `in_memory_container_is_byte_identical_to_the_file_written_one` | the wasm branch's |
+| `default_split_streams_tests` | 3/3 | `dev`'s sidecar retirement |
+| `ctfs_tests` | 11/11 | `dev`'s |
+| `interning_tables_tests` | 9/9 | `dev`'s |
+| whole workspace | **356 passed** | both |
+
+*(The two failures in that run are `trace_storage`'s, which read sibling recorder repositories by
+relative path and cannot resolve them from a worktree. Proven, not assumed: `NotFound` on a path
+that exists from a normal checkout.)*
+
+**`git merge-base --is-ancestor origin/wasm/ctfs-writer origin/dev` now answers YES**, so the branch
+is fully contained and retirable.
+
+**The entry step landed on `dev`**, with the red-green test that fails at `start() emitted 0 steps`
+without it. **Eight assertions across five files were CONFORMED TO THE SPEC, not loosened** — every
+one was an exact constant that silently encoded *"start emits no step"*, and every one is still an
+exact constant: `9 → 10`, `19 → 20`, `n-1 → n`, `47 → 48`, two positional subscripts that shifted by
+one, and one I/O attribution index whose *rule* is unchanged. Each site cites the spec sentence.
+
+## 5d. THE FINDING THAT CHANGES THE SHAPE OF THE PROBLEM
+
+Re-pointing `trace_format` at `dev` was measured, and it does something nobody was looking for:
+
+> **`dev` stamps `META_DAT_VERSION = 4`. The PURE-RUST writer at that revision emits v4 containers.**
+
+So *"this runtime ships v3 containers that six readers refuse"* — the thing the flip existed to fix
+— **is fixed by a pin move, with no flip at all.** Measured on the container the Path A module
+produces at that pin:
+
+```
+ct-print @ baea074019 (the reader anchor)   rc=1   meta.dat: unsupported version 4, expected 3
+ct-print @ 0638684686 (a v4 reader)         rc=0
+```
+
+**Both writers now emit v4, so the reader anchor is no longer a choice between them — it is
+required for the runtime to verify anything at all.** And moving it is now *possible*, because
+§9c's property-based control no longer demands that the control be the reader's parent: with the
+reader at `0638684686`, the control is `baea074019`, which refuses a v4 container **by name** and is
+an ancestor. That is the redesign paying for itself.
+
+### What the migration costs, mapped and not taken
+
+Both anchors moved, measured together:
+
+| milestone | green today | both anchors moved |
+|---|---|---|
+| m40 | 145 / 12 | 145 / **7** — *better than today* |
+| m41 | 171 / 0 | 171 / 7 |
+| m24 | 356 / 0 | 356 / 31 |
+| m26 | 341 / 0 | 135 / 4 |
+| m25 | 456 / 0 | 456 / **46** |
+
+m24's are the conformable shape — `5000 → 5001`, `first step's line 0 → 1`, and two document
+figures. **m25's are not**: they read `got []`, which is its arms decoding through a reader whose
+output shape they were written against. m26 returns to the `ctf-wt-wasm` worktree/pin mismatch,
+which the now-retirable branch makes fixable by moving that worktree onto `dev`.
+
+**It is a migration of the same shape as the eight assertions just conformed in
+`codetracer-trace-format`, across four milestones this one does not own**, and it is left mapped
+rather than half-done. The pins are back at their verified-green values and every milestone above
+is green. **This is the campaign's last open item, and it is now a single named thing: move both
+anchors and conform m24, m25, m40, m41 and m26 to the v4 reader and the entry step.**
+
+---
+
 ## 9c. The coupled move: the control redesigned, the anchor advanced, and what was left
 
 M24's roundtrip control was **over-specified** — it pinned the control commit's *identity* (must be
@@ -525,6 +604,25 @@ Two ways out, both outside M41: teach the probe to materialise into a scratch tr
 Noir build at it (a `[patch]` or a temporary checkout), or move the `trace_format` pin as §9d
 measures. **Until one is taken, every advance of `wasm/ctfs-writer` reddens m26 again**, and this
 paragraph is where that drift should send its reader.
+
+---
+
+## 9f. `verify_trace_event_abi_batched_faster` re-reds on EVERY module rebuild
+
+Budget an afternoon for this one or you will lose one. The check compares `TRACE-ABI.md` §2's arm
+table against a **freshly measured** benchmark, and `m24_require_oq6` re-runs that benchmark
+whenever the module is newer than `arms.tsv`. So **any** change that rebuilds `ct-writer` — a pin
+move, a feature flip, `rm -rf target` — produces new medians, and the document is stale the moment
+they land.
+
+It is not a flake in the sense that M9's is: it is deterministic and it is the check doing exactly
+what it says. But the consequence is that *"m24 is 15 red"* means *"the benchmark ran again"* far
+more often than it means anything about the writer. This milestone re-derived that table **four
+times** for that reason.
+
+The remedy when you meet it: `python3 verification/_oq6_compare.py ~/.cache/aztec-m24-oq6/arms.tsv 3.0`
+prints every number the check wants; §2's five rows and §8's last run are the only places they go.
+Do not read a red there as a regression until you have compared the table against that output.
 
 ---
 

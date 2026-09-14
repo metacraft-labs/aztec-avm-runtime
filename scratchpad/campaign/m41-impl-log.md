@@ -551,3 +551,28 @@ runs, which settles by repetition what its own control had already said: the ins
 resolve, and it was not the pin move.
 
 Failing assertions 93 → 85, entirely m9's eight.
+
+## The merge, the entry step, and the finding under them
+
+**`wasm/ctfs-writer` merged into `dev`** (codetracer-trace-format `b01f960`). One conflicted file,
+a semantic split: `dev` retired the JSON sidecars, the branch added the recording-id selection, on
+adjacent lines. Both kept. Verified by both sides' own checks — `in_memory_container` 4/4 (incl.
+the byte-identical assertion), `default_split_streams_tests` 3/3, `ctfs_tests` 11/11,
+`interning_tables_tests` 9/9, workspace 356. `merge-base --is-ancestor` now YES: **the branch is
+retirable.**
+
+**The entry step landed** (`3b58c68`), with its red-green test. Eight assertions across five files
+conformed to the spec — every one still an exact constant, every site citing the spec sentence.
+
+**The finding: `dev` stamps `META_DAT_VERSION = 4`.** Re-pointing `trace_format` at `dev` makes the
+PURE-RUST writer emit v4, so "this runtime ships v3 containers six readers refuse" is fixed by a
+pin move with no flip. Measured: `ct-print @ baea074019` answers `meta.dat: unsupported version 4,
+expected 3`; a v4 reader reads it.
+
+**Both anchors moved, measured, and reverted:** m40 12→**7** (better), m41 0→7, m24 0→31 (all the
+conformable `N→N+1` shape), m25 0→**46** (`got []`, a different problem), m26 341→135 (the
+worktree/pin mismatch). A migration across four milestones M41 does not own. Left mapped; pins back
+at verified-green.
+
+`verify_trace_event_abi_batched_faster` re-derived a **fourth** time — it re-reds on every module
+rebuild by design. Written up in WRITER-SEAM 9f with the one-line remedy.

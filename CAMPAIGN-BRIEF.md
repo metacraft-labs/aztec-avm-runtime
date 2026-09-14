@@ -3034,6 +3034,26 @@ Format spec: `~/ah/dev/agent-harbor/ah-lib/specs/Milestones-Files.md`.
   build has no `CC_wasm32_unknown_unknown`, so it dies inside `zstd-sys` on `cover.c` with the host
   `gcc`. The real remedy is for the probe to materialise from the object store like every other
   consumer here, which it cannot while a Noir worktree resolves those crates by relative path.
+- **THE v3 PROBLEM IS FIXED BY A PIN MOVE, NOT BY THE FLIP — and that is the campaign's last open
+  item, now a single named thing.** `codetracer-trace-format`'s `dev` stamps
+  `META_DAT_VERSION = 4`, so the PURE-RUST writer at that revision emits v4 containers too.
+  Measured: the reader pinned at `baea074019` answers `meta.dat: unsupported version 4, expected 3`
+  on a Path A container built at `dev`, and a v4 reader reads it. **Both writers now emit v4, so
+  the reader anchor stops being a choice between them and becomes required.** Moving it is possible
+  now because M41's property-based control no longer demands the control be the reader's parent.
+  The migration is mapped and NOT taken: with both anchors moved, m40 goes 12 failures to **7**
+  (better than today) and m41 to 7 and m24 to 31 — all the conformable `N → N+1` shape — while m25
+  goes 0 to **46** of the `got []` kind and m26 returns to its worktree/pin mismatch. That is a
+  migration across four milestones M41 does not own, so the pins are left at their verified-green
+  values. *Do not read "the flip" as the remaining work; the remaining work is the reader anchor
+  plus a conform pass.*
+- **`wasm/ctfs-writer` IS MERGED INTO `dev` AND IS RETIRABLE.** It had diverged — 27 commits on
+  `dev`, 8 on the branch, `dev` not an ancestor. One conflicted file, and it was a semantic split:
+  `dev` retired the JSON sidecars, the branch added the recording-id selection, on adjacent lines.
+  Both survive. Verified by running both sides' own checks — `in_memory_container` 4/4 including
+  the byte-identical assertion, `default_split_streams_tests` 3/3, `ctfs_tests` 11/11,
+  `interning_tables_tests` 9/9, workspace 356 — rather than by a clean `git status`.
+  `merge-base --is-ancestor` now answers YES.
 - **`ruzstd` IS OUT OF THE SHIPPED PATH.** The user took M41's option 1 and `trace_format` moved
   `592fa42cbf → c8802c548f`, making the writer's Zstandard backend a cargo feature that defaults to
   C libzstd. Measured on the built module: the string appears **0 times where it appeared 9**. That

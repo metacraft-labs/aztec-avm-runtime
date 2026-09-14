@@ -7,7 +7,7 @@
 **THE MEASUREMENT DOES NOT HAVE A STABLE SIGN, AND THAT IS THE RESULT.** Run eleven times — once in
 the system engine and ten times in this repository's dev shell — `perEvent - batched` came out
 **+0.20 %**, **+1.09 %**, **-0.58 %**, **-0.09 %**, **+0.96 %**, **+0.98 %**, **+0.85 %**,
-**+0.74 %**, **+1.34 %**, **+1.21 %**, **+1.07 %** and **+1.39 %**. Every one is inside the declared **margin of 3 %**; runs 2, 3 and 4 were taken on the *same engine, the
+**+0.74 %**, **+1.34 %**, **+1.21 %**, **+1.07 %** and **+1.55 %**. Every one is inside the declared **margin of 3 %**; runs 2, 3 and 4 were taken on the *same engine, the
 same module and the same binary*, and two of those have 95 % intervals that do not overlap and
 point opposite ways. So the honest statement is not "the batched ABI is about one per cent faster"
 — it is that **the difference is smaller than the run-to-run variation of the instrument that
@@ -101,11 +101,11 @@ silently.
 
 | arm | median (µs) | min (µs) | crossings | container (B) |
 |---|---|---|---|---|
-| `batched` | 476,768 | 460,539 | 25 | 1,630,208 |
-| `perEvent` | 483,816 | 466,973 | 100,000 | 1,630,208 |
-| `control` | 480,313 | 458,824 | 25 | 1,630,208 |
-| `nopBatched` | 4,921 | 4,619 | 25 | 159,744 |
-| `nopPerEvent` | 5,782 | 4,926 | 100,000 | 159,744 |
+| `batched` | 475,159 | 460,487 | 25 | 1,630,208 |
+| `perEvent` | 483,730 | 469,406 | 100,000 | 1,630,208 |
+| `control` | 477,414 | 464,033 | 25 | 1,630,208 |
+| `nopBatched` | 4,809 | 4,591 | 25 | 159,744 |
+| `nopPerEvent` | 5,682 | 5,037 | 100,000 | 159,744 |
 
 *Every figure in this table moved when the `trace_format` pin advanced to `c8802c548f` and the
 writer's compressor became C libzstd. **The container is the headline: 4,694,016 → 1,630,208
@@ -489,7 +489,7 @@ nuisance. None is wrong; they are what this measurement does.
 | 9 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **the SAME module as run 8**) | +1.34 % | [+0.67, +2.00] % | -0.17 % | +17.24 % | ~7.7 ns |
 | 10 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, the SAME module as runs 8 and 9) | +1.21 % | [+0.58, +1.85] % | -0.35 % | +18.71 % | ~8.7 ns |
 | 11 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M40's module, source steps) | +1.07 % | [+0.36, +1.78] % | +0.22 % | +21.21 % | ~8.7 ns |
-| 12 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M41's module, **C libzstd**) | **+1.39 %** | **[+0.82, +1.96] %** | +0.39 % | +19.26 % | ~8.7 ns |
+| 12 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M41's module, **C libzstd**) | **+1.55 %** | **[+1.04, +2.07] %** | +0.25 % | +17.04 % | ~8.7 ns |
 
 Run 12 is the one §2 tabulates, because it is the one `arms.tsv` currently holds and the one the
 check compares this file against. **Runs 2, 3 and 4 are the same engine, the same module and the
