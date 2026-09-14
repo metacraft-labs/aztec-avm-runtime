@@ -215,15 +215,26 @@ m38_doc_figures() {
 # comparer whose needles had all stopped matching reports no BAD lines, and "no disagreement" over
 # an empty comparison is this campaign's most repeated shape.
 #
-# `xargs -r echo` AND NOT `tr` FOR THE COLLAPSE: `tr '\n' ' '` over an EMPTY list produces a single
-# SPACE, so `assert_eq "" " "` fails on a document with nothing wrong with it — M36's own
-# check-that-can-only-be-red, in the section whose job is to notice a rotted figure.
+# `paste -sd' ' -` FOR THE COLLAPSE, AND NEITHER `tr` NOR `xargs`. Both alternatives are wrong, in
+# opposite directions, and each one hides a different thing:
+#
+#   - `tr '\n' ' '` over an EMPTY list produces a single SPACE, so `assert_eq "" " "` fails on a
+#     document with nothing wrong with it — a check that can only be red, in the section whose job
+#     is to notice a rotted figure.
+#   - `xargs` treats quotes as SPECIAL. A row named `the public half's container bytes` contains an
+#     unmatched apostrophe, so xargs aborts mid-stream with `unmatched single quote` and prints only
+#     `the public` — the failure is reported, but the measured and quoted values that say WHAT is
+#     wrong are silently cut off. A reporter that truncates at an apostrophe turns a diagnosable
+#     failure into a mystery, and half these row names contain a possessive.
+#
+# `paste` collapses without interpreting anything, and on empty input emits a bare newline that
+# command substitution strips, so the empty case stays empty.
 m38_assert_doc() { # <label> <document> <spec>...
   local label="$1" doc="$2"; shift 2
   local out bad missing okcount
   out="$(m38_doc_figures "$doc" "$@")"
-  bad="$(printf '%s\n' "$out" | sed -n 's/^BAD //p' | xargs -r echo)"
-  missing="$(printf '%s\n' "$out" | sed -n 's/^MISSING //p' | xargs -r echo)"
+  bad="$(printf '%s\n' "$out" | sed -n 's/^BAD //p' | paste -sd' ' -)"
+  missing="$(printf '%s\n' "$out" | sed -n 's/^MISSING //p' | paste -sd' ' -)"
   okcount="$(printf '%s\n' "$out" | sed -n 's/^OK //p' | tail -1)"
   assert_eq "$label: no figure disagrees with the artefacts" "" "$bad"
   assert_eq "$label: every needle names exactly one row" "" "$missing"

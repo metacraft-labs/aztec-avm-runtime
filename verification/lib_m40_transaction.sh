@@ -59,8 +59,11 @@ m40_assert_prefixes() { # <label> <doc> <spec>...
   local label="$1" doc="$2"; shift 2
   local out bad missing ok
   out="$(m40_doc_prefixes "$doc" "$@")"
-  bad="$(printf '%s\n' "$out" | grep '^BAD ' | tr '\n' ' ' | xargs -r echo)"
-  missing="$(printf '%s\n' "$out" | grep '^MISSING ' | tr '\n' ' ' | xargs -r echo)"
+  # `paste -sd' ' -` AND NOT `xargs`, for the reason spelled out over `m38_assert_doc`: xargs treats
+  # an apostrophe as an opening quote, so a row named `the tracer's columns` aborts the collapse and
+  # the measured and quoted values that say what is actually wrong never reach the report.
+  bad="$(printf '%s\n' "$out" | grep '^BAD ' | paste -sd' ' -)"
+  missing="$(printf '%s\n' "$out" | grep '^MISSING ' | paste -sd' ' -)"
   ok="$(printf '%s\n' "$out" | sed -n 's/^OK //p' | tail -1)"
   assert_eq "$label: no quoted value disagrees with the artefacts" "" "$bad"
   assert_eq "$label: every needle names exactly one row and every token is an abbreviation" "" "$missing"

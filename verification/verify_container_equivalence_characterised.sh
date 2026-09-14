@@ -44,12 +44,19 @@ TAB=$'\t'
 m41_require_path_a
 m41_require_path_b
 m41_require_readers
-# The two probes must be two BINARIES, or every "read by whichever can read it" below is one
-# reader agreeing with itself. They coincide exactly when the reader anchor has caught up with the
-# writer anchor, which is a real state and a legitimate one — but it is not one this comparison can
-# run in, so it is named rather than absorbed.
-assert_false "the two probes are different builds, so the comparison has two readers" \
-  test "$M41_PROBE_OLD" = "$M41_PROBE_NEW"
+# THE REQUIREMENT IS A COMPLETE READ OF BOTH CONTAINERS, NOT TWO BINARIES.
+#
+# This asserted that the two probes are different builds, because when the anchors straddled the
+# v3/v4 flag day each container was readable by exactly one of them and comparing with a single
+# reader would have been one reader agreeing with itself. THE ANCHORS HAVE CONVERGED: both writers
+# emit v4 now and one reader reads both, so the two probes are legitimately the same binary and
+# demanding two would fail on the fixed state rather than on a broken one.
+#
+# What still has to hold is the thing that assertion was standing in for — that neither container
+# was compared on a partial decode. `_m41_container_diff.py` sets `probe.source` to `NONE` for an
+# arm nothing could read completely, so asserting it is never `NONE` is the same guarantee and it
+# survives the anchors moving apart again.
+m41_say "probes: old=$(basename "$M41_PROBE_OLD") new=$(basename "$M41_PROBE_NEW")"
 
 m41_drive "$M41_PATH_A" path-a
 m41_drive "$M41_PATH_B" path-b
@@ -79,10 +86,17 @@ A_BY_READER="$(grep -c '^OPEN'$'\t''ok' "$M41_WORK/path-a/probe-reader.tsv" || t
 B_BY_WRITER="$(grep -c '^OPEN'$'\t''ok' "$M41_WORK/path-b/probe-writer.tsv" || true)"
 assert_eq "the reader anchor OPENS the Path A container" "1" "$A_BY_READER"
 assert_eq "the writer anchor OPENS the Path B container" "1" "$B_BY_WRITER"
-assert_true "and the writer anchor REFUSES the Path A container, naming the schema version" \
-  grep -q 'schema version 3' "$M41_WORK/path-a/probe-writer.tsv"
-assert_true "while the reader anchor reads Path B's streams only partially, and says which" \
-  grep -q 'ERR:steps.dat' "$M41_WORK/path-b/probe-reader.tsv"
+# THE ASYMMETRY IS GONE, AND ITS ABSENCE IS THE ASSERTION NOW.
+#
+# These two asserted that each reader refused the other writer's container — true while the anchors
+# straddled the v3/v4 flag day, and the reason the equivalence comparison needed two readers at all.
+# Both writers emit v4 now, so the same reader reads both, and the property worth pinning is that
+# NEITHER container is refused: a regression that put one writer back on a superseded schema would
+# show up here as a refusal.
+assert_false "no reader refuses the Path A container over its schema version" \
+  grep -q 'schema version' "$M41_WORK/path-a/probe-writer.tsv"
+assert_false "and none refuses Path B's split streams either" \
+  grep -q 'ERR:steps.dat' "$M41_WORK/path-b/probe-writer.tsv"
 
 # ---------------------------------------------------------------------------
 # 2. The comparison itself.
@@ -96,6 +110,14 @@ else
   fail "the container comparison reported an unexplained or stale difference:
 $(cat "$DIFF_ERR")"
 fi
+
+# `$TAB`, NOT `\t`. `grep -E` is a POSIX ERE in which `\t` matches a literal `t`, so the pattern
+# would look for `probe.sourcet` and find nothing — reporting "no arm says which reader" over
+# output that plainly says it. This file's own header records the same trap.
+assert_false "neither container was compared on a PARTIAL decode" \
+  grep -qE "^(SAME|DIFF)${TAB}probe\.source${TAB}.*NONE" "$DIFF_OUT"
+assert_true "and both arms report which reader read them" \
+  grep -qE "^(SAME|DIFF)${TAB}probe\.source${TAB}" "$DIFF_OUT"
 
 SAME="$(grep -c '^SAME' "$DIFF_OUT" || true)"
 DIFFN="$(grep -c '^DIFF' "$DIFF_OUT" || true)"
@@ -114,10 +136,12 @@ assert_contains "the comparison's own verdict is ok" "VERDICT${TAB}ok" "$(cat "$
 # contains the lines it is looking for. `lib_m24_ct_writer.sh` records the same trap.
 assert_true "the events.log difference is catalogued as a stream, not as an 8-byte header" \
   grep -qE "^WHY${TAB}internal\.events_log${TAB}.*writes no .events\.log. at all" "$DIFF_OUT"
-assert_true "the meta.dat schema version difference is catalogued" \
-  grep -qE "^WHY${TAB}meta\.schema_version${TAB}" "$DIFF_OUT"
-assert_true "and the two readers' asymmetry is catalogued rather than worked around" \
-  grep -qE "^WHY${TAB}reads\.reader_anchor${TAB}" "$DIFF_OUT"
+# The schema version and the reader asymmetry are no longer differences to catalogue — both
+# writers emit v4 and one reader reads both. What replaces them is the assertion that they AGREE.
+assert_true "the two containers agree on the meta.dat schema version" \
+  grep -qE "^SAME${TAB}meta\.schema_version${TAB}" "$DIFF_OUT"
+assert_true "and on which reader read them" \
+  grep -qE "^SAME${TAB}probe\.source${TAB}" "$DIFF_OUT"
 assert_true "and the events.log row says which container carries one" \
   grep -qE "^DIFF${TAB}internal\.events_log${TAB}present" "$DIFF_OUT"
 

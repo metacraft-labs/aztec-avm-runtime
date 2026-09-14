@@ -81,15 +81,28 @@ def main():
     print("VARIDS\t%s" % ",".join("%d=%s" % (k, names[k]) for k in sorted(names)))
     print("STEPS\t%d" % len(steps))
 
+    # THE ENTRY STEP IS EXCLUDED FROM THE PER-STEP STATISTICS BELOW, and it is excluded by the
+    # spec rather than by convenience. `codetracer-trace-format-spec`'s `trace-events.md`,
+    # "Recorder Integration — Starting a Recording": `start` emits an entry step, so index 0 is
+    # that step and the recorder wrote no variables on it. Counting it as "incomplete" would report
+    # every conformant recording as missing a variable, and reading `l2Gas` from it would find
+    # nothing.
+    #
+    # `STEPS` above still counts EVERY step, because a caller comparing against "the events the
+    # recording declares" wants the total. Only the per-step variable and gas statistics skip it,
+    # and `RECORDED_STEPS` says how many they are over, so the two figures cannot be confused.
+    recorded = steps[1:] if steps else []
+    print("RECORDED_STEPS\t%d" % len(recorded))
+
     wanted = ("opcode", "contextId", "l2Gas", "daGas", "contractAddress")
-    incomplete = [i for i, s in enumerate(steps) if any(w not in s for w in wanted)]
+    incomplete = [i + 1 for i, s in enumerate(recorded) if any(w not in s for w in wanted)]
     print("INCOMPLETE\t%d" % len(incomplete))
     print("INCOMPLETE_FIRST\t%s" % (incomplete[0] if incomplete else "none"))
-    if not steps:
+    if not recorded:
         return 0
 
-    l2 = [s.get("l2Gas") for s in steps]
-    da = [s.get("daGas") for s in steps]
+    l2 = [s.get("l2Gas") for s in recorded]
+    da = [s.get("daGas") for s in recorded]
     if any(not isinstance(v, int) for v in l2 + da):
         print("GASKIND\tNON-INTEGER")
         return 0
@@ -114,7 +127,7 @@ def main():
     print("DA_DELTA_ZERO\t%d" % sum(1 for x in dda if x == 0))
 
     ctx = {}
-    for s in steps:
+    for s in recorded:
         ctx[s.get("contextId")] = ctx.get(s.get("contextId"), 0) + 1
     print("CONTEXTS\t%s" % ",".join("%s:%d" % (k, ctx[k]) for k in sorted(ctx)))
     print("CONTEXT_COUNT\t%d" % len(ctx))
@@ -128,7 +141,11 @@ def main():
     with open(sys.argv[2], encoding="utf-8") as fh:
         drained = [parse_record(l) for l in fh.read().split("\n") if l.strip()]
     print("DRAINED\t%d" % len(drained))
-    n = min(len(steps), len(drained))
+    # PAIRED AGAINST `recorded`, NOT `steps`. The drained stream is what the HOST pushed; the
+    # container's step 0 is the entry step, which the writer emits and the host never sent. Zipping
+    # the container's total against the drained records shifts every pair by one and reports every
+    # single one as a mismatch — which is exactly what it did.
+    n = min(len(recorded), len(drained))
 
     def mismatches(offset):
         # `offset` is 0 for the real pairing and 1 for the control. It is never negative, and the
@@ -136,7 +153,7 @@ def main():
         # property of dead code, which this campaign has a rule about.
         bad = 0
         for i in range(n - offset):
-            s = steps[i]
+            s = recorded[i]
             r = drained[i + offset]
             if str(s.get("contextId")) != r.get("ctx") \
                or str(s.get("opcode")) != r.get("op") \

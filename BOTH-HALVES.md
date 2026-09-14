@@ -44,7 +44,7 @@ enqueues a second directly.
 | instructions the public half executed | **146** |
 | AVM contexts they ran in | **2** |
 | distinct opcodes among them | **15** |
-| the public half's container bytes | **180224** |
+| the public half's container bytes | **163840** |
 | steps of it positioned in aztec-nr source | **110** |
 | instructions the unseeded control executed | **1** |
 
@@ -135,7 +135,7 @@ asserted about. This is a different answer to the same need rather than the answ
 | private frames in the container | **2** |
 | ops replayed into the writer | **147** |
 | paths the private container interns | **78** |
-| the private half's container bytes | **208896** |
+| the private half's container bytes | **188416** |
 | steps the NATIVE probe produced | **64** |
 | column differences between them | **2** |
 | imports the tracer module declares | **4** |
@@ -180,8 +180,8 @@ Measured instead by writing the same transaction twice with one field changed:
 
 | arm | container bytes | sha256 |
 |---|---|---|
-| the tracer's columns | 208,896 | `d53fc677…` |
-| every step's column set to 0 | 208,896 | `d7da2342…` |
+| the tracer's columns | 188,416 | `fcec0c15…` |
+| every step's column set to 0 | 188,416 | `0e2c6c79…` |
 
 Same op list, same steps, same paths, same size — a different digest, because a column is a delta
 opcode rather than a field. The column reaches the container.

@@ -59,10 +59,10 @@ worth the paragraph:
 
 | entry point | eager, gzipped | files | M27's figure |
 |---|---|---|---|
-| `aztec-avm-runtime/browser` — the DD-5 reference | **265.97 KB** | 9 | 253.94 KB |
-| `aztec-avm-runtime/testing` | 294.83 KB | 12 | 291.09 KB |
-| the demo page | 295.93 KB | 12 | 292.3 KB |
-| `aztec-avm-runtime/node` | 225.62 KB | 4 | 223.61 KB |
+| `aztec-avm-runtime/browser` — the DD-5 reference | **266.58 KB** | 9 | 253.94 KB |
+| `aztec-avm-runtime/testing` | 295.44 KB | 12 | 291.09 KB |
+| the demo page | 296.54 KB | 12 | 292.3 KB |
+| `aztec-avm-runtime/node` | 226.21 KB | 4 | 223.61 KB |
 
 and, lazily, never in any eager set:
 
@@ -74,7 +74,7 @@ and, lazily, never in any eager set:
 | `chunks/FeeJuice-*.js` | 185.88 KB | yes, when a fee payer is funded |
 | `chunks/ContractInstanceRegistry-*.js` | 103.25 KB | no |
 
-**8,239.78 KB gzipped across every chunk; 265.97 KB is what the reference entry point costs.** That is
+**8,240.98 KB gzipped across every chunk; 266.58 KB is what the reference entry point costs.** That is
 the whole of DD-11 in two numbers, and the difference between them is exactly the two things DD-11
 names.
 

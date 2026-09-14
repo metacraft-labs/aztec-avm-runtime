@@ -135,7 +135,13 @@ const out = { module: MODULE, moduleBytes: bytes.length, node: process.version, 
     droppedColumnAwareness: rec.droppedColumnAwareness,
     memoryGrowths: rec.memoryGrowths,
     // What a reader must find. Five variables per step, plus the opening frame.
-    expectedSteps: evs.length,
+    // CONFORMED TO THE SPEC, NOT LOOSENED. `codetracer-trace-format-spec`'s `trace-events.md`,
+    // "Recorder Integration — Starting a Recording": *a recording contains one more step than the
+    // recorder emitted — the entry step, which `start` emits.* This said `evs.length`, which
+    // silently encoded the writer behaviour that preceded the spec. It is still an exact figure
+    // derived from the driven events, not a tolerance.
+    expectedSteps: evs.length + 1,
+    // The ENTRY STEP CARRIES NO VALUES, so the value total is unchanged: five per driven event.
     expectedValues: evs.length * 5,
     firstPc: evs[0].pc,
     lastPc: evs[evs.length - 1].pc,

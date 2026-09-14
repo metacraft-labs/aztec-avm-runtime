@@ -282,6 +282,52 @@ reddened on its own assertion.
 
 ---
 
+## 9g. THE THIRD FLIP MEASUREMENT — taken in the state that was supposed to unblock it
+
+Every condition the two earlier attempts named as the blocker had been removed before this one was
+taken: both anchors sit on their repositories' own mainlines, the reader reads v4/v5, **both**
+writers emit the entry step and intern `<toplevel>` (the spec pins it for both), and m24, m25, m26,
+m40 and m41 are green under `path-a`. So the flip was set and measured again, in this repository's
+own dev shell.
+
+**It does not clear, and the reason is not a constant.**
+
+| milestone | `path-a` | `path-b` |
+|---|---|---:|
+| m41 | 172, 0 | **172, 0** |
+| m24 | 358, 0 | 358, **27** |
+| m25 | 459, 0 | 459, **3** |
+| m26 | 341, 0 | 341, **12** |
+| m40 | 146, 0 | 146, **6** |
+
+The 48 split into three families, and only two of them are conformable:
+
+1. **Figures about which writer ships** — TRACE-ABI's OQ-6 arm table and its §7 module byte count
+   and sha256. Path B's module is 735,659 bytes where Path A's is 480,876, so every one moves.
+   Re-derivable, and they would be re-derived as a matter of course if the flip landed.
+2. **Container shape** — the CTFS container header version (`…e2 03` against `…e2 04`), where a
+   call's argument attaches, and the variable naming (`contractAddress` where M24's constants say
+   `contractAddressLow`, with a `(tkInt, "Field")` type record). These are the differences §5
+   already catalogues WITH REASONS. Conformable, but conforming them is re-deciding what M24 and
+   M25 measure, which is a decision and not a refresh.
+3. **THE ONE THAT IS NOT A CONSTANT.** Under `path-b` the **public half's container reads back as
+   ZERO**: `the public half decoded steps expected >= 1, got [0]`, `carries a ct.trace-join record
+   expected >= 20, got [0]`, `the split public half has steps of its own expected >= 1, got [0]`,
+   and the join identity the two halves are supposed to share is absent. A `got [0]` is how a
+   silent-empty read presents, and this campaign has been bitten by that shape twice already, so it
+   was measured rather than assumed: the arm was **re-run with `join.json` deleted, in the dev
+   shell**, because the first run of it had been driven by a system-node invocation and its config
+   recorded `node: v25.9.0`. Re-measured cleanly at `node: v24.19.0` the twelve failures are
+   unchanged. It is a real gap in what Path B's public half produces, not a stale artefact and not
+   a figure to update.
+
+**So the default stays `path-a`, and this time the reason is a measurement rather than a pin.** It
+also no longer costs anything: §5d's finding is that the pure-Rust writer AT THE CURRENT ANCHOR
+emits `meta.dat` version 4, so "this runtime ships v3 containers current readers refuse" — the
+problem the flip existed to solve — is solved by the pin move under either writer. The flip is now
+a question of which writer is better on its own merits, and family 3 is the answer to that
+question for as long as it stands.
+
 ## 9. The flip was made and measured, and then made again in reverse
 
 M41's goal is that this runtime writes through the Nim writer. **`default = ["path-b"]` was set,
@@ -625,6 +671,57 @@ prints every number the check wants; §2's five rows and §8's last run are the 
 Do not read a red there as a regression until you have compared the table against that output.
 
 ---
+
+## 10b. THE SWEEP AFTER THE CONFORM PASS, and the one blocker it exposed
+
+Measured M0–M41 `setsid`-detached under `direnv exec`, one milestone at a time. 84 markers for 42
+milestones, no hole.
+
+> **TOTAL 13,259 · 42 milestones · delta −303 against a reference of 13,562 · 32 of 42 exit 0**
+>
+> **m24 = 358, m25 = 459, m26 = 341, m41 = 172 — all four exactly at reference and all four rc=0**,
+> which is the conform pass landing. m27, m32, m34, m35 and m36 went from red to green with it.
+>
+> Six moves and every unit accounts: **+9 +2 +8 −92 −84 −146 = −303**.
+>
+> The three PLUS moves are not this milestone's: m11 (+9), m27 (+2) and m28 (+8) are L-track check
+> edits and were already in the previous sweep's accounting.
+>
+> **The three MINUS moves are one cause, and it is named exactly**: m38 (−92), m39 (−84) and m40
+> (−146) are all the `noir` build gate refusing a dirty checkout. See below — it is a ten-line
+> lockfile commit in a repository this milestone does not own.
+
+### The `noir` lockfile gate, measured end to end
+
+The chain, each link measured rather than inferred:
+
+1. The `trace_format` anchor at `3b58c6894d` pulls **`cbor4ii 1.2.3`**, which `noir`'s COMMITTED
+   `Cargo.lock` does not carry. The first cargo resolve in that checkout adds ten lines to it.
+2. `verify_foreign_call_executor_is_injectable` — m38's SECOND check — runs cargo there, so the
+   checkout goes dirty *in the middle of m38's own recipe*. Confirmed by running m38's first two
+   checks one at a time and reading `git status` after each: the first leaves it clean, the second
+   does not.
+3. `build_m38_private_trace_probe` and `build_m40_private_trace_wasm` then refuse, correctly — *a
+   probe built from uncommitted edits is evidence about nothing*. m38 stops at 58 of 150, m39 at
+   123 of 207, and m40 at **0 of 146**, dying before its first assertion.
+
+It was latent until now: the previous sweep had a cargo resolution cached from before the pin move,
+so nothing rewrote the lockfile and all three milestones ran. Any from-scratch rebuild surfaces it.
+
+**What the fix buys was measured, not predicted.** The lockfile change was committed in `noir`
+temporarily, the three milestones re-run, and the checkout then reset to its original commit with
+no dirt and no stash:
+
+- **m38 → 150, 0 failures, rc=0** — exactly its reference.
+- **m39 → 207, 0 failures, rc=0** — exactly its reference.
+- **m40 → still 0/2**, and for a SECOND reason that the local commit cannot satisfy:
+  `build_m40_private_trace_wasm` requires `noir`'s HEAD to be **contained in a published remote
+  ref**, and refuses by name when it is contained in zero. M40's gate is about publication, not
+  cleanliness, so the lockfile commit has to be PUSHED to `noir`'s `codetracer` branch.
+
+So the campaign total with that one commit landed and published would be **13,581 — reference plus
+the same +19 the three L-track edits account for**, and the delta would be entirely other people's.
+`noir` was left exactly as found: `e78dc9935`, clean, no stash.
 
 ## 10. The sweep
 

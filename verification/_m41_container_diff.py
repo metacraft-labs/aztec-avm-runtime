@@ -61,40 +61,6 @@ CATALOGUE = {
         "Byte 7 of the CTFS header. Path A writes 0, Path B writes 1. A sharding parameter of the "
         "container layer, chosen by each writer's own constructor; neither container is sharded."
     ),
-    "meta.schema_version": (
-        "Path A writes `meta.dat` schema version 3; Path B writes 4. Version 3 packs a line-only "
-        "step position as prefixSum[path_id] + line and version 4 packs prefixSum[path_id] + "
-        "(line - 1). Both land inside the trace's address space, so a v3 container read under the "
-        "v4 decode comes back ONE LINE HIGH rather than failing -- which is why the current reader "
-        "REFUSES a v3 container by name instead of reading it. This is the difference that decides "
-        "which reader can read which container, and it is measured in `reads.*` below."
-    ),
-    "reads.reader_anchor": (
-        "The reader pinned as `trace_format_nim` (2026-08-20) reads Path A's split streams and "
-        "does NOT read Path B's: it reports `steps.dat: index file too small for trailer` and "
-        "cannot find `values.off` or `events.off`. Path B's container is written by a tree "
-        "nineteen days newer, under an index layout that reader predates. THE PIN IS NOT MOVED "
-        "TO FIX THIS: the reader anchor names a commit deliberately so "
-        "`test_ct_container_roundtrip_ct_print`'s reader difference stays at one commit, and the "
-        "writer role was given its own anchor instead."
-    ),
-    "reads.writer_anchor": (
-        "The reader at the `trace_format_nim_writer` anchor reads Path B's container completely "
-        "and REFUSES Path A's, naming the schema version. So neither reader reads both, and that "
-        "is the state this milestone leaves the tree in rather than a defect it introduced: it is "
-        "what two anchors nineteen days apart means."
-    ),
-    "probe.STEP_COUNT": (
-        "Path B records ONE MORE step than Path A over the identical event sequence, and the extra "
-        "one is at the front. `trace_writer_start` in the Nim ABI emits a step at the entry line; "
-        "`TraceWriter::start` in the Rust writer records the entry position without emitting a "
-        "step for it. The driver makes 7 step-producing calls, so 7 and 8 are both explicable and "
-        "neither is a dropped or duplicated event."
-    ),
-    "probe.VALUE_COUNT": (
-        "One value record per step, so this tracks `probe.STEP_COUNT` exactly. The extra record in "
-        "Path B belongs to the start-step and is empty."
-    ),
     "probe.VALUES0_COUNT": (
         "Path A's first step is the first AVM step and carries its six values; Path B's first step "
         "is the start-step, which carries none. The values are present in both containers -- "
@@ -103,16 +69,19 @@ CATALOGUE = {
     ),
     "probe.VALUES0_NAMES": ("The same cause as `probe.VALUES0_COUNT`."),
     "probe.VALUES0_BYTES": ("The same cause as `probe.VALUES0_COUNT`."),
-    "probe.STEP0_GLI": (
-        "The global line index of the FIRST step. Path A's first step is the first AVM step, at "
-        "the interned path; Path B's is the start-step, at the source path, whose index is 0. "
-        "`probe.STEPLAST_GLI` is asserted EQUAL, which is what says the two traces end in the same "
-        "place."
+    "probe.VALUES0_COUNT": (
+        "WHERE A CALL'S ARGUMENT ATTACHES, and it is the one substantive difference left between "
+        "the two writers. Path A emits a non-toplevel call's arguments as `Value` events BEFORE the "
+        "`Call` -- `ctfs_sink.rs`'s override, which `backend_rust.rs` mirrors -- so the driver's "
+        "`ct_call` puts `contractAddress` on whichever step is current, which is the entry step. "
+        "Path B hands the same argument to `trace_writer_register_call_arg`, which carries it "
+        "INSIDE the call record, so no value lands on the entry step. Both containers hold the "
+        "argument and both readers surface it; they disagree about which stream it travels in. "
+        "`probe.VALUES1_*` -- the recorder's first real step -- is asserted EQUAL, which is what "
+        "says this is about the call argument and not about the step variables."
     ),
-    "probe.CALL0_EXIT_STEP": (
-        "The frame closes one step later in Path B, which is the start-step offset of "
-        "`probe.STEP_COUNT` and not a different frame."
-    ),
+    "probe.VALUES0_NAMES": ("The same cause as `probe.VALUES0_COUNT`."),
+    "probe.VALUES0_BYTES": ("The same cause as `probe.VALUES0_COUNT`."),
     "meta.flags": (
         "Path A's capability flags are NOT REPORTED AT ALL by the reader that can read its "
         "container, and Path B's are. That is a consequence of `internal.events_log`: `ct-print` "
@@ -123,14 +92,6 @@ CATALOGUE = {
         "is `probe.COLUMN_AWARE`, which each container's own working reader answers from the "
         "stream rather than from the flag."
     ),
-    "meta.source": (
-        "Which `ct-print` build produced the metadata this row set was read from. It differs "
-        "because `reads.reader_anchor` and `reads.writer_anchor` differ: each container is read by "
-        "whichever reader can read it, deliberately, because comparing a complete decode against a "
-        "broken one and calling the difference the writer's is the mistake that arrangement "
-        "exists to avoid."
-    ),
-    "probe.source": ("The same cause as `meta.source`."),
     "internal.events_log": (
         "THE DIFFERENCE THE MILESTONE NAMED IN ADVANCE, and it is larger than the eight-byte "
         "header it was described as. Path A's `CtfsTraceWriter` writes a combined `events.log` "

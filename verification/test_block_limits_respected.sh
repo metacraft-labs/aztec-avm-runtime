@@ -321,9 +321,22 @@ echo "== the contracts adapter's deferred-registration seam, exercised against a
 # the defect this campaign has met at an implementation agent, a review agent and a reviewer
 # reviewing that very defect. It is measured now, against a RECORDING STUB rather than the module,
 # because the seam is about queueing and de-duplication and needs no wasm.
-REG="$(cd "$ORCH_DIR" && node --input-type=module -e '
+# A MODULE FILE AND NOT `--input-type=module -e`, AND THE STDERR IS KEPT.
+#
+# The eval'd form failed outright here and `2>&1 | tail -1` reduced the crash to its last line,
+# `Node.js v24.19.0`, which was then compared against every expected value in turn. Seven
+# assertions reported "[queued0=0] not found in: Node.js v24.19.0" — each naming what it wanted and
+# none able to say that node had not run at all. Written as a real module the same code answers
+# `queued0=0 class1=true class2=false ...`, so the seam was always correct and only its driver was
+# broken.
+#
+# The file goes under `orchestration/node_modules`, which is ignored, and reaches the source it
+# exercises as `../src/...`; it is removed after the call.
+REG_MJS="$ORCH_DIR/node_modules/.m22-registration.mjs"
+REG_ERR="${TMPDIR:-/tmp}/m22-registration.err"
+cat >"$REG_MJS" <<'REGISTRATION'
 import { Fr } from "@aztec/foundation/curves/bn254";
-import { ResidentContractsDB } from "./src/resident_contracts_db.ts";
+import { ResidentContractsDB } from "../src/resident_contracts_db.ts";
 const sent = [];
 const stub = { callWithBlob: (name) => { sent.push(name); return null; }, callWithHandle: () => null };
 const db = new ResidentContractsDB(stub, 1);
@@ -342,7 +355,11 @@ const flushed = await db.flush();
 out.push("flushed=" + flushed.classes + "/" + flushed.instances);
 out.push("queuedAfter=" + db.pendingRegistrations);
 console.log(out.join(" "));
-' 2>&1 | tail -1)"
+REGISTRATION
+REG="$(cd "$ORCH_DIR" && node "$REG_MJS" 2>"$REG_ERR" | tail -1)"
+rm -f "$REG_MJS"
+assert_true "the registration seam ran, and its stderr is: $(tr '\n' ' ' <"$REG_ERR" | cut -c1-200)" \
+  test -n "$REG"
 note "$REG"
 assert_contains "the queue starts empty" "queued0=0" "$REG"
 assert_contains "a class is SENT the first time" "class1=true" "$REG"

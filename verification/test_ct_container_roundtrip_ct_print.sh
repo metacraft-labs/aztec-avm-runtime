@@ -94,7 +94,12 @@ REQUESTED="$(m24_arm 'd["roundtrip"]["requested"]')"
 EXP_STEPS="$(m24_arm 'd["roundtrip"]["expectedSteps"]')"
 EXP_VALUES="$(m24_arm 'd["roundtrip"]["expectedValues"]')"
 assert_eq "the module accepted every event the host pushed" "$REQUESTED" "$EVENTS"
-assert_eq "and the expected step count is that same number" "$EVENTS" "$EXP_STEPS"
+# CONFORMED TO THE SPEC, NOT LOOSENED. `codetracer-trace-format-spec`'s `trace-events.md`,
+# "Recorder Integration — Starting a Recording": a recording contains one more step than the
+# recorder emitted. The arm derives `expectedSteps` from the events it pushed, so this asserts the
+# arm did that arithmetic and did not, say, hard-code a number.
+assert_eq "and the expected step count is that number plus the entry step" \
+  "$(( EVENTS + 1 ))" "$EXP_STEPS"
 assert_eq "the crossing count is exactly ceil(events / batch)" \
   "$(m24_arm 'd["roundtrip"]["expectedCrossings"]')" "$(m24_arm 'd["roundtrip"]["crossings"]')"
 
@@ -143,8 +148,17 @@ assert_eq "and exactly one Function" "1" "$(dv COUNT_Function)"
 assert_eq "the five per-step variables are exactly the fields emit() records" \
   "contextId,contractAddress,daGas,l2Gas,opcode" "$(dv VARNAMES)"
 # The pc of the first and last event, carried through the ABI, the module and the container.
-assert_eq "the first step's line is the first event's pc" \
-  "$(m24_arm 'd["roundtrip"]["firstPc"]')" "$(dv FIRSTLINE)"
+# CONFORMED TO THE SPEC, NOT LOOSENED. `codetracer-trace-format-spec`'s `trace-events.md`,
+# "Recorder Integration — Starting a Recording": *a recording contains one more step than the
+# recorder emitted — the entry step, which `start` emits.*
+# So the container's FIRST step is the entry step, at the line `start` was given — line 1 — and the
+# first event's pc is the SECOND step. Both are asserted, because "the entry step is there" and
+# "the recorder's first event is where it should be" are different claims and a writer could get
+# either one right alone.
+assert_eq "the container's first step is the ENTRY step, at the line start() was given" \
+  "1" "$(dv FIRSTLINE)"
+assert_eq "and the SECOND step's line is the first event's pc" \
+  "$(m24_arm 'd["roundtrip"]["firstPc"]')" "$(dv SECONDLINE)"
 assert_eq "the last step's line is the last event's pc" \
   "$(m24_arm 'd["roundtrip"]["lastPc"]')" "$(dv LASTLINE)"
 
@@ -364,8 +378,13 @@ assert_ge "and at least one steps.dat zstd chunk was inflated to answer" "1" \
 # other, so neither side is a constant typed here.
 assert_eq "the first step's position, out of steps.dat, is the first event's pc" \
   "$(m24_arm 'd["roundtrip"]["firstPc"]')" "$(sv STEP0_GLI)"
-assert_eq "and the last step's position is the last event's pc" \
-  "$(m24_arm 'd["roundtrip"]["lastPc"]')" "$(sv STEPLAST_GLI)"
+# AND THE v4 GLOBAL LINE INDEX IS THE OTHER CAUSE, which is NOT the entry step and is worth
+# separating. `codetracer-trace-format-nim` `638ba06` made the index the inverse of its own
+# decode: a position is `prefixSum[path] + (line - 1)` where it used to be
+# `prefixSum[path] + line`. With one interned path the prefix sum is 0, so a step at line L now
+# has global index L - 1. That is why these compare a line against an index one lower.
+assert_eq "and the last step's position is the last event's pc, as a v4 global index" \
+  "$(( $(m24_arm 'd["roundtrip"]["lastPc"]') - 1 ))" "$(sv STEPLAST_GLI)"
 
 # --- values.dat ------------------------------------------------------------
 assert_eq "values.dat DECODES, one value record per step" "$EXP_STEPS" "$(sv VALUE_COUNT)"
@@ -373,10 +392,18 @@ assert_eq "and the value stream was really opened" "true" "$(sv VALUE_LOADED)"
 # A COUNT IS NOT A READ: `values.idx` is uncompressed, so a container whose `values.dat` frames
 # are unreadable still reports the right count. Pulling step 0's record is what exercises the
 # compressed stream, and the names come back out of `varnames.dat` with it.
-assert_eq "step 0's record carries the five variables emit() writes" "5" "$(sv VALUES0_COUNT)"
+# CONFORMED TO THE SPEC, NOT LOOSENED. `codetracer-trace-format-spec`'s `trace-events.md`,
+# "Recorder Integration — Starting a Recording": *a recording contains one more step than the
+# recorder emitted — the entry step, which `start` emits.*
+# So index 0 is the entry step. That it carries NOTHING is asserted rather than skipped — a writer
+# emitting a spurious value on the entry step would otherwise go unnoticed — and the five are
+# asserted on index 1, the recorder's first step.
+assert_eq "the ENTRY step carries no variables, because the recorder wrote none there" \
+  "0" "$(sv VALUES0_COUNT)"
+assert_eq "step 1's record carries the five variables emit() writes" "5" "$(sv VALUES1_COUNT)"
 assert_eq "by name, decoded from the split streams rather than from events.log" \
-  "contextId,contractAddress,daGas,l2Gas,opcode" "$(sv VALUES0_NAMES)"
-assert_ge "with real CBOR bytes behind them, not five empty records" "1" "$(sv VALUES0_BYTES)"
+  "contextId,contractAddress,daGas,l2Gas,opcode" "$(sv VALUES1_NAMES)"
+assert_ge "with real CBOR bytes behind them, not five empty records" "1" "$(sv VALUES1_BYTES)"
 
 # --- calls.dat -------------------------------------------------------------
 assert_eq "calls.dat DECODES, and the call stream was really opened" "true" "$(sv CALL_LOADED)"
@@ -432,18 +459,28 @@ assert_eq "events.log and calls.dat agree on the call count" "$(dv COUNT_Call)" 
 # reads as a smaller check" is the shape this campaign has met four times, and a check must not
 # have that shape in the very run it was written to survive. Non-numeric input produces a loud
 # value that FAILS the comparison instead of ending the process.
+# `VALUE_COUNT` counts one record per step INCLUDING the entry step, whose record is empty — see
+# the spec note above — so the total is the per-step count over the recorder's own steps, which is
+# one fewer. `VALUES1_COUNT` is the per-step figure for the same reason.
 V_RECORDS="$(sv VALUE_COUNT)"
-V_PER_STEP="$(sv VALUES0_COUNT)"
+V_PER_STEP="$(sv VALUES1_COUNT)"
 if str_has_re "$V_RECORDS" '^[0-9]+$' && str_has_re "$V_PER_STEP" '^[0-9]+$'; then
-  V_TOTAL="$(( V_RECORDS * V_PER_STEP ))"
+  V_TOTAL="$(( (V_RECORDS - 1) * V_PER_STEP ))"
 else
   V_TOTAL="UNREADABLE [$V_RECORDS] x [$V_PER_STEP]"
 fi
 assert_eq "events.log and values.dat agree on the total value count" \
   "$(dv COUNT_Value)" "$V_TOTAL"
-assert_eq "and on the variable names, as a set" "$(dv VARNAMES)" "$(sv VALUES0_NAMES)"
-assert_eq "and on the first step's line" "$(dv FIRSTLINE)" "$(sv STEP0_GLI)"
-assert_eq "and on the last step's line" "$(dv LASTLINE)" "$(sv STEPLAST_GLI)"
+assert_eq "and on the variable names, as a set" "$(dv VARNAMES)" "$(sv VALUES1_NAMES)"
+# AND THE v4 GLOBAL LINE INDEX IS THE OTHER CAUSE, which is NOT the entry step and is worth
+# separating. `codetracer-trace-format-nim` `638ba06` made the index the inverse of its own
+# decode: a position is `prefixSum[path] + (line - 1)` where it used to be
+# `prefixSum[path] + line`. With one interned path the prefix sum is 0, so a step at line L now
+# has global index L - 1. That is why these compare a line against an index one lower.
+assert_eq "and on the first step's line, as a v4 global index" \
+  "$(( $(dv FIRSTLINE) - 1 ))" "$(sv STEP0_GLI)"
+assert_eq "and on the last step's line, as a v4 global index" \
+  "$(( $(dv LASTLINE) - 1 ))" "$(sv STEPLAST_GLI)"
 assert_eq "and on the one source path" "$(dv PATH0)" "$(sv PATH0)"
 
 # --- THE INSTRUMENT'S OWN CONTROL ------------------------------------------

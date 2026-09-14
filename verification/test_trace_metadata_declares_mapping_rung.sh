@@ -169,9 +169,20 @@ assert_true "the rung-1 container is COLUMN-AWARE, which only a real source colu
   str_has_line "$R1_PROBE" "$(printf 'COLUMN_AWARE\ttrue')"
 assert_true "the rung-3 container is NOT, which is the control for that" \
   str_has_line "$R3_PROBE" "$(printf 'COLUMN_AWARE\tfalse')"
-assert_true "the rung-3 container's first step addresses the PROGRAM COUNTER 706" \
-  str_has_line "$R3_PROBE" "$(printf 'STEP0_GLI\t706')"
-R1_GLI="$(printf '%s\n' "$R1_PROBE" | awk -F'\t' '$1=="STEP0_GLI"{print $2}')"
+# INDEX 1, NOT 0: index 0 is the entry step `start` emits — `codetracer-trace-format-spec`'s
+# `trace-events.md`, "Recorder Integration — Starting a Recording" — and the RECORDER's first step,
+# the one that addresses a program counter, is the next one. The entry step's own index is asserted
+# too, because "the entry step is at the start of the space" is a real statement and a writer that
+# put it somewhere else would otherwise go unnoticed.
+assert_true "the rung-3 container's ENTRY step is at the start of the position space" \
+  str_has_line "$R3_PROBE" "$(printf 'STEP0_GLI\t0')"
+# 705 FOR A PC OF 706, and the one is the v4 global line index rather than an off-by-one here.
+# `codetracer-trace-format-nim` `638ba06` made the index the inverse of its own decode: a position
+# is `prefixSum[path] + (line - 1)` where it used to be `prefixSum[path] + line`. With one interned
+# path the prefix sum is 0, so a step addressing pc 706 has global index 705.
+assert_true "…and its first RECORDED step addresses the PROGRAM COUNTER 706, as a v4 index" \
+  str_has_line "$R3_PROBE" "$(printf 'STEP1_GLI\t705')"
+R1_GLI="$(printf '%s\n' "$R1_PROBE" | awk -F'\t' '$1=="STEP1_GLI"{print $2}')"
 assert_ge "…while the rung-1 container's first step is a global position index, far above any pc" \
   100000 "$R1_GLI"
 assert_true "…and it is not 706, which is what it would be if the position had been ignored" \

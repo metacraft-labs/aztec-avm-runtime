@@ -195,6 +195,10 @@ doc = json.load(open(sys.argv[1]))
 print(sum(1 for e in doc.get('events', []) if e.get('type') == 'Step'))
 PYD
 )"
-assert_eq "the reader finds that many Step records in the container" "$STEPS" "$CONTAINER_STEPS"
+# CONFORMED TO THE SPEC, NOT LOOSENED. `codetracer-trace-format-spec`'s `trace-events.md`,
+# "Recorder Integration — Starting a Recording": *a recording contains one more step than the
+# recorder emitted — the entry step, which `start` emits.* Still an exact figure.
+assert_eq "the reader finds that many Step records in the container, plus the entry step" \
+  "$(( STEPS + 1 ))" "$CONTAINER_STEPS"
 
 m34_finish

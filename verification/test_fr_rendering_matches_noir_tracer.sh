@@ -198,29 +198,35 @@ for arm in $ARMS; do
   body="$(printf '%s\n' "$out" | tail -n +2)"
   # THE CONTROL IS IN EVERY ARM AND IS ASSERTED IN EVERY ARM THAT DECODES. Without it, "this
   # container decoded" would be a statement about a file that opened.
-  case "$arm" in
-    bigint)
-      assert_eq "the $arm arm is REFUSED by ct-print at the pinned reader revision" "1" "$rc"
-      READ_REFUSED=$((READ_REFUSED + 1))
-      assert_true "…and the refusal names the CBOR major-type mismatch, not a generic failure" \
-        str_has_sub "$body" 'cbor: expected byte string (major 2), got major 3'
-      # The other reader reads it GREEN, which is the finding rather than a nuisance.
-      probe="$(m24_split_probe "$f")"
-      assert_true "ct-split-probe reports DONE ok over the SAME refused container" \
-        str_has_line "$probe" "$(printf 'DONE\tok')"
-      assert_true "…and lists both variables, because it names value records without decoding them" \
-        str_has_sub "$probe" 'control,subject'
-      ;;
-    *)
-      assert_eq "the $arm arm is READ by ct-print at the pinned reader revision" "0" "$rc"
-      READ_OK=$((READ_OK + 1))
-      assert_true "…and its control variable decoded, so the arm is attributable to its subject" \
-        str_has_sub "$body" '"i": 42'
-      ;;
-  esac
+  # THE BIGINT ARM READS NOW, AND THAT IS THIS CHECK DOING WHAT IT WAS BUILT TO DO.
+  #
+  # It used to assert that `bigint` was REFUSED, with the refusal naming
+  # `cbor: expected byte string (major 2), got major 3` — `codetracer_trace_types`' `base64` serde
+  # module wrote `b` as a CBOR TEXT string while the reference Nim reader read a BYTE string. Four
+  # arms green and that one red was the measurement, and `backend_rust.rs`'s comment on OQ-4 said
+  # in as many words that *"the day the reader is fixed, this comment goes red rather than stale."*
+  #
+  # M41 advanced the reader anchor to `codetracer-trace-format-nim` `dev`, and THE DAY ARRIVED: all
+  # five arms decode. So the assertion is inverted rather than deleted — a reader that regressed to
+  # refusing `BigInt` again would fail here — and the consequence is recorded in
+  # `SOURCE-MAPPING.md` §4.4, whose rejected option was exactly "fix `BigInt`'s CBOR encoding".
+  assert_eq "the $arm arm is READ by ct-print at the pinned reader revision" "0" "$rc"
+  READ_OK=$((READ_OK + 1))
+  assert_true "…and its control variable decoded, so the arm is attributable to its subject" \
+    str_has_sub "$body" '"i": 42'
+  if [ "$arm" = bigint ]; then
+    # The split probe still reads it, as it always did. Kept because "the two readers agree" is a
+    # stronger statement now than "they disagree" was.
+    probe="$(m24_split_probe "$f")"
+    assert_true "ct-split-probe reports DONE ok over the bigint container too" \
+      str_has_line "$probe" "$(printf 'DONE\tok')"
+    assert_true "…and lists both variables" str_has_sub "$probe" 'control,subject'
+    assert_false "and ct-print no longer names the CBOR major-type mismatch, because there is none" \
+      str_has_sub "$body" 'cbor: expected byte string (major 2), got major 3'
+  fi
 done
-assert_eq "four of the five renderings are readable" "4" "$READ_OK"
-assert_eq "…and exactly one is refused" "1" "$READ_REFUSED"
+assert_eq "ALL FIVE renderings are readable now, including BigInt" "5" "$READ_OK"
+assert_eq "…and none is refused" "0" "$READ_REFUSED"
 
 # The two readable full-precision arms carry all 64 hex characters, which is the property that
 # rules out `low64`. Asserted from the DECODED output, not from the probe's source.

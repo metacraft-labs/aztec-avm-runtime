@@ -393,11 +393,15 @@ echo "== 9. THE DOCUMENT'S FIGURES, RE-DERIVED FROM THE ARTEFACTS"
 [ -s "$M36_DOC" ] || die "there is no $M36_DOC"
 FIG="$(python3 "$VERIFY_DIR/_m36_doc_figures.py" "$M36_DOC" "$BROWSER_DIST/chunks.json" "$M36_ARMS")"
 CHECKED="$(printf '%s\n' "$FIG" | awk -F'\t' '$1=="CHECKED"{print $2}')"
-# `xargs` RATHER THAN `tr`, and it is not cosmetic: `tr '\n' ' '` over an EMPTY list produces a
+# `paste` RATHER THAN `tr`, and it is not cosmetic: `tr '\n' ' '` over an EMPTY list produces a
 # single SPACE, so the assertion compares "" against " " and fails on a document with nothing wrong
 # with it — a check that can only ever be red is the mirror of one that can only ever be green.
-BAD="$(printf '%s\n' "$FIG" | awk -F'\t' '$1=="BAD"{print $2}' | xargs -r echo)"
-MISSING="$(printf '%s\n' "$FIG" | awk -F'\t' '$1=="MISSING"{print $2}' | xargs -r echo)"
+#
+# AND RATHER THAN `xargs`, which treats an apostrophe as an opening quote and abandons the rest of
+# the list with `unmatched single quote`. A row name like `the tracer's steps` would truncate the
+# report at `the`, so the failure still fires but says nothing about which figure rotted.
+BAD="$(printf '%s\n' "$FIG" | awk -F'\t' '$1=="BAD"{print $2}' | paste -sd' ' -)"
+MISSING="$(printf '%s\n' "$FIG" | awk -F'\t' '$1=="MISSING"{print $2}' | paste -sd' ' -)"
 assert_ge "the comparer found figures to compare rather than an empty list" 15 "$CHECKED"
 assert_eq "every figure LOCAL-HISTORY.md states is the one the artefacts produce" "" "$BAD"
 assert_eq "and every subject line it names is still in the document" "" "$MISSING"

@@ -143,8 +143,16 @@ assert_ge "the split public half has steps of its own" 1 "$PUB_STEPS"
 # Guarded: `$(( MISSING + MISSING ))` is an unbound variable under `set -u`, which would kill the
 # check here rather than redden it — see `test_private_public_frame_nesting`'s note on the same
 # family, found by M26's own mutation matrix.
+# MINUS ONE ENTRY STEP, and it is arithmetic rather than a fudge.
+#
+# `codetracer-trace-format-spec`'s `trace-events.md`, "Recorder Integration — Starting a
+# Recording": `start` emits an entry step, so a recording holds one more step than the recorder
+# emitted. The SPLIT arm is TWO recordings and therefore carries TWO entry steps; the SHARED arm is
+# ONE recording carrying ONE. So the halves' sum exceeds the shared container by exactly one, and
+# subtracting it is what makes this an equality about the RECORDED steps rather than about how many
+# times `start` was called.
 SUM_STEPS="UNCOMPUTABLE"
-case "$PRIV_STEPS$PUB_STEPS" in ''|*[!0-9]*) ;; *) SUM_STEPS="$((PRIV_STEPS + PUB_STEPS))" ;; esac
+case "$PRIV_STEPS$PUB_STEPS" in ''|*[!0-9]*) ;; *) SUM_STEPS="$((PRIV_STEPS + PUB_STEPS - 1))" ;; esac
 assert_eq "…and the SHARED container holds exactly the two halves' steps together" \
   "$SUM_STEPS" "$(m26_row "$SHARED" STEPS)"
 

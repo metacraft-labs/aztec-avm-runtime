@@ -124,8 +124,12 @@ assert_eq "…and the parser then reports no steps at all" "0" \
 echo "== 2. PER-STEP GAS, IN THE TOKEN CONTAINER — the first missing piece"
 # ---------------------------------------------------------------------------
 
-assert_eq "the container's Step records account for every event the recording declares" \
-  "$EVENTS" "$(st STEPS)"
+# CONFORMED TO THE SPEC, NOT LOOSENED. `codetracer-trace-format-spec`'s `trace-events.md`,
+# "Recorder Integration — Starting a Recording": a recording contains one more step than the
+# recorder emitted. Still an exact figure derived from the declared events.
+assert_eq "the container's Step records account for every event the recording declares, plus the entry step" \
+  "$(( EVENTS + 1 ))" "$(st STEPS)"
+assert_eq "and the recorder's own steps are that many" "$EVENTS" "$(st RECORDED_STEPS)"
 # The five interned variable names, as a SET. A container that lost one would still render.
 assert_eq "every step carries the five variables the writer declares" \
   "contextId,contractAddress,daGas,l2Gas,opcode" "$(st VARNAMES)"
@@ -149,7 +153,9 @@ assert_true "…and the last is larger, so gas was consumed across the stream" \
 # CONSTANT one. Neither is the case, and both directions are asserted.
 assert_eq "l2Gas never goes down or stands still — every instruction cost something" "0" \
   "$(st L2_DELTA_NONPOSITIVE)"
-assert_eq "…so every step's reading is distinct" "$(st STEPS)" "$(st L2_DISTINCT)"
+# Over the RECORDER's steps, not the container's total: the entry step carries no gas reading at
+# all, so it can be neither distinct nor repeated. See the spec note in `_m25_container_steps.py`.
+assert_eq "…so every step's reading is distinct" "$(st RECORDED_STEPS)" "$(st L2_DISTINCT)"
 assert_ge "…and the per-step costs are not one number repeated" 5 "$(st L2_DELTA_DISTINCT)"
 assert_ge "…the cheapest instruction costing at least a unit" 1 "$(st L2_DELTA_MIN)"
 assert_true "the per-step cost readings are numbers" \
@@ -198,9 +204,12 @@ echo "== 3. THE GAS IN THE CONTAINER IS THE AVM'S, not the writer's"
 # against the records the page DRAINED out of the module — the other side of the writer. A writer
 # that fabricated a gas column would satisfy §2 and fail here.
 
+# THE DRAINED STREAM IS WHAT THE HOST PUSHED, so it is the recorder's steps that must match it —
+# the entry step is the WRITER's and was never pushed. Comparing the container's total against the
+# drained count would report a conformant recording as having one record too many, for ever.
 assert_eq "the container and the drained stream have the same number of records" \
-  "$(st STEPS)" "$(st DRAINED)"
-assert_eq "…and every one of them was compared" "$(st STEPS)" "$(st PAIRED)"
+  "$(st RECORDED_STEPS)" "$(st DRAINED)"
+assert_eq "…and every one of them was compared" "$(st RECORDED_STEPS)" "$(st PAIRED)"
 assert_eq "…with contextId, opcode, l2Gas, daGas and contractAddress agreeing on every step" "0" \
   "$(st MISMATCH)"
 # THE COMPARER CAN REPORT A DISAGREEMENT. Pairing each container step with the NEXT drained record

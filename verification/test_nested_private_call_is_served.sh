@@ -262,10 +262,30 @@ echo "== 8. THE SELECTOR A CALLER PASSES IS THE ONE THE PROTOCOL DERIVES"
 # derived over the RAW artifact's parameters — which begin with the `inputs` context the macro
 # injects — and produced a selector no contract ever names. It was wrong from the first frame and
 # nothing compared it with anything until a nested call had to FIND a callee by it.
-SELECTOR_CMP="$( cd "$REPO_ROOT/orchestration" && node --input-type=module -e "
+# A MODULE FILE AND NOT `--input-type=module -e`, AND THE STDERR IS KEPT.
+#
+# `FunctionSelector.fromNameAndParameters` reaches poseidon through bb-js, which picks its backend
+# with a DYNAMIC `import()`. Under `--input-type=module -e` the eval'd module has no URL of its own,
+# so node refuses every runtime import with
+# `ERR_INPUT_TYPE_NOT_ALLOWED: --input-type can only be used with string input via --eval`. The
+# static imports above are unaffected, which is what makes this so quiet: `@aztec/stdlib/abi` loads
+# cleanly and the failure arrives later, from inside the selector call.
+#
+# `2>/dev/null` then completed the silence. Both selectors came back `MISSING`, the guard below
+# refused the run, and the check EXITED AT SECTION 8 — losing the seventy assertions that follow it.
+# A discarded stderr turned a one-line node error into a milestone that was quietly 70 assertions
+# short, which is the reason this campaign keeps stderr even when it is noise.
+#
+# The file is written under `orchestration/node_modules` so bare specifiers resolve (node walks
+# parent directories for `node_modules`) and because that directory is ignored, and it is removed
+# after the call.
+SELECTOR_MJS="$REPO_ROOT/orchestration/node_modules/.m39-selectors.mjs"
+SELECTOR_ERR="$M39_WORK/selectors.err"
+mkdir -p "$M39_WORK"
+cat >"$SELECTOR_MJS" <<'SELECTORS'
 import { FunctionSelector, loadContractArtifact } from '@aztec/stdlib/abi';
 import { readFileSync } from 'node:fs';
-const raw = JSON.parse(readFileSync(process.argv[1], 'utf8'));
+const raw = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 const loaded = loadContractArtifact(raw);
 const fn = loaded.functions.find(f => f.name === 'value');
 const upstream = await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters);
@@ -274,7 +294,15 @@ const withContext = await FunctionSelector.fromNameAndParameters({
   name: 'value', parameters: rawFn.abi.parameters,
 });
 console.log(JSON.stringify({ upstream: upstream.toString(), withContext: withContext.toString() }));
-" -- "$REPO_ROOT/$(m39_top assets.child.root)/node_modules/@aztec/noir-test-contracts.js/artifacts/child_contract-Child.json" 2>/dev/null | tail -1 )"
+SELECTORS
+SELECTOR_CMP="$( cd "$REPO_ROOT/orchestration" && node "$SELECTOR_MJS" \
+  "$REPO_ROOT/$(m39_top assets.child.root)/node_modules/@aztec/noir-test-contracts.js/artifacts/child_contract-Child.json" \
+  2>"$SELECTOR_ERR" | tail -1 )"
+rm -f "$SELECTOR_MJS"
+# The stderr is surfaced rather than left in a file nobody opens, so a derivation that fails for a
+# real reason says why instead of presenting as two absent fields.
+assert_true "the selector derivation produced output, and its stderr is: $(tr '\n' ' ' <"$SELECTOR_ERR" | cut -c1-200)" \
+  test -n "$SELECTOR_CMP"
 UPSTREAM_SEL="$(printf '%s' "$SELECTOR_CMP" | python3 -c 'import json,sys; d=sys.stdin.read().strip(); print(json.loads(d)["upstream"] if d.startswith("{") else "MISSING")')"
 WITHCTX_SEL="$(printf '%s' "$SELECTOR_CMP" | python3 -c 'import json,sys; d=sys.stdin.read().strip(); print(json.loads(d)["withContext"] if d.startswith("{") else "MISSING")')"
 ARM_SEL="$(m39_arm nested.report.child.selector)"
@@ -289,13 +317,24 @@ assert_true "and it is NOT what the raw parameter list derives, so the strip is 
 # hard-coded answer would also produce. The first draft of this line grepped `$EXEC_SRC` for the
 # exported function's NAME — a name grepped in the file that declares that name, which cannot be
 # less than true and which reads beside a real measurement as if it were one.
-PARENT_SEL_UP="$( cd "$REPO_ROOT/orchestration" && node --input-type=module -e "
+# A MODULE FILE AND A KEPT STDERR, for the reason spelled out over the derivation in section 8:
+# the selector call reaches bb-js, bb-js picks its backend with a dynamic `import()`, and
+# `--input-type=module -e` forbids exactly that.
+PARENT_SEL_MJS="$REPO_ROOT/orchestration/node_modules/.m39-parent-selector.mjs"
+PARENT_SEL_ERR="$M39_WORK/parent-selector.err"
+cat >"$PARENT_SEL_MJS" <<'PARENTSEL'
 import { FunctionSelector, loadContractArtifact } from '@aztec/stdlib/abi';
 import { readFileSync } from 'node:fs';
-const loaded = loadContractArtifact(JSON.parse(readFileSync(process.argv[1], 'utf8')));
+const loaded = loadContractArtifact(JSON.parse(readFileSync(process.argv[2], 'utf8')));
 const fn = loaded.functions.find(f => f.name === 'entry_point');
 process.stdout.write((await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters)).toString());
-" -- "$REPO_ROOT/$(m39_top assets.parent.root)/node_modules/@aztec/noir-test-contracts.js/artifacts/parent_contract-Parent.json" 2>/dev/null | tail -1 )"
+PARENTSEL
+PARENT_SEL_UP="$( cd "$REPO_ROOT/orchestration" && node "$PARENT_SEL_MJS" \
+  "$REPO_ROOT/$(m39_top assets.parent.root)/node_modules/@aztec/noir-test-contracts.js/artifacts/parent_contract-Parent.json" \
+  2>"$PARENT_SEL_ERR" | tail -1 )"
+rm -f "$PARENT_SEL_MJS"
+assert_true "the caller's selector derivation produced output, and its stderr is: $(tr '\n' ' ' <"$PARENT_SEL_ERR" | cut -c1-200)" \
+  test -n "$PARENT_SEL_UP"
 m38_absent parentSelectorUpstream="$PARENT_SEL_UP"
 assert_eq "the CALLER's own selector is upstream's too, on a second function" \
   "$PARENT_SEL_UP" "$(m39_arm nested.report.run.selector)"

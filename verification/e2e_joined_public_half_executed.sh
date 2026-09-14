@@ -256,18 +256,62 @@ assert_true "the callee's artifact is on disk to derive from" test -n "$ARTIFACT
 # root, so a resolution from there answers nothing at all — and `2>/dev/null` would turn that into
 # two empty strings comparing equal, which is this campaign's first defect form. The stderr is kept
 # and the derivation is asserted to have produced something before it is compared.
-CLASS_IDS="$(cd "$REPO_ROOT/browser" && node --input-type=module -e '
+CLASS_ERR="$M40_WORK/class-ids.err"
+mkdir -p "$M40_WORK"
+# A MODULE FILE AND NOT `--input-type=module -e`, BECAUSE THIS CHECK EXPORTS `BB_BINARY_PATH`.
+#
+# `-e` with `--input-type=module` forbids DYNAMIC import: the eval'd module has no URL of its own,
+# so `defaultResolve` refuses any `import()` performed at runtime with
+# `ERR_INPUT_TYPE_NOT_ALLOWED: --input-type can only be used with string input via --eval`. Static
+# imports are unaffected — they resolve against the eval base — which is exactly why this is so easy
+# to misread: `@aztec/stdlib/testing` and `@aztec/stdlib/abi` both import cleanly, and the failure
+# arrives later, on `process.nextTick`, out of `makeContractClassPublic`.
+#
+# The dynamic import is bb-js picking a backend, and `BB_BINARY_PATH` is what sends it down that
+# road: this check points it at a non-existent path ON PURPOSE, to force bb-js onto its wasm
+# backend, and the wasm backend is the one loaded dynamically. So the two intents collided — the
+# same derivation succeeds in a shell without `BB_BINARY_PATH` and fails in this one, which is the
+# shape of a defect that looks environmental and is not.
+#
+# Running a real `.mjs` gives the module a URL and dynamic import works, WITHOUT unsetting
+# `BB_BINARY_PATH` for the call. That distinction matters: unsetting it would silently let bb-js
+# fall back to a native binary and quietly retire the forcing this check exists inside.
+#
+# It is written under `browser/node_modules` so that bare specifiers resolve — node walks parent
+# directories for `node_modules`, so a file there finds `browser/node_modules` — and because that
+# directory is already ignored, the check leaves nothing behind in the working tree.
+CLASS_MJS="$REPO_ROOT/browser/node_modules/.m40-class-ids.mjs"
+cat >"$CLASS_MJS" <<'CLASSIDS'
 import { readFileSync } from "node:fs";
 import { makeContractClassPublic } from "@aztec/stdlib/testing";
 import { loadContractArtifact } from "@aztec/stdlib/abi";
-const raw = JSON.parse(readFileSync(process.argv[1], "utf8"));
+const raw = JSON.parse(readFileSync(process.argv[2], "utf8"));
 const b64 = raw.functions.find((f) => f.name === "public_dispatch").bytecode;
 const decoded = loadContractArtifact(raw).functions.find((f) => f.name === "public_dispatch").bytecode;
 console.log((await makeContractClassPublic(27, b64)).id.toString());
 console.log((await makeContractClassPublic(27, decoded)).id.toString());
-' "$REPO_ROOT/$ARTIFACT_ROOT/node_modules/@aztec/noir-test-contracts.js/artifacts/child_contract-Child.json" 2>&1)"
+CLASSIDS
+CLASS_IDS="$(cd "$REPO_ROOT/browser" && node "$CLASS_MJS" \
+  "$REPO_ROOT/$ARTIFACT_ROOT/node_modules/@aztec/noir-test-contracts.js/artifacts/child_contract-Child.json" \
+  2>"$CLASS_ERR")"
+rm -f "$CLASS_MJS"
+# STDERR IS KEPT BUT NOT MERGED, and the distinction is the whole of it. `2>&1` honours the rule
+# above — never discard the diagnosis — by the wrong means: it redirects stderr into the stream that
+# is then read BY LINE NUMBER. Node writes warnings to stderr unbuffered while stdout to a pipe is
+# block-buffered, so a `MaxListenersExceededWarning` (this tree adds more than ten abort listeners to
+# one `AbortSignal`) arrives FIRST and shifts both class ids down two lines. `sed -n 1p` then yields
+# the warning and `sed -n 2p` yields its stack frame — which is why this check once reported
+# `node:internal/event_target:1136` as a contract class id: not a wrong derivation, a misread one.
+#
+# The warning is load- and version-dependent, so the merge fails INTERMITTENTLY and reports a
+# derivation defect when there is none. Sending stderr to a file keeps every byte of it for the
+# assertion below while leaving the positional read looking only at what node actually returned.
 FROM_TEXT="$(printf '%s\n' "$CLASS_IDS" | sed -n '1p')"
 FROM_BYTECODE="$(printf '%s\n' "$CLASS_IDS" | sed -n '2p')"
+# The stderr is surfaced HERE rather than left in a file nobody opens, so a derivation that fails
+# for a real reason still says why — the property `2>&1` was reaching for.
+assert_true "the derivation produced two lines on stdout, and its stderr is: $(tr '\n' ' ' <"$CLASS_ERR" | cut -c1-200)" \
+  test "$(printf '%s\n' "$CLASS_IDS" | grep -c .)" -eq 2
 assert_true "the base64-text derivation produced a class id" str_has_re "$FROM_TEXT" '^0x[0-9a-f]{64}$'
 assert_true "and so did the decoded-bytecode one" str_has_re "$FROM_BYTECODE" '^0x[0-9a-f]{64}$'
 # TWO MEASUREMENTS RATHER THAN ONE FIGURE COMPARED WITH ITSELF: they must DIFFER, and the page must

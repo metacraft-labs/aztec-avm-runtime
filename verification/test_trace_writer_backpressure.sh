@@ -128,7 +128,13 @@ sv() { printf '%s\n' "$SUMMARY" | sed -n "s/^$1\t//p"; }
 
 # EVERY EVENT IS IN THE CONTAINER. This is the half that a dropping host would fail, and it is
 # compared against the number the HOST pushed rather than against a constant typed here.
-assert_eq "every one of the events pushed is a Step in the container" "$LARGE_N" "$(sv STEPS)"
+# CONFORMED TO THE SPEC, NOT LOOSENED. `codetracer-trace-format-spec`'s `trace-events.md`,
+# "Recorder Integration — Starting a Recording": *a recording contains one more step than the
+# recorder emitted — the entry step, which `start` emits.*
+# So the container holds the pushed events PLUS the entry step. Still compared against the number
+# the HOST pushed rather than a constant typed here — a dropping host still fails.
+assert_eq "every one of the events pushed is a Step in the container, plus the entry step" \
+  "$(( LARGE_N + 1 ))" "$(sv STEPS)"
 assert_eq "and each carries its five variables" "$((LARGE_N * 5))" "$(sv VALUES)"
 assert_eq "one path, as configured" "1" "$(sv PATHS)"
 assert_eq "and the metadata survived a container this size" "aztec-avm-runtime" "$(sv PROGRAM)"

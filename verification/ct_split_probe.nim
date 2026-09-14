@@ -136,6 +136,13 @@ proc main() =
     emit("STEP0_GLI", if g0.isOk: $g0.get() else: "ERR:steps.dat: " & g0.error)
     let gl = r.stepAbsoluteGlobalLineIndex(last)
     emit("STEPLAST_GLI", if gl.isOk: $gl.get() else: "ERR:steps.dat: " & gl.error)
+    # STEP 1's INDEX, for `VALUES1_*`'s reason: index 0 is the ENTRY STEP that `start` emits
+    # (`trace-events.md`, "Recorder Integration — Starting a Recording"), so a caller asking where
+    # the RECORDER's first step landed wants index 1. `STEP0_GLI` is kept — the entry step's own
+    # position is worth being able to assert.
+    if sc.get() > 1'u64:
+      let g1 = r.stepAbsoluteGlobalLineIndex(1'u64)
+      emit("STEP1_GLI", if g1.isOk: $g1.get() else: "ERR:steps.dat: " & g1.error)
 
   # --- values.dat -----------------------------------------------------------
   let vc = r.valueCount()
@@ -159,6 +166,31 @@ proc main() =
       emit("VALUES0_BYTES", $bytes)
     else:
       emit("VALUES0_COUNT", "ERR:values.dat: " & v0.error)
+
+  # STEP 1's VALUES, BECAUSE STEP 0 IS THE ENTRY STEP AND CARRIES NONE.
+  #
+  # `codetracer-trace-format-spec`'s `trace-events.md`, "Recorder Integration — Starting a
+  # Recording": `start` emits the entry step, so a recording holds one more step than the recorder
+  # emitted and index 0 is that step. A caller asking "what does a recorded step carry" wants the
+  # FIRST RECORDER STEP, which is index 1. `VALUES0_*` above is kept and is worth having: asserting
+  # that the entry step carries NOTHING is a real statement, and one that a writer emitting a
+  # spurious value on it would fail.
+  block:
+    let v1 = r.values(1'u64)
+    if v1.isOk:
+      emit("VALUES1_COUNT", $v1.get().len)
+      var names1: seq[string] = @[]
+      for v in v1.get():
+        let n = r.varname(v.varnameId)
+        names1.add(if n.isOk: n.get() else: "?")
+      names1.sort()
+      emit("VALUES1_NAMES", names1.join(","))
+      var bytes1 = 0
+      for v in v1.get():
+        bytes1 += v.data.len
+      emit("VALUES1_BYTES", $bytes1)
+    else:
+      emit("VALUES1_COUNT", "ERR:values.dat: " & v1.error)
 
   # --- calls.dat ------------------------------------------------------------
   let cc = r.callCount()

@@ -112,7 +112,11 @@ STEP_RECORDS="$(printf '%s\n' "$OUT" | grep -c '"type": "Step"' || true)"
 note "ct-print --full exited $RC and emitted $STEP_RECORDS Step record(s)"
 
 assert_eq "ct-print --full reads the container" "0" "$RC"
-assert_eq "…emitting one Step record per executed instruction" "$STAT" "$STEP_RECORDS"
+# CONFORMED TO THE SPEC, NOT LOOSENED. `codetracer-trace-format-spec`'s `trace-events.md`,
+# "Recorder Integration — Starting a Recording": *a recording contains one more step than the
+# recorder emitted — the entry step, which `start` emits.* Still an exact figure.
+assert_eq "…emitting one Step record per executed instruction, plus the entry step" \
+  "$(( STAT + 1 ))" "$STEP_RECORDS"
 # THE PRODUCER IS NAMED IN THE CONTAINER, so a reader can tell where the stream came from without
 # being told. M29's fourth deliverable, and the other half of `ct_writer_kind()`.
 assert_true "…and the container names its step producer" str_has_sub "$OUT" 'ct.step-producer'

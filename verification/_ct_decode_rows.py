@@ -94,6 +94,10 @@ def rows(d):
     out.append(("COUNT_Function", str(n_funcs)))
     out.append(("COUNT_Call", str(n_calls)))
     out.append(("FIRSTLINE", str(steps[0].get("line")) if steps else "MISSING"))
+    # The SECOND step, because the first is the entry step `start` emits and a caller asking "where
+    # did the recorder's first event land" wants index 1. See the spec's "Recorder Integration —
+    # Starting a Recording".
+    out.append(("SECONDLINE", str(steps[1].get("line")) if len(steps) > 1 else "MISSING"))
     out.append(("LASTLINE", str(steps[-1].get("line")) if steps else "MISSING"))
     out.append(("VARNAMES", ",".join(varnames)))
     return out

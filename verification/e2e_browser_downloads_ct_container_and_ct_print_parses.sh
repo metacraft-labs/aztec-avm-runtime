@@ -156,7 +156,12 @@ assert_true "…and the reader emitted Step records" str_has_sub "$OUT" '"type":
 assert_true "…and Call records for the frames" str_has_sub "$OUT" '"type": "Call"'
 STEP_COUNT="$(printf '%s\n' "$OUT" | grep -c '"type": "Step"')"
 note "the reader emitted $STEP_COUNT Step record(s)"
-assert_eq "…as many Step records as the writer wrote events" "$EVENTS" "$STEP_COUNT"
+# CONFORMED TO THE SPEC, NOT LOOSENED. `codetracer-trace-format-spec`'s `trace-events.md`,
+# "Recorder Integration — Starting a Recording": *a recording contains one more step than the
+# recorder emitted — the entry step, which `start` emits.* Still an exact figure derived from the
+# events the writer was driven with, not a tolerance.
+assert_eq "…as many Step records as the writer wrote events, plus the entry step" \
+  "$(( EVENTS + 1 ))" "$STEP_COUNT"
 
 echo "== 5. THE CONTROL: the same reader REFUSES a container it cannot read"
 
@@ -197,14 +202,22 @@ CORRUPT_OUT="$(printf '%s\n' "$CORRUPT_READ" | tail -n +2)"
 note "ct-print over a container whose recording id is 35 characters exits $CORRUPT_RC"
 assert_false "…and the reader REFUSES it, so exit 0 above is a verdict rather than a habit" \
   test "$CORRUPT_RC" -eq 0
-# THE REASON IT GIVES IS `meta.dat present but corrupt`, and it is quoted rather than predicted.
+# THE REASON IT GIVES IS QUOTED RATHER THAN PREDICTED, and it has been quoted twice now.
+#
 # The expectation was `recording_id: expected 36 chars`, which is the refusal M26 measured when the
 # id was made LONGER by editing the source. Shortening it inside a finished container moves the
 # stream's own framing, so the reader stops at the magic bytes first and never gets as far as the
 # field. Same stream, same refusal, earlier line — and the assertion says what happened rather than
 # what was expected.
+#
+# The reader at the current `trace_format_nim` anchor says it at more length: it reports which
+# BLOCK the stream's directory entry names and why that is out of bounds, where the older reader
+# said only `meta.dat present but corrupt`. The refusal, the stream it names, and the exit status
+# are unchanged; the sentence grew. The needle follows the sentence rather than being relaxed to
+# something a refusal over any other stream would also satisfy — `meta.dat` still has to be the
+# stream named, and it still has to be named as unreadable rather than merely mentioned.
 assert_true "…naming meta.dat as the stream it refused" \
-  str_has_sub "$CORRUPT_OUT" 'meta.dat present but corrupt'
+  str_has_sub "$CORRUPT_OUT" 'meta.dat is present in this container but its blocks are not'
 
 echo "== 6. the page that produced it fetched no proving stack"
 
