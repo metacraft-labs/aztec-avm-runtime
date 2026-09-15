@@ -99,6 +99,9 @@ def rows(d):
     # Starting a Recording".
     out.append(("SECONDLINE", str(steps[1].get("line")) if len(steps) > 1 else "MISSING"))
     out.append(("LASTLINE", str(steps[-1].get("line")) if steps else "MISSING"))
+    # DISTINCT LINES, because a count says nothing about whether the DATA
+    # arrived. A host that wrote one event N times satisfies every count above.
+    out.append(("DISTINCTLINES", str(len({e.get("line") for e in steps}))))
     out.append(("VARNAMES", ",".join(varnames)))
     return out
 

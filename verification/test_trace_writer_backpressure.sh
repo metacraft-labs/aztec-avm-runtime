@@ -96,7 +96,12 @@ assert_ge "and it happened many times, not once by luck" "10" \
 # ---- HALF TWO: the container is CORRECT ------------------------------------
 CT="$(m24_arm 'd["backpressure"]["largeFile"]')"
 assert_file "the large arm wrote a container" "$CT"
-assert_ge "and it is large, in proportion to its events" "5000000" \
+# THE FLOOR MOVED BECAUSE THE CONTAINER DID, and it halved for a reason rather than by drift: the
+# writer no longer emits a combined `events.log` alongside the split streams, so the second encoding
+# of every event is gone. 2,461,696 bytes against the 5,000,000 this used to clear is the same trace
+# recorded once instead of twice. The assertion is still a floor in proportion to the events — it is
+# the proportion that changed.
+assert_ge "and it is large, in proportion to its events" "2000000" \
   "$(m24_arm 'd["backpressure"]["largeContainerBytes"]')"
 
 OUT="$M24_WORK/backpressure.ct-print.json"
@@ -104,23 +109,18 @@ m24_run_bounded "$M24_READER_TIMEOUT" "ct-print on the backpressure container" \
   "$READERS/ct-print" --full "$CT" >"$OUT" 2>"$OUT.err"
 assert_eq "ct-print reads the 250,000-event container (exit 0)" "0" "$?"
 
-SUMMARY="$(python3 - "$OUT" <<'PY'
-import json, sys
-from collections import Counter
-try:
-    d = json.load(open(sys.argv[1], encoding="utf-8"))
-except Exception as e:
-    print("PROBLEM\t%s" % e); raise SystemExit(0)
-c = Counter(e.get("type") for e in d.get("events", []))
-print("STEPS\t%d" % c.get("Step", 0))
-print("VALUES\t%d" % c.get("Value", 0))
-print("PATHS\t%d" % len(d.get("paths", [])))
-steps = [e for e in d.get("events", []) if e.get("type") == "Step"]
-lines = {e.get("line") for e in steps}
-print("DISTINCTLINES\t%d" % len(lines))
-print("PROGRAM\t%s" % d.get("metadata", {}).get("program", "MISSING"))
-PY
-)" || die "the backpressure container could not be summarised"
+# THROUGH THE SHARED DECODER, NOT AN INLINE ONE. This block counted
+# `e["type"] == "Step"`, which is the LEGACY combined-stream schema. The writer
+# no longer emits that stream, so `ct-print` decodes through its split-stream
+# path and tags events with `kind` instead — and a count of `type == "Step"`
+# over that output is ZERO, reported successfully. Every assertion below would
+# then have compared a real number against nothing and failed for a reason that
+# has nothing to do with backpressure.
+#
+# `_ct_decode_rows.py` reads both schemas and is the fourth place this repository
+# has needed it, so the inline copy is gone rather than repaired.
+SUMMARY="$(python3 "$REPO_ROOT/verification/_ct_decode_rows.py" "$OUT")" \
+  || die "the backpressure container could not be summarised"
 [ -n "$SUMMARY" ] || die "the container summary is empty"
 assert_not_contains "the JSON is well formed" "PROBLEM" "$SUMMARY"
 
@@ -134,8 +134,8 @@ sv() { printf '%s\n' "$SUMMARY" | sed -n "s/^$1\t//p"; }
 # So the container holds the pushed events PLUS the entry step. Still compared against the number
 # the HOST pushed rather than a constant typed here — a dropping host still fails.
 assert_eq "every one of the events pushed is a Step in the container, plus the entry step" \
-  "$(( LARGE_N + 1 ))" "$(sv STEPS)"
-assert_eq "and each carries its five variables" "$((LARGE_N * 5))" "$(sv VALUES)"
+  "$(( LARGE_N + 1 ))" "$(sv COUNT_Step)"
+assert_eq "and each carries its five variables" "$((LARGE_N * 5))" "$(sv COUNT_Value)"
 assert_eq "one path, as configured" "1" "$(sv PATHS)"
 assert_eq "and the metadata survived a container this size" "aztec-avm-runtime" "$(sv PROGRAM)"
 # NOT ALL THE SAME STEP. A host that wrote one event 250,000 times would satisfy every count

@@ -45,13 +45,6 @@ CATALOGUE = {
         "modules must disagree here or the field would be a literal. 1 is DD-7's Path A, 2 is "
         "Path B."
     ),
-    "report.containerBytes": (
-        "Path A's container carries an `events.log` that Path B's does not (see "
-        "`internal.events_log`), and the two writers pack their split streams under different "
-        "meta.dat schema versions. The figure is reported rather than bounded: CTFS allocates in "
-        "blocks, so a byte count cannot tell two traces apart in either direction and is not "
-        "evidence of anything on its own."
-    ),
     # `header.ctfs_version` AND `header.max_shards` WERE CATALOGUED HERE AND ARE NOT ANY MORE,
     # because they were never differences to explain -- they were one writer disagreeing with the
     # spec, and the other with itself.
@@ -70,6 +63,24 @@ CATALOGUE = {
     # Both rows are now `SAME`, and the assertion that no CATALOGUED difference has gone stale is
     # what forced them to be removed rather than left as prose describing a disagreement that had
     # been fixed.
+    # THREE ROWS WERE CATALOGUED HERE AND ARE NOT ANY MORE. They were consequences of one
+    # difference, and removing that difference removed all three — which the assertion that no
+    # CATALOGUED difference has gone stale is what forced to be recognised.
+    #
+    #   * `internal.events_log`. The Rust writer emitted a combined `events.log` IN ADDITION to the
+    #     split streams; the spec defines no such stream. It is gone, so both containers are now
+    #     `absent` — and, more to the point, both are read by the SAME code path in the same binary,
+    #     which they were not before.
+    #   * `report.containerBytes`. Path A carried a second encoding of events already encoded.
+    #     Without it both containers are 143,360 bytes on the same input: EXACTLY equal. The old
+    #     note's caution still stands — CTFS allocates in 4096-byte blocks, so a byte count is not
+    #     evidence on its own — but 35 blocks against 35 blocks is not a size argument.
+    #   * `meta.flags`. This row said Path A's flags were "not reported by the reader that reads
+    #     this container", because the legacy reader path knew nothing about meta.dat capability
+    #     bits. With both containers on the split path both are reported, and they then differed on
+    #     exactly ONE of twelve bits: the Nim writer created all four interning tables and never
+    #     stamped `FLAG_HAS_INTERNING_TABLES`. A pre-existing defect this change EXPOSED rather than
+    #     caused, fixed at the pinned writer revision.
     "probe.VALUES0_COUNT": (
         "Path A's first step is the first AVM step and carries its six values; Path B's first step "
         "is the start-step, which carries none. The values are present in both containers -- "
@@ -91,28 +102,6 @@ CATALOGUE = {
     ),
     "probe.VALUES0_NAMES": ("The same cause as `probe.VALUES0_COUNT`."),
     "probe.VALUES0_BYTES": ("The same cause as `probe.VALUES0_COUNT`."),
-    "meta.flags": (
-        "Path A's capability flags are NOT REPORTED AT ALL by the reader that can read its "
-        "container, and Path B's are. That is a consequence of `internal.events_log`: `ct-print` "
-        "sends a container carrying an `events.log` down its legacy combined-stream reader, which "
-        "reconstructs `program`, `args` and `workdir` and knows nothing about meta.dat capability "
-        "bits. So this row is not 'Path A declares different flags' -- it is 'nothing that reads "
-        "Path A's container reports flags for it'. What both containers ARE measured to agree on "
-        "is `probe.COLUMN_AWARE`, which each container's own working reader answers from the "
-        "stream rather than from the flag."
-    ),
-    "internal.events_log": (
-        "THE DIFFERENCE THE MILESTONE NAMED IN ADVANCE, and it is larger than the eight-byte "
-        "header it was described as. Path A's `CtfsTraceWriter` writes a combined `events.log` "
-        "stream IN ADDITION to the split streams, prefixed with an 8-byte CodeTracer file header; "
-        "the Nim multi-stream writer writes no `events.log` at all. The consequence is not "
-        "cosmetic: `ct-print` diverts any container carrying an `events.log` to its LEGACY "
-        "combined-stream reader, so the two containers are read by two different code paths in the "
-        "same binary -- and that behaviour is how this row is MEASURED, since the container's "
-        "internal file names are base40-encoded and not greppable. A decode with a populated "
-        "`events` array and no `counts` object is the legacy path and therefore an `events.log`; "
-        "one with `counts` is the split-stream path and therefore none."
-    ),
 }
 
 # Compared for equality is the default; these are not compared at all.

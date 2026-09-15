@@ -134,16 +134,23 @@ assert_contains "the comparison's own verdict is ok" "VERDICT${TAB}ok" "$(cat "$
 # `$TAB` and not `\t`: `grep -E` is a POSIX ERE, in which `\t` matches a literal `t`. The pattern
 # would then match nothing and every assertion below would go red over output that plainly
 # contains the lines it is looking for. `lib_m24_ct_writer.sh` records the same trap.
-assert_true "the events.log difference is catalogued as a stream, not as an 8-byte header" \
-  grep -qE "^WHY${TAB}internal\.events_log${TAB}.*writes no .events\.log. at all" "$DIFF_OUT"
-# The schema version and the reader asymmetry are no longer differences to catalogue — both
-# writers emit v4 and one reader reads both. What replaces them is the assertion that they AGREE.
+# `events.log`, the schema version and the reader asymmetry are no longer differences to
+# catalogue. Both writers emit v4, neither emits a combined `events.log`, and one reader reads
+# both — so what replaces each of them is the assertion that they AGREE, which is the stronger
+# statement and the one that goes red if any of it regresses.
 assert_true "the two containers agree on the meta.dat schema version" \
   grep -qE "^SAME${TAB}meta\.schema_version${TAB}" "$DIFF_OUT"
 assert_true "and on which reader read them" \
   grep -qE "^SAME${TAB}probe\.source${TAB}" "$DIFF_OUT"
-assert_true "and the events.log row says which container carries one" \
-  grep -qE "^DIFF${TAB}internal\.events_log${TAB}present" "$DIFF_OUT"
+assert_true "and NEITHER carries a combined events.log, which the spec does not define" \
+  grep -qE "^SAME${TAB}internal\.events_log${TAB}absent" "$DIFF_OUT"
+assert_true "and they agree on the capability flags, all twelve of them" \
+  grep -qE "^SAME${TAB}meta\.flags${TAB}" "$DIFF_OUT"
+# THE SIZES ARE EQUAL, NOT MERELY CLOSE, and the block quantum is stated so the figure is
+# readable: CTFS allocates in 4096-byte blocks, so this is 35 blocks against 35 blocks on the
+# same input and the same stream set.
+assert_true "and the two containers are the SAME SIZE on the same input" \
+  grep -qE "^SAME${TAB}report\.containerBytes${TAB}" "$DIFF_OUT"
 
 # ---------------------------------------------------------------------------
 # 4. The facts that must AGREE, asserted by name. A catalogue of differences says nothing about

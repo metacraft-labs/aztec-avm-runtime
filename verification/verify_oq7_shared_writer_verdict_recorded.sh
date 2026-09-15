@@ -115,7 +115,13 @@ assert_eq "…and the probe reports ONE container for that arm" "1" \
   "$(m26_arm 'd["shared"]["containers"]')"
 SHARED="$(m26_frames "$SHARED_CT")"
 assert_false "the pinned reader read it rather than refusing" str_has_sub "$SHARED" 'ERR:'
-assert_ge "…and it decoded a substantial number of events" 100 "$(m26_row "$SHARED" EVENTS)"
+# THE UNIT CHANGED WITH THE DECODE, so the floor did. `EVENTS` is the length of the reader's event
+# array, and the legacy combined stream emitted one event per VALUE as well as per step — so a
+# recording of n steps carrying five variables each produced roughly 6n events. The split decode
+# carries a step's variables ON the step, so the same recording is roughly n. 49 against the 100
+# this used to clear is the same trace reported in a different unit, not a smaller trace: the step
+# and value COUNTS are asserted exactly, by name, further down.
+assert_ge "…and it decoded a substantial number of events" 40 "$(m26_row "$SHARED" EVENTS)"
 # BOTH producers are present, by NAME, in one container. Names come from the two sides:
 # `main`/`foo`/`bar` are the Noir program's own functions, and `Token.transfer_in_public` is
 # upstream's `getDebugFunctionName`, forwarded from the TypeScript side.

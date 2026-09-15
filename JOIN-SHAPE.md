@@ -225,7 +225,7 @@ this milestone.
 
 - The join surface added **2,854 bytes** to the module, 259,839 → 262,693, and **no imports**: the
   count is still 0 and the module still instantiates under a bare
-  `WebAssembly.instantiate(bytes, {})`. **The module is **481,061 bytes** today**, because M40 added
+  `WebAssembly.instantiate(bytes, {})`. **The module is **480,600 bytes** today**, because M40 added
   a source-step surface of two exports (+518) for a private half's steps — see `BOTH-HALVES.md` §3
   — and because M41 advanced the `trace_format` pin, which made the writer's compressor C libzstd
   and took `ruzstd` out of the shipped module (+234,128 bytes, and eight more exports, every one

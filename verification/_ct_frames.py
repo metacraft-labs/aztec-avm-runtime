@@ -43,6 +43,30 @@ def main(path):
         print(f"_ct_frames: {path} is not a ct-print --full decode", file=sys.stderr)
         return 2
     events = doc["events"]
+
+    # `ct-print` HAS TWO OUTPUT SCHEMAS AND THIS READS BOTH.
+    #
+    # The legacy combined-stream decode tags events with `type` (`"Step"`,
+    # `"Call"`, `"Return"`, `"Function"`, `"VariableName"`). The split-stream
+    # decode tags them with `kind` (`"step"`, `"call_entry"`, `"call_exit"`,
+    # `"io"`) and hoists the interning tables into top-level `functions` /
+    # `varnames` arrays instead of emitting them as events.
+    #
+    # Reading only the first shape over a split container is not an error — it
+    # finds no matching events and reports ZERO, successfully. That is this
+    # campaign's most repeated defect and it has already been paid for twice, so
+    # the normalisation is here rather than at each call site.
+    def ev_type(e):
+        t = e.get("type")
+        if t is not None:
+            return t
+        return {
+            "step": "Step",
+            "call_entry": "Call",
+            "call_exit": "Return",
+            "io": "Event",
+        }.get(e.get("kind"), e.get("kind"))
+
     out = []
     functions = {}
     fn_order = 0
@@ -50,27 +74,58 @@ def main(path):
     # `variable_id` INTO it; a report that printed the id would make a check assert on an ordinal,
     # which is the shape that keeps passing when the table shifts underneath it.
     varnames = []
-    for e in events:
-        if e.get("type") == "VariableName":
-            varnames.append(e.get("name", ""))
-    for e in events:
-        if e.get("type") == "Function":
-            functions[fn_order] = (e.get("name", ""), e.get("path_id", -1), e.get("line", -1))
-            out.append(
-                "FUNCTION\t%d\t%s\t%s\t%s"
-                % (fn_order, e.get("name", ""), e.get("path_id", -1), e.get("line", -1))
-            )
+    if isinstance(doc.get("varnames"), list):
+        varnames = [str(v) for v in doc["varnames"]]
+    else:
+        for e in events:
+            if e.get("type") == "VariableName":
+                varnames.append(e.get("name", ""))
+
+    if isinstance(doc.get("functions"), list):
+        # The split decode carries the interning table itself, so the function
+        # table is read from it rather than reconstructed from events that the
+        # split streams do not emit.
+        for name in doc["functions"]:
+            functions[fn_order] = (str(name), -1, -1)
+            out.append("FUNCTION\t%d\t%s\t%s\t%s" % (fn_order, name, -1, -1))
             fn_order += 1
+    else:
+        for e in events:
+            if e.get("type") == "Function":
+                functions[fn_order] = (e.get("name", ""), e.get("path_id", -1), e.get("line", -1))
+                out.append(
+                    "FUNCTION\t%d\t%s\t%s\t%s"
+                    % (fn_order, e.get("name", ""), e.get("path_id", -1), e.get("line", -1))
+                )
+                fn_order += 1
 
     stack = []
     frames = []
     steps = calls = returns = 0
     for e in events:
-        t = e.get("type")
+        t = ev_type(e)
         if t == "Step":
             steps += 1
             for fr in stack:
                 frames[fr]["steps"] += 1
+            # THE SPLIT DECODE CARRIES VALUES ON THE STEP, not as separate
+            # events: `values.dat` is parallel-indexed to `steps.dat`, so a
+            # step's variables arrive with it rather than after it. The legacy
+            # combined stream emitted each as its own `Value` event, which is
+            # the `t == "Value"` branch below.
+            for var in e.get("vars") or []:
+                v = var.get("value") or {}
+                kind = v.get("kind", "")
+                if kind == "String":
+                    shown = v.get("text", "")
+                elif kind == "Int":
+                    shown = str(v.get("i", ""))
+                elif kind == "Raw":
+                    shown = v.get("r", "")
+                else:
+                    shown = kind
+                name = var.get("varname") or "<unnamed>"
+                out.append("VALUE\t%s\t%s\t%s" % (name, kind, str(shown).replace("\t", " ")))
         elif t == "Call":
             calls += 1
             fid = e.get("function_id", -1)
@@ -82,9 +137,14 @@ def main(path):
             if stack:
                 stack.pop()
         elif t == "Event":
-            out.append(
-                "EVENT\t%s\t%s" % (e.get("metadata", ""), e.get("content", "").replace("\t", " "))
-            )
+            # `content` in the legacy decode, `text` in the split one. The
+            # metadata slot is spelled the same in both — it is what carries
+            # `ct.trace-join`, so reading only `content` finds the record's
+            # TEXT missing while its key is right there.
+            content = e.get("content")
+            if content is None:
+                content = e.get("text", "")
+            out.append("EVENT\t%s\t%s" % (e.get("metadata", ""), str(content).replace("\t", " ")))
         elif t == "Value":
             v = e.get("value", {})
             kind = v.get("kind", "")

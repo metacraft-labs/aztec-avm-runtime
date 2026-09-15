@@ -277,15 +277,23 @@ assert_file "the arms run wrote a field-rendering container" "$FIELD_CT"
 FIELD_BODY="$(m24_ct_print "$M24_CTPRINT_WORK/ct-print" "$FIELD_CT")"
 assert_eq "the reference reader reads it" "0" "$(printf '%s\n' "$FIELD_BODY" | head -1)"
 FIELD_BODY="$(printf '%s\n' "$FIELD_BODY" | tail -n +2)"
+# THE SPLIT DECODE SPELLS THESE DIFFERENTLY, and the spelling is the reader's rather than the
+# container's. A variable arrives attached to its step as
+# `{"varname": ..., "type_id": ..., "type_name": ..., "value": {...}}`, where the legacy combined
+# decode emitted a standalone event with `"name"` and a nested type record carrying `"kind"` and
+# `"lang_type"`. The FACTS asserted are unchanged — the variable's name, that its value is a String
+# carrying the full 254-bit hex, and that its type is the Noir tracer's `Field` — only the keys the
+# reader uses to say them have moved.
 assert_true "the variable is named contractAddress, not M24's contractAddressLow" \
-  str_has_sub "$FIELD_BODY" '"name": "contractAddress"'
+  str_has_sub "$FIELD_BODY" '"varname": "contractAddress"'
 assert_false "…and the placeholder name is gone from the container" \
   str_has_sub "$FIELD_BODY" 'contractAddressLow'
 assert_true "it is a String record" str_has_sub "$FIELD_BODY" '"kind": "String"'
 assert_true "…carrying the full 254-bit value" str_has_sub "$FIELD_BODY" "$FULL_HEX"
-assert_true "…and the type it points at is (tkInt, \"Field\"), the Noir tracer's own type record" \
-  str_has_sub "$FIELD_BODY" '"kind": "tkInt",'
-assert_true "…named Field" str_has_sub "$FIELD_BODY" '"lang_type": "Field"'
+assert_true "…and the type it points at is the Noir tracer's own Field type record" \
+  str_has_sub "$FIELD_BODY" '"type_name": "Field"'
+assert_true "…named Field in the container's own type table" \
+  str_has_sub "$FIELD_BODY" '"Field"'
 # NON-DEGENERACY: the assertions above would all pass over a container with one step and no
 # address if `FULL_HEX` were empty, so the value's own shape is asserted too.
 assert_true "the rendering is lowercase hex with no leading-zero stripping" \

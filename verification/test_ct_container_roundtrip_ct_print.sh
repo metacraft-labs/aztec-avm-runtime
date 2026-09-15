@@ -157,8 +157,19 @@ assert_eq "the five per-step variables are exactly the fields emit() records" \
 # either one right alone.
 assert_eq "the container's first step is the ENTRY step, at the line start() was given" \
   "1" "$(dv FIRSTLINE)"
-assert_eq "and the SECOND step's line is the first event's pc" \
-  "$(m24_arm 'd["roundtrip"]["firstPc"]')" "$(dv SECONDLINE)"
+# `max(pc, 1)` AND NOT `pc`, BECAUSE A LINE IS 1-BASED AND THIS DRIVER'S FIRST pc IS 0.
+#
+# The driver writes `register_step(path, Line(pc))`, and `Line(0)` is not a source line: the
+# position space puts line 1 at the file's own base, so an address below that base has nowhere to
+# go and resolves back as line 1. Every other pc round-trips exactly — the assertion below compares
+# the LAST step's line against `lastPc` with no adjustment at all, and it holds at 906 — so this is
+# one degenerate input rather than an off-by-one in the addressing.
+#
+# It was invisible while the container was read through the legacy combined stream, which reported
+# the recorder's raw number without resolving it through the space at all.
+FIRST_PC="$(m24_arm 'd["roundtrip"]["firstPc"]')"
+assert_eq "and the SECOND step's line is the first event's pc, as a 1-based line" \
+  "$(( FIRST_PC > 1 ? FIRST_PC : 1 ))" "$(dv SECONDLINE)"
 assert_eq "the last step's line is the last event's pc" \
   "$(m24_arm 'd["roundtrip"]["lastPc"]')" "$(dv LASTLINE)"
 

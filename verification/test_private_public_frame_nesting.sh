@@ -101,10 +101,20 @@ for name in "$FIRST_NAME" "$SECOND_NAME"; do
   d="$(printf '%s\n' "$REPORT" | awk -F'\t' -v n="$name" '$1=="FRAME" && $4==n {print $3; exit}')"
   assert_ge "the public frame $name opens INSIDE a private frame, not beside one" 1 "${d:-MISSING}"
 done
-# AND THE PRIVATE FRAME IT IS INSIDE IS STILL OPEN, which is the half a depth alone does not say.
-# `main` never returns in this recording — the Noir tracer leaves the entry frames open — so the
-# unbalanced count is exactly the private half's outer two.
-assert_eq "…and the private frames it is inside are still open at the end of the recording" "2" \
+# THE CALL STREAM IS BALANCED BY CONSTRUCTION, AND THAT IS THE WRITER DOING ITS JOB.
+#
+# This asserted 2 unbalanced frames: `main` never returns in this recording, the Noir tracer leaves
+# the entry frames open, and the legacy combined stream showed them open. The split `calls.dat`
+# stream does not, and not because the frames changed — `close` DRAINS any unclosed call stack
+# innermost-first, precisely "so partial-trace recordings (panic, trap, exit-without-return) still
+# produce balanced call_entry/call_exit pairs rather than silently losing the deepest un-popped
+# frames". The frames that used to be invisible at the end of a truncated recording are the ones
+# this guarantees are present.
+#
+# So the count is 0, and what it used to stand for is asserted directly instead: the two private
+# frames are the OUTERMOST two, and every public frame is nested inside both — which the
+# assertions above and below already establish by depth.
+assert_eq "…and the call stream is balanced, because close() drains rather than drops open frames" "0" \
   "$(m26_row "$REPORT" UNBALANCED)"
 assert_eq "…which is <toplevel> and main, so the public frames are inside BOTH" \
   "2" "$(printf '%s\n' "$FRAME_DEPTHS" | tr ',' '\n' | grep -c '^0$\|^1$' || true)"
