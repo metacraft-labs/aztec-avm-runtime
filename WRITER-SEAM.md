@@ -672,6 +672,72 @@ Do not read a red there as a regression until you have compared the table agains
 
 ---
 
+## 10c. THE `noir` BLOCKER DISSOLVED, BY A DIFFERENT ROUTE, AND WHAT IT EXPOSED UNDERNEATH
+
+§10b's blocker is gone and no commit to `noir` was needed. `ca080a58b` — *fix(cargo): reach
+codetracer-trace-format by git revision, not by sibling path* — landed on `origin/codetracer`, and
+`noir` now reaches `codetracer_trace_types` and `codetracer_trace_writer` at **git rev
+`235e377ec6`** instead of through a sibling checkout. `cargo metadata --locked` exits 0 there, the
+pinned revision does not declare `cbor4ii`, so the absence §10b measured is correct rather than
+missing, and the checkout stops going dirty mid-recipe. **Confirmed: `verify_foreign_call_executor_is_injectable`
+now passes 23/0 and leaves `noir` clean.**
+
+**Underneath it were three more, each only visible once the one above it was fixed**, and all three
+were in THIS repository rather than in `noir`:
+
+1. **The build scripts read a PATH out of Noir's manifest.** There is no path any more. They now
+   read the REVISION — which is strictly stronger, since a sibling worktree drifts and a revision
+   does not.
+2. **The probe linked TWO copies of `codetracer_trace_types`.** Pointing the probe at a materialised
+   *path* copy while `noir_tracer` reached the same crate by *git rev* gives cargo two SOURCES, and
+   two sources are two distinct types: 31 errors of the form `expected
+   codetracer_trace_types::types::Line, found Line` — RI-42's failure, reproduced exactly.
+   **Both scripts now COPY Noir's own dependency lines verbatim** rather than re-expressing them, so
+   the manifests agree by construction and cannot drift apart again whichever form Noir uses next.
+3. **`codetracer_trace_writer_nim/build.rs` looks for its Nim sources as a SIBLING of its own
+   crate**, and inside a cargo git checkout there is no sibling. Noir's manifest says so and names
+   the escape; the probe links the crate, so it must supply
+   `CODETRACER_TRACE_FORMAT_NIM_DIR`. It now materialises **this repository's own
+   `trace_format_nim_writer` anchor** out of the object store for it, so the probe's Nim half is
+   pinned by `pins.json` rather than by whatever a sibling checkout is sitting on.
+
+One consequence is recorded rather than smoothed over: a tree extracted by `git archive` into a
+cache directory is not direnv-approved and cannot be, so the probe takes its `nim` from the
+checkout's shell. That substitution is only sound if the checkout's shell IS the revision's, so
+`.envrc`, `flake.nix` and `flake.lock` are compared **byte for byte against the revision** and the
+build dies naming the file that differs. A later revision that changes how `nim` is provided will
+say so rather than silently building against the wrong toolchain.
+
+**Result: m38 = 150, m39 = 207, m40 = 146, each rc=0 and each exactly at reference.**
+
+**And the sweep that followed closes the milestone's accounting:**
+
+> **TOTAL 13,584 · 42 milestones · delta +19 against a reference of 13,565 · 35 of 42 exit 0 · no
+> hole.**
+>
+> **Three moves, and none of them is this milestone's**: m11 (+9), m27 (+2) and m28 (+8) are
+> L-track check edits already in the previous sweep's accounting. **Every milestone this work
+> touched is exactly at reference** — m24 = 358, m25 = 462, m26 = 341, m38 = 150, m39 = 207,
+> m40 = 146, m41 = 172, all rc=0. The seven non-zero exits (m1, m11, m15, m20, m21, m22, m37) are
+> the pre-existing L-track reds, unchanged.
+
+One more casualty of the Noir fast-forward was found and conformed, and it is worth naming because
+it is a CONTROL rather than a figure. `test_fr_rendering_matches_noir_tracer` asserted that the
+`Field` arm no longer renders through `ValueRecord::Int { i: field_value.to_i128() as i64 }`, and
+controlled that absence by asserting the INTEGER arms still do — an `assert_false` over a needle
+that matches nothing anywhere is satisfied for free. Noir then removed the lossy path from the
+integer arms too (`field_to_int_record`: `fits_in_i128`, `i64::try_from` rather than `as i64`, and a
+`ValueRecord::BigInt` fallback), so the control's needle stopped matching live code and survived
+only in comments explaining what it replaced. The control is re-pointed at live code and the
+stronger upstream fact is now asserted beside it: `to_i128() as i64` appears on NO live path in that
+file, measured by stripping comment lines first. Three line-number citations in `SOURCE-MAPPING.md`
+moved with the same fast-forward and were re-derived (`Field` arm **214-263**, the `()` and `fn`
+escape hatches at **356** and **389**). Noir's pin
+(`235e377ec6`) and this repository's `trace_format` anchor (`3b58c6894d`) are different revisions of
+one repository and they straddle the entry-step commit — `235e377ec6` predates it. That is fine and
+is not a latent disagreement: the two are linked into different modules, and every step-count
+assertion is green under both.
+
 ## 10b. THE SWEEP AFTER THE CONFORM PASS, and the one blocker it exposed
 
 Measured M0–M41 `setsid`-detached under `direnv exec`, one milestone at a time. 84 markers for 42

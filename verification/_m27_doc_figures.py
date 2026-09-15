@@ -5,6 +5,14 @@
 
 Prints `KEY<TAB>VALUE` lines for `verify_browser_chunk_budget` §6.
 
+THE EAGER FIGURES ARE ORDER-DEPENDENT, SO RE-DERIVE THEM FROM THE FULL SWEEP AND NOTHING ELSE.
+This check run alone, and run inside a full M0-M41 sweep, both measure `browser.js` at 266.58 KB.
+Run as `MILESTONES=m27` -- the milestone by itself -- it measures 267.72 KB, reproducibly, and
+every other eager figure moves with it. A figure calibrated in that context is WRONG in the sweep,
+which cost one full round trip: the documents went green as a single milestone and red again in the
+sweep. The bundle these numbers describe depends on what was built before it, so the number is only
+meaningful with its context named.
+
 WHY THIS EXISTS. `CAMPAIGN-BRIEF.md`: "If a document states a measurement, something must take that
 measurement again and compare." Every other milestone write-up in this repository is opened by
 between two and seven checks; `BROWSER-PACKAGING.md` was opened by NONE — `lib_m27_browser.sh`

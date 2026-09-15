@@ -78,10 +78,31 @@ assert_true "…and field_to_hex is 0x + AcirField::to_hex, which is 64 lowercas
   str_has_sub "$GLUE" 'format!("0x{}", field_value.to_hex())'
 assert_false "…and the to_i128 rendering is GONE from the Field arm" \
   str_has_sub "$FIELD_ARM" 'ValueRecord::Int { i: field_value.to_i128() as i64, type_id }'
-# THE CONTROL FOR THAT ABSENCE, and it is the assertion that makes the extraction meaningful: the
-# integer arms still render that way, so the needle is one that CAN match this file.
-assert_true "…while the integer arms still do render that way, so the needle still matches the file" \
-  str_has_sub "$GLUE" 'ValueRecord::Int { i: field_value.to_i128() as i64, type_id }'
+# THE CONTROL FOR THAT ABSENCE — and it had to be RE-DERIVED, because the world it controlled for
+# is gone.
+#
+# It used to read: *the integer arms still render that way, so the needle is one that CAN match this
+# file*. That is the right shape of control — an `assert_false` over a needle that matches NOTHING
+# anywhere is satisfied for free — but it stopped being true. Noir's `ca080a58b` lineage replaced
+# the lossy integer path entirely: `field_to_int_record` now tests `fits_in_i128`, converts with
+# `i64::try_from` rather than `as i64`, and falls back to `ValueRecord::BigInt` for what does not
+# fit. `to_i128() as i64` survives in that file only inside COMMENTS explaining what it replaced.
+#
+# So the control is re-pointed at live code and the property it guards is unchanged: integers still
+# reach `ValueRecord::Int`, which is what makes "the Field arm does not" a statement about this file
+# rather than about a spelling nothing uses. The stronger fact upstream established — that the
+# truncation is gone from every integer type and not merely from `Field` — is asserted beside it,
+# since it is the reason the old needle died and a future reader will otherwise re-add it.
+assert_true "…while the integer arms still reach ValueRecord::Int, so the arm is real code" \
+  str_has_sub "$GLUE" 'return ValueRecord::Int { i, type_id };'
+assert_true "…through i64::try_from rather than the `as i64` that truncated" \
+  str_has_sub "$GLUE" 'if let Ok(i) = i64::try_from(wide)'
+assert_true "…with a BigInt fallback, so a value too wide for an i64 is recorded rather than lost" \
+  str_has_sub "$GLUE" 'ValueRecord::BigInt'
+# AND THE LOSSY SPELLING IS GONE FROM EVERY LIVE PATH, not just from the `Field` arm. Measured by
+# stripping comment lines first, because the file still DISCUSSES it at length.
+assert_eq "…and `to_i128() as i64` survives only in comments, on no live path" "0" \
+  "$(printf '%s\n' "$GLUE" | grep -v '^[[:space:]]*//' | grep -c 'to_i128() as i64' || true)"
 assert_true "…under the type (TypeKind::Int, \"Field\"), which is the type this runtime reuses" \
   str_has_sub "$GLUE" 'PrintableType::Field => (TypeKind::Int, "Field".to_string()),'
 assert_true "…and to_i128 PANICS rather than truncating, above 127 bits" \

@@ -1357,6 +1357,45 @@ shape again, in the opposite direction, in the tool written to guard against it.
 `^([A-Za-z_0-9][A-Za-z_0-9 .-]*): (\d+) assertion\(s\), (\d+) failure\(s\)$`, still anchored at
 column 0.
 
+### `node --input-type=module -e` CANNOT PERFORM A DYNAMIC IMPORT, AND THE FAILURE ARRIVES LATE
+**Four defects, one fact.** An eval'd module has no URL of its own, so node refuses every `import()`
+performed at RUNTIME with `ERR_INPUT_TYPE_NOT_ALLOWED: --input-type can only be used with string
+input via --eval`. **Static imports are unaffected** — they resolve against the eval base — which is
+what makes this so hard to read: every `import` at the top of the snippet loads cleanly, the check
+proves each specifier resolves, and the failure then arrives from inside a library call, on
+`process.nextTick`, looking like an environment problem.
+
+It bites hardest where a library picks a backend lazily. This repository sets
+`BB_BINARY_PATH=/nonexistent/...` **on purpose**, to force bb-js onto its wasm backend — and that
+backend is the one loaded dynamically. So a derivation that works in a plain shell fails inside a
+check, deterministically, for a reason that has nothing to do with the derivation. Do not "fix" it
+by unsetting `BB_BINARY_PATH`: that silently retires the forcing the check exists inside.
+
+**Write a real `.mjs` and run it.** Put it under a `node_modules` directory (bare specifiers resolve
+by walking parents, and it is already ignored), and delete it after. Found in the contract-class-id
+derivation, both selector derivations, and the registration seam.
+
+**AND KEEP THE STDERR — SEPARATELY.** All four had it discarded (`2>/dev/null`) or merged (`2>&1`)
+into the stream they then read BY LINE NUMBER. Merging is the worse of the two: node writes errors
+unbuffered while stdout to a pipe is block-buffered, so the error arrives FIRST and shifts every
+value down. That is how one check came to report `node:internal/event_target:1136` as a **contract
+class id** — not a wrong derivation, a misread one — and how another compared `Node.js v24.19.0`
+against seven expected values in turn. Send stderr to a file, read only stdout, and surface the
+stderr in the assertion message so a real failure still says why. Fixing the four recovered seventy
+assertions in `test_nested_private_call_is_served` alone, which had been exiting at section 8.
+
+### AN EXACT-FIGURE ASSERTION WHOSE VALUE DEPENDS ON WHAT ELSE RAN IS A TRAP
+**The browser bundle figures are order-dependent.** `verify_browser_chunk_budget` run alone and the
+same check run inside a FULL SWEEP both measure `browser.js` at **266.58 KB**. The same check run as
+`MILESTONES=m27` — the milestone by itself — measures **267.72 KB**, reproducibly. Every eager
+figure moves with it, in m27, m32, m34, m35 and m36.
+
+**So a figure re-derived outside the full sweep is wrong inside it.** This cost a full round trip:
+the documents were calibrated on the single-milestone value, went green in that context, and went
+red again in the sweep. **Derive these figures from the full sweep, which is the campaign's stated
+measurement context, and from nothing else.** The same caution applies to any figure a check
+measures rather than reads: ask what else had to run first before treating the number as the tree's.
+
 ### A SWEEP IS A MEASUREMENT OF THE TREE AT THE MOMENT IT RAN
 **Three instances, and all three were read as regressions first.** M19 committed a pin-carrying
 fixture after its own sweep and M1 went red. M20 committed the phase splitter after its own sweep

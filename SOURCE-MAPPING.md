@@ -195,7 +195,7 @@ is GONE, in both Noir checkouts, so neither this section nor that check can go s
 **THE TABLE NAMES ITS REVISION NOW, AND ONE OF ITS FOUR ROWS WAS WRONG IN EVERY ERA.** A line
 citation with no revision beside it is not re-derivable by anybody, which is how the first row
 survived: it said `tracer_glue.rs:160-189`, and the `Field` arm is **148-161** at the revision this
-table measures, **160-197** at the one immediately after it, and **162-211** today — so `160-189`
+table measures, **160-197** at the one immediately after it, and **214-263** today — so `160-189`
 was M26's start with an end that matches nothing, in a table about the state before M26. The other
 three rows are correct at the revision now named. Measured on 2026-08-31 against the `noir`
 checkout; `test_fr_rendering_matches_noir_tracer` §1 re-derives every figure in this table and in
@@ -264,7 +264,7 @@ ValueRecord::String { text: "0x" + 64 lowercase big-endian hex, type_id }
 - **Readable by both pinned readers**, verified over a container the arms run produces, not
   reasoned about.
 - **`String` and not `Raw`**, because `Raw` is Noir's escape hatch for values it *cannot* represent
-  (`"()"` at `tracer_glue.rs:302`, `"fn"` at `:335`, at the `noir` checkout's current tip), and an
+  (`"()"` at `tracer_glue.rs:356`, `"fn"` at `:389`, at the `noir` checkout's current tip), and an
   address is not one of those. (These read 252 and 285 until 2026-08-31 — the `eb8b28c27^` numbers,
   in a present-tense sentence, fifty lines out of date. Both are re-derived by
   `test_fr_rendering_matches_noir_tracer` §1 now.)
@@ -277,7 +277,7 @@ What M24 recorded for the same address, kept so this is a delta rather than a cl
 ### 4.4 The cross-half work this leaves, named rather than implied
 
 **The Noir half must change to match**, at `noir/tooling/tracer/src/tracer_glue.rs:148-161` — the
-arm as it stood at `eb8b28c27^`, which is where this instruction was written; it is at **162-211**
+arm as it stood at `eb8b28c27^`, which is where this instruction was written; it is at **214-263**
 today, and both figures are re-derived by `test_fr_rendering_matches_noir_tracer` §1. That is
 a Metacraft repository and not Aztec, so it is **not** the sixth upstream contribution, and it is
 M26's to land — M26 is where the two halves become one container and where a disagreement between

@@ -80,12 +80,23 @@ NOIR_PUBLISHED="$(git -C "$NOIR_ROOT" for-each-ref --contains "$NOIR_HEAD" --for
 # The trace-format checkout the Noir workspace itself names, so this module cannot link a second
 # copy of `codetracer_trace_types` — RI-42's failure, two copies on two paths being two distinct
 # types that will not unify.
-CTF_REL="$(grep -oE 'path = "\.\./[a-zA-Z0-9_.-]+/codetracer_trace_types"' "$NOIR_ROOT/Cargo.toml" | head -1 | sed 's|.*"\(.*\)"|\1|')"
-[ -n "$CTF_REL" ] || die "could not read codetracer_trace_types' path out of $NOIR_ROOT/Cargo.toml"
-CTF_ABS="$(cd "$NOIR_ROOT" && cd "$(dirname "$CTF_REL")" && pwd)"
-[ -d "$CTF_ABS/codetracer_trace_types" ] || \
-  die "$NOIR_ROOT/Cargo.toml points at $CTF_ABS/codetracer_trace_types, which is not there"
-CTF_REV="$(git -C "$CTF_ABS" rev-parse HEAD 2>/dev/null)"
+# THE LINE IS COPIED FROM NOIR'S MANIFEST, not re-expressed from it. Noir reached this crate by a
+# sibling PATH and now reaches it by a GIT REVISION; a path dependency and a git dependency on the
+# same crate are two SOURCES however identical their contents, and two sources are two distinct
+# types that will not unify. Copying the declaration makes the two manifests agree by construction,
+# so this module cannot link a second copy whichever form Noir uses next.
+CTF_DEP_TYPES="$(grep -E '^codetracer_trace_types = ' "$NOIR_ROOT/Cargo.toml" | head -1)"
+[ -n "$CTF_DEP_TYPES" ] || \
+  die "could not read the codetracer_trace_types dependency line out of $NOIR_ROOT/Cargo.toml"
+# The revision identifies the build for the staleness stamp below. A path form has none, in which
+# case the sibling checkout's HEAD stands in for it, as it always did.
+CTF_REV="$(printf '%s\n' "$CTF_DEP_TYPES" | grep -oE 'rev = "[0-9a-f]{40}"' | head -1 | sed 's|.*"\(.*\)"|\1|')"
+if [ -z "$CTF_REV" ]; then
+  CTF_REL="$(printf '%s\n' "$CTF_DEP_TYPES" | grep -oE 'path = "[^"]+"' | head -1 | sed 's|.*"\(.*\)"|\1|')"
+  [ -n "$CTF_REL" ] || die "$NOIR_ROOT/Cargo.toml names codetracer_trace_types by neither a rev nor a path: $CTF_DEP_TYPES"
+  CTF_REV="$(cd "$NOIR_ROOT" && cd "$(dirname "$CTF_REL")" && git rev-parse HEAD 2>/dev/null)"
+fi
+[ -n "$CTF_REV" ] || die "could not identify the trace-format revision this module links"
 
 mkdir -p "$CRATE/src" "$CRATE/.cargo" || die "could not create $CRATE"
 
@@ -130,7 +141,7 @@ noir_tracer = { path = "$NOIR_ROOT/tooling/tracer" }
 noir_tracer_wasm = { path = "$NOIR_ROOT/tooling/tracer_wasm", default-features = false }
 noirc_abi = { path = "$NOIR_ROOT/tooling/noirc_abi" }
 noirc_artifacts = { path = "$NOIR_ROOT/tooling/noirc_artifacts" }
-codetracer_trace_types = { path = "$CTF_ABS/codetracer_trace_types" }
+$CTF_DEP_TYPES
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"

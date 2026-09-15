@@ -66,12 +66,33 @@ NOIR_HEAD="$(git -C "$NOIR_ROOT" rev-parse HEAD)"
 # probe cannot link a second copy of `codetracer_trace_types`. Two copies on two paths are two
 # distinct types and will not unify — RI-42's failure, and `test_single_trace_types_instantiation`
 # is what reproduces it.
-CTF_REL="$(grep -oE 'path = "\.\./[a-zA-Z0-9_.-]+/codetracer_trace_writer_nim"' "$NOIR_ROOT/Cargo.toml" | head -1 | sed 's|.*"\(.*\)"|\1|')"
-[ -n "$CTF_REL" ] || die "could not read the Nim writer's path out of $NOIR_ROOT/Cargo.toml"
-CTF_ABS="$(cd "$NOIR_ROOT" && cd "$(dirname "$CTF_REL")" && pwd)"
-[ -d "$CTF_ABS/codetracer_trace_writer_nim" ] || \
-  die "$NOIR_ROOT/Cargo.toml points at $CTF_ABS/codetracer_trace_writer_nim, which is not there"
-CTF_REV="$(git -C "$CTF_ABS" rev-parse HEAD 2>/dev/null)"
+# THE PROBE DECLARES THESE CRATES EXACTLY AS NOIR DECLARES THEM — the two lines are COPIED, not
+# re-expressed — because the invariant is that cargo resolves ONE copy of `codetracer_trace_types`
+# for the probe and for `noir_tracer` alike. Two copies on two sources are two distinct types and
+# will not unify; that is RI-42's failure, and `test_single_trace_types_instantiation` reproduces
+# it.
+#
+# It used to be enough to read the sibling PATH out of Noir's manifest and point the probe at the
+# same directory. Noir now reaches them by GIT REVISION, and a path dependency and a git dependency
+# on the same crate are two sources however identical their contents — measured, as 31 errors of
+# the form `expected codetracer_trace_types::types::Line, found Line`. Copying the lines makes the
+# two manifests agree by construction rather than by a translation this script would have to keep
+# correct.
+CTF_DEP_TYPES="$(grep -E '^codetracer_trace_types = ' "$NOIR_ROOT/Cargo.toml" | head -1)"
+CTF_DEP_WRITER="$(grep -E '^codetracer_trace_writer = ' "$NOIR_ROOT/Cargo.toml" | head -1)"
+[ -n "$CTF_DEP_TYPES" ] && [ -n "$CTF_DEP_WRITER" ] || \
+  die "could not read the trace-format dependency lines out of $NOIR_ROOT/Cargo.toml"
+
+# The revision is read for the record and for the toolchain check below. Noir may name these crates
+# by path or by rev; only the rev form needs the Nim sources supplied explicitly.
+CTF_REV="$(printf '%s\n' "$CTF_DEP_WRITER" | grep -oE 'rev = "[0-9a-f]{40}"' | head -1 | sed 's|.*"\(.*\)"|\1|')"
+[ -n "$CTF_REV" ] || \
+  die "$NOIR_ROOT/Cargo.toml names the writer by neither a revision this script understands
+     nor anything else it can resolve: $CTF_DEP_WRITER"
+TRACE_FORMAT_REPO="${TRACE_FORMAT_REPO:-$WORKSPACE_ROOT/codetracer-trace-format}"
+[ -e "$TRACE_FORMAT_REPO/.git" ] || die "no codetracer-trace-format checkout at $TRACE_FORMAT_REPO"
+git -C "$TRACE_FORMAT_REPO" cat-file -e "$CTF_REV^{commit}" 2>/dev/null \
+  || die "$TRACE_FORMAT_REPO does not have the revision $NOIR_ROOT/Cargo.toml names ($CTF_REV)"
 
 mkdir -p "$PROBE/src" "$PROBE/bin" || die "could not create $PROBE"
 
@@ -98,8 +119,8 @@ noir_debugger = { path = "$NOIR_ROOT/tooling/debugger", default-features = false
 noir_tracer = { path = "$NOIR_ROOT/tooling/tracer", features = ["nim-writer"] }
 noirc_abi = { path = "$NOIR_ROOT/tooling/noirc_abi" }
 noirc_artifacts = { path = "$NOIR_ROOT/tooling/noirc_artifacts" }
-codetracer_trace_types = { path = "$CTF_ABS/codetracer_trace_types" }
-codetracer_trace_writer = { path = "$CTF_ABS/codetracer_trace_writer_nim", package = "codetracer_trace_writer_nim" }
+$CTF_DEP_TYPES
+$CTF_DEP_WRITER
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
@@ -135,15 +156,64 @@ M38_RUSTUP_HOME="${M38_RUSTUP_HOME:-$HOME/.rustup}"
 # `CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL=1` is that build script's own documented escape
 # from needing `nimble` as well; without it the failure is `nimble` rather than `nim`, and the
 # campaign brief records an agent concluding "it does not build here" from exactly that.
-[ -d "$CTF_ABS/.direnv" ] || [ -f "$CTF_ABS/.envrc" ] || \
-  die "$CTF_ABS has no .envrc, so there is no dev shell to take `nim` from"
+# THE SHELL COMES FROM THE CHECKOUT, THE SOURCES COME FROM THE REVISION, AND THE TWO ARE PROVED
+# EQUIVALENT RATHER THAN ASSUMED. A tree extracted with `git archive` into a cache directory is not
+# direnv-approved and cannot be — `direnv exec` on it fails with `.envrc is blocked`, and approving
+# a path under `~/.cache` from a verification script would be this repository approving its own
+# input. So the shell is taken from the checkout, which is already approved.
+#
+# That substitution is only sound if the checkout's shell IS the revision's shell, so it is
+# compared byte for byte instead of being asserted in a comment. If a later revision changes how
+# `nim` is provided, this dies naming the file that differs rather than silently building against
+# the wrong toolchain — which is the failure mode the campaign brief calls the engine being part of
+# the measurement.
+for f in .envrc flake.nix flake.lock; do
+  git -C "$TRACE_FORMAT_REPO" cat-file -e "$CTF_REV:$f" 2>/dev/null || continue
+  if ! git -C "$TRACE_FORMAT_REPO" show "$CTF_REV:$f" 2>/dev/null | cmp -s - "$TRACE_FORMAT_REPO/$f"; then
+    die "the toolchain this probe would use is not the one revision ${CTF_REV:0:10} declares:
+     $TRACE_FORMAT_REPO/$f differs from that revision's. Check the checkout out at $CTF_REV,
+     or teach this script to approve the materialised tree."
+  fi
+done
+[ -d "$TRACE_FORMAT_REPO/.direnv" ] || [ -f "$TRACE_FORMAT_REPO/.envrc" ] || \
+  die "$TRACE_FORMAT_REPO has no .envrc, so there is no dev shell to take `nim` from"
+
+# THE NIM SOURCES THE WRITER'S `build.rs` COMPILES, SUPPLIED EXPLICITLY.
+#
+# `codetracer_trace_writer_nim/build.rs` looks for `codetracer-trace-format-nim` as a SIBLING of
+# its own crate. That held when Noir reached the writer by a sibling path; inside a cargo GIT
+# checkout there is no such sibling and the build panics with `Nim FFI entry point not found`.
+# Noir's own manifest says so and names the escape: a consumer that LINKS this crate must point
+# `CODETRACER_TRACE_FORMAT_NIM_DIR` at a checkout. This probe links it, so it must.
+#
+# The revision supplied is THIS repository's declared writer anchor, materialised out of the object
+# store like everything else, so the probe's Nim half is pinned by `pins.json` rather than by
+# whichever commit a sibling working tree is sitting on.
+NIM_WRITER_REV="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["anchors"]["trace_format_nim_writer"]["commit"])' "$REPO_ROOT/pins.json" 2>/dev/null)"
+case "$NIM_WRITER_REV" in
+  [0-9a-f][0-9a-f]*) : ;;
+  *) die "pins.json declares no anchors.trace_format_nim_writer.commit, and this probe links the Nim writer" ;;
+esac
+NIM_REPO="${TRACE_FORMAT_NIM_REPO:-$WORKSPACE_ROOT/codetracer-trace-format-nim}"
+[ -e "$NIM_REPO/.git" ] || die "no codetracer-trace-format-nim checkout at $NIM_REPO"
+git -C "$NIM_REPO" cat-file -e "$NIM_WRITER_REV^{commit}" 2>/dev/null \
+  || die "$NIM_REPO does not have the pinned trace_format_nim_writer revision $NIM_WRITER_REV"
+NIM_DIR="$M38_WORK/ctf-nim-${NIM_WRITER_REV:0:10}"
+if [ "$FORCE" = 1 ] || [ ! -f "$NIM_DIR/src/codetracer_trace_writer_ffi.nim" ]; then
+  rm -rf "$NIM_DIR"; mkdir -p "$NIM_DIR"
+  git -C "$NIM_REPO" archive "$NIM_WRITER_REV" | tar -x -m -C "$NIM_DIR" \
+    || die "git archive of $NIM_WRITER_REV failed"
+fi
+[ -f "$NIM_DIR/src/codetracer_trace_writer_ffi.nim" ] || \
+  die "${NIM_WRITER_REV:0:10} has no src/codetracer_trace_writer_ffi.nim"
 rc=0
-direnv exec "$CTF_ABS" nix shell nixpkgs#rustup nixpkgs#capnproto --command bash -c '
+direnv exec "$TRACE_FORMAT_REPO" nix shell nixpkgs#rustup nixpkgs#capnproto --command bash -c '
   set -uo pipefail
   command -v nim >/dev/null || { echo "no nim on PATH inside the writer'"'"'s dev shell" >&2; exit 1; }
   export RUSTUP_HOME="'"$M38_RUSTUP_HOME"'"
   export CARGO_TARGET_DIR="'"$NOIR_ROOT"'/target"
   export CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL=1
+  export CODETRACER_TRACE_FORMAT_NIM_DIR="'"$NIM_DIR"'"
   cd "'"$PROBE"'" || exit 1
   rustup run "'"$NOIR_TOOLCHAIN"'" rustc --version || exit 1
   rustup run "'"$NOIR_TOOLCHAIN"'" cargo build --release || exit 1
