@@ -52,15 +52,24 @@ CATALOGUE = {
         "blocks, so a byte count cannot tell two traces apart in either direction and is not "
         "evidence of anything on its own."
     ),
-    "header.ctfs_version": (
-        "The CTFS CONTAINER format version, byte 5 of the header. Path A writes 3; Path B writes "
-        "4. A v4 reader accepts 2, 3 and 4, so this byte alone is not what makes Path A's "
-        "container unreadable to the current reader -- `meta.schema_version` is."
-    ),
-    "header.max_shards": (
-        "Byte 7 of the CTFS header. Path A writes 0, Path B writes 1. A sharding parameter of the "
-        "container layer, chosen by each writer's own constructor; neither container is sharded."
-    ),
+    # `header.ctfs_version` AND `header.max_shards` WERE CATALOGUED HERE AND ARE NOT ANY MORE,
+    # because they were never differences to explain -- they were one writer disagreeing with the
+    # spec, and the other with itself.
+    #
+    #   * VERSION. `ctfs-container.md` section 1 states byte 5 is `4`. Path A wrote 3. That is not a
+    #     difference between two implementations, it is one of them being stale, and this entry used
+    #     to argue it was harmless ("a v4 reader accepts 2, 3 and 4") -- which is true and beside the
+    #     point. Path A writes 4 now. The bump was not a constant: v4 re-defines bytes 6 and 7, and
+    #     the Rust serialiser wrote the v2/v3 meaning unconditionally.
+    #
+    #   * MAX_SHARDS. Path A wrote 0 and Path B wrote 1 for containers neither of which is sharded.
+    #     The spec said `0 = no sharding` and left "one shard" and "no sharding" as two spellings of
+    #     one state, so BOTH writers conformed and they still disagreed. The spec now pins `0`, and
+    #     both write it.
+    #
+    # Both rows are now `SAME`, and the assertion that no CATALOGUED difference has gone stale is
+    # what forced them to be removed rather than left as prose describing a disagreement that had
+    # been fixed.
     "probe.VALUES0_COUNT": (
         "Path A's first step is the first AVM step and carries its six values; Path B's first step "
         "is the start-step, which carries none. The values are present in both containers -- "

@@ -350,9 +350,20 @@ done
 # ---------------------------------------------------------------------------
 MAGIC="$(python3 -c '
 import sys
-b = open(sys.argv[1], "rb").read(6)
+b = open(sys.argv[1], "rb").read(8)
 print(" ".join("%02x" % x for x in b))' "$CT")"
-assert_eq "the container carries the CTFS magic and version" "c0 de 72 ac e2 03" "$MAGIC"
+# CONFORMED TO THE SPEC, NOT LOOSENED. `codetracer-trace-format-spec`'s
+# `ctfs-container.md` section 1 states that header byte 5 is `4`; this asserted `03`, which pinned
+# the writer's staleness in a check rather than catching it.
+#
+# BYTES 6 AND 7 ARE READ TOO, because version 4 RE-DEFINES them: under v2/v3 they were compression
+# and encryption, under v4 they are encryption and max_shards. A container could satisfy a version
+# assertion alone while carrying a compression tag in the byte a v4 reader reads as encryption, and
+# would then declare itself AES-256-GCM encrypted. `00 00` is encryption=none and max_shards=0,
+# where `0` is what the spec now pins for a container that is not sharded -- both writers write it,
+# so this line is the same for either.
+assert_eq "the container carries the CTFS magic, version and v4 header bytes" \
+  "c0 de 72 ac e2 04 00 00" "$MAGIC"
 
 # ===========================================================================
 # THE SPLIT STREAMS, THROUGH THE REFERENCE READER. See this file's header for why nothing above
