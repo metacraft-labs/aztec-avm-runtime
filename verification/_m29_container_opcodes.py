@@ -55,6 +55,31 @@ def main() -> int:
         print("the reader's output has no 'events' array", file=sys.stderr)
         return 3
 
+    # THE SPLIT DECODE CARRIES A STEP'S VARIABLES ON THE STEP, and names them.
+    #
+    # The loop below walks the LEGACY shape: a `VariableName` event interns a
+    # name, a following `Value` event references it by ordinal, and a `Step`
+    # opens the window they belong to. The split decode emits neither of those
+    # events — a step arrives as `{"kind": "step", "vars": [{"varname": ...,
+    # "value": {...}}]}` with the name already resolved — so walking it the old
+    # way finds no `VariableName`, no `Value`, and reports "no record names
+    # 'opcode'" over a container that is full of them.
+    split_steps = [e for e in events if e.get("kind") == "step"]
+    if split_steps:
+        opcodes = []
+        for st in split_steps:
+            for var in st.get("vars") or []:
+                if var.get("varname") != "opcode":
+                    continue
+                value = var.get("value") or {}
+                if value.get("kind") == "Int":
+                    opcodes.append(int(value["i"]))
+                    break
+        if not opcodes:
+            print("no step carries an 'opcode' variable", file=sys.stderr)
+            return 5
+        return emit(opcodes)
+
     opcode_ids = set()
     pending_name = None
     opcodes = []
@@ -86,6 +111,11 @@ def main() -> int:
         print("the 'opcode' variable was named but no Step carried a value for it", file=sys.stderr)
         return 5
 
+    return emit(opcodes)
+
+
+def emit(opcodes):
+    """Print the requested rendering of the extracted opcodes."""
     if len(sys.argv) == 3 and sys.argv[2] == "histogram":
         for op, n in sorted(Counter(opcodes).items()):
             print(f"{op}\t{n}")

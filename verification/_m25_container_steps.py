@@ -39,6 +39,25 @@ def load_steps(doc):
             nid += 1
 
     steps = []
+
+    # THE SPLIT DECODE CARRIES A STEP'S VARIABLES ON THE STEP, and names them.
+    # The legacy combined-stream decode emitted each as a separate `Value` event
+    # referencing an interned ordinal, which is the loop below. Reading only that
+    # over a split container finds no steps at all and answers zero.
+    split_steps = [e for e in doc.get("events", []) if e.get("kind") == "step"]
+    if split_steps:
+        for e in split_steps:
+            cur = {"line": e.get("line"), "path_id": e.get("path_id")}
+            for var in e.get("vars") or []:
+                v = var.get("value") or {}
+                name = var.get("varname")
+                if name is not None:
+                    cur[name] = v.get("i", v.get("text"))
+            steps.append(cur)
+        if not names:
+            names = {i: n for i, n in enumerate(doc.get("varnames") or [])}
+        return names, steps
+
     cur = None
     for e in doc.get("events", []):
         t = e.get("type")

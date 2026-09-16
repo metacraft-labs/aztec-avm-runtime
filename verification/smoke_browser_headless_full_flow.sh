@@ -191,9 +191,25 @@ LINES="$(printf '%s\n' "$OUT" | grep -c . || true)"
 note "ct-print --full over the downloaded container exited $RC with $LINES line(s)"
 assert_eq "ct-print --full exits 0 over the container the browser downloaded" "0" "$RC"
 assert_ge "…printing a substantial record stream rather than an empty one" 500 "$LINES"
-assert_true "…with Step records" str_has_sub "$OUT" '"type": "Step"'
-assert_true "…and Call records, so the frames survived" str_has_sub "$OUT" '"type": "Call"'
-assert_true "…and Path records, so the source positions did" str_has_sub "$OUT" '"type": "Path"'
+# THE READER HAS TWO OUTPUT SPELLINGS, AND THIS READS BOTH.
+#
+# The legacy combined-stream decode tags events `"type": "Step"` / `"Call"` /
+# `"Path"`; the split-stream decode tags them `"kind": "step"` / `"call_entry"`
+# and hoists the interning tables to top-level arrays. Grepping only the first
+# over a split container finds nothing and reports ZERO, successfully — which is
+# this campaign's most repeated defect, and the reason `_ct_decode_rows.py`
+# exists. Counting is done through it; the presence checks accept either
+# spelling.
+# THE BODY GOES TO A FILE FIRST — `--full` over this container is megabytes, and
+# passing it as an argv element exceeds ARG_MAX.
+mkdir -p "$M28_WORK"
+printf '%s\n' "$OUT" > "$M28_WORK/reader.json"
+assert_true "…with Step records" \
+  grep -qE '"type":[[:space:]]*"Step"|"kind":[[:space:]]*"step"' "$M28_WORK/reader.json"
+assert_true "…and Call records, so the frames survived" \
+  grep -qE '"type":[[:space:]]*"Call"|"kind":[[:space:]]*"call_entry"' "$M28_WORK/reader.json"
+assert_true "…and Path records, so the source positions did" \
+  grep -qE '"type":[[:space:]]*"Path"|"paths":' "$M28_WORK/reader.json"
 # THE FLOW'S LAST JOIN: the recording is of an AZTEC transaction, named by the sources it executed,
 # not of an empty session that happened to serialise.
 assert_true "…naming the AVM entry point" str_has_sub "$OUT" "/aztec/tx.avm"

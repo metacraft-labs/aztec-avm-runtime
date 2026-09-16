@@ -108,7 +108,26 @@ assert_file "the downloaded container is on disk" "$DL_PATH"
 READ="$(m24_ct_print "$M24_READERS/ct-print" "$DL_PATH")"
 RC="$(printf '%s\n' "$READ" | head -1)"
 OUT="$(printf '%s\n' "$READ" | tail -n +2)"
-STEP_RECORDS="$(printf '%s\n' "$OUT" | grep -c '"type": "Step"' || true)"
+# COUNTED THROUGH THE SHARED DECODER, NOT BY GREPPING ONE SPELLING. The legacy
+# combined-stream decode tags a step `"type": "Step"`; the split-stream decode
+# tags it `"kind": "step"`. Grepping only the first over a split container
+# counts ZERO and reports it successfully — the defect `_ct_decode_rows.py`
+# exists to stop, and this is the fifth check to need it.
+ct_step_count() { # <ct-print body>
+  printf '%s\n' "$1" > "$M29_WORK/decode.json"
+  local n
+  n="$(python3 "$REPO_ROOT/verification/_ct_decode_rows.py" "$M29_WORK/decode.json" 2>/dev/null \
+    | sed -n 's/^COUNT_Step\t//p')"
+  # A body the decoder cannot read counts ZERO, which is what `grep -c` answered
+  # before and what the assertions below compare against. It is only safe to
+  # default here because the reader's EXIT STATUS is asserted separately: a
+  # refusal is established by the status, and this number then says the refusal
+  # produced no steps — the two together are what "refused, and emitted nothing"
+  # means.
+  printf '%s\n' "${n:-0}"
+}
+mkdir -p "$M29_WORK"
+STEP_RECORDS="$(ct_step_count "$OUT")"
 note "ct-print --full exited $RC and emitted $STEP_RECORDS Step record(s)"
 
 assert_eq "ct-print --full reads the container" "0" "$RC"
@@ -148,7 +167,7 @@ HALVED="$CTL_DIR/halved.ct"
 head -c "$((DL_BYTES / 2))" "$DL_PATH" >"$HALVED"
 assert_eq "the halved copy is half the container" "$((DL_BYTES / 2))" "$(stat -c %s "$HALVED")"
 HALVED_READ="$(m24_ct_print "$M24_READERS/ct-print" "$HALVED")"
-HALVED_STEPS="$(printf '%s\n' "$HALVED_READ" | tail -n +2 | grep -c '"type": "Step"' || true)"
+HALVED_STEPS="$(ct_step_count "$(printf '%s\n' "$HALVED_READ" | tail -n +2)")"
 note "the reader emits $HALVED_STEPS Step record(s) over a HALVED container (exit $(printf '%s\n' "$HALVED_READ" | head -1)) — not a control, a recorded fact about the format"
 
 # THE CONTROL THAT DISCRIMINATES: a 512-byte stub is not a container, the reader refuses it, and the
@@ -157,7 +176,7 @@ STUB="$CTL_DIR/stub.ct"
 head -c 512 "$DL_PATH" >"$STUB"
 STUB_READ="$(m24_ct_print "$M24_READERS/ct-print" "$STUB")"
 STUB_RC="$(printf '%s\n' "$STUB_READ" | head -1)"
-STUB_STEPS="$(printf '%s\n' "$STUB_READ" | tail -n +2 | grep -c '"type": "Step"' || true)"
+STUB_STEPS="$(ct_step_count "$(printf '%s\n' "$STUB_READ" | tail -n +2)")"
 note "the reader exits $STUB_RC with $STUB_STEPS Step record(s) over a 512-byte stub"
 assert_false "the reader REFUSES a 512-byte stub" test "$STUB_RC" -eq 0
 assert_false "…and does not emit the executed count over it" test "$STUB_STEPS" -eq "$STAT"

@@ -192,7 +192,11 @@ assert_ge "…and the stream is not degenerate" 100 "$STEPS"
 CONTAINER_STEPS="$(python3 - "$M34_WORK/$(basename "$SUBJECT" .ct).ct-print.json" <<'PYD'
 import json, sys
 doc = json.load(open(sys.argv[1]))
-print(sum(1 for e in doc.get('events', []) if e.get('type') == 'Step'))
+# BOTH SPELLINGS: the legacy decode tags a step `"type": "Step"`, the split
+# decode `"kind": "step"`. Counting only the first over a split container
+# answers ZERO and reports success.
+print(sum(1 for e in doc.get('events', [])
+          if e.get('type') == 'Step' or e.get('kind') == 'step'))
 PYD
 )"
 # CONFORMED TO THE SPEC, NOT LOOSENED. `codetracer-trace-format-spec`'s `trace-events.md`,

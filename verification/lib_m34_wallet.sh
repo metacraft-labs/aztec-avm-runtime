@@ -187,10 +187,29 @@ m34_log_events() { # <container>
   printf '%s\n' "$out" | tail -n +2 > "$json"
   timeout --signal=TERM --kill-after=10 "${M34_READER_TIMEOUT:-120}" python3 - "$json" <<'PY'
 import json, sys
+# BOTH READER SPELLINGS. The legacy combined-stream decode tags a log event
+# `{"type": "Event", "event_kind": "elkTraceLogEvent", "content": ...}`; the
+# split-stream decode tags it `{"kind": "io", "io_kind": "ioTraceLogEvent",
+# "text": ...}`. Reading only the first over a split container yields NO rows and
+# reports success, and the non-degeneracy assertion above is the only thing that
+# would have caught it.
 doc = json.load(open(sys.argv[1]))
 for e in doc.get('events', []):
-    if e.get('type') == 'Event' and e.get('event_kind') == 'elkTraceLogEvent':
-        print('%s\t%s' % (e.get('metadata', ''), e.get('content', '').replace('\t', ' ')))
+    legacy = e.get('type') == 'Event' and e.get('event_kind') == 'elkTraceLogEvent'
+    # `ioStderr` AND NOT A NAME ENDING 'TraceLogEvent', because the Nim reader
+    # COLLAPSES the fourteen `EventLogKind` values into four coarse ones and
+    # `io_event_stream.nim` documents `ioStderr` as the representative for
+    # ordinals 12 and 13 — TraceLogEvent and EvmEvent. So a trace-log event
+    # surfaces as `io_kind: "ioStderr"` there, and it is unambiguous: ordinary
+    # stdout/stderr writes are `Write`/`WriteOther` (0/2) and collapse to
+    # `ioStdout` instead.
+    split = e.get('kind') == 'io' and e.get('io_kind') == 'ioStderr'
+    if not (legacy or split):
+        continue
+    content = e.get('content')
+    if content is None:
+        content = e.get('text', '')
+    print('%s\t%s' % (e.get('metadata', ''), str(content).replace('\t', ' ')))
 PY
   rc=$?
   if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
