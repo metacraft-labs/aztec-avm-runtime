@@ -69,21 +69,22 @@ for arm in transaction parentOnly; do
     test "$(m39_container "$ct" steps)" != "UNREADABLE"
   assert_eq "and it declares column-aware steps" "true" "$(m39_container "$ct" columnAware)"
 done
-# THE READER CAN COME BACK EMPTY, so a positive step count is a measurement by an instrument that
-# has been seen to produce zero. A 512-byte stub, which is M38's own control and its reason: a
-# HALVED container still parses, because a `.ct` is a directory of independent streams.
+# THE READER DISCRIMINATES, so a positive step count is a measurement by an instrument that has
+# been seen to answer differently. M38's own control, for M38's reason: a 512-byte stub of the
+# container is REFUSED by the pinned reader, which exits non-zero and names `meta.dat` as the stream
+# it cannot find, while the whole container reads back with its steps.
 #
-# **AND IT ANSWERS ZERO RATHER THAN REFUSING, WHICH IS THE OPPOSITE OF WHAT THE FIRST DRAFT OF THIS
-# LINE ASSERTED.** M38's own check records exactly that — *"the fact that it does NOT refuse one is
-# recorded rather than assumed, because the first draft of that control asserted the opposite"* —
-# and this file's first draft asserted the opposite again, one milestone later, and was caught by
-# running it. Zero is the stronger control anyway: an instrument that refuses says nothing about
-# what it counts, and one that counts zero over a stub is one whose 60 is a reading.
+# The refusal is asserted by exit status AND by reason, separately. A reader that decoded the stub
+# as an empty recording would be answering where it should refuse — the shape a `got 0` takes — and
+# one that refused for an unrelated reason (a missing binary, a bad argument) would satisfy the exit
+# status alone.
 STUB="$(mktemp -d)/stub.ct"
 head -c 512 "$TX_CT" > "$STUB"
-assert_eq "the same reader answers ZERO steps over a 512-byte stub" "0" "$(m39_container "$STUB" steps)"
-assert_true "and it does not refuse it, which is a property of this format rather than a guess" \
-  test "$(m39_container "$STUB" steps)" != "UNREADABLE"
+STUB_RC=0
+STUB_ERR="$("$CT_PRINT" --full "$STUB" 2>&1 >/dev/null)" || STUB_RC=$?
+assert_true "the same reader REFUSES a 512-byte stub, with a non-zero exit" test "$STUB_RC" -ne 0
+assert_contains "and the refusal names the stream it could not find, so it is about the bytes" \
+  "meta.dat" "$STUB_ERR"
 rm -rf "$(dirname "$STUB")"
 
 echo "== 2. THE STEP COUNT IS AN IDENTITY: container = recorder + one entry step PER FRAME"

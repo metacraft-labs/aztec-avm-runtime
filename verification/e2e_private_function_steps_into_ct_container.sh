@@ -163,43 +163,33 @@ for arm in replay transfer; do
       -le "$(m38_num "$distinct" "$arm distinct positions")"
 done
 
-echo "== 6. TWO CONTROLS: A SYNTHESISED STREAM, AND A READER THAT CAN COME BACK EMPTY"
+echo "== 6. TWO CONTROLS: A SYNTHESISED STREAM, AND A READER THAT REFUSES A STUB"
 WORK="$(mktemp -d)"
-# 6a. THE READER CAN COME BACK EMPTY, AND IT DOES NOT REFUSE — MEASURED, NOT ASSUMED.
+# 6a. THE READER DISCRIMINATES A STUB FROM A CONTAINER — MEASURED, NOT ASSUMED.
 #
-# The first draft of this control asserted that a 512-byte stub is REFUSED. It is not: the pinned
-# `ct-print` exits **0** over one and prints a well-formed recording with no events and every stream
-# flag false. That is the same fact M27 recorded about a halved container — a `.ct` is a set of
-# independent streams and a reader over a partial one reports what it can find — and writing a
-# control on top of the opposite belief is what M29's review caught once already.
+# A 512-byte head of the real container is REFUSED by the pinned `ct-print`: it exits non-zero and
+# names `meta.dat` as the stream it cannot find. A reader that decoded a stub as a well-formed
+# recording with no events would be answering where it should refuse, and a step count read by such
+# a reader would not distinguish a recording from a truncation.
 #
-# So the control is the measurement rather than the refusal: the same reader answers ZERO over the
-# stub and 22 over the container, which is what makes the 22 a reading. The flag is asserted beside
-# it, because "no steps" and "no step STREAM" are different statements and the second is the one the
-# container itself makes.
+# So the control is the pair: the same reader REFUSES the stub and reads 22 steps out of the
+# container, which is what makes the 22 a reading. The refusal's REASON is asserted separately from
+# its exit status, because "refused" and "refused because the metadata stream is absent" are two
+# different claims and only the second says the reader looked at the bytes.
 head -c 512 "$REPLAY_CT" > "$WORK/stub.ct"
-STUB_STEPS="$(read_container "$WORK/stub.ct" steps)"
-assert_eq "the same reader answers zero over a 512-byte stub" "0" \
-  "$(m38_num "$STUB_STEPS" 'stub steps')"
-assert_true "so the container's own count is a reading rather than a constant" \
-  test "$(m38_num "$STUB_STEPS" 'stub steps')" -lt "$(m38_num "$R_STEPS" 'replay container steps')"
-assert_eq "and the stub declares no step stream, which the real container does" "false" \
-  "$("$CT_PRINT" --full "$WORK/stub.ct" 2>/dev/null | python3 -c '
-import json, sys
-try:
-    print("true" if json.load(sys.stdin)["metadata"]["flags"]["has_step_stream"] else "false")
-except Exception:
-    print("UNREADABLE")')"
-assert_eq "while the real container declares one" "true" \
+STUB_RC=0
+STUB_ERR="$("$CT_PRINT" --full "$WORK/stub.ct" 2>&1 >/dev/null)" || STUB_RC=$?
+assert_true "the same reader REFUSES a 512-byte stub, with a non-zero exit" test "$STUB_RC" -ne 0
+assert_true "while it reads a positive step count out of the real container, so that count is a reading" \
+  test "$(m38_num "$R_STEPS" 'replay container steps')" -gt 0
+assert_contains "and the refusal names the stream it could not find" "meta.dat" "$STUB_ERR"
+assert_eq "while the real container declares a step stream" "true" \
   "$("$CT_PRINT" --full "$REPLAY_CT" 2>/dev/null | python3 -c '
 import json, sys
 try:
     print("true" if json.load(sys.stdin)["metadata"]["flags"]["has_step_stream"] else "false")
 except Exception:
     print("UNREADABLE")')"
-note "the pinned ct-print does NOT refuse a truncated container: it exits 0 and reports an empty
-      recording. Recorded here because a control written on the opposite belief would pass for the
-      wrong reason."
 # 6b. THE SYNTHESISED STREAM. M29's discriminator applied to the private half: a step stream
 # fabricated from a formula over the program counter has positions that are not in the artifact's
 # file map at all. The predicate this check rests on — every step's path is one the container
