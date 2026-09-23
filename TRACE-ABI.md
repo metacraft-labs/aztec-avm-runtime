@@ -4,10 +4,10 @@
 
 # The trace event ABI — OQ-6, settled
 
-**THE MEASUREMENT DOES NOT HAVE A STABLE SIGN, AND THAT IS THE RESULT.** Run fourteen times — once in
-the system engine and thirteen times in this repository's dev shell — `perEvent - batched` came out
+**THE MEASUREMENT DOES NOT HAVE A STABLE SIGN, AND THAT IS THE RESULT.** Run fifteen times — once in
+the system engine and fourteen times in this repository's dev shell — `perEvent - batched` came out
 **+0.20 %**, **+1.09 %**, **-0.58 %**, **-0.09 %**, **+0.96 %**, **+0.98 %**, **+0.85 %**,
-**+0.74 %**, **+1.34 %**, **+1.21 %**, **+1.07 %**, **+1.83 %**, **+2.65 %** and **+1.22 %**. Every one is inside the declared **margin of 3 %**; runs 2, 3 and 4 were taken on the *same engine, the
+**+0.74 %**, **+1.34 %**, **+1.21 %**, **+1.07 %**, **+1.83 %**, **+2.65 %**, **+1.22 %** and **+2.09 %**. Every one is inside the declared **margin of 3 %**; runs 2, 3 and 4 were taken on the *same engine, the
 same module and the same binary*, and two of those have 95 % intervals that do not overlap and
 point opposite ways. So the honest statement is not "the batched ABI is about one per cent faster"
 — it is that **the difference is smaller than the run-to-run variation of the instrument that
@@ -101,11 +101,11 @@ silently.
 
 | arm | median (µs) | min (µs) | crossings | container (B) |
 |---|---|---|---|---|
-| `batched` | 347,922 | 333,914 | 25 | 1,748,992 |
-| `perEvent` | 354,552 | 339,625 | 100,000 | 1,748,992 |
-| `control` | 348,087 | 332,804 | 25 | 1,748,992 |
-| `nopBatched` | 5,068 | 4,624 | 25 | 143,360 |
-| `nopPerEvent` | 5,504 | 5,017 | 100,000 | 143,360 |
+| `batched` | 331,289 | 327,075 | 25 | 1,748,992 |
+| `perEvent` | 338,745 | 333,036 | 100,000 | 1,748,992 |
+| `control` | 332,728 | 327,002 | 25 | 1,748,992 |
+| `nopBatched` | 4,894 | 4,505 | 25 | 143,360 |
+| `nopPerEvent` | 5,293 | 4,866 | 100,000 | 143,360 |
 
 *Every figure in this table moved when the `trace_format` pin advanced to `c8802c548f` and the
 writer's compressor became C libzstd. **The container is the headline: 4,694,016 → 1,630,208
@@ -114,19 +114,19 @@ does that `ruzstd`'s `Fastest`-only encoder could not. Every timing arm got fast
 terms with it — there is less to write. The RATIO §2 exists to measure is unmoved and is still
 inside the margin; see run 12 in §8.*
 
-*And every figure moved again when M41 made the Nim writer the default (runs 13 and 14 in §8):
+*And every figure moved again when M41 made the Nim writer the default (runs 13 to 15 in §8):
 the table above is Path B's. The 100,000-event container is **1,748,992 bytes** — larger than Path
 A's 1,630,208 on C libzstd, because the two writers lay their streams out differently — and the
 writer-work arms are faster. The ratio §2 measures is again inside the margin.*
 
 | comparison | median | 95 % interval | reads as |
 |---|---|---|---|
-| `perEvent - batched` | **+1.22 %** | **[-1.03, +3.46] %** | within noise |
-| `control - batched` | -0.17 % | [-3.58, +3.24] % | the instrument is calibrated |
-| `nopPerEvent - nopBatched` | +7.84 % | [+1.83, +13.86] % | the crossing, priced alone |
+| `perEvent - batched` | **+2.09 %** | **[+1.42, +2.76] %** | within noise |
+| `control - batched` | +0.12 % | [-0.41, +0.65] % | the instrument is calibrated |
+| `nopPerEvent - nopBatched` | +9.03 % | [+5.02, +13.04] % | the crossing, priced alone |
 
 **Verdict: `within-noise`.** The comparator resolves a verdict only when the whole interval lies
-OUTSIDE ±3 %, and none of the fourteen runs resolves one. Within a *single* run the interval is narrow
+OUTSIDE ±3 %, and none of the fifteen runs resolves one. Within a *single* run the interval is narrow
 enough to exclude zero — twice, in opposite directions — which is exactly the pathology
 `_timing_compare.py`'s header records for a different measurement: *"six runs of the same
 measurement over the same two binaries produced mutually disjoint 95 % intervals"*. The
@@ -170,7 +170,7 @@ criterion is:
 > **The per-event ABI's cost is linear in an engine constant this project has not measured and
 > does not control; the batched ABI's is linear in one it does.**
 
-4.4 ns per crossing is *V8-in-node-24*'s number. M27 packages this runtime for a browser and M28
+4.0 ns per crossing is *V8-in-node-24*'s number. M27 packages this runtime for a browser and M28
 gates on one, and neither engine has been measured. A per-event ABI makes a 38,903-step `burn`
 recording's overhead a function of whichever engine the page happens to run in; a batched ABI
 makes it a function of `encodeStep`, which is ours and which every arm above exercises.
@@ -479,15 +479,15 @@ reconsidered if any of these changed:
 
 | quantity | measured | where |
 |---|---|---|
-| `perEvent - batched`, median | +1.22 % | §2 |
-| its 95 % interval | [-1.03, +3.46] % | §2 |
-| cost of one boundary crossing in V8 | ~4.4 ns | §2 |
-| the crossing's share of a 100k-event recording | 0.13 % | §2 |
-| writer work versus boundary work | ~798× | §2 |
+| `perEvent - batched`, median | +2.09 % | §2 |
+| its 95 % interval | [+1.42, +2.76] % | §2 |
+| cost of one boundary crossing in V8 | ~4.0 ns | §2 |
+| the crossing's share of a 100k-event recording | 0.12 % | §2 |
+| writer work versus boundary work | ~830× | §2 |
 | containers produced by the two ABIs | byte-identical | §3 |
 | host-side buffer at 250,000 events | 65,536 B, constant | §7 |
 
-**All fourteen runs, retained**, because the disagreement between them is the finding rather than a
+**All fifteen runs, retained**, because the disagreement between them is the finding rather than a
 nuisance. None is wrong; they are what this measurement does.
 
 | # | engine | `perEvent - batched` | 95 % interval | `control - batched` | `nopPerEvent - nopBatched` | crossing |
@@ -505,9 +505,10 @@ nuisance. None is wrong; they are what this measurement does.
 | 11 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M40's module, source steps) | +1.07 % | [+0.36, +1.78] % | +0.22 % | +21.21 % | ~8.7 ns |
 | 12 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M41's module, **C libzstd**) | +1.83 % | [+0.67, +2.99] % | -0.23 % | +14.03 % | ~8.7 ns |
 | 13 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M41's module, **Path B — the Nim writer**) | +2.65 % | [-0.58, +5.87] % | -0.31 % | +11.17 % | ~5.8 ns |
-| 14 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **the SAME module as run 13**) | **+1.22 %** | **[-1.03, +3.46] %** | -0.17 % | +7.84 % | ~4.4 ns |
+| 14 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **the SAME module as run 13**) | +1.22 % | [-1.03, +3.46] % | -0.17 % | +7.84 % | ~4.4 ns |
+| 15 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, the SAME module as runs 13 and 14) | **+2.09 %** | **[+1.42, +2.76] %** | +0.12 % | +9.03 % | ~4.0 ns |
 
-Run 14 is the one §2 tabulates, because it is the one `arms.tsv` currently holds and the one the
+Run 15 is the one §2 tabulates, because it is the one `arms.tsv` currently holds and the one the
 check compares this file against. **Runs 2, 3 and 4 are the same engine, the same module and the
 same binary**, and runs 2 and 3 have disjoint intervals with opposite signs — which is why §2 says
 the sign is not stable rather than quoting any one run's interval as a precision. **Runs 5 to 8
@@ -544,6 +545,12 @@ hashes `ct-host/src/{writer,abi,config}.ts` whole and M41 added the Path B kind 
 run-10 mechanism again. It reads **+1.22 %, [-1.03, +3.46] %** against run 13's +2.65 %: two runs
 of one binary more than a point apart with overlapping intervals, which is the between-run nuisance
 §2 describes, measured once more on a fourth writer configuration.
+
+**RUN 15 IS A SECOND REPLICATE OF RUN 13**, for the same reason: `CtWriter`'s constructor now
+refuses a module whose `ct_writer_kind()` contradicts the declared writer path, which edits
+`writer.ts` and `config.ts` and so the stamp. It reads **+2.09 %, [+1.42, +2.76] %** — the first
+interval on this module that excludes zero, and still wholly inside the ±3 % margin, so the
+verdict stays `within-noise`. Runs 13, 14 and 15 span +1.22 to +2.65 on one binary.
 
 **RUN 10 EXISTS BECAUSE A COMMENT WAS CORRECTED**, which is a fact about the instrument worth
 having in the record. `_m24_oq6_stamp` hashes `ct-host/src/{writer,abi,config}.ts` and

@@ -69,6 +69,39 @@ export const WRITER_KIND_OF: Readonly<Record<WriterPath, number>> = {
 };
 
 /**
+ * The module that was loaded is not the writer the configuration declares.
+ *
+ * The declared path is a label every consumer records beside the container; `ct_writer_kind()` is
+ * the module's own answer. `CtWriter`'s constructor compares the two before it opens a session, so
+ * a recording can never carry the name of a writer that did not write it. There is no option that
+ * skips the comparison: a caller holding the other module declares the other path.
+ */
+export class WriterKindMismatch extends Error {
+  readonly declaredPath: WriterPath;
+  readonly declaredKind: number;
+  readonly reportedKind: number;
+  constructor(declaredPath: WriterPath, reportedKind: number) {
+    const declaredKind = WRITER_KIND_OF[declaredPath];
+    const reportedPath = (Object.keys(WRITER_KIND_OF) as WriterPath[]).find(
+      (p) => WRITER_KIND_OF[p] === reportedKind,
+    );
+    super(
+      `the tracing configuration declares the '${declaredPath}' writer path ` +
+        `(ct_writer_kind() = ${declaredKind}), and the module that was loaded reports ` +
+        `ct_writer_kind() = ${reportedKind}, ` +
+        (reportedPath ? `the '${reportedPath}' writer` : 'which is no writer path this host knows') +
+        '. Refusing before a session is opened: the recording would name a writer that did not ' +
+        'write it. Load the module the configuration declares, or declare the path of the module ' +
+        'that is loaded.',
+    );
+    this.name = 'WriterKindMismatch';
+    this.declaredPath = declaredPath;
+    this.declaredKind = declaredKind;
+    this.reportedKind = reportedKind;
+  }
+}
+
+/**
  * Which writer paths can produce column-aware steps **as wired into this runtime**.
  *
  * A DATA TABLE RATHER THAN A CONDITIONAL, so adding Path B is a row and not an edit to the gate.

@@ -19,6 +19,14 @@
 // `@aztec/stdlib/abi`'s `parseDebugSymbols`). It is decoded here, in a TOOL, with `node:zlib` —
 // deliberately not in `ct-host`, which has no npm dependencies and imports no Node module in its
 // trace path, and must go on not doing either for M27 and M28.
+//
+// TWO WRITER PATHS APPEAR HERE, AND WHICH ONE AN ARM NAMES DEPENDS ON WHETHER IT LOADS A MODULE.
+// Every arm that constructs a `CtWriter` declares `WRITER_PATH_B_NIM`, the writer `--module`
+// defaults to: the host refuses a declaration that disagrees with the module's `ct_writer_kind()`,
+// and none of those arms is about the label. `columnGate` still resolves against
+// `WRITER_PATH_A_PURE_RUST`, because the DD-7 rule it measures — columns refused unless the path
+// carries them or the recording is at rung 1 — only has a refusal to show on the path whose
+// `CARRIES_COLUMNS` row is false, and it resolves configurations without loading a module.
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { inflateRawSync } from 'node:zlib';
@@ -44,6 +52,7 @@ import {
   REQUIRED_EXPORTS,
   ALL_REQUIRED_EXPORTS,
   WRITER_PATH_A_PURE_RUST,
+  WRITER_PATH_B_NIM,
   instantiateCtWriter,
   lineColumnOf,
   lineLengths,
@@ -248,7 +257,7 @@ if (ARTIFACT) {
   // produce `null` and the arm would pass by not resolving anything.
   // ---------------------------------------------------------------------------
   {
-    const cfg = resolveTracingConfig(baseConfig({ columns: true, mappingRung: RUNG_SOURCE }), WRITER_PATH_A_PURE_RUST);
+    const cfg = resolveTracingConfig(baseConfig({ columns: true, mappingRung: RUNG_SOURCE }), WRITER_PATH_B_NIM);
     const w = await newWriter(cfg, { batchRecords: 64 });
     const map = new ContractSourceMap(real.debugInfo, real.bytecodeLength, real.files, (p, ll) =>
       w.internPath(p, ll),
@@ -309,7 +318,7 @@ if (ARTIFACT) {
   // "never silently degrades" is a sentence in a document.
   // ---------------------------------------------------------------------------
   {
-    const cfg = resolveTracingConfig(baseConfig({ mappingRung: RUNG_SOURCE }), WRITER_PATH_A_PURE_RUST);
+    const cfg = resolveTracingConfig(baseConfig({ mappingRung: RUNG_SOURCE }), WRITER_PATH_B_NIM);
     const w = await newWriter(cfg, { batchRecords: 64 });
     w.declareRung(FULL_WIDTH_ADDRESS, RUNG_SOURCE, 'claimed without resolving anything');
     for (const pc of [706, 715, 720]) w.push(stepAt(pc, FULL_WIDTH_ADDRESS));
@@ -339,7 +348,7 @@ if (ARTIFACT) {
   // an unpositioned step rather than by the declaration it contradicts.
   // ---------------------------------------------------------------------------
   {
-    const cfg = resolveTracingConfig(baseConfig({ mappingRung: RUNG_BYTECODE }), WRITER_PATH_A_PURE_RUST);
+    const cfg = resolveTracingConfig(baseConfig({ mappingRung: RUNG_BYTECODE }), WRITER_PATH_B_NIM);
     const w = await newWriter(cfg, { batchRecords: 64 });
     w.declareRung(FULL_WIDTH_ADDRESS, RUNG_BYTECODE, 'no artifact was supplied for this contract');
     for (const pc of [706, 715, 720]) w.push(stepAt(pc, FULL_WIDTH_ADDRESS));
@@ -407,7 +416,7 @@ if (ARTIFACT) {
 // asserting that this file agrees with itself.
 // ---------------------------------------------------------------------------
 {
-  const cfg = resolveTracingConfig(baseConfig(), WRITER_PATH_A_PURE_RUST);
+  const cfg = resolveTracingConfig(baseConfig(), WRITER_PATH_B_NIM);
   const w = await newWriter(cfg, { batchRecords: 8 });
   w.push(stepAt(11, FULL_WIDTH_ADDRESS));
   const rec = w.close();
@@ -430,7 +439,7 @@ if (ARTIFACT) {
 // ARM: desync — more positions than steps must be refused, not absorbed.
 // ---------------------------------------------------------------------------
 {
-  const cfg = resolveTracingConfig(baseConfig({ mappingRung: RUNG_SOURCE }), WRITER_PATH_A_PURE_RUST);
+  const cfg = resolveTracingConfig(baseConfig({ mappingRung: RUNG_SOURCE }), WRITER_PATH_B_NIM);
   const w = await newWriter(cfg, { batchRecords: 64 });
   const id = w.internPath('/aztec/token.nr', lineLengths('a\nbb\nccc\n'));
   w.push(stepAt(1, FULL_WIDTH_ADDRESS), { pathId: id, line: 1, column: 1 });

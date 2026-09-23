@@ -286,11 +286,14 @@ out.gates.push(
   }),
 );
 // 5. THE CONTROL FOR THE GATES: an ordinary recording must NOT throw. Without this every gate
-//    above is satisfied by a writer that refuses everything.
+//    above is satisfied by a writer that refuses everything. It declares the path of the module
+//    it loads, as every recording must: the host refuses a declaration the module's
+//    `ct_writer_kind()` contradicts, and a control that tripped that refusal would control nothing.
+//    Gates 1, 2 and 4b keep Path A because they resolve configurations and load no module.
 out.gates.push(
   await attempt('ordinary-recording-is-allowed', async () => {
     const inst = await instantiateCtWriter(bytes);
-    const w = new CtWriter(inst, config(false, WRITER_PATH_A_PURE_RUST), { batchRecords: 8 });
+    const w = new CtWriter(inst, config(false, WRITER_PATH_B_NIM), { batchRecords: 8 });
     for (const e of events(10, 5)) w.push(e);
     const r = w.close();
     if (r.events !== 10) throw new Error(`the control recording wrote ${r.events} of 10 events`);

@@ -3846,6 +3846,9 @@ verify-abi-functions-served:
 verify-nim-writer-zero-imports:
     @verification/verify_nim_writer_module_is_zero_import.sh
 
+verify-declared-writer-path:
+    @verification/verify_declared_writer_path_matches_module.sh
+
 verify-ruzstd-defect-absent:
     @verification/verify_ruzstd_checksum_defect_absent_from_shipped_path.sh
 
@@ -3869,7 +3872,8 @@ verify-m41:
       verify_ruzstd_checksum_defect_absent_from_shipped_path \
       verify_in_memory_reader_reachable_from_browser \
       verify_container_equivalence_characterised \
-      e2e_runtime_traces_through_nim_writer
+      e2e_runtime_traces_through_nim_writer \
+      verify_declared_writer_path_matches_module
     do
       echo "=== $check"
       verification/"$check".sh || rc=1

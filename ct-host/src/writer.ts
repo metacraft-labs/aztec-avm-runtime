@@ -41,6 +41,7 @@ import {
   MappingRungDegraded,
   UnresolvedTracingConfig,
   WRITER_KIND_OF,
+  WriterKindMismatch,
   isResolvedTracingConfig,
   type ResolvedTracingConfig,
   type WriterPath,
@@ -164,6 +165,14 @@ export class CtWriter {
     }
     if (!(ex.memory instanceof WebAssembly.Memory)) {
       throw new Error('ct_writer.wasm does not export its linear memory');
+    }
+    // THE DECLARED WRITER IS THE LOADED WRITER. Every host entry point constructs a `CtWriter`
+    // from an instance and a resolved configuration, so this is the one place where both are
+    // known. Checked before anything is allocated or opened, so a refused instance is left as it
+    // was found.
+    const reportedKind = ex.ct_writer_kind();
+    if (!writerKindMatchesPath(reportedKind, config.writerPath)) {
+      throw new WriterKindMismatch(config.writerPath, reportedKind);
     }
     // The module's own record size, not this host's constant. A disagreement here is the
     // silently-misaligned-container failure and it is refused before a single byte is written.

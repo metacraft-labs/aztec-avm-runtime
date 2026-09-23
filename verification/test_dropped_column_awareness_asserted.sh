@@ -234,10 +234,13 @@ try {
   console.log("READBACK\t" + cfg2.program + "," + cfg2.writerPath + "," + String(cfg2.columns));
 } catch (e) { no("frozen-config-readback", e); }
 
-// 6. THE CONTROL: an ordinary recording, through the public export, must be ALLOWED.
+// 6. THE CONTROL: an ordinary recording, through the public export, must be ALLOWED. It declares
+//    the writer the shipped module IS, because the host refuses a declared path the module`s
+//    `ct_writer_kind()` contradicts; the gates above that name Path A resolve configurations, or
+//    are refused by identity before the module is asked anything.
 const inst4 = await m.instantiateCtWriter(bytes);
 try {
-  const w = new m.CtWriter(inst4, m.resolveTracingConfig({ ...base, columns: false }, m.WRITER_PATH_A_PURE_RUST), { batchRecords: 4 });
+  const w = new m.CtWriter(inst4, m.resolveTracingConfig({ ...base, columns: false }, m.WRITER_PATH_B_NIM), { batchRecords: 4 });
   const addr = new Uint8Array(32);
   for (let i = 0; i < 9; i++) w.push({ contextId: 0, pc: i, opcode: i, l2Gas: 1n, daGas: 0n, contractAddress: addr });
   const r = w.close();

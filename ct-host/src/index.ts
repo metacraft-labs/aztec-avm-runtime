@@ -66,6 +66,7 @@ export {
   WRITER_KIND_OF,
   WRITER_PATH_A_PURE_RUST,
   WRITER_PATH_B_NIM,
+  WriterKindMismatch,
   isResolvedTracingConfig,
   resolveTracingConfig,
   type ResolvedTracingConfig,
