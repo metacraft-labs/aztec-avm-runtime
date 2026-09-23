@@ -104,14 +104,22 @@ matching an empty list" \
   str_has_line_re "$LOCKINFO" "^DUPLICATES${TAB}[1-9][0-9]*${TAB}"
 
 # ---------------------------------------------------------------------------
-# 2. Cargo's own answer.
+# 2. Cargo's own answer — for the `path-a` graph, NAMED, because it is the only graph the trace
+#    crates are in.
+#
+# The lock file above is feature-independent; `cargo tree` is not. Since M41 the crate's default is
+# `path-b`, whose writer is Nim source linked as a static library, so the default graph carries no
+# `codetracer_*` crate at all and `--duplicates` over it reports NOTHING — "no codetracer crate is
+# duplicated" would then be true of a graph that contains none, which is the vacuous scan the
+# non-emptiness assertion below exists to refuse. The Path A module is still built (the
+# differential checks compare it with the shipped one), so its graph is the one asked about.
 # ---------------------------------------------------------------------------
 TREE="$(m24_require_bounded 900 "cargo tree --duplicates" \
   nix shell nixpkgs#rustup nixpkgs#capnproto --command bash -c '
 set -uo pipefail
 export PATH="$CARGO_HOME/bin:$PATH"
 cd "$M24_CRATE" || exit 1
-cargo tree --duplicates --target wasm32-unknown-unknown 2>&1
+cargo tree --duplicates --target wasm32-unknown-unknown --no-default-features --features path-a 2>&1
 echo "TREE_EXIT $?"
 ' )" || true
 assert_true "cargo tree ran" str_has_sub "$TREE" 'TREE_EXIT'

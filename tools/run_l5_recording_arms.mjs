@@ -46,7 +46,7 @@ import {
   instantiateCtWriter,
   resolveTracingConfig,
   RUNG_SOURCE,
-  WRITER_PATH_A_PURE_RUST,
+  WRITER_PATH_B_NIM,
 } from '../ct-host/src/index.ts';
 import { artifactCrypto, installedProtocolContracts } from '../replay/tools/artifact_sources.mjs';
 
@@ -150,7 +150,7 @@ async function openWriter(rung) {
       workdir: '/aztec',
       mappingRung: rung,
       columns: rung === RUNG_SOURCE,
-    }, WRITER_PATH_A_PURE_RUST),
+    }, WRITER_PATH_B_NIM),
     { batchRecords: 64 },
   );
 }

@@ -26,6 +26,7 @@ import {
   RUNG_NAME,
   RUNG_SOURCE,
   WRITER_KIND_PATH_A_PURE_RUST,
+  WRITER_KIND_PATH_B_NIM,
   type MappingRung,
 } from './abi.ts';
 
@@ -56,7 +57,7 @@ export class MappingRungDegraded extends Error {
 
 /** DD-7's Path A: the pure-Rust `CtfsTraceWriter`. */
 export const WRITER_PATH_A_PURE_RUST = 'path-a-pure-rust';
-/** DD-7's Path B: the column-aware Nim writer. Declared, and not available on wasm today. */
+/** DD-7's Path B: the column-aware Nim writer. What `ct-writer`'s default build links since M41. */
 export const WRITER_PATH_B_NIM = 'path-b-nim';
 
 export type WriterPath = typeof WRITER_PATH_A_PURE_RUST | typeof WRITER_PATH_B_NIM;
@@ -64,7 +65,7 @@ export type WriterPath = typeof WRITER_PATH_A_PURE_RUST | typeof WRITER_PATH_B_N
 /** Which `ct_writer_kind()` value each declared path corresponds to. */
 export const WRITER_KIND_OF: Readonly<Record<WriterPath, number>> = {
   [WRITER_PATH_A_PURE_RUST]: WRITER_KIND_PATH_A_PURE_RUST,
-  [WRITER_PATH_B_NIM]: 2,
+  [WRITER_PATH_B_NIM]: WRITER_KIND_PATH_B_NIM,
 };
 
 /**

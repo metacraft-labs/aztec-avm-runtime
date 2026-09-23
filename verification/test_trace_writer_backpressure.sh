@@ -20,10 +20,11 @@
 # bound its buffer; the identity is what says the batching is the batching that was designed.
 #
 # THE MEMORY-GROWTH PATH IS ASSERTED TO HAVE BEEN EXERCISED. `WebAssembly.Memory.grow` DETACHES
-# `memory.buffer`, killing every cached `DataView`. At 250,000 events it happens hundreds of
-# times. A run in which it never happened would prove nothing about the host's handling of it, and
-# `memoryGrowths` is counted so that "the code path exists" and "the code path ran" are different
-# statements.
+# `memory.buffer`, killing every cached `DataView`. How OFTEN it happens is the writer's allocation
+# pattern, not the host's: the pure-Rust writer grew memory 18 times at 25,000 events and 166 at
+# 250,000, the Nim writer 5 and 9 — it grows geometrically. A run in which it never happened would
+# prove nothing about the host's handling of it, and `memoryGrowths` is counted so that "the code
+# path exists" and "the code path ran" are different statements.
 #
 # Run: just verify-ct-backpressure
 
@@ -90,8 +91,17 @@ assert_ge "the large arm really did cross many times, so the identity is not 1 =
 # ---- the detach path was exercised -----------------------------------------
 assert_ge "linear memory grew during the large recording, so the buffer-detach path RAN" "1" \
   "$(m24_arm 'd["backpressure"]["largeMemoryGrowths"]')"
-assert_ge "and it happened many times, not once by luck" "10" \
-  "$(m24_arm 'd["backpressure"]["largeMemoryGrowths"]')"
+# REPEATEDLY, AND DRIVEN BY THE RECORDING. Stated comparatively rather than as a count, because the
+# count is the writer's: "at least ten" described the pure-Rust writer's growth step and the Nim
+# writer, which the runtime ships, grows geometrically and reaches 9 at 250,000 events. What the
+# host must survive is the SAME cached view dying more than once in one recording, and a recording
+# ten times larger dying MORE often — which a fixed start-up allocation, the "once by luck" this
+# guards against, cannot produce.
+SMALL_GROWTHS="$(m24_arm 'd["backpressure"]["smallMemoryGrowths"]')"
+LARGE_GROWTHS="$(m24_arm 'd["backpressure"]["largeMemoryGrowths"]')"
+assert_ge "even the small recording detached the buffer more than once" "2" "$SMALL_GROWTHS"
+assert_ge "and the ten-times-larger one detached it MORE often, so the count follows the recording" \
+  "$(( ${SMALL_GROWTHS:-0} + 1 ))" "$LARGE_GROWTHS"
 
 # ---- HALF TWO: the container is CORRECT ------------------------------------
 CT="$(m24_arm 'd["backpressure"]["largeFile"]')"

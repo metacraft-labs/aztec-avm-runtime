@@ -44,7 +44,7 @@ enqueues a second directly.
 | instructions the public half executed | **146** |
 | AVM contexts they ran in | **2** |
 | distinct opcodes among them | **15** |
-| the public half's container bytes | **163840** |
+| the public half's container bytes | **147456** |
 | steps of it positioned in aztec-nr source | **110** |
 | instructions the unseeded control executed | **1** |
 
@@ -122,10 +122,10 @@ Two wasm modules and **no third writer**:
 | | what it is |
 |---|---|
 | `m40_private_trace.wasm` | `noir_tracer` built for `wasm32-unknown-unknown` from the PUBLISHED `noir`, with M38's executor seam and a tape-replaying foreign-call executor. It stops at the CodeTracer low-level event stream and emits it as an ordered op list. |
-| `ct_writer.wasm` | the page's own Path A writer, already there, already used by the public half. It gains one export pair for this: `ct_source_step` / `ct_source_steps_written`. |
+| `ct_writer.wasm` | the page's own writer — DD-7's Path B, the Nim writer, since M41 — already there, already used by the public half. It gains one export pair for this: `ct_source_step` / `ct_source_steps_written`. |
 
 **The Noir tracer links no container writer on this path at all**, which is why `JOIN-SHAPE.md` §2's
-facts 6 and 7 are untouched and `wasm/webpage` stays unpublished — asserted on every run rather than
+fact 7 is untouched and `wasm/webpage` stays unpublished (fact 6 is retired by M41 — see there) — asserted on every run rather than
 asserted about. This is a different answer to the same need rather than the answer OQ-7 ruled out.
 
 | | derived |
@@ -135,7 +135,7 @@ asserted about. This is a different answer to the same need rather than the answ
 | private frames in the container | **2** |
 | ops replayed into the writer | **147** |
 | paths the private container interns | **78** |
-| the private half's container bytes | **188416** |
+| the private half's container bytes | **172032** |
 | steps the NATIVE probe produced | **64** |
 | column differences between them | **2** |
 | imports the tracer module declares | **4** |
@@ -171,17 +171,20 @@ used twice, and it is the only shape that can catch a defect in either.
 
 ### The column reaches the container, and that is a digest pair
 
-The pinned `ct-print` renders a Path A container through its **legacy `events.log` decoder**, whose
-`Step` record is `(path_id, line)` and has no column field at all. Reading that absence as "the
-browser's container has no columns" would be a fact about the READER stated as one about the
-container — this campaign's "an absence asked of a tree that excludes the subject by construction".
+When this was written the pinned `ct-print` rendered this container through its **legacy
+`events.log` decoder**, whose `Step` record is `(path_id, line)` and has no column field at all, so
+reading that absence as "the browser's container has no columns" would have been a fact about the
+READER stated as one about the container. Neither writer emits `events.log` any more, the container
+now decodes through the split-stream reader, and that reader surfaces the columns directly — one per
+step the tracer gave a column, plus one per frame entry — which the check asserts as an exact figure.
 
-Measured instead by writing the same transaction twice with one field changed:
+The digest pair is kept, because it measures the same thing at the writer's boundary rather than
+through a reader: the same transaction written twice with one field changed:
 
 | arm | container bytes | sha256 |
 |---|---|---|
-| the tracer's columns | 188,416 | `fcec0c15…` |
-| every step's column set to 0 | 188,416 | `0e2c6c79…` |
+| the tracer's columns | 172,032 | `79bba749…` |
+| every step's column set to 0 | 172,032 | `a7f5805f…` |
 
 Same op list, same steps, same paths, same size — a different digest, because a column is a delta
 opcode rather than a field. The column reaches the container.

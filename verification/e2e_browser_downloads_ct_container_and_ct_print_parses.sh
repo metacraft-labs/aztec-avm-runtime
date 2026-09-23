@@ -122,7 +122,7 @@ assert_eq "…the artifact itself earning rung 1, the source rung" "1" "$RUNG"
 assert_eq "…and the DECLARED rung is 1 exactly when every step of the contract was positioned" \
   "$([ "$UNPOS" -eq 0 ] && echo 1 || echo 2)" "$DECLARED"
 # DD-7: which writer path produced this, read off the module rather than declared by the host.
-assert_eq "…written by Path A, the pure-Rust writer, per ct_writer_kind()" "1" "$KIND"
+assert_eq "…written by Path B, the Nim writer the runtime ships, per ct_writer_kind()" "2" "$KIND"
 assert_true "…and the rung verdict names the mechanism it rests on" \
   str_has_sub "$(m27_arm download recording.rungReason)" 'brillig_locations'
 # M29: the declared rung's reason carries the SPLIT, not just the number. A rung with no reason is

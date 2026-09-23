@@ -55,6 +55,8 @@ export const CT_ERR_NO_FRAME = -10;
 
 /** `ct_writer_kind()` values. `1` is DD-7's Path A, the pure-Rust `CtfsTraceWriter`. */
 export const WRITER_KIND_PATH_A_PURE_RUST = 1;
+/** `2` is DD-7's Path B, the Nim writer — the one `ct-writer`'s default build links since M41. */
+export const WRITER_KIND_PATH_B_NIM = 2;
 
 // ---------------------------------------------------------------------------
 // §9.2's SOURCE-MAPPING LADDER. Mirrors `ct-writer/src/lib.rs`'s `CT_RUNG_*`.

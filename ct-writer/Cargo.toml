@@ -40,59 +40,25 @@ codetracer_trace_writer = { path = "build-wasm-deps/ctf/codetracer_trace_writer"
 # CREATED this seam rather than flipping one.
 #
 # ---------------------------------------------------------------------------
-# THE DEFAULT IS `path-a`, AND FLIPPING IT WAS TRIED AND MEASURED RATHER THAN DECLINED.
+# THE DEFAULT IS `path-b` — THE NIM WRITER — AND IT WAS FLIPPED ON MEASUREMENT.
 #
-# M41's goal is that this runtime writes through the Nim writer, and `path-b` is the writer that
-# should win on the merits: `ruzstd`, which Path A links, returns 4,194,304 bytes of wrong data
-# where C libzstd refuses a frame corrupted under a content checksum; Path A has no in-memory
-# reader, which a browser needs because it holds bytes and no path; and Path A stamps `meta.dat`
-# version 3 while Path B stamps 4. Size is not the reason for anything here — Path B's module is
-# 480,833 bytes larger and that was known when the decision was taken.
+# The user's decision, taken on two facts about Path A rather than on speed: `ruzstd`, which Path A
+# linked on wasm, returns 4,194,304 bytes of wrong data where C libzstd refuses a frame corrupted
+# under a content checksum; and Path A has no in-memory reader, which a browser needs because it
+# holds bytes and no path. Size was known and accepted: the Path B module is 743,420 bytes against
+# Path A's 480,600, both with zero imports.
 #
-# THE FLIP WAS MADE AND MEASURED TWICE, and the second time the blockers under it were fixed first.
+# The flip was attempted three times before it landed, and each attempt named what blocked it:
+# a v3-era reader that answered with nothing rather than refusing, container-shape constants that
+# described Path A, and a public-half container that read back as zero steps. The pins, the spec
+# (`start()`'s three records, container v4, `meta.dat` v4, no `events.log`) and the checks' split
+# decoder removed all three; `WRITER-SEAM.md` §9–§9g carries those measurements and §11 the one
+# that landed it. Both writers now produce containers that differ only by the minted recording id
+# and the catalogued call-argument attachment.
 #
-# First attempt — `default = ["path-b"]` alone, every M41 check green:
-#
-#   m24  350 assertions, 14 failures -> 350, 58   (+44)
-#   m25  456 assertions,  0 failures -> 456, 15   (+15)
-#   m40  145 assertions, 12 failures -> 145, 26   (+14)
-#   m38  107,  4  and  m39  80, 10   -> UNCHANGED
-#
-# Second attempt — the reader anchor advanced WITH it (a v4 reader refuses the v3 container the old
-# default writes, so neither moves alone), M24's roundtrip control redesigned property-first, and
-# `ct-print`'s two output schemas reconciled by a shared decoder:
-#
-#   m40  145, 12 -> 145, 10   (BETTER than baseline)
-#   m24  356, 15 -> 356, 43
-#   m25  456,  0 -> 456, 49
-#
-# Every assertion COUNT is unchanged in both, so nothing structural moved. The FIRST attempt failed
-# on one thing: this repository verifies every container it writes with a version-3-era `ct-print`,
-# which on M24's own 4.6 MB Path B container reports 0 events, an empty program and 1,830 steps
-# where there are 250,001 — and does NOT refuse, it answers.
-#
-# What remains after the SECOND attempt is not a defect in either writer. M24's and M25's content
-# assertions are CONSTANTS DESCRIBING PATH A'S CONTAINER SHAPE — exactly N steps, exactly one
-# `Call`, exactly one `Function`, the first step at pc 0, five variables on step 0. The Nim
-# writer's `start()` emits a step and interns no top-level function, so every one of them is off by
-# the start-step and the toplevel frame, and both are differences `WRITER-SEAM.md` §5 already
-# catalogues WITH REASONS. Re-expressing them is re-deciding what M24 measures.
-#
-# So the flip is blocked on a PIN, not on a writer, and the pin is the one M41 was told not to
-# move: `trace_format_nim` names a commit deliberately so `test_ct_container_roundtrip_ct_print`'s
-# reader difference stays at ONE commit, and its control is that commit's parent. Moving it
-# forward makes the control `8cfb1bb`, which READS a v4 container, so the check's "the parent must
-# not read it" arm has to be re-designed rather than re-pointed.
-#
-# **The default therefore stays `path-a`.** Shipping v3 is a LOUD failure downstream — current
-# readers refuse it by name — whereas shipping v4 today would leave this repository verifying its
-# own containers against writer-specific constants that do not describe them, which trades a
-# refusal for a silence.
-#
-# Everything the two attempts left behind is KEPT, because all of it is an improvement under either
-# writer: the property-first control, the schema-agnostic decoder, both explicit build arms, and
-# the C toolchain exports. `WRITER-SEAM.md` §9, §9c, §9d and §9e carry the full measurement and the
-# named follow-ups.
+# `path-a` STAYS BUILDABLE AND IS BUILT. The differential checks compare the two writers on the same
+# input, and `verification/build_ct_writer_wasm.sh` names both arms explicitly (`--path-a`,
+# `--path-b`) so that no caller gets one of them by relying on the default.
 #
 # `path-b` WINS WHEN BOTH ARE ON, and that precedence is declared here rather than left for a
 # reader to derive from `cfg` polarity in `backend.rs`. Cargo features are additive — nothing can
@@ -111,7 +77,7 @@ codetracer_trace_writer = { path = "build-wasm-deps/ctf/codetracer_trace_writer"
 # and compiled by `build.rs` at the revision `pins.json` declares as `trace_format_nim_writer`, and
 # linked as a static library. That is why the feature list looks lopsided.
 [features]
-default = ["path-a"]
+default = ["path-b"]
 path-a = ["dep:codetracer_trace_types", "dep:codetracer_trace_writer"]
 path-b = []
 

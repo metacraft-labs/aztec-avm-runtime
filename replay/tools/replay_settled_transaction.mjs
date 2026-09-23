@@ -39,7 +39,7 @@ import {
   resolveContractArtifact,
 } from '../src/index.ts';
 import { CtWriter, ContractSourceMap, instantiateCtWriter, resolveTracingConfig,
-  WRITER_PATH_A_PURE_RUST } from '../../ct-host/src/index.ts';
+  WRITER_PATH_B_NIM } from '../../ct-host/src/index.ts';
 import { artifactCrypto, contractClassPublicLike, liveChainProviders }
   from './artifact_sources.mjs';
 import { COMPONENTS_VERSION_FIELDS } from '../src/pinned_protocol_version.ts';
@@ -210,7 +210,7 @@ if (ctOut) {
       // exactly right and it still runs — what L5 changed is that when an artifact is proved the
       // positions are no longer program counters, so the guard is satisfied rather than bypassed.
       columns: anythingResolved,
-    }, WRITER_PATH_A_PURE_RUST),
+    }, WRITER_PATH_B_NIM),
     { batchRecords: 64 },
   );
   // THE STEP PASS. The hydration pass ran with `collectHints` on and therefore produced NO step

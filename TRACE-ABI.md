@@ -4,10 +4,10 @@
 
 # The trace event ABI — OQ-6, settled
 
-**THE MEASUREMENT DOES NOT HAVE A STABLE SIGN, AND THAT IS THE RESULT.** Run eleven times — once in
-the system engine and ten times in this repository's dev shell — `perEvent - batched` came out
+**THE MEASUREMENT DOES NOT HAVE A STABLE SIGN, AND THAT IS THE RESULT.** Run fourteen times — once in
+the system engine and thirteen times in this repository's dev shell — `perEvent - batched` came out
 **+0.20 %**, **+1.09 %**, **-0.58 %**, **-0.09 %**, **+0.96 %**, **+0.98 %**, **+0.85 %**,
-**+0.74 %**, **+1.34 %**, **+1.21 %**, **+1.07 %** and **+1.83 %**. Every one is inside the declared **margin of 3 %**; runs 2, 3 and 4 were taken on the *same engine, the
+**+0.74 %**, **+1.34 %**, **+1.21 %**, **+1.07 %**, **+1.83 %**, **+2.65 %** and **+1.22 %**. Every one is inside the declared **margin of 3 %**; runs 2, 3 and 4 were taken on the *same engine, the
 same module and the same binary*, and two of those have 95 % intervals that do not overlap and
 point opposite ways. So the honest statement is not "the batched ABI is about one per cent faster"
 — it is that **the difference is smaller than the run-to-run variation of the instrument that
@@ -101,11 +101,11 @@ silently.
 
 | arm | median (µs) | min (µs) | crossings | container (B) |
 |---|---|---|---|---|
-| `batched` | 470,793 | 457,708 | 25 | 811,008 |
-| `perEvent` | 481,652 | 466,828 | 100,000 | 811,008 |
-| `control` | 470,470 | 459,023 | 25 | 811,008 |
-| `nopBatched` | 4,973 | 4,538 | 25 | 135,168 |
-| `nopPerEvent` | 5,578 | 5,026 | 100,000 | 135,168 |
+| `batched` | 347,922 | 333,914 | 25 | 1,748,992 |
+| `perEvent` | 354,552 | 339,625 | 100,000 | 1,748,992 |
+| `control` | 348,087 | 332,804 | 25 | 1,748,992 |
+| `nopBatched` | 5,068 | 4,624 | 25 | 143,360 |
+| `nopPerEvent` | 5,504 | 5,017 | 100,000 | 143,360 |
 
 *Every figure in this table moved when the `trace_format` pin advanced to `c8802c548f` and the
 writer's compressor became C libzstd. **The container is the headline: 4,694,016 → 1,630,208
@@ -114,14 +114,19 @@ does that `ruzstd`'s `Fastest`-only encoder could not. Every timing arm got fast
 terms with it — there is less to write. The RATIO §2 exists to measure is unmoved and is still
 inside the margin; see run 12 in §8.*
 
+*And every figure moved again when M41 made the Nim writer the default (runs 13 and 14 in §8):
+the table above is Path B's. The 100,000-event container is **1,748,992 bytes** — larger than Path
+A's 1,630,208 on C libzstd, because the two writers lay their streams out differently — and the
+writer-work arms are faster. The ratio §2 measures is again inside the margin.*
+
 | comparison | median | 95 % interval | reads as |
 |---|---|---|---|
-| `perEvent - batched` | **+1.07 %** | **[+0.36, +1.78] %** | within noise |
-| `control - batched` | +0.22 % | [-0.50, +0.93] % | the instrument is calibrated |
-| `nopPerEvent - nopBatched` | +21.21 % | [+16.67, +25.75] % | the crossing, priced alone |
+| `perEvent - batched` | **+1.22 %** | **[-1.03, +3.46] %** | within noise |
+| `control - batched` | -0.17 % | [-3.58, +3.24] % | the instrument is calibrated |
+| `nopPerEvent - nopBatched` | +7.84 % | [+1.83, +13.86] % | the crossing, priced alone |
 
 **Verdict: `within-noise`.** The comparator resolves a verdict only when the whole interval lies
-OUTSIDE ±3 %, and none of the eleven runs comes close. Within a *single* run the interval is narrow
+OUTSIDE ±3 %, and none of the fourteen runs resolves one. Within a *single* run the interval is narrow
 enough to exclude zero — twice, in opposite directions — which is exactly the pathology
 `_timing_compare.py`'s header records for a different measurement: *"six runs of the same
 measurement over the same two binaries produced mutually disjoint 95 % intervals"*. The
@@ -165,7 +170,7 @@ criterion is:
 > **The per-event ABI's cost is linear in an engine constant this project has not measured and
 > does not control; the batched ABI's is linear in one it does.**
 
-8.7 ns per crossing is *V8-in-node-24*'s number. M27 packages this runtime for a browser and M28
+4.4 ns per crossing is *V8-in-node-24*'s number. M27 packages this runtime for a browser and M28
 gates on one, and neither engine has been measured. A per-event ABI makes a 38,903-step `burn`
 recording's overhead a function of whichever engine the page happens to run in; a batched ABI
 makes it a function of `encodeStep`, which is ours and which every arm above exercises.
@@ -371,15 +376,20 @@ else can resolve is a local file wearing a pin's clothes.
 - **The module has zero wasm imports**, so it instantiates under a bare
   `WebAssembly.instantiate(bytes, {})` with no WASI shim, no `wasm-bindgen` and no glue file.
   `ct-host` has **no npm dependencies** and imports no Node module in its trace path.
-- **480,600 bytes** for the writer plus this ABI, release, `opt-level = "z"`, LTO,
-  `panic = "abort"`, one codegen unit, stripped. Two clean builds (`rm -rf target`) are
-  byte-identical, sha256 `8e9bc9bd…`.
+- **743,420 bytes** for the writer plus this ABI, release, `opt-level = "z"`, LTO,
+  `panic = "abort"`, one codegen unit, stripped, sha256 `1eba4de0…`. It is byte-identical to the
+  explicitly-flagged `--no-default-features --features path-b` build, which
+  `verify_writer_path_is_selectable` asserts on every run.
 
-  *This is the module the runtime SHIPS, which since M41 is a CHOICE rather than the only
-  possibility: `ct-writer` has two feature-selected writers and this figure is the `path-a`
-  default. The Path B module measures **745,114 bytes**, and the two are NOT comparable with
-  anything else in this campaign's seven module shapes — `WRITER-SEAM.md` §2 compares them as the
-  only pair that can be, two builds of one crate on one target differing in one flag.*
+  *This is the module the runtime SHIPS, and since M41's flip it is **Path B — the Nim writer**,
+  reached through its C ABI and linked as a static library by `ct-writer/build.rs`. The Path A
+  module (`--no-default-features --features path-a`) is still built, because the differential
+  checks need both, and measures **480,600 bytes**; that was this line's figure while Path A was the
+  default. The +262,820 bytes are the size cost the user accepted when choosing the Nim writer, on
+  the grounds `WRITER-SEAM.md` records: `ruzstd` returns wrong data where C libzstd refuses, and
+  Path B has the in-memory reader a browser needs. The two are NOT comparable with anything else in
+  this campaign's seven module shapes — `WRITER-SEAM.md` §2 compares them as the only pair that can
+  be, two builds of one crate on one target differing in one flag.*
 
   ***264,281 → 498,409 when the `trace_format` pin advanced to `c8802c548f`**, and the +234,128
   bytes were taken deliberately: that revision makes the Zstandard backend a cargo feature and the
@@ -389,12 +399,16 @@ else can resolve is a local file wearing a pin's clothes.
   module this runtime ships the whole time. The container it produces is 65 % smaller (§2), and
   the imports are still **0**.*
 
-- **47 exports, not 39**, and the eight beyond the ABI's thirty-eight and `memory` are named:
+- **39 exports in the shipped module** — the ABI's thirty-eight and `memory`, and nothing else.
+  The Nim writer brings its own libzstd and no Rust allocator shim. **The Path A module has 47**,
+  and that history is kept below because Path A is still built and its exports are still counted.
+
+  *Path A: **47 exports, not 39**, and the eight beyond the ABI's thirty-eight and `memory` are named:
   `rust_zstd_wasm_shim_{malloc,calloc,free,memcmp,memcpy,memmove,memset,qsort}`. They are
   `zstd-sys`'s wasm shim re-exporting what Rust's allocator resolved, and they arrived with the
   same pin move. **This was not predicted when that move was priced** — it is a change to the
   module's public surface, and it is recorded rather than absorbed. The checks that count exports
-  name them individually now, so a forty-eighth export by any other name still fails.
+  name them individually now, so a forty-eighth export by any other name still fails.*
 
   *Re-derived on 2026-09-10, when M41 put the writer behind a seam. The move is **263,211 ->
   264,281**, and it is TWO separate movements which are stated separately because only one of them
@@ -465,15 +479,15 @@ reconsidered if any of these changed:
 
 | quantity | measured | where |
 |---|---|---|
-| `perEvent - batched`, median | +1.07 % | §2 |
-| its 95 % interval | [+0.36, +1.78] % | §2 |
-| cost of one boundary crossing in V8 | ~8.7 ns | §2 |
-| the crossing's share of a 100k-event recording | 0.14 % | §2 |
-| writer work versus boundary work | ~724× | §2 |
+| `perEvent - batched`, median | +1.22 % | §2 |
+| its 95 % interval | [-1.03, +3.46] % | §2 |
+| cost of one boundary crossing in V8 | ~4.4 ns | §2 |
+| the crossing's share of a 100k-event recording | 0.13 % | §2 |
+| writer work versus boundary work | ~798× | §2 |
 | containers produced by the two ABIs | byte-identical | §3 |
 | host-side buffer at 250,000 events | 65,536 B, constant | §7 |
 
-**All eleven runs, retained**, because the disagreement between them is the finding rather than a
+**All fourteen runs, retained**, because the disagreement between them is the finding rather than a
 nuisance. None is wrong; they are what this measurement does.
 
 | # | engine | `perEvent - batched` | 95 % interval | `control - batched` | `nopPerEvent - nopBatched` | crossing |
@@ -489,9 +503,11 @@ nuisance. None is wrong; they are what this measurement does.
 | 9 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **the SAME module as run 8**) | +1.34 % | [+0.67, +2.00] % | -0.17 % | +17.24 % | ~7.7 ns |
 | 10 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, the SAME module as runs 8 and 9) | +1.21 % | [+0.58, +1.85] % | -0.35 % | +18.71 % | ~8.7 ns |
 | 11 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M40's module, source steps) | +1.07 % | [+0.36, +1.78] % | +0.22 % | +21.21 % | ~8.7 ns |
-| 12 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M41's module, **C libzstd**) | **+1.83 %** | **[+0.67, +2.99] %** | -0.23 % | +14.03 % | ~8.7 ns |
+| 12 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M41's module, **C libzstd**) | +1.83 % | [+0.67, +2.99] % | -0.23 % | +14.03 % | ~8.7 ns |
+| 13 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M41's module, **Path B — the Nim writer**) | +2.65 % | [-0.58, +5.87] % | -0.31 % | +11.17 % | ~5.8 ns |
+| 14 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **the SAME module as run 13**) | **+1.22 %** | **[-1.03, +3.46] %** | -0.17 % | +7.84 % | ~4.4 ns |
 
-Run 12 is the one §2 tabulates, because it is the one `arms.tsv` currently holds and the one the
+Run 14 is the one §2 tabulates, because it is the one `arms.tsv` currently holds and the one the
 check compares this file against. **Runs 2, 3 and 4 are the same engine, the same module and the
 same binary**, and runs 2 and 3 have disjoint intervals with opposite signs — which is why §2 says
 the sign is not stable rather than quoting any one run's interval as a precision. **Runs 5 to 8
@@ -512,6 +528,22 @@ in all eleven; what is not stable is the subject.
 control reads **+0.22 %** with an interval that straddles zero, which is the instrument saying it
 cannot resolve a difference between two byte-for-byte identical arms; that is the same statement
 the subject's own interval makes, and it is why the verdict stays `within-noise`.
+
+**RUN 13 IS THE MODULE THE RUNTIME SHIPS SINCE M41's FLIP — the Nim writer, Path B.** Same ABI,
+same host, same engine; a different writer behind `ct_ingest`. It reads **+2.65 %, [-0.58, +5.87] %**:
+the widest interval of any dev-shell run, straddling zero, so the verdict stays `within-noise`
+rather than resolving. The writer-work arms got FASTER (`batched` 377,874 µs against the
+470,793 µs §2 carried for Path A before the flip) and the container for the same 100,000 events is 1,748,992 bytes against Path A's
+1,630,208 — the two writers compress differently, which `WRITER-SEAM.md` §5 catalogues. The
+control reads **-0.31 %** and the crossing-only pair **+11.17 %**, so the instrument is calibrated
+on this module too. Nothing here reopens §4: the question was the boundary's cost, and the
+boundary did not change.
+
+**RUN 14 IS A REPLICATE OF RUN 13** — the same module byte for byte, re-run because the stamp
+hashes `ct-host/src/{writer,abi,config}.ts` whole and M41 added the Path B kind constant there, the
+run-10 mechanism again. It reads **+1.22 %, [-1.03, +3.46] %** against run 13's +2.65 %: two runs
+of one binary more than a point apart with overlapping intervals, which is the between-run nuisance
+§2 describes, measured once more on a fourth writer configuration.
 
 **RUN 10 EXISTS BECAUSE A COMMENT WAS CORRECTED**, which is a fact about the instrument worth
 having in the record. `_m24_oq6_stamp` hashes `ct-host/src/{writer,abi,config}.ts` and

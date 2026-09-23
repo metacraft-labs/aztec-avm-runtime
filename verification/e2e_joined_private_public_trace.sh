@@ -159,8 +159,13 @@ assert_ge "and a non-degenerate number of interned paths" 50 "$PPATHS"
 assert_eq "the nested frame is a Call in the container" "1" \
   "$(m40_arm "$SUBJECT.report.privateContainer.recording.callsOpened")"
 assert_eq "and it closed" "0" "$(m40_arm "$SUBJECT.report.privateContainer.recording.callDepthAtClose")"
-assert_eq "the writer path is DD-7's Path A" "path-a-pure-rust" \
+# THE WRITER THE RUNTIME SHIPS, twice: the path the host declared, and the kind the MODULE reports
+# at close. The first is configuration and the second is the module's own answer, so a host that
+# declared one writer while the page loaded the other fails here on the second.
+assert_eq "the writer path is DD-7's Path B, the Nim writer the runtime ships" "path-b-nim" \
   "$(m40_arm "$SUBJECT.report.privateContainer.recording.writerPath")"
+assert_eq "and the module that wrote the container reports the Nim writer's kind" "2" \
+  "$(m40_arm "$SUBJECT.report.privateContainer.recording.writerKind")"
 assert_eq "columns were requested of it" "true" \
   "$(m40_arm "$SUBJECT.report.privateContainer.recording.columnsRequested")"
 assert_eq "and the writer dropped none" "false" \
@@ -177,8 +182,11 @@ BROWSER_POS="$(m40_arm "$SUBJECT.report.privateContainer.report.stepPositions" \
   | python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin)))')"
 assert_eq "the native container decodes through the SPLIT-stream reader" "split" \
   "$(m40_container "$NATIVE_CT" rendering)"
-assert_eq "and the browser's through the low-level one, which is a fact about the WRITER PATH" \
-  "lowlevel" "$(m40_container "$PRIV_CT" rendering)"
+# BOTH through the split-stream reader. Neither writer emits `events.log` any more — both write
+# only the streams the spec defines — so the decoder a container takes is no longer a fact about
+# which writer produced it, and a `lowlevel` answer here would be a writer regressing.
+assert_eq "and the browser's through the same split-stream reader, because neither writer emits events.log" \
+  "split" "$(m40_container "$PRIV_CT" rendering)"
 assert_eq "both hold the same number of steps" "$(printf '%s\n' "$NATIVE_POS" | grep -c .)" \
   "$(printf '%s\n' "$BROWSER_POS" | grep -c .)"
 assert_ge "and it is not an empty comparison" 50 "$(printf '%s\n' "$NATIVE_POS" | grep -c .)"
@@ -233,9 +241,13 @@ assert_eq "and the same number of container bytes, because a column is a DELTA o
   "$PBYTES" "$(m40_arm "columnsDropped.report.privateContainer.containerBytes")"
 assert_true "and the two digests DIFFER, which is the column reaching the container" \
   test "$SUBJ_SHA" != "$DROP_SHA"
-# The reader cannot see it, and that is stated as a fact about the READER.
-assert_eq "the pinned reader's Path A rendering surfaces no column, which is why the pair exists" \
-  "NOCOLUMNS" "$(m40_container "$PRIV_CT" withColumn)"
+# AND THE READER SEES IT NOW. The split-stream decoder surfaces columns, so the column is read
+# back out of the browser's container as well as inferred from the digest pair: one per step the
+# tracer gave a column, plus the frame-entry steps a column-aware decoder answers 1 for (§3's
+# difference, from the other side). An exact figure, derived, not a lower bound: a reader that
+# surfaced a column on EVERY step would pass `>=`.
+assert_eq "the pinned reader surfaces the private container's columns: the tracer's, plus one per frame entry" \
+  "$((PCOLS + PFRAMES))" "$(m40_container "$PRIV_CT" withColumn)"
 assert_ge "while it surfaces every one of the native container's" "$PCOLS" \
   "$(m40_container "$NATIVE_CT" withColumn)"
 

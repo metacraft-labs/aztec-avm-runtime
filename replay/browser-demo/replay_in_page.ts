@@ -48,7 +48,7 @@ import { fixtureFetch, loadSettledFixture } from '../tools/settled_fixture.ts';
 import { createBrowserAvmHost } from '../tools/browser_avm_host.ts';
 import {
   CtWriter,
-  WRITER_PATH_A_PURE_RUST,
+  WRITER_PATH_B_NIM,
   instantiateCtWriter,
   resolveTracingConfig,
 } from '../../ct-host/src/index.ts';
@@ -134,7 +134,7 @@ export async function replayInPage(options: ReplayInPageOptions): Promise<Replay
       // Columns OFF at rung 3 — `resolveTracingConfig` refuses them, and it is right to: a program
       // counter has no column. See `recording.ts`.
       columns: false,
-    } as never, WRITER_PATH_A_PURE_RUST),
+    } as never, WRITER_PATH_B_NIM),
     { batchRecords: 64 },
   );
   const recording = buildSettledRecording(

@@ -144,7 +144,7 @@ PRODUCER_LINE="$(printf '%s\n' "$OUT" | grep -o 'avm-execution-observer steps=[^
 note "the container's producer record: $PRODUCER_LINE"
 assert_true "…with the executed-instruction statistic beside the record count" \
   str_has_sub "$PRODUCER_LINE" "steps=$STAT instructionsExecuted=$STAT"
-assert_eq "…written by Path A, per ct_writer_kind()" "1" "$(m27_arm download recording.writerKind)"
+assert_eq "…written by Path B, the Nim writer, per ct_writer_kind()" "2" "$(m27_arm download recording.writerKind)"
 
 echo "== 4. THE CONTROLS: the identity is capable of failing"
 

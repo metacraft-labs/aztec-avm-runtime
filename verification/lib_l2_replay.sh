@@ -249,7 +249,7 @@ import {
 import { fixtureFetch, loadSettledFixture } from '$L2_TOOLS/settled_fixture.ts';
 import { createNodeAvmHost } from '$L2_TOOLS/node_avm_host.ts';
 import { TxHash } from '@aztec/stdlib/tx/tx-hash';
-import { CtWriter, instantiateCtWriter, resolveTracingConfig, WRITER_PATH_A_PURE_RUST }
+import { CtWriter, instantiateCtWriter, resolveTracingConfig, WRITER_PATH_B_NIM }
   from '$REPO_ROOT/ct-host/src/index.ts';
 import { readFileSync as readBytes } from 'node:fs';
 
@@ -265,7 +265,7 @@ const l3Writer = async (settled) => new CtWriter(
     workdir: '/aztec',
     mappingRung: RUNG_BYTECODE_VALUE,
     columns: false,
-  }, WRITER_PATH_A_PURE_RUST),
+  }, WRITER_PATH_B_NIM),
   { batchRecords: 64 },
 );
 

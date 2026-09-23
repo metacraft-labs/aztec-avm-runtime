@@ -15,8 +15,9 @@
 //                               PUBLISHED `noir`, with M38's executor seam and a tape-replaying
 //                               foreign-call executor. It stops at the CodeTracer low-level event
 //                               stream and emits it as an ordered op list.
-//   `ct_writer.wasm`          — the page's own Path A writer, already here, already used by the
-//                               public half. It gains one export for this: `ct_source_step`.
+//   `ct_writer.wasm`          — the page's own writer (DD-7's Path B, the Nim writer), already
+//                               here, already used by the public half. It gains one export for
+//                               this: `ct_source_step`.
 //
 // **The Noir tracer links no container writer on this path at all**, which is why `JOIN-SHAPE.md`
 // §2's facts 6 and 7 are untouched: this is a different answer to the same need rather than the
@@ -36,7 +37,7 @@
 import {
   CtWriter,
   RUNG_SOURCE,
-  WRITER_PATH_A_PURE_RUST,
+  WRITER_PATH_B_NIM,
   instantiateCtWriter,
   resolveTracingConfig,
   type CtRecording,
@@ -245,7 +246,7 @@ export async function recordPrivateHalf(options: {
         mappingRung: RUNG_SOURCE,
         columns: true,
       } as never,
-      WRITER_PATH_A_PURE_RUST,
+      WRITER_PATH_B_NIM,
     ),
   );
 

@@ -72,7 +72,7 @@ import {
   CtWriter,
   RUNG_FUNCTION,
   RUNG_SOURCE,
-  WRITER_PATH_A_PURE_RUST,
+  WRITER_PATH_B_NIM,
   NoirFrameTracker,
   instantiateCtWriter,
   lineLengths,
@@ -278,7 +278,7 @@ export async function recordAndDownload(options: RecordOptions): Promise<Browser
         mappingRung: RUNG_SOURCE,
         columns: true,
       } as never,
-      WRITER_PATH_A_PURE_RUST,
+      WRITER_PATH_B_NIM,
     ),
     { batchRecords: 64 },
   );

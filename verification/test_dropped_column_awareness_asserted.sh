@@ -133,7 +133,7 @@ assert_ge "over a recording that actually wrote an event" "1" \
   "$(m24_arm 'd["columnRequest"]["events"]')"
 assert_ge "and produced a container rather than an empty buffer" "1000" \
   "$(m24_arm 'd["columnRequest"]["containerBytes"]')"
-assert_eq "on the Path A module, so this is Path A's answer and not another writer's" "1" \
+assert_eq "on the SHIPPED module, which is the Nim writer, so this is Path B's answer and not another writer's" "2" \
   "$(m24_arm 'd["columnRequest"]["writerKind"]')"
 
 # ---------------------------------------------------------------------------
@@ -162,9 +162,9 @@ assert_eq "and reports NO dropped column awareness, so the assertion cannot fire
 
 # "record which writer path produced the container" — DD-7's second half, recorded rather than
 # inferred, and read from the module rather than from the configuration.
-assert_eq "the recording records WHICH writer path produced it" "path-a-pure-rust" \
+assert_eq "the recording records WHICH writer path produced it" "path-b-nim" \
   "$(m24_arm 'd["roundtrip"]["writerPath"]')"
-assert_eq "and the module's own kind agrees with it" "1" "$(m24_arm 'd["roundtrip"]["writerKind"]')"
+assert_eq "and the module's own kind agrees with it" "2" "$(m24_arm 'd["roundtrip"]["writerKind"]')"
 assert_eq "which is the kind the surface probe read straight off the module" \
   "$(m24_arm 'd["surface"]["writerKind"]')" "$(m24_arm 'd["roundtrip"]["writerKind"]')"
 

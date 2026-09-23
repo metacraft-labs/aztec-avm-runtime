@@ -59,7 +59,7 @@ import {
   CtWriter,
   instantiateCtWriter,
   resolveTracingConfig,
-  WRITER_PATH_A_PURE_RUST,
+  WRITER_PATH_B_NIM,
 } from '../ct-host/src/index.ts';
 
 function arg(name, dflt) {
@@ -115,7 +115,7 @@ async function oneRep(bytes, arm, events) {
       workdir: '/aztec',
       columns: false,
     },
-    WRITER_PATH_A_PURE_RUST,
+    WRITER_PATH_B_NIM,
   );
   const opts = { batchRecords: BATCH };
   if (arm.ingest) opts.ingestExport = arm.ingest;

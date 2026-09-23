@@ -210,10 +210,10 @@ now, three assertions each.)*
 | `browser.js` | 255.79 KB, 7 files | 255.87 KB, 8 files | 263.10 KB, 9 files | **266.58 KB, 9 files** |
 | `testing.js` | 279.77 KB, 8 files | 279.93 KB, 10 files | 288.28 KB, 12 files | **295.44 KB, 12 files** |
 | `demo.js` | 280.97 KB, 8 files | 281.12 KB, 10 files | 289.50 KB, 12 files | **296.54 KB, 12 files** |
-| `node/node.js` | 225.36 KB, 4 files | 225.36 KB, 4 files | 225.49 KB, 4 files | **226.21 KB, 4 files** |
+| `node/node.js` | 225.36 KB, 4 files | 225.36 KB, 4 files | 225.49 KB, 4 files | **226.23 KB, 4 files** |
 | `worker.js` | — | 282.40 KB, 9 files | 290.78 KB, 11 files | **294.47 KB, 11 files** |
 | `worker-demo.js` | — | 283.48 KB, 11 files | 291.85 KB, 13 files | **298.90 KB, 13 files** |
-| `wallet-demo.js` | — | — | 309.99 KB, 13 files | **353.49 KB, 13 files** |
+| `wallet-demo.js` | — | — | 309.99 KB, 13 files | **353.50 KB, 13 files** |
 
 *(M35 moved every row, and only one of them by much. The wallet demo carries the private-execution
 surface and pays 22 KB for it; the other six moved by 0.13 to 2.37 KB because an entry point that
@@ -228,6 +228,12 @@ browser entries moved by 0.39 to 0.40 KB, because M36's exports change what is h
 what any entry imports. `node/node.js` is unmoved for the FOURTH time running. The `current` column
 is the only one this check re-derives — the historical columns are a record and are compared as
 prose — which is why moving a figure means editing exactly one cell per row.)*
+
+*(**M41 moved two rows, by 0.02 and 0.01 KB**: `node/node.js` 226.21 → 226.23 and `wallet-demo.js`
+353.49 → 353.50. The host now declares the writer path the runtime ships — `path-b-nim` where it
+said `path-a-pure-rust` — in `ct_download.ts` and `private_half_container.ts`, and a minifier spends a byte or two on
+which constant a call site names. The five other rows did not move, which is re-derived rather
+than assumed: all seven cells are compared against `chunks.json` on every run.)*
 
 `node/node.js` is unmoved in both moves, and for the same reason: the Node pass is a separate one.
 

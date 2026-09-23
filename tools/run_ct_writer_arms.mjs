@@ -84,7 +84,7 @@ function config(columns, path) {
 
 async function record(evs, { batchRecords, perCall = false }) {
   const inst = await instantiateCtWriter(bytes);
-  const w = new CtWriter(inst, config(false, WRITER_PATH_A_PURE_RUST), { batchRecords });
+  const w = new CtWriter(inst, config(false, WRITER_PATH_B_NIM), { batchRecords });
   const before = process.memoryUsage().heapUsed;
   let peak = before;
   for (let i = 0; i < evs.length; i++) {
@@ -198,6 +198,7 @@ const out = { module: MODULE, moduleBytes: bytes.length, node: process.version, 
     smallContainerBytes: small.rec.container.length,
     largeContainerBytes: large.rec.container.length,
     largeFile,
+    smallMemoryGrowths: small.rec.memoryGrowths,
     largeMemoryGrowths: large.rec.memoryGrowths,
   };
 }
@@ -247,8 +248,9 @@ out.gates.push(
     new CtWriter(inst, forged, { batchRecords: 8 });
   }),
 );
-// 4. A config resolved against the column-aware path, run on the Path A module — so a column
-//    request really does reach `ct_writer_open(want_columns = 1)`.
+// 4. A config resolved against the column-aware path, run on the SHIPPED module — Path B, the
+//    Nim writer, since M41's flip; Path A before it — so a column request really does reach
+//    `ct_writer_open(want_columns = 1)`.
 //
 //    THIS GATE INVERTED WHEN THE `trace_format` ANCHOR MOVED, AND THAT INVERSION IS THE RESULT.
 //    At the old anchor the writer could not honour the request, `dropped_column_awareness()`
