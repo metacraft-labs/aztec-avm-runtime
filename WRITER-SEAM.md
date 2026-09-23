@@ -13,6 +13,7 @@ milestone's prose.*
 | `ct_writer_kind()` | a literal `1` | `ActiveBackend::kind()` — the two builds disagree, which is what makes it a measurement |
 | the writer's source | one crate from `pins.json`'s `trace_format` anchor | that, plus Nim source from a NEW `trace_format_nim_writer` anchor, materialised and cross-compiled by `ct-writer/build.rs` |
 | the ABI | thirty-eight functions | thirty-eight functions, unchanged, served by both backends |
+| the declared path | a label the host recorded without comparing it to anything | compared against `ct_writer_kind()` in `CtWriter`'s constructor; a disagreement is refused (§12) |
 
 **The default is Path B — the Nim writer — since §11.** It stayed Path A through three measured
 attempts, each blocked by something named (§6, §9, §9g); §11 is the attempt that landed, with the
@@ -1002,3 +1003,47 @@ ships reports kind 2 (measured). The verdict's reason narrows from publication t
 both halves link one writer from published revisions, and the single-container path on that writer
 is not built — `e2e_form_b_single_ct_recording` stays pending. `wasm/webpage` is still in zero
 published refs.
+
+---
+
+## 12. THE DECLARED WRITER IS THE LOADED WRITER — the refusal §11 was missing
+
+§11's flip found several hosts declaring `path-a-pure-rust` over a module answering kind 2 and
+fixed each by hand. `writerKindMatchesPath` existed, was exported, and was called by nothing, so the
+next one would have recorded the wrong label too. It is enforced now, at one site.
+
+**Where.** `CtWriter`'s constructor — the only place where the instance and the resolved
+configuration are both in hand, and a place every host entry point passes through: the browser's
+download and private half, both replay tools, the L-track replay library, every arms driver. After
+the configuration-identity gate and the export checks, before anything is allocated or opened,
+`ct_writer_kind()` is compared with the declared path and a disagreement throws
+`WriterKindMismatch`, whose message names the declared path, the kind it implies, the kind the
+module reported and the path that kind belongs to. `instantiateCtWriter` does not know the path, so
+it cannot be the site. There is no option that skips the comparison.
+
+**Measured.** `verify_declared_writer_path_matches_module` pairs the real Path A and Path B modules
+with both declarations. Before the enforcement: **20 assertions, 12 failures**, with the probe
+recording Path B's module as `path-a-pure-rust` — the defect, live. After: **20/0**. The matched
+pairs record seven events each; the crossed pairs are refused by name; a refused instance still
+records when re-declared correctly, so the refusal precedes the session. Its mutation arm removes
+the comparison from a copy of `ct-host/src` and re-runs the same probe: nothing is refused and both
+crossed pairs record the wrong label. The same mutation made to the tree takes the check to 11
+failures.
+
+**What had paired a label with a module, and what each was testing.** The two ordinary-recording
+controls (`run_ct_writer_arms` gate 5, and the public-export control in
+`test_dropped_column_awareness_asserted`) and `run_trace_arms`' five module-driving arms declared
+Path A over the shipped Path B module; none was about the label, so they declare Path B. The DD-7
+column refusals and `columnGate` keep Path A, because they resolve configurations without loading a
+module and Path A is the path with a refusal to show. The forged-configuration cases keep Path A:
+the identity gate refuses them before the module is asked anything.
+
+**The sweep.** TOTAL **13,608**, 42 milestones, **delta +20** against §11's 13,588, 35 of 42 exit 0,
+no hole. **One move: m41 173 → 193**, the new check's twenty. Every other milestone is at §11's
+figure to the assertion, and the 34 failing assertions in the seven non-zero exits (m1, m11, m15,
+m20, m21, m22, m37) are the same assertions. Before the sweep, six milestones had re-derived
+figures conformed: m24's OQ-6 benchmark re-ran because its stamp hashes `writer.ts` and
+`config.ts` (`TRACE-ABI.md` §2 is run 15, **+2.09 % [+1.42, +2.76]**, inside the margin, verdict
+unmoved); and the class and its message add **0.23–0.24 KB** gzipped to every entry that can
+construct a writer, re-derived in `BROWSER-PACKAGING.md`, `WORKER-NODE.md`, `DEV-WALLET.md`,
+`LOCAL-HISTORY.md` and `PRIVATE-EXECUTION.md` (m27, m32, m34, m35, m36). None of those moved a count.
