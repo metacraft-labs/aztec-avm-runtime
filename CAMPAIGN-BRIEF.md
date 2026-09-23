@@ -3086,6 +3086,25 @@ Format spec: `~/ah/dev/agent-harbor/ah-lib/specs/Milestones-Files.md`.
   migration across four milestones M41 does not own, so the pins are left at their verified-green
   values. *Do not read "the flip" as the remaining work; the remaining work is the reader anchor
   plus a conform pass.*
+- **M41 LANDED: THE RUNTIME SHIPS THE NIM WRITER.** `ct-writer` defaults to `path-b`; `path-a` is
+  still built, by name, for the differential checks. Sweep: **TOTAL 13,588, delta +22 against
+  13,566, 35 of 42 exit 0, no hole** — the L-track's +19 plus three assertions this change added,
+  each named in `WRITER-SEAM.md` §11. OQ-7 fact 6 is retired. The bullets above that say "the
+  default is still Path A" describe the attempts before this one.
+- **A GATE THAT BLOCKS A MILESTONE ALSO HIDES WHAT HAS BROKEN IN IT.** m38–m40 were refused by the
+  dirty-`noir` gate through the whole conform pass, so they never ran against the reader it
+  changed — and when `noir` came clean they were at reference COUNTS with ten failures, none of
+  them the flip's: two controls written on the reader's old "a stub reads as zero" behaviour, which
+  the reader now refuses by name, and four figures plus one decoder fact in m40. They were measured
+  BEFORE the flip precisely so the two causes could not be summed into one number. *When a gate
+  clears, re-run what it was blocking before changing anything else.*
+- **A COUNT THRESHOLD CAN DESCRIBE THE IMPLEMENTATION RATHER THAN THE PROPERTY.** "Memory grew at
+  least ten times" was the pure-Rust writer's growth step; the Nim writer grows geometrically and
+  reaches 9. The property — the host's cached views die repeatedly and the count follows the
+  recording — is now stated comparatively (small > 1, large > small) rather than lowered. And
+  `cargo tree --duplicates` over a default graph that no longer contains the crates it was asked
+  about went empty; its own non-emptiness assertion caught it. *An assertion that its scan is not
+  empty is what turns a flipped default into a red rather than a silent pass.*
 - **`wasm/ctfs-writer` IS MERGED INTO `dev` AND IS RETIRABLE.** It had diverged — 27 commits on
   `dev`, 8 on the branch, `dev` not an ancestor. One conflicted file, and it was a semantic split:
   `dev` retired the JSON sidecars, the branch added the recording-id selection, on adjacent lines.

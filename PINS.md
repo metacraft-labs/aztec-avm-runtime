@@ -15,9 +15,9 @@ Enforced by `just verify-pinned-nightly` (`verification/verify_pinned_nightly_si
 | `anchors.historical-protocol-specs` | `reference/historical-protocol-specs/`, the only commit at which the deleted protocol specs still exist |
 | `npm.current` | **the** pinned `@aztec/*` nightly — what new work uses |
 | `npm.deletion_era` | frozen evidence: the published line that is byte-comparable with `anchors.ts` |
-| `anchors.trace_format` | the Rust trace-format tree: DD-7's **Path A** writer, materialised into `ct-writer/build-wasm-deps/ctf` |
+| `anchors.trace_format` | the Rust trace-format tree: DD-7's **Path A** writer, materialised into `ct-writer/build-wasm-deps/ctf` — built for the differential checks, no longer shipped |
 | `anchors.trace_format_nim` | the **READER** role: the `ct-print` this repository verifies containers with, and its one-commit control |
-| `anchors.trace_format_nim_writer` | the **WRITER** role: the Nim source `ct-writer/build.rs` cross-compiles for DD-7's **Path B** |
+| `anchors.trace_format_nim_writer` | the **WRITER** role: the Nim source `ct-writer/build.rs` cross-compiles for DD-7's **Path B** — the writer the runtime ships since M41 |
 | `toolchain.nim` | the Nim compiler version `ct-writer/build.rs` REFUSES to build Path B without |
 
 ## Why there are two npm lines and only one of them is "the pin"
@@ -71,9 +71,9 @@ there is exactly one **authority**, and that nothing anywhere disagrees with it.
    names whatever revision the Nim writer is built from. M41 added the second rather than moving the
    first, and the reason is in that anchor's own `what` field. **Do not collapse them.** A single
    anchor would force the roundtrip check's difference to three commits, which is what the reader
-   anchor's rationale declines. The consequence is measured and recorded in `WRITER-SEAM.md` §6:
-   neither reader reads both writers' containers, and that is what holds the runtime's default at
-   Path A.
+   anchor's rationale declines. `WRITER-SEAM.md` §6 records when neither reader read both writers'
+   containers, which held the runtime's default at Path A; both writers now emit container v4 and
+   `meta.dat` v4, the reader anchor reads both, and the default is Path B (`WRITER-SEAM.md` §11).
 5. **A bump is not a version edit.** It is, in order:
    - `tools/repin.py --apply` (rewrites the `@aztec/*` versions in the affected trees),
    - `npm install` in each affected tree so the lockfile follows,

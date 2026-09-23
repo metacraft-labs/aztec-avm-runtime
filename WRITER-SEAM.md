@@ -9,13 +9,14 @@ milestone's prose.*
 
 | | before | after |
 |---|---|---|
-| the seam | none — no `[features]`, no `cfg`, `CtfsTraceWriter` named at the type level in two places | `ct-writer` has `path-a` (default) and `path-b`, and nothing outside `backend_*.rs` names a concrete writer |
+| the seam | none — no `[features]`, no `cfg`, `CtfsTraceWriter` named at the type level in two places | `ct-writer` has `path-a` and `path-b` (**the default since §11**), and nothing outside `backend_*.rs` names a concrete writer |
 | `ct_writer_kind()` | a literal `1` | `ActiveBackend::kind()` — the two builds disagree, which is what makes it a measurement |
 | the writer's source | one crate from `pins.json`'s `trace_format` anchor | that, plus Nim source from a NEW `trace_format_nim_writer` anchor, materialised and cross-compiled by `ct-writer/build.rs` |
 | the ABI | thirty-eight functions | thirty-eight functions, unchanged, served by both backends |
 
-**The default is still Path A.** That is a decision this milestone took on measurement rather than
-a shortfall — §6 says which measurement and what would change it.
+**The default is Path B — the Nim writer — since §11.** It stayed Path A through three measured
+attempts, each blocked by something named (§6, §9, §9g); §11 is the attempt that landed, with the
+sweep that accounts for it. Path A is still built, for the differential checks.
 
 ---
 
@@ -175,7 +176,7 @@ silent-wrong-answer shape, and only a comparison against what was asked for coul
 
 ---
 
-## 6. Which reader reads which container, and why Path A is still the default
+## 6. Which reader reads which container, and why Path A was the default until §11
 
 **Neither of the two pinned readers reads both containers.** Measured, in both directions:
 
@@ -246,7 +247,10 @@ runtime is Path A"*.
 
 So the Noir half is Path B, confirmed rather than assumed.
 
-**Fact 6 is RETIRABLE, and is NOT RETIRED.** The seam turns "this runtime is Path A" from a
+**Fact 6 was RETIRABLE and NOT RETIRED until §11; it is retired now.** What follows is the
+reasoning as it stood before the flip, kept because it says why the retirement waited.
+
+**Fact 6 was RETIRABLE, and was NOT RETIRED.** The seam turns "this runtime is Path A" from a
 property of the code into a build-time choice, and a `--features path-b` build of this runtime
 links the same writer the Noir half links, with nothing published that was not already published.
 What is not true yet is that the runtime SHIPS that way, and fact 6 is a statement about what
@@ -915,3 +919,86 @@ assertion over `PATH` only tells you which shell you were in.*
 **A sweep is a writer.** `carry/*.json` checksummed before and `sha256sum -c` after, both runs:
 `exposure.json` and `rebase.json` came back changed, were restored from HEAD, all four re-verified
 OK, and neither was staged.
+
+---
+
+## 11. THE FLIP LANDED — `default = ["path-b"]`, and the sweep that accounts for it
+
+The runtime ships the Nim writer. `ct-writer/Cargo.toml` defaults to `path-b`; `path-a` is still
+built, by name, for the differential checks. Measured on the built artefacts:
+
+| | Path A (`--features path-a`) | Path B (the default) |
+|---|---:|---:|
+| bytes | 480,600 | **743,420** |
+| sha256 (first 8) | — | `1eba4de0` |
+| wasm imports | 0 | **0** |
+| exports | 47 (38 + `memory` + eight `rust_zstd_wasm_shim_*`) | **39** (38 + `memory`) |
+| byte-identical to the explicitly-flagged arm | — | **yes**, asserted by `verify_writer_path_is_selectable` |
+
+**Why it cleared this time, when §9g did not.** §9g's family 3 — the public half reading back as
+zero steps — was the reader's split-stream output read through a filter that knew only the legacy
+spelling; `6177309` taught `_ct_frames.py` and `_ct_decode_rows.py` both schemas, and under
+`path-b`, before any change here, m26 measured 341 with ONE red, and that red was a module-size
+figure in a document. Families 1 and 2 were figures and constants; §5's
+catalogue is down to the minted id and the call-argument attachment, so what was left to conform
+was small and every piece of it is named below.
+
+### `noir` clean first, BEFORE the flip, so the two causes stay separate
+
+With `noir` clean at `fee00409b` and the default still `path-a`, m38–m40 were run alone:
+**m38 150/3, m39 207/2, m40 146/5** — every count back at reference, ten failures, and none of
+them the flip's. They were the conform pass's consequences in three milestones the dirty checkout
+had kept from running:
+
+- **m38 and m39 — a control written on the reader's old behaviour.** Both asserted that the pinned
+  `ct-print` answers ZERO steps over a 512-byte stub and does NOT refuse it. The reader now REFUSES,
+  naming `meta.dat` — the regression fix recorded in `bd17d69`. The controls are conformed to the
+  refusal: non-zero exit, and the reason named, as two assertions, beside the real container's
+  positive count. Same number of assertions; the control is now of the kind the campaign prefers.
+- **m40 — a decoder fact and four figures.** Neither writer emits `events.log` any more, so the
+  browser's private container decodes through the split-stream reader rather than the legacy one,
+  and that reader SURFACES the columns: `NOCOLUMNS` became an exact figure, the tracer's 64 plus
+  one per frame entry. `BOTH-HALVES.md`'s two container sizes and two digests are re-derived.
+
+### What the flip itself moved, every item
+
+- **m24.** `TRACE-ABI.md` §2's table is Path B's (runs 13 and 14 in §8, the second a replicate of
+  the first because the stamp hashes `ct-host/src/abi.ts`); §7's module figure is 743,420 and 39
+  exports. Three writer-kind assertions `1 → 2` and the recorded path `path-a-pure-rust →
+  path-b-nim`. `test_single_trace_types_instantiation`'s `cargo tree --duplicates` is asked of the
+  `path-a` graph BY NAME: the default graph has no `codetracer_*` crate in it, and the scan's own
+  non-emptiness assertion caught that it had become vacuous. `test_trace_writer_backpressure`'s
+  "at least ten memory growths" was the pure-Rust writer's growth step (18 at 25,000 events, 166 at
+  250,000); the Nim writer grows geometrically (5 and 9), so the property is now stated
+  comparatively — the small recording detaches more than once and the large one more often than
+  the small — as TWO assertions where there was one: **+1**.
+- **m26 — fact 6 retired**, §7 below. The measurement replaces the prose needle and one assertion
+  is added: the module the join arms drove reports kind 2: **+1**.
+- **m27, m29** — one writer-kind assertion each, `1 → 2`.
+- **m32, m34, m35, m36 — bundle figures, by 0.01–0.02 KB.** The host now declares the writer path
+  it ships (`WRITER_PATH_B_NIM`) in `ct_download.ts` and `private_half_container.ts`; two eager
+  sets moved and five documents re-derive them.
+- **m40** — the recorded writer path is `path-b-nim`, and one assertion is added reading the kind
+  the MODULE reported at close, so a host declaring one writer while the page loaded the other
+  fails: **+1**.
+
+### The sweep
+
+> **TOTAL 13,588 · 42 milestones · delta +22 against the reference of 13,566 · 35 of 42 exit 0 ·
+> no hole.**
+>
+> **Six moves, every unit accounted: +9 +1 +1 +2 +8 +1 = +22.** m11 (+9), m27 (+2) and m28 (+8)
+> are the L-track edits already in every sweep since `925db04`. m24 (+1), m26 (+1) and m40 (+1)
+> are this section's three added assertions, each named above. **m38 = 150, m39 = 207, m40 = 147
+> — back from the −322 the dirty `noir` checkout cost, all rc=0.** The seven non-zero exits (m1,
+> m11, m15, m20, m21, m22, m37) are the pre-existing L-track reds with the same failing assertions
+> as sweep 13; only the upstream tip's SHA and m37's commit distance (140 → 175) moved.
+
+### §7, fact 6: RETIRED
+
+`JOIN-SHAPE.md` §2's row is struck and replaced, and `verify_oq7_shared_writer_verdict_recorded`
+asserts both halves: the Noir manifest resolves the Nim writer (read), and the module this runtime
+ships reports kind 2 (measured). The verdict's reason narrows from publication to construction:
+both halves link one writer from published revisions, and the single-container path on that writer
+is not built — `e2e_form_b_single_ct_recording` stays pending. `wasm/webpage` is still in zero
+published refs.
