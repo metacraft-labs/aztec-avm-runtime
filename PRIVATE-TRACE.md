@@ -286,8 +286,9 @@ calls, told by the trace.
 
 - **The container is DD-7's Path B**, written by the Nim FFI writer, because that is what the Noir
   half ships (`JOIN-SHAPE.md` §2 fact 6). A Path A private container is possible and is not
-  shippable, for the reason that file gives: the only tree in which both halves link the same writer
-  is `wasm/webpage`, and it is unpublished (fact 7). **Nothing here touches that worktree**, and
+  shippable, for the reason that file gave: the only tree in which both halves linked the same
+  writer was `wasm/webpage`, and it is unpublished (fact 7). Since M41 the runtime ships Path B too,
+  which retires fact 6 — the two halves now link one writer without that branch. **Nothing here touches that worktree**, and
   `verify_oq7_shared_writer_verdict_recorded` still asserts its HEAD is contained in zero published
   remote refs.
 - **No variables.** An Aztec artifact is compiled without `instrument_debug`, so there are no

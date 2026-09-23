@@ -47,7 +47,7 @@ import {
   RUNG_SOURCE,
   SOURCE_MAPPING_EXPORTS,
   SOURCE_STEP_EXPORTS,
-  WRITER_PATH_A_PURE_RUST,
+  WRITER_PATH_B_NIM,
   instantiateCtWriter,
   lineLengths,
   resolveTracingConfig,
@@ -226,12 +226,12 @@ function stepFor(pc, i) {
 async function twoInstances() {
   const a = new CtWriter(
     await instantiateCtWriter(moduleBytes),
-    resolveTracingConfig(baseConfig({ recordingId: RECORDING_IDS.instanceA }), WRITER_PATH_A_PURE_RUST),
+    resolveTracingConfig(baseConfig({ recordingId: RECORDING_IDS.instanceA }), WRITER_PATH_B_NIM),
     { batchRecords: 8 },
   );
   const b = new CtWriter(
     await instantiateCtWriter(moduleBytes),
-    resolveTracingConfig(baseConfig({ recordingId: RECORDING_IDS.instanceB }), WRITER_PATH_A_PURE_RUST),
+    resolveTracingConfig(baseConfig({ recordingId: RECORDING_IDS.instanceB }), WRITER_PATH_B_NIM),
     { batchRecords: 8 },
   );
   // Disjoint pcs: if one writer's events reached the other's container, the pc sets would overlap.
@@ -243,7 +243,7 @@ async function twoInstances() {
   writeFileSync(`${WORK}/two-instances-a.ct`, ra.container);
   writeFileSync(`${WORK}/two-instances-b.ct`, rb.container);
   return {
-    a: { events: ra.events, bytes: ra.container.length, logEvents: ra.logEvents },
+    a: { events: ra.events, bytes: ra.container.length, logEvents: ra.logEvents, writerKind: ra.writerKind },
     b: { events: rb.events, bytes: rb.container.length, logEvents: rb.logEvents },
     identicalBytes: Buffer.compare(Buffer.from(ra.container), Buffer.from(rb.container)) === 0,
   };
@@ -282,7 +282,7 @@ async function secondOpenOnOneInstance() {
 async function logEventRefusals() {
   const w = new CtWriter(
     await instantiateCtWriter(moduleBytes),
-    resolveTracingConfig(baseConfig({ recordingId: RECORDING_IDS.refusals }), WRITER_PATH_A_PURE_RUST),
+    resolveTracingConfig(baseConfig({ recordingId: RECORDING_IDS.refusals }), WRITER_PATH_B_NIM),
     { batchRecords: 4 },
   );
   const outcomes = {};
@@ -329,7 +329,7 @@ async function publicHalfViaModule(half, halves, arm, out) {
     await instantiateCtWriter(moduleBytes),
     resolveTracingConfig(
       baseConfig({ recordingId: RECORDING_IDS.splitPublic, mappingRung: RUNG_SOURCE, columns: true }),
-      WRITER_PATH_A_PURE_RUST,
+      WRITER_PATH_B_NIM,
     ),
     { batchRecords: 64 },
   );

@@ -163,9 +163,14 @@ assert_eq "…and the SHARED container holds exactly the two halves' steps toget
   "$SUM_STEPS" "$(m26_row "$SHARED" STEPS)"
 
 # ===========================================================================
-# FACT 6 — the branch the Noir tracer SHIPS from links a different writer.
+# FACT 6 — RETIRED BY M41. The branch the Noir tracer SHIPS from links the Nim writer, and since
+# M41 so does this runtime.
 #
-# THIS IS THE VERDICT'S FIRST HALF AND IT IS READ OUT OF TWO Cargo.tomls, not out of prose.
+# The Noir half is READ OUT OF TWO Cargo.tomls, not out of prose. The runtime half is MEASURED on
+# the module the join arms drove — the default build, the one the runtime ships — because "this
+# runtime ships Path B" is a claim about an artefact and a manifest line only says what was typed.
+# Both halves are asserted: a retirement argued from one side is the same shape as the verdict it
+# replaces being argued from one side.
 # ===========================================================================
 SHIP_TOML="$(cat "$M26_NOIR_SOURCE/Cargo.toml" 2>/dev/null)"
 WEB_TOML="$(cat "$OQ7_NOIR_ROOT/Cargo.toml" 2>/dev/null)"
@@ -174,7 +179,7 @@ assert_ge "the shipping Noir checkout's workspace manifest reads back" 100 \
 assert_ge "…and the probe worktree's does too" 100 "$(printf '%s\n' "$WEB_TOML" | grep -c . || true)"
 assert_true "the shipping branch resolves codetracer_trace_writer to the NIM writer — DD-7's Path B" \
   str_has_sub "$SHIP_TOML" 'package = "codetracer_trace_writer_nim" }'
-assert_false "…and NOT to the pure-Rust writer this runtime links" \
+assert_false "…and NOT to the pure-Rust writer (Path A, which this runtime shipped until M41)" \
   str_has_sub "$SHIP_TOML" 'codetracer_trace_writer = { path = "../ctf-wt-wasm/codetracer_trace_writer" }'
 assert_true "the probe worktree carries the pure-Rust writer under a SECOND alias" \
   str_has_sub "$WEB_TOML" 'codetracer_trace_writer_rs = { path = "../ctf-wt-wasm/codetracer_trace_writer", package = "codetracer_trace_writer" }'
@@ -182,8 +187,10 @@ assert_true "…and its own comment says that alias is NOT what nargo trace uses
   str_has_sub "$WEB_TOML" 'It is NOT used'
 assert_true "…while `codetracer_trace_writer` there is STILL the Nim one" \
   str_has_sub "$WEB_TOML" 'codetracer_trace_writer = { path = "../ctf-wt-wasm/codetracer_trace_writer_nim", package = "codetracer_trace_writer_nim" }'
-assert_true "the document records fact 6" \
-  str_has_sub "$DOC_FLAT" 'the shipping Noir branch links a **different writer**'
+assert_eq "the module the runtime ships, which the join arms drove, is the Nim writer — Path B, kind 2" \
+  "2" "$(m26_arm 'd["module"]["twoInstances"]["a"]["writerKind"]')"
+assert_true "the document records fact 6 as RETIRED, and names what retired it" \
+  str_has_sub "$DOC_FLAT" '**RETIRED by M41**: the shipping Noir branch links the **same writer** this runtime ships'
 
 # ===========================================================================
 # FACT 7 — that branch is UNPUBLISHED, so the shared path cannot be pinned.

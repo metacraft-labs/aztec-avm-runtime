@@ -28,6 +28,13 @@ producers**.
 > **Sharing is POSSIBLE and is demonstrated on one container. It is NOT SHIPPABLE, and the reason
 > is publication rather than capability. The fallback — two containers, each carrying an explicit
 > join record — is the shipped path.**
+>
+> **Since M41 the reason has narrowed.** Fact 6 is retired: this runtime now ships the Nim writer,
+> which is the writer the Noir half links, so both halves link one writer from published revisions
+> and the publication obstacle of fact 7 no longer stands between them. What remains is that the
+> single-container path is not BUILT on that writer — §3's demonstration drives the pure-Rust one —
+> so M26's `e2e_form_b_single_ct_recording` is reachable and still pending, and the two-container
+> fallback is still what ships.
 
 | # | fact | how it was established |
 |---|---|---|
@@ -36,19 +43,19 @@ producers**.
 | 3 | `noir_tracer` is **writer-agnostic** | read it: `trace_circuit(…, tracer: &mut dyn TraceSink)`, and its `codetracer_trace_writer` dependency is `optional = true` behind a `nim-writer` feature whose default is off |
 | 4 | a `TraceSink` over the pure-Rust writer **already exists** | read it: `tooling/tracer_wasm/src/ctfs_sink.rs`'s `CtfsSink` |
 | 5 | so one module with both producers **works** | built and ran it — §3 |
-| 6 | but the shipping Noir branch links a **different writer** | read it: `noir/Cargo.toml` resolves `codetracer_trace_writer` to `codetracer_trace_writer_nim` — DD-7's **Path B** — while this runtime is Path A |
+| 6 | ~~but the shipping Noir branch links a different writer~~ — **RETIRED by M41**: the shipping Noir branch links the **same writer** this runtime ships | read it: `noir/Cargo.toml` resolves `codetracer_trace_writer` to `codetracer_trace_writer_nim` — DD-7's **Path B**; and measured: this runtime's default module reports `ct_writer_kind()` = **2**, Path B, since M41 made `path-b` `ct-writer`'s default. Until then it was Path A, and this row said so |
 | 7 | the branch where both resolve **Path A** is `wasm/webpage`, and it is **unpublished** | `git for-each-ref refs/remotes --contains` is empty for its HEAD |
 
-**Facts 6 and 7 are the verdict.** *A pin that is not published is not a pin, it is a local file*
+**Facts 6 and 7 were the verdict, and fact 6 is retired** (see the note under the verdict). *A pin that is not published is not a pin, it is a local file*
 (`CAMPAIGN-BRIEF.md`, and M24's review paid for that sentence). Every anchor in `pins.json` must be
 reachable from a published remote ref, and the only tree in which the two halves link the same
 writer crate is not. Shipping the shared path would mean pinning a commit that resolves on one
 machine — which is the exact defect M24's review found and fixed, reintroduced deliberately.
 
-**And fact 6 is not a packaging accident.** On `wasm/webpage` the pure-Rust writer is present under
+**And fact 6 was not a packaging accident**, which is why it took a decision to retire it. On `wasm/webpage` the pure-Rust writer is present under
 a *second* alias, `codetracer_trace_writer_rs`, used only by `tracer_wasm`; that file's own comment
 says *"It is NOT used by `nargo trace`"*. So even there, the tracer the Noir campaign ships writes
-Path B containers and this runtime writes Path A ones.
+Path B containers — and until M41 this runtime wrote Path A ones.
 
 ---
 
@@ -194,7 +201,10 @@ this milestone.
 
 - **`wasm/webpage` published, or the Noir tracer's `codetracer_trace_writer` repointed at Path A on
   the branch it ships from.** Either removes fact 7 or fact 6, and the shared path becomes
-  pinnable. Nothing else in §2 has to change.
+  pinnable. Nothing else in §2 has to change. **M41 took the third route**: it moved THIS runtime
+  onto the Noir half's writer, which retires fact 6 without touching `wasm/webpage` — still in zero
+  published refs, asserted on every run. What reopening now needs is the single-container path
+  built on the Nim writer, which is `e2e_form_b_single_ct_recording`.
 - **A second consumer of `ct_log_event`.** The export is generic on purpose; a third record kind
   needs no third export, so the module does not move again.
 
@@ -225,11 +235,12 @@ this milestone.
 
 - The join surface added **2,854 bytes** to the module, 259,839 → 262,693, and **no imports**: the
   count is still 0 and the module still instantiates under a bare
-  `WebAssembly.instantiate(bytes, {})`. **The module is **480,600 bytes** today**, because M40 added
+  `WebAssembly.instantiate(bytes, {})`. **The module is **743,420 bytes** today**, because M40 added
   a source-step surface of two exports (+518) for a private half's steps — see `BOTH-HALVES.md` §3
-  — and because M41 advanced the `trace_format` pin, which made the writer's compressor C libzstd
-  and took `ruzstd` out of the shipped module (+234,128 bytes, and eight more exports, every one
-  named in `TRACE-ABI.md` §7).
+  — because M41 advanced the `trace_format` pin, which made the writer's compressor C libzstd
+  and took `ruzstd` out of the Path A module (+234,128 bytes), and because M41 then made the Nim
+  writer — Path B — the one the runtime ships (Path A 480,600 → Path B 743,420, and back to 39
+  exports; `TRACE-ABI.md` §7 names them).
   `TRACE-ABI.md` §7 re-derives the CURRENT figure from the built artefact on every run and so does
   this line, which is why the delta above is stated as a historical measurement rather than as an
   arithmetic that has to keep coming out: a later milestone growing the module must not be able to
