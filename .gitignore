@@ -66,3 +66,6 @@ browser/dist/
 #
 # Sweep logs live under ~/.cache; the summariser reads them there.
 scratchpad/campaign/*sweep*.log
+
+# Repro development environment cache
+.repro/

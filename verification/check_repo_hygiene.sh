@@ -30,7 +30,7 @@ command -v python3 >/dev/null 2>&1 || die "python3 is required to read flake.loc
 
 # Paths that must never show up as changed or untracked in `git status`.
 # Extended regex, matched against the workspace-relative path git reports.
-GENERATED_RE='(^|/)(node_modules|\.direnv|__pycache__|dest|dist|target|build|build-wasm[^/]*|build-native[^/]*|\.cache|\.tsbuildinfo)(/|$)|\.(o|obj|a|wasm\.gz|tsbuildinfo)$|(^|/)result(-[^/]*)?$'
+GENERATED_RE='(^|/)(node_modules|\.direnv|\.repro|__pycache__|dest|dist|target|build|build-wasm[^/]*|build-native[^/]*|\.cache|\.tsbuildinfo)(/|$)|\.(o|obj|a|wasm\.gz|tsbuildinfo)$|(^|/)result(-[^/]*)?$'
 
 # Generated locations that are EXPECTED to exist after a normal working session
 # and must therefore be ignored. Per repo, at least one of these must exist —
@@ -41,11 +41,13 @@ drift/node_modules
 probe-mt/node_modules
 vm2wasm/src
 vm2wasm/wasi-sdk-33
-.direnv"
+.direnv
+.repro/dev-env"
 GENERATED_CANDIDATES_aztec_packages="barretenberg/cpp/build-wasm
 barretenberg/cpp/build
 node_modules
-.direnv"
+.direnv
+.repro/dev-env"
 
 check_repo() { # <label> <root> <candidate-list>
   local label="$1" root="$2" candidates="$3"
