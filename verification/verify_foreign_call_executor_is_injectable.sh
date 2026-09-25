@@ -87,7 +87,7 @@ assert_false "rather than spawning a binary" str_has_sub "$SRC" 'Command::new'
 echo "== 3. THE SUITE RUNS, AND IT IS NOT EMPTY"
 OUT="$(mktemp)"
 rc=0
-direnv exec "$M38_NOIR_ROOT" true 2>/dev/null || true
+repro exec "$M38_NOIR_ROOT" -- true 2>/dev/null || true
 timeout -s KILL "$M38_NOIR_TESTS_TIMEOUT" \
   nix shell nixpkgs#rustup nixpkgs#capnproto --command bash -c '
     set -uo pipefail

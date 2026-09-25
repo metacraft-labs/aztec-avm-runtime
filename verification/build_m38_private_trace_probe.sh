@@ -207,7 +207,7 @@ fi
 [ -f "$NIM_DIR/src/codetracer_trace_writer_ffi.nim" ] || \
   die "${NIM_WRITER_REV:0:10} has no src/codetracer_trace_writer_ffi.nim"
 rc=0
-direnv exec "$TRACE_FORMAT_REPO" nix shell nixpkgs#rustup nixpkgs#capnproto --command bash -c '
+repro exec "$TRACE_FORMAT_REPO" -- nix shell nixpkgs#rustup nixpkgs#capnproto --command bash -c '
   set -uo pipefail
   command -v nim >/dev/null || { echo "no nim on PATH inside the writer'"'"'s dev shell" >&2; exit 1; }
   export RUSTUP_HOME="'"$M38_RUSTUP_HOME"'"

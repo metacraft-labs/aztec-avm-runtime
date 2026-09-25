@@ -27,16 +27,9 @@ TEST_NAME="verify_workspace_repos_registered"
 command -v python3 >/dev/null 2>&1 || die "python3 is required to read repro's JSON"
 command -v git >/dev/null 2>&1 || die "git is required"
 
-# `repro` may be on PATH already (the workspace dev shell), or reachable
-# through direnv at the workspace root. Anything else is a hard failure.
-REPRO=""
-if command -v repro >/dev/null 2>&1; then
-  REPRO="repro"
-elif command -v direnv >/dev/null 2>&1; then
-  REPRO="direnv exec $WORKSPACE_ROOT repro"
-else
-  die "the 'repro' CLI is not available (not on PATH, and direnv is missing)"
-fi
+# The workspace's Repro environment supplies the CLI used for this check.
+command -v repro >/dev/null 2>&1 || die "the 'repro' CLI is not on PATH; enter the workspace development environment"
+REPRO="$(command -v repro)"
 
 # The expectations. These are the assertion, not the input: they are written
 # out here so a drifting manifest is caught rather than mirrored.
@@ -45,9 +38,9 @@ EXPECTED="aztec-avm-runtime|aztec-avm-runtime|metacraft-labs|https://github.com/
 aztec-packages|aztec-packages|metacraft-labs|https://github.com/metacraft-labs/aztec-packages|aztec-avm-runtime|barretenberg/cpp/CMakePresets.json"
 EXPECTED_PROJECT="codetracer"
 
-LIST_JSON="$($REPRO ws list --json --workspace-root="$WORKSPACE_ROOT" 2>/dev/null)" || die "'repro ws list --json' failed"
+LIST_JSON="$("$REPRO" ws list --json --workspace-root="$WORKSPACE_ROOT" 2>/dev/null)" || die "'repro ws list --json' failed"
 LIST_JSON="${LIST_JSON#*\{}"; LIST_JSON="{$LIST_JSON"
-REPOS_JSON="$($REPRO ws repos list --json --workspace-root="$WORKSPACE_ROOT" 2>/dev/null)" || die "'repro ws repos list --json' failed"
+REPOS_JSON="$("$REPRO" ws repos list --json --workspace-root="$WORKSPACE_ROOT" 2>/dev/null)" || die "'repro ws repos list --json' failed"
 REPOS_JSON="${REPOS_JSON#*\{}"; REPOS_JSON="{$REPOS_JSON"
 
 jq_field() { # <json> <repo-name> <field>
@@ -94,21 +87,23 @@ while IFS='|' read -r name path remote url revision sentinel; do
     "path = \"$path\"" "$COMMITTED_FRAG"
   assert_contains "$name: the committed fragment declares remote = \"$remote\"" \
     "remote = \"$remote\"" "$COMMITTED_FRAG"
-  # aztec-packages is PINNED to its fork branch; aztec-avm-runtime deliberately
-  # omits the key so it INHERITS the codetracer project's default_revision.
-  if [ "$name" = "aztec-packages" ]; then
-    assert_contains "$name: the fragment pins revision = \"$revision\"" \
-      "revision = \"$revision\"" "$COMMITTED_FRAG"
-  else
-    assert_not_contains "$name: the fragment omits revision (inherits the project default)" \
-      "revision = " "$COMMITTED_FRAG"
-  fi
+  # Compare parsed manifest fields: branches select mainlines, revisions pin
+  # snapshots, and project membership names repositories rather than fragments.
+  COMMITTED_BRANCH="$(printf '%s' "$COMMITTED_FRAG" | python3 -c '
+import sys, tomllib
+print(tomllib.loads(sys.stdin.read())["repo"].get("branch", "dev"))
+')"
+  assert_eq "$name: the committed fragment selects the expected branch" \
+    "$revision" "$COMMITTED_BRANCH"
 
-  # ---- the include edge into the codetracer project ----------------------
   PROJECT_FILE="projects/$EXPECTED_PROJECT.toml"
   COMMITTED_PROJECT="$(git -C "$WORKSPACE_ROOT" show "HEAD:$PROJECT_FILE" 2>/dev/null)"
-  assert_contains "$name: included by the $EXPECTED_PROJECT project (committed)" \
-    "\"$FRAG\"" "$COMMITTED_PROJECT"
+  IS_MEMBER="$(printf '%s' "$COMMITTED_PROJECT" | python3 -c '
+import sys, tomllib
+print(sys.argv[1] in tomllib.loads(sys.stdin.read()).get("member_repos", []))
+' "$name")"
+  assert_eq "$name: member of the $EXPECTED_PROJECT project (committed)" \
+    "True" "$IS_MEMBER"
   assert_true "$name: $PROJECT_FILE has no uncommitted changes" \
     git -C "$WORKSPACE_ROOT" diff --quiet HEAD -- "$PROJECT_FILE"
 

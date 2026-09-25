@@ -245,7 +245,7 @@ m30_native_tests() { # <package>
   M30_CARGO_LOG="$M30_WORK/cargo-$pkg.log"
   mkdir -p "$M30_WORK"
   TMPDIR="$M30_WORK" timeout -s KILL "$M30_CARGO_TIMEOUT" \
-    direnv exec "$WORKSPACE_ROOT/codetracer-trace-format" \
+    repro exec "$WORKSPACE_ROOT/codetracer-trace-format" -- \
     bash -c "cd '$M30_NOIR_ROOT' && cargo test -p $pkg" >"$M30_CARGO_LOG" 2>&1
   M30_CARGO_RC=$?
   if [ "$M30_CARGO_RC" = 124 ] || [ "$M30_CARGO_RC" = 137 ]; then
