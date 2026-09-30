@@ -34,18 +34,103 @@ assert_ge "index.ts was read" 100 "$(printf '%s\n' "$INDEX" | grep -c . || true)
 
 # ---------------------------------------------------------------------------
 echo "== 1. no export in this package is named AztecNode, by any spelling"
-# ---------------------------------------------------------------------------
-EXPORTED="$(printf '%s\n' "$INDEX" | grep -oE '^  (type )?[A-Za-z_][A-Za-z0-9_]*,$' \
-            | sed 's/^  //; s/^type //; s/,$//' | LC_ALL=C sort -u || true)"
+# THE EXPORT SURFACE IS PARSED, NOT GREPPED LINE BY LINE. A `  Name,` pattern sees only the members
+# of multi-line `export { … }` blocks: it misses a single-line `export { X } from …`, an inline
+# `type` specifier, an `as` alias, and `export *` — and the likeliest way for this package to ship
+# an `AztecNode` is exactly a one-line re-export of upstream's own type. The parser below reads
+# every export statement in a module, resolves a local `export *` into the module it names, and
+# reports an `export *` from a PACKAGE as such, because that forwards a surface this check cannot
+# enumerate. Its controls follow it: real single-line exports of this index are found, and a probe
+# module holding each evasive spelling is reported.
+EXPORT_PY="$(cat <<'PYEOF'
+import os, re, sys
+
+def strip_comments(t):
+    t = re.sub(r'/\*.*?\*/', '', t, flags=re.S)
+    return re.sub(r'(^|[^:\\])//[^\n]*', r'\1', t)
+
+NAME = r'[A-Za-z_$][A-Za-z0-9_$]*'
+DECL = re.compile(r'\bexport\s+(?:declare\s+)?(?:default\s+)?(?:abstract\s+)?(?:async\s+)?'
+                  r'(?:type|interface|class|const|let|var|function\*?|enum|namespace)\s+(' + NAME + r')')
+BRACES = re.compile(r'\bexport\s+(?:type\s+)?\{([^}]*)\}')
+STAR = re.compile(r'\bexport\s+(?:type\s+)?\*\s*(?:as\s+(' + NAME + r')\s+)?from\s*[\'"]([^\'"]+)[\'"]')
+
+def exports(path, seen):
+    if path in seen:
+        return set()
+    seen.add(path)
+    src = strip_comments(open(path, encoding='utf-8').read())
+    out = set(m.group(1) for m in DECL.finditer(src))
+    for m in BRACES.finditer(src):
+        for spec in m.group(1).split(','):
+            spec = re.sub(r'^\s*type\s+', '', spec.strip())
+            if not spec:
+                continue
+            alias = re.search(r'\bas\s+(' + NAME + r')\s*$', spec)
+            out.add(alias.group(1) if alias else spec.split()[0])
+    for m in STAR.finditer(src):
+        ns, target = m.group(1), m.group(2)
+        if ns:
+            out.add(ns)
+        elif target.startswith('.'):
+            local = os.path.normpath(os.path.join(os.path.dirname(path), target))
+            for cand in (local, local + '.ts', re.sub(r'\.js$', '.ts', local)):
+                if os.path.isfile(cand):
+                    out |= exports(cand, seen)
+                    break
+            else:
+                out.add('STAR-UNRESOLVED:' + target)
+        else:
+            out.add('STAR-FROM-PACKAGE:' + target)
+    return out
+
+for n in sorted(exports(sys.argv[1], set())):
+    print(n)
+PYEOF
+)"
+exported_names() { python3 -c "$EXPORT_PY" "$1"; }
+
+EXPORTED="$(exported_names "$SRC/index.ts")"
 N_EXPORTED="$(printf '%s\n' "$EXPORTED" | grep -c . || true)"
-note "index.ts re-exports $N_EXPORTED name(s)"
+note "index.ts exports $N_EXPORTED name(s)"
 assert_ge "the export surface is not empty, so what follows is not vacuous" 30 "$N_EXPORTED"
-if str_has_line "$EXPORTED" "AztecNode"; then named=yes; else named=no; fi
-assert_eq "…and none of them is AztecNode" "no" "$named"
+for spelling in AztecNode AztecNodeApi AztecNodeLike AztecNodeAdapter aztecNode; do
+  if str_has_line "$EXPORTED" "$spelling"; then named=yes; else named=no; fi
+  assert_eq "…and none of them is $spelling" "no" "$named"
+done
+STARS="$(printf '%s\n' "$EXPORTED" | grep -E '^STAR-' || true)"
+assert_eq "…and nothing is forwarded wholesale by an export * this check cannot enumerate" "" "$STARS"
 if str_has_line "$EXPORTED" "SubmittedTx"; then named=yes; else named=no; fi
 assert_eq "…while the same lookup DOES find SubmittedTx, which is exported" "yes" "$named"
 if str_has_line "$EXPORTED" "SettledLeafIndexSource"; then named=yes; else named=no; fi
 assert_eq "…and the adapter's own type, so the surface really was parsed" "yes" "$named"
+if str_has_line "$EXPORTED" "ForkCheckpoint"; then named=yes; else named=no; fi
+assert_eq "…and a SINGLE-LINE export { X } from, which a block-member pattern does not see" "yes" "$named"
+if str_has_line "$EXPORTED" "BlobCallable"; then named=yes; else named=no; fi
+assert_eq "…and an inline type specifier on such a line" "yes" "$named"
+
+# THE PARSER'S CONTROL: each evasive spelling, in a probe module, IS reported.
+EXPORT_PROBE="$(mktemp -d)"
+mkdir -p "$EXPORT_PROBE/sub"
+cat >"$EXPORT_PROBE/index.ts" <<'TSEOF'
+// export type { NotExportedInAComment } from 'x';
+export type { AztecNode } from '@aztec/stdlib/interfaces/server';
+export { SomethingLocal as AztecNodeApi } from './sub/local.ts';
+export { type AztecNodeLike, Plain } from './sub/local.ts';
+export * from './sub/star.ts';
+export * from '@aztec/stdlib/interfaces/server';
+TSEOF
+printf 'export interface AztecNodeAdapter { x: number }\n' >"$EXPORT_PROBE/sub/star.ts"
+PROBE_EXPORTS="$(exported_names "$EXPORT_PROBE/index.ts")"
+rm -rf "$EXPORT_PROBE"
+for spelling in AztecNode AztecNodeApi AztecNodeLike AztecNodeAdapter; do
+  assert_true "the parser reports a planted $spelling export" str_has_line "$PROBE_EXPORTS" "$spelling"
+done
+assert_true "…and a planted export * from a package" \
+  str_has_line "$PROBE_EXPORTS" "STAR-FROM-PACKAGE:@aztec/stdlib/interfaces/server"
+assert_false "…and not a name that appears only in a comment" \
+  str_has_line "$PROBE_EXPORTS" "NotExportedInAComment"
+assert_false "…nor the local name behind an alias" str_has_line "$PROBE_EXPORTS" "SomethingLocal"
 
 for spelling in AztecNode AztecNodeApi AztecNodeLike AztecNodeAdapter aztecNode; do
   HITS="$(grep -rhcE "^\s*export (type |interface |class |const |function )?$spelling\b" "$SRC" \

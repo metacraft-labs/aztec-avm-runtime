@@ -67,11 +67,19 @@ for d in $SCAN_DIRS; do assert_dir "the scanned directory is present" "$d"; done
 # `[ "$(diff … | grep -c "^[<>]")" -eq 2 ]` as a quiet flag. Measured: that spelling put
 # `verify_avm_wasm_module_split_patch_applies.sh:243` on the offender list, which is a needle
 # matching more than it names — the campaign's fourteen-times defect, met again in this check.
-PRED_RE='printf.*\|.*grep( +-[A-Za-z]*q| +--quiet)'
+#
+# THE FLAG NEED NOT BE THE FIRST OPTION. `grep -E -q`, `grep -F -e X -q` and `grep NEEDLE -q` are
+# the same quiet reader as `grep -qE`, and a needle that looked only at the first option cluster did
+# not see them. So the grammar is: `grep`, then any number of space-separated words, then a word
+# that is a single-dash cluster containing `q` (or `--quiet`). The words may not contain `)`, a
+# quote or a backtick, which is what keeps the `-eq` above from being read as a flag: to reach it a
+# word would have to cross the `)"` that closes the command substitution.
+GREPQ_TAIL="grep( +[^ |;&)\"'\`]+)* +(-[A-Za-z]*q[A-Za-z]*|--quiet)( |\$)"
+PRED_RE="printf.*\\|.*$GREPQ_TAIL"
 # `(^|[^|])` in front of the pipe, because `||` is not a pipeline. Without it this check put its
 # own `if grep -qF … || grep -qF …` on the offender list — a needle matching more than it names, in
 # the check whose entire subject is needles matching more than they name.
-ANY_GREPQ_RE='(^|[^|])\| *grep +(-[A-Za-z]*q|--quiet)'
+ANY_GREPQ_RE="(^|[^|])\\| *$GREPQ_TAIL"
 
 # THIS FILE IS EXCLUDED FROM THE SCAN, and that is asserted rather than assumed: section 4 below
 # runs the very spelling this check forbids, deliberately, to cross-check each builtin against the
@@ -79,10 +87,48 @@ ANY_GREPQ_RE='(^|[^|])\| *grep +(-[A-Za-z]*q|--quiet)'
 # a rule quietly stops applying, so the count of instances IN THIS FILE is pinned exactly too.
 SELF="$REPO_ROOT/verification/verify_no_pipeline_predicates.sh"
 
+# THE SCANNER READS LOGICAL LINES. A pipeline continued with a trailing backslash puts the writer on
+# one physical line and `| grep -q` on the next, and a line-at-a-time grep sees neither half as the
+# pipeline it is. Continued lines are joined before matching and reported at their first line; a
+# line whose first non-blank character is `#` is a comment and is not counted.
+SCAN_PY="$(cat <<'PYEOF'
+import os, re, sys
+rx = re.compile(sys.argv[1])
+exclude = sys.argv[2]
+for root in sys.argv[3:]:
+    if os.path.isfile(root):
+        paths = [root]
+    else:
+        paths = []
+        for d, ds, fs in os.walk(root):
+            ds[:] = sorted(x for x in ds if x != '.m21-scan-probe')
+            paths += [os.path.join(d, f) for f in sorted(fs) if f.endswith(('.sh', '.py', '.mjs'))]
+    for path in paths:
+        if path == exclude:
+            continue
+        try:
+            lines = open(path, encoding='utf-8', errors='replace').read().split('\n')
+        except OSError:
+            continue
+        i = 0
+        while i < len(lines):
+            start, text = i + 1, lines[i]
+            while text.endswith('\\') and i + 1 < len(lines):
+                i += 1
+                text = text[:-1] + ' ' + lines[i].lstrip()
+            i += 1
+            if text.lstrip().startswith('#'):
+                continue
+            if rx.search(text):
+                print('%s:%d:%s' % (path, start, text))
+PYEOF
+)"
+scan_paths() { # <regex> <excluded-path> <path…> -> path:line:text per matching logical line
+  python3 -c "$SCAN_PY" "$@"
+}
 scan() { # <regex> -> path:line:text for every matching line that is not a comment, self excluded
-  grep -rnE "$1" $SCAN_DIRS --include='*.sh' --include='*.py' --include='*.mjs' \
-       --exclude-dir='.m21-scan-probe' 2>/dev/null \
-    | grep -vE '^[^:]+:[0-9]+: *#' | grep -vF "$SELF:" || true
+  # shellcheck disable=SC2086
+  scan_paths "$1" "$SELF" $SCAN_DIRS || true
 }
 
 HITS="$(scan "$PRED_RE")"
@@ -104,10 +150,18 @@ trap 'rm -rf "$PROBE_DIR"' EXIT
   printf '%s\n' '# if printf "%s" "$x" | grep -q COMMENTED; then :; fi'
   printf '%s\n' 'if str_has_sub "$x" NEEDLE; then :; fi'
   printf '%s\n' 'git show HEAD:f | grep -q NEEDLE'
+  printf '%s\n' 'if printf "%s" "$x" | grep -E -q SEPARATED; then :; fi'
+  printf '%s\n' 'if printf "%s" "$x" \'
+  printf '%s\n' '     | grep -qx CONTINUED; then :; fi'
+  printf '%s\n' '[ "$(printf "%s" "$x" | grep -c NOTQUIET)" -eq 2 ]'
 } >"$PROBE_DIR/planted.sh"
-PROBE_HITS="$(grep -nE "$PRED_RE" "$PROBE_DIR/planted.sh" | grep -vE '^[0-9]+: *#' || true)"
-assert_eq "the scanner reports a planted direct offender AND one with a stage in between" "2" \
+PROBE_HITS="$(scan_paths "$PRED_RE" "" "$PROBE_DIR/planted.sh" || true)"
+assert_eq "the scanner reports all four planted offenders: direct, staged, separated-flag, continued" "4" \
   "$(printf '%s\n' "$PROBE_HITS" | grep -c . || true)"
+assert_contains "…the one whose quiet flag is not the first option" 'grep -E -q SEPARATED' "$PROBE_HITS"
+assert_contains "…and the one continued onto a second line, at its first line" \
+  'planted.sh:8:if printf' "$PROBE_HITS"
+assert_not_contains "…while a -eq after a command substitution is not read as a flag" 'NOTQUIET' "$PROBE_HITS"
 assert_contains "…the direct one" 'grep -q NEEDLE; then' "$PROBE_HITS"
 assert_contains "…and the one with a tr between the writer and the reader" '| tr ' "$PROBE_HITS"
 assert_not_contains "…and a COMMENTED offender is not counted" 'COMMENTED' "$PROBE_HITS"
@@ -152,10 +206,12 @@ $REMAINING
 EOF
 assert_eq "…and not one of them has printf as its writer" "1" "$NOT_PRINTF"
 
-# The self-exclusion, pinned in both directions.
-SELF_HITS="$(grep -nE "$PRED_RE" "$SELF" | grep -vE '^[0-9]+: *#' | grep -c . || true)"
+# The self-exclusion, pinned in both directions. Twelve: the six lines of section 1 that WRITE a
+# planted probe line containing `| grep -q` (each is itself a `printf` feeding that text), the
+# section-3 reproduction, the section-3 helper-binding probe, and the four section-4 cross-checks.
+SELF_HITS="$(scan_paths "$PRED_RE" "" "$SELF" | grep -c . || true)"
 assert_eq "this check itself runs the forbidden spelling, deliberately and a known number of times" \
-  "10" "$SELF_HITS"
+  "12" "$SELF_HITS"
 assert_ge "…so its exclusion from the scan is load-bearing rather than cosmetic" 1 "$SELF_HITS"
 
 # ---------------------------------------------------------------------------
