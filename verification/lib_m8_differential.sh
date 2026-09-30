@@ -278,8 +278,9 @@ m8_require_artifacts() {
 # m8_report <file>
 #
 # Turns a `_transcript_compare.py` / `_tierd_compare.py` PASS/FAIL report into this harness's own
-# assertions, one per row, so a failure names itself. Dies if the report is empty: a comparator
-# that printed nothing has not agreed with anything.
+# assertions, one per row, so a failure names itself. A NOTE row is a measurement the comparator
+# reports without asserting; it is printed as a note and not counted as a pass. Dies if the report
+# is empty: a comparator that printed nothing has not agreed with anything.
 # ---------------------------------------------------------------------------
 m8_report() {
   local file="$1" rows=0
@@ -289,6 +290,8 @@ m8_report() {
     rows=$((rows + 1))
     if [ "$status" = "PASS" ]; then
       pass "$name${detail:+  [$detail]}"
+    elif [ "$status" = "NOTE" ]; then
+      note "$name${detail:+  [$detail]}"
     else
       fail "$name  ($detail)"
     fi
