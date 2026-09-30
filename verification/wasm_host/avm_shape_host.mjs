@@ -94,7 +94,7 @@ function simulateResident(name, h) {
   try { status = R.e.avm_simulate(ptr, b.length, h.cdb, h.mdb); } finally { R.free(ptr); }
   const t1 = process.hrtime.bigint();
   R.check(status, `avm_simulate(${name})`);
-  return { raw: R.result(), us: Number((t1 - t0) / 1000n), inputBytes: b.length };
+  return { raw: R.result(), us: Number((t1 - t0) / 1000n), inputBytes: b.length, entry: 'avm_simulate' };
 }
 
 function simulateChattyBatched(name) {
@@ -105,7 +105,7 @@ function simulateChattyBatched(name) {
   try { status = R.e.avm_simulate_with_hinted_dbs(ptr, b.length); } finally { R.free(ptr); }
   const t1 = process.hrtime.bigint();
   R.check(status, `avm_simulate_with_hinted_dbs(${name})`);
-  return { raw: R.result(), us: Number((t1 - t0) / 1000n), inputBytes: b.length };
+  return { raw: R.result(), us: Number((t1 - t0) / 1000n), inputBytes: b.length, entry: 'avm_simulate_with_hinted_dbs' };
 }
 
 // The INTERACTIVE form: issue, one at a time, exactly the multiset of DB operations the hint
@@ -180,6 +180,14 @@ function dump(prefix, raw) {
   line(`${prefix}.noteHashes.count`, r.publicTxEffect.noteHashes.length);
   r.publicTxEffect.noteHashes.forEach((n, i) => line(`${prefix}.noteHashes.${i}`, hexOf(n)));
   line(`${prefix}.dataWrites.count`, r.publicTxEffect.publicDataWrites.length);
+  // The CONTENTS, not only the count: a world-state read that answers wrongly changes what a
+  // program writes and leaves how many writes it makes, its gas and its fee exactly as they were.
+  r.publicTxEffect.publicDataWrites.forEach((w, i) =>
+    line(`${prefix}.dataWrites.${i}`, `${hexOf(w.leafSlot)} ${hexOf(w.value)}`));
+  line(`${prefix}.publicLogs.count`, r.publicTxEffect.publicLogs.length);
+  r.publicTxEffect.publicLogs.forEach((l, i) =>
+    line(`${prefix}.publicLogs.${i}`, `${hexOf(l.contractAddress)} ${l.fields.map((f) => hexOf(f)).join(',')}`));
+  line(`${prefix}.l2ToL1Msgs.count`, r.publicTxEffect.l2ToL1Msgs.length);
   line(`${prefix}.publicInputsPresent`, r.publicInputs ? 1 : 0);
   line(`${prefix}.resultBytes`, raw.length);
   return r;
@@ -200,21 +208,35 @@ try {
     const name = rest[0] ?? 'add';
     line('shapes.program', name);
     line('shapes.abiVersion', String(R.e.avm_abi_version()));
-    const h = seed(name);
-    const res = simulateResident(name, h);
-    dump('resident', res.raw);
-    line('resident.inputBytes', res.inputBytes);
-    line('resident.steps', R.e.avm_steps_count());
-    roots(h.mdb, 'resident.roots');
-    destroy(h);
+    // Each arm runs with every entry into a DB export counted: the resident arm must enter them
+    // (it seeds its world state through them), and the chatty arm must not, because it holds no
+    // world state in the module at all. That is the chatty shape's defining property, so it is
+    // observed on the arm that ran rather than printed as a constant. The ARITY of the entry point
+    // each arm called is read off the export itself: a DB handle is a parameter, and the chatty
+    // entry point has none to take.
+    const DB_EXPORTS = /^avm_(contract|merkle)_db_/;
+    const resRun = R.countCalls(DB_EXPORTS, () => {
+      const h = seed(name);
+      const res = simulateResident(name, h);
+      dump('resident', res.raw);
+      line('resident.inputBytes', res.inputBytes);
+      line('resident.steps', R.e.avm_steps_count());
+      roots(h.mdb, 'resident.roots');
+      destroy(h);
+      return res;
+    });
 
-    const cha = simulateChattyBatched(name);
+    const chaRun = R.countCalls(DB_EXPORTS, () => simulateChattyBatched(name));
+    const cha = chaRun.value;
     dump('chatty', cha.raw);
     line('chatty.inputBytes', cha.inputBytes);
     line('chatty.steps', R.e.avm_steps_count());
-    // The chatty arm holds no world state in the module, so there are no resident roots to read.
-    // That is the shape's defining property and it is stated as a value rather than by omission.
-    line('chatty.residentTreesPresent', 0);
+    line('shapes.residentEntry', resRun.value.entry);
+    line('shapes.residentEntryArity', R.e[resRun.value.entry].length);
+    line('shapes.residentDbExportCalls', resRun.calls);
+    line('shapes.chattyEntry', cha.entry);
+    line('shapes.chattyEntryArity', R.e[cha.entry].length);
+    line('shapes.chattyDbExportCalls', chaRun.calls);
     line('shapes.done', '1');
   } else if (mode === 'crossings') {
     const names = programs();
@@ -230,6 +252,14 @@ try {
         if (n > 0) line(`crossings.${name}.op.${op.name}`, n);
       }
       line(`crossings.${name}.unmappedHintCategories`, t.unmapped.join(',') || '-');
+      // The RESIDENT shape's own crossings for the same transaction, counted at the exports: every
+      // entry into the module from handing it the input to holding the decoded result. The hint
+      // tally above is upstream's record of the chatty shape; this is what the shape M15 ships
+      // actually costs, measured on the module this milestone built.
+      const h = seed(name);
+      const resident = R.countCalls(/^avm_/, () => simulateResident(name, h));
+      destroy(h);
+      line(`crossings.${name}.residentBoundaryCalls`, resident.calls);
     }
     line('crossings.done', '1');
   } else if (mode === 'cost') {
@@ -255,6 +285,13 @@ try {
         line('cost.interactive.replyBytes', d.replyBytes);
       }
     }
+    // `crossings` above is the drive's own loop counter over the hint table, so it equals the
+    // table's total by construction. What the module actually saw is counted on one further,
+    // untimed drive: every entry into a DB export, which is what a chatty shape pays for.
+    const hc = seed(name);
+    const enteredDrive = R.countCalls(/^avm_(contract|merkle)_db_/, () => driveInteractive(name, hc, table));
+    destroy(hc);
+    line('cost.interactive.exportsEntered', enteredDrive.calls);
     resident.forEach((v, i) => line(`cost.resident.us.${i}`, v));
     batched.forEach((v, i) => line(`cost.chattyBatched.us.${i}`, v));
     interactive.forEach((v, i) => line(`cost.chattyInteractive.us.${i}`, v));
