@@ -74,10 +74,17 @@ assert_eq "and it creates no file at all" 0 \
 m6_configure "$M7_TREE" wasm-avm build-wasm-simoff
 off_rc=$?
 assert_eq "wasm-avm configures with AVM_SIM_TESTS left at its default" 0 "$off_rc"
-off_targets="$(m6_ninja_targets "$M7_TREE" build-wasm-simoff | grep -c 'vm2_sim_tests')"
+# "No such target" is only a finding over a target list that was actually read,
+# so the list's size is asserted before its absences are.
+OFF_TARGETS="$(m6_ninja_targets "$M7_TREE" build-wasm-simoff)"
+assert_ge "with the option OFF the wasm build still declares a real target list" 1000 \
+  "$(printf '%s\n' "$OFF_TARGETS" | grep -c .)"
+assert_ge "including the vm2_sim library the tests would link" 1 \
+  "$(printf '%s\n' "$OFF_TARGETS" | grep -c '^lib/libvm2_sim\.a$')"
+off_targets="$(printf '%s\n' "$OFF_TARGETS" | grep -c 'vm2_sim_tests')"
 assert_eq "with the option OFF the wasm build declares no vm2_sim_tests target" 0 "$off_targets"
 assert_eq "and no vm2_sim_test_objects either" 0 \
-  "$(m6_ninja_targets "$M7_TREE" build-wasm-simoff | grep -c 'vm2_sim_test_objects')"
+  "$(printf '%s\n' "$OFF_TARGETS" | grep -c 'vm2_sim_test_objects')"
 
 # --- the wasm build ---------------------------------------------------------
 m7_build_wasm

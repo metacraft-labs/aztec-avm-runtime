@@ -113,10 +113,13 @@ assert_eq "and every member of it is a WebAssembly object" "WASM" \
 link_line="$(grep -A6 "^build bin/vm2_sim_tests" "$M7_TREE/barretenberg/cpp/$M7_WASM_BUILD/build.ninja" | tr ' ' '\n' | grep -E '\.a$' | LC_ALL=C sort -u)"
 assert_ge "it is on the wasm test binary's link line" 1 \
   "$(printf '%s\n' "$link_line" | grep -c 'libworld_state_reference\.a$')"
-wsr_syms="$(m6_in_devshell '"$WASI_SDK_PREFIX/bin/llvm-nm" "$1" 2>/dev/null | grep -c "MemoryMerkleDB"' \
+# Counted by namespace: vm2 has its own adapter class of the same name,
+# bb::avm2::simulation::MemoryMerkleDB, and a bare "MemoryMerkleDB" match would be
+# satisfied by the adapter alone. This module's class is bb::world_state's.
+wsr_syms="$(m6_in_devshell '"$WASI_SDK_PREFIX/bin/llvm-nm" "$1" 2>/dev/null | grep -c "bb::world_state::MemoryMerkleDB::"' \
   "$M7_WASM_BIN" 2>/dev/null | tail -1)"
-assert_ge "and its MemoryMerkleDB symbols are in the artefact" 1 "$wsr_syms"
-note "MemoryMerkleDB symbols in the wasm test binary: $wsr_syms"
+assert_ge "and its own bb::world_state::MemoryMerkleDB symbols are in the artefact" 1 "$wsr_syms"
+note "bb::world_state::MemoryMerkleDB symbols in the wasm test binary: $wsr_syms"
 
 # world_state_reference's vocabulary reaches the tests through db.hpp.
 assert_ge "vm2/simulation/interfaces/db.hpp takes MerkleTreeId from world_state_reference" 1 \

@@ -91,33 +91,56 @@ assert_eq "the reason codes and their counts are exactly the recorded ones" \
   "dsl=5 proving-stack=1059 proving-stack+dsl=59 tracegen=286 tracegen-fixture=3" \
   "$reasons"
 
-# Every row's file really is where its suite is declared, re-derived here rather
-# than trusted from the generator that wrote the row.
+# Every row's file really is where its suite is declared. The generator derived
+# that file with _gtest_suite_sources.scan(), so re-reading it through the same
+# scan() would agree with the row by construction. It is checked instead against
+# the FILE ITSELF, with a declaration pattern written here: the named file must
+# exist and must contain a gtest macro whose suite argument is this test's suite.
 python3 "$M7_SUITE_SOURCES" "$VM2_SRC" >"$M7_WORK/suite_sources.tsv"
 assert_ge "gtest suites were found in the tree" 100 \
   "$(wc -l <"$M7_WORK/suite_sources.tsv" | tr -d ' ')"
-bad_rows="$(python3 - "$M7_EXCLUSIONS_TSV" "$M7_WORK/suite_sources.tsv" "$VERIFY_DIR/wasm_host" <<'PY'
-import sys, collections
-sys.path.insert(0, sys.argv[3])
-from _gtest_suite_sources import suite_of
-tab = collections.defaultdict(set)
-for line in open(sys.argv[2]):
-    s, p = line.rstrip("\n").split("\t")
-    tab[s].add(p)
-bad = 0
+row_check="$(python3 - "$M7_EXCLUSIONS_TSV" "$VM2_SRC" <<'PY'
+import os, re, sys
+rows = bad = 0
+cache = {}
 for line in open(sys.argv[1]):
     name, rel, _code = line.rstrip("\n").split("\t")
-    if rel not in tab.get(suite_of(name), ()):
+    rows += 1
+    # `Prefix/Suite.Name/0` (value-parameterised) or `Suite/0.Name` (typed).
+    head = name.split(".", 1)[0].split("/")
+    while len(head) > 1 and head[-1].isdigit():
+        head.pop()
+    suite = re.escape(head[-1])
+    path = os.path.join(sys.argv[2], rel)
+    if path not in cache:
+        cache[path] = open(path, errors="replace").read() if os.path.isfile(path) else None
+    text = cache[path]
+    declared = text is not None and (
+        re.search(r"\b(TEST|TEST_F|TEST_P|TYPED_TEST|TYPED_TEST_P|TYPED_TEST_SUITE|TYPED_TEST_SUITE_P)"
+                  r"\s*\(\s*" + suite + r"\s*,", text)
+        or re.search(r"\bINSTANTIATE_(TYPED_)?TEST_SUITE_P\s*\(\s*\w+\s*,\s*" + suite + r"\s*,", text))
+    if not declared:
         bad += 1
-print(bad)
+print(rows, bad)
 PY
 )"
-assert_eq "every excluded test's recorded file really declares its suite" 0 "$bad_rows"
+read -r ROWS_CHECKED BAD_ROWS <<<"$row_check"
+assert_eq "every excluded row was checked against its file" "$M7_EXPECTED_EXCLUDED" "$ROWS_CHECKED"
+assert_eq "every excluded test's recorded file really declares its suite" 0 "$BAD_ROWS"
 
 # No test is excluded because of threads -- the milestone expected that category
-# and it is empty, which is a result rather than an omission.
-assert_eq "no test is excluded for needing threads" 0 \
-  "$(cut -f3 "$M7_EXCLUSIONS_TSV" | grep -c 'thread' || true)"
+# and it is empty, which is a result rather than an omission. A reason CODE cannot
+# carry that claim: the generator's vocabulary has no thread code to emit. What
+# carries it is WHERE the excluded tests live: a test the wasm build drops for
+# needing threads would be a simulation-side test (simulation/, common/, tooling/
+# are the target's globs) missing from the included set, whatever it was labelled.
+# The one simulation-side file that is excluded is common/avm_io.test.cpp, for the
+# tracegen fixture, and that is the only one there may be.
+SIM_SIDE_ROWS="$(awk -F'\t' '$2 ~ /^(simulation|common|tooling)\// {print $2}' "$M7_EXCLUSIONS_TSV")"
+assert_eq "the simulation-side excluded rows are counted, and there are three" 3 \
+  "$(printf '%s\n' "$SIM_SIDE_ROWS" | grep -c .)"
+assert_eq "no test is excluded for needing threads: no simulation-side file but avm_io.test.cpp" \
+  "common/avm_io.test.cpp" "$(printf '%s\n' "$SIM_SIDE_ROWS" | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ $//')"
 # And exactly one simulation-side file is excluded, with three tests in it.
 assert_eq "exactly one simulation-side source file is excluded" 1 \
   "$(awk -F'\t' '$3=="tracegen-fixture"{print $2}' "$M7_EXCLUSIONS_TSV" | LC_ALL=C sort -u | wc -l | tr -d ' ')"
