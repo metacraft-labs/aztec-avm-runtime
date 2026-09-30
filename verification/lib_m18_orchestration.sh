@@ -97,3 +97,7 @@ m18_graph_modules() { # <graph-json>
 import json, sys
 print(json.load(open(sys.argv[1]))["module_count"])' "$1"
 }
+
+# Every M18 check runs node — the import-graph walker, the roundtrip driver, the probes — and it is
+# the dev shell's node they run, asserted, rather than whichever one the caller's PATH offers.
+use_devshell_node

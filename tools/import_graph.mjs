@@ -21,9 +21,11 @@
 // STATIC, DELIBERATELY. Running the entry point and inspecting what got loaded
 // would miss every branch not taken on that run, and a check that only sees the
 // happy path is the failure mode this file exists to avoid. The cost is that a
-// specifier built at run time (`import(base + name)`) is invisible; those are
-// reported separately as `unresolvable`, with their source location, so they are
-// a named gap rather than a silent one.
+// specifier built at run time (`import(base + name)`, `require(path)`, or a
+// `createRequire` loader called on a variable) is invisible; those sites are
+// reported separately — `computed_dynamic_import_sites` and
+// `computed_require_sites`, per module — so they are a named gap rather than a
+// silent one.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -137,6 +139,25 @@ const SIDE_EFFECT_RE = /(?:^|[\s;}])import\s*['"]([^'"]+)['"]/g;
 const DYNAMIC_RE = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
 const DYNAMIC_COMPUTED_RE = /\bimport\s*\(\s*(?!['"])/g;
 const REQUIRE_RE = /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+// `require` loads a module as surely as `import()` does, and a CommonJS file — or an ES module that
+// made itself a `require` with `createRequire` — can build the specifier at run time just the same.
+// A computed `require(x)` is therefore the same hole in the measurement as a computed `import(x)`
+// and is reported the same way. `createRequire` can also return a loader under ANY name, or be
+// called immediately, so both of those shapes are recognised too: a literal argument is an edge
+// the walker follows, a non-literal one is a computed site.
+const REQUIRE_COMPUTED_RE = /\brequire\s*\(\s*(?!['"])/g;
+// `createRequire` itself can be renamed on the way in — `import { createRequire as mk }`,
+// `const { createRequire: mk } = module`, `const mk = module.createRequire` — and a factory the
+// walker does not recognise by its new name is the same blind spot as not recognising it at all.
+const CREATE_REQUIRE_ALIAS_RES = [
+  /\bcreateRequire\s+as\s+([A-Za-z_$][\w$]*)/g,
+  /\bcreateRequire\s*:\s*([A-Za-z_$][\w$]*)/g,
+  /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:[A-Za-z_$][\w$]*\s*\.\s*)?createRequire\s*[;,\n]/g,
+];
+
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 function specifiersOf(src) {
   const clean = stripComments(src);
@@ -153,7 +174,31 @@ function specifiersOf(src) {
   while ((m = DYNAMIC_RE.exec(clean)) !== null) dyn.add(m[1]);
   DYNAMIC_COMPUTED_RE.lastIndex = 0;
   const computed = (clean.match(DYNAMIC_COMPUTED_RE) || []).length;
-  return { stat: [...stat], dyn: [...dyn], computed };
+  let computedRequire = (clean.match(REQUIRE_COMPUTED_RE) || []).length;
+  const factories = new Set(['createRequire']);
+  for (const re of CREATE_REQUIRE_ALIAS_RES) {
+    re.lastIndex = 0;
+    while ((m = re.exec(clean)) !== null) factories.add(m[1]);
+  }
+  // A literal argument to a loader is an edge; anything else is a computed site.
+  const loaderCalls = (callee) => {
+    const lit = new RegExp(`${callee}\\s*\\(\\s*(['"])([^'"]+)\\1\\s*\\)`, 'g');
+    let c;
+    while ((c = lit.exec(clean)) !== null) stat.add(c[2]);
+    computedRequire += (clean.match(new RegExp(`${callee}\\s*\\(\\s*(?!['"])`, 'g')) || []).length;
+  };
+  for (const f of factories) {
+    const fn = `(?<![\\w$])(?:[A-Za-z_$][\\w$]*\\s*\\.\\s*)?${escapeRe(f)}`;
+    // Bound to a name: `const load = createRequire(url)`, then `load(x)`. A loader bound to the name
+    // `require` is already covered by the two `require` expressions above.
+    const binding = new RegExp(`\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${fn}\\s*\\(`, 'g');
+    while ((m = binding.exec(clean)) !== null) {
+      if (m[1] !== 'require') loaderCalls(`(?<![\\w$.])${escapeRe(m[1])}`);
+    }
+    // Called immediately: `createRequire(url)(x)`.
+    loaderCalls(`${fn}\\s*\\((?:[^()]|\\([^()]*\\))*\\)`);
+  }
+  return { stat: [...stat], dyn: [...dyn], computed, computedRequire };
 }
 
 function packageOf(fileUrl) {
@@ -168,6 +213,7 @@ function packageOf(fileUrl) {
 const seen = new Map();          // fileUrl -> { package, static:[], dynamic:[] }
 const unresolvable = [];         // { from, spec, reason }
 const computedSites = [];        // { from, count }
+const computedRequireSites = []; // { from, count }
 const builtins = new Set();
 
 const queue = [];
@@ -196,9 +242,10 @@ while (queue.length && seen.size < MAX) {
     seen.set(url, { package: packageOf(url), static: [], dynamic: [], unread: true });
     continue;
   }
-  const { stat, dyn, computed } = specifiersOf(src);
+  const { stat, dyn, computed, computedRequire } = specifiersOf(src);
   seen.set(url, { package: packageOf(url), static: stat, dynamic: dyn });
   if (computed) computedSites.push({ from: url, count: computed });
+  if (computedRequire) computedRequireSites.push({ from: url, count: computedRequire });
   const resolve = resolverFor(url);
   const follow = includeDynamic ? [...stat, ...dyn] : stat;
   for (const spec of follow) {
@@ -224,6 +271,7 @@ const report = {
   packages: [...packages].sort(),
   builtins: [...builtins].sort(),
   computed_dynamic_import_sites: computedSites.map((c) => ({ from: c.from, count: c.count })),
+  computed_require_sites: computedRequireSites.map((c) => ({ from: c.from, count: c.count })),
   unresolvable,
   modules: [...seen.keys()].sort(),
 };
@@ -239,4 +287,5 @@ for (const p of report.packages) console.log(`package ${p}`);
 console.log(`unresolvable ${report.unresolvable.length}`);
 for (const u of report.unresolvable) console.log(`unresolvable ${u.spec} from ${u.from} (${u.reason})`);
 console.log(`computed-dynamic-sites ${report.computed_dynamic_import_sites.length}`);
+console.log(`computed-require-sites ${report.computed_require_sites.length}`);
 console.log('import-graph.done 1');

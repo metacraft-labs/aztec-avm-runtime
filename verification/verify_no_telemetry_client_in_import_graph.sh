@@ -15,8 +15,11 @@
 # It is STATIC. Importing the entry point and inspecting what got loaded would miss every branch
 # not taken, and a check that only sees the happy path is the failure this file exists to catch.
 # The price is that a specifier assembled at run time is invisible, so the walker reports those
-# separately and this check asserts their COUNT — a computed `import()` appearing in the shipped
-# graph is a hole in the measurement and must be a failure, not a silent omission.
+# separately — computed `import()` and computed `require()` alike — and this check asserts them: no
+# computed `import()` at all, and computed `require()` sites that are EXACTLY the enumerated set
+# DRIFT.md D17 accounts for. A computed specifier anywhere else in the shipped graph is a hole in
+# the measurement and must be a failure, not a silent omission. The detector is itself exercised,
+# one probe per shape, because an exact set and an absence are both satisfied by a blind one.
 #
 # THE ASSERTION IS A CONJUNCTION OF SEVEN, and each conjunct gets a negative case: a probe module
 # that imports exactly that package is walked through the same walker and must be caught. A
@@ -78,12 +81,37 @@ for pkg in $FORBIDDEN; do
     "$(m18_graph_has_package "$GRAPH" "$pkg")"
 done
 
-# A computed `import()` in the shipped graph is an unmeasured edge. Reported by the walker and
-# asserted here, so the measurement's own coverage is part of the result.
+# A specifier built at run time is an unmeasured edge: whatever it loads is invisible to every
+# absence above. The walker reports two kinds — a computed `import()`, and a computed `require()`
+# (including a loader obtained from `createRequire`, under any name or called immediately) — and
+# both are asserted here, so the measurement's own coverage is part of the result.
 N_COMPUTED="$(python3 -c '
 import json, sys
 print(len(json.load(open(sys.argv[1]))["computed_dynamic_import_sites"]))' "$GRAPH")"
-assert_eq "no module in the shipped graph builds an import specifier at run time" "0" "$N_COMPUTED"
+assert_eq "no module in the shipped graph builds an import() specifier at run time" "0" "$N_COMPUTED"
+
+# The computed `require()` sites are NOT zero, and the set is stated exactly rather than counted
+# away. Both are `@aztec/bb.js`'s Node backend calling `require(addonPath)`, where `addonPath` is
+# `findNapiBinary(napiPath)` — the platform directory of its prebuilt `nodejs_module.node` addon.
+# That is DRIFT.md D17: the graph reaches bb.js's native-addon loader through upstream's own crypto
+# (`BarretenbergSync` in `@aztec/foundation`), and what it loads is a `.node` binary, not a
+# JavaScript module that could carry telemetry. Any other computed site — one more in bb.js, or one
+# anywhere else — is an edge nobody has read, and fails here by name.
+ALLOWED_COMPUTED_REQUIRE="@aztec/bb.js/dest/node-cjs/bb_backends/node/native_shm.js
+@aztec/bb.js/dest/node-cjs/bb_backends/node/native_shm_async.js"
+computed_require_sites() { # <graph-json> -> package-relative path per site, sorted
+  python3 -c '
+import json, sys
+for s in json.load(open(sys.argv[1])).get("computed_require_sites", ["<walker reports no computed_require_sites field>"]):
+    f = s["from"] if isinstance(s, dict) else s
+    print(f.rsplit("/node_modules/", 1)[-1])' "$1" | LC_ALL=C sort
+}
+CREQ="$(computed_require_sites "$GRAPH")"
+printf '%s\n' "$CREQ" | sed '/^$/d; s/^/      computed require: /'
+assert_eq "the computed require() sites in the shipped graph are exactly bb.js's two addon loaders (D17)" \
+  "$ALLOWED_COMPUTED_REQUIRE" "$CREQ"
+assert_contains "…and DRIFT.md D17 records the addon loader they are" \
+  "native_shm.js,native_shm_async.js" "$(cat "$REPO_ROOT/DRIFT.md")"
 
 # Unresolvable specifiers are named rather than counted to zero: `ws` has two optional native
 # accelerators that are legitimately absent, and requiring zero would fail for a reason that says
@@ -152,6 +180,71 @@ do
       "yes" "$(probe_finds "$spec" "$name")"
   fi
 done
+
+# THE COMPUTED-SPECIFIER DETECTOR, exercised once per shape it claims to see. The assertions above
+# on the computed sites are an absence (no `import()`) and an exact set (two `require()`s), and a
+# detector that cannot see a shape would satisfy both. Each probe loads `@aztec/telemetry-client`
+# through a specifier the walker cannot read, re-exported from the shipped entry point, and the
+# probe module must appear among the computed sites of the matching kind. The last probe hands a
+# `createRequire` loader a LITERAL, which is not a computed site at all but an edge: the walker must
+# follow it and reach the package.
+probe_graph() { # <probe-source> <graph-json>
+  local pfile="$ORCH_SRC/.probe_computed.ts" saved="$SCRATCH/index.ts.saved.computed"
+  cp "$ORCH_SRC/index.ts" "$saved"
+  printf '%s\n' "$1" > "$pfile"
+  printf "\nexport * from './.probe_computed.ts';\n" >> "$ORCH_SRC/index.ts"
+  m18_import_graph "$ORCH_DIR" ./src/index.ts "$2" >/dev/null 2>&1 || true
+  cp "$saved" "$ORCH_SRC/index.ts"
+  rm -f "$pfile"
+}
+probe_site_kind() { # <graph-json> <field> -> yes if the probe module is among those sites
+  python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+print("yes" if any(s["from"].endswith("/.probe_computed.ts") for s in d.get(sys.argv[2], [])) else "no")' \
+    "$1" "$2" 2>/dev/null || echo "no"
+}
+TELEMETRY_EXPR="['@aztec', 'telemetry-client'].join('/')"
+probe_graph "export const loaded = await import($TELEMETRY_EXPR);" "$SCRATCH/probe_cimport.json"
+assert_eq "control: a computed import() in a reached module is reported as a computed import site" "yes" \
+  "$(probe_site_kind "$SCRATCH/probe_cimport.json" computed_dynamic_import_sites)"
+probe_graph "declare const require: (s: string) => unknown;
+export const loaded = require($TELEMETRY_EXPR);" "$SCRATCH/probe_crequire.json"
+assert_eq "control: a computed require() in a reached module is reported as a computed require site" "yes" \
+  "$(probe_site_kind "$SCRATCH/probe_crequire.json" computed_require_sites)"
+probe_graph "import { createRequire } from 'node:module';
+const load = createRequire(import.meta.url);
+export const loaded = load($TELEMETRY_EXPR);" "$SCRATCH/probe_cbound.json"
+assert_eq "control: a createRequire loader bound to another name and called on a variable is reported" "yes" \
+  "$(probe_site_kind "$SCRATCH/probe_cbound.json" computed_require_sites)"
+probe_graph "import { createRequire } from 'node:module';
+export const loaded = createRequire(import.meta.url)($TELEMETRY_EXPR);" "$SCRATCH/probe_cimmediate.json"
+assert_eq "control: a createRequire loader called immediately on a variable is reported" "yes" \
+  "$(probe_site_kind "$SCRATCH/probe_cimmediate.json" computed_require_sites)"
+probe_graph "import { createRequire as makeLoader } from 'node:module';
+export const loaded = makeLoader(import.meta.url)($TELEMETRY_EXPR);" "$SCRATCH/probe_calias.json"
+assert_eq "control: …and so is one whose factory was imported under another name" "yes" \
+  "$(probe_site_kind "$SCRATCH/probe_calias.json" computed_require_sites)"
+probe_graph "import { createRequire } from 'node:module';
+export const loaded = createRequire(import.meta.url)('@aztec/telemetry-client');" "$SCRATCH/probe_cliteral.json"
+# The package is not installed under orchestration/ — the orchestration does not depend on it — so
+# a followed edge lands in `unresolvable` rather than in `packages`; either one is the walker SEEING
+# the import, which is what this control is for, and the walk of the unprobed graph above has it in
+# neither.
+followed_to() { # <graph-json> <specifier> -> yes if the walker followed an edge to it
+  python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1])); spec = sys.argv[2]
+print("yes" if spec in d["packages"] or any(u["spec"] == spec for u in d["unresolvable"]) else "no")' \
+    "$1" "$2" 2>/dev/null || echo "no"
+}
+assert_eq "control: a createRequire loader called on a LITERAL is followed as an edge to the package" "yes" \
+  "$(followed_to "$SCRATCH/probe_cliteral.json" @aztec/telemetry-client)"
+assert_eq "…while the unprobed graph has no edge to it at all" "no" \
+  "$(followed_to "$GRAPH" @aztec/telemetry-client)"
+assert_true "…and the exact-set comparison above names the probe as a site outside the allow-list" \
+  str_has_line_re "$(computed_require_sites "$SCRATCH/probe_crequire.json" | grep -vxF "$ALLOWED_COMPUTED_REQUIRE")" \
+  '/\.probe_computed\.ts$'
 
 # THE SCANNER'S OWN BLIND SPOT, exercised. Every assertion above is an ABSENCE, so the failure
 # that matters is a walker that cannot SEE an import. Its first version scanned for `//`
