@@ -86,6 +86,10 @@ assert_eq "upstream at the anchor already has three observation seams, and this 
 # Seam 2, and the gap. `HybridExecution::execute` emits nothing, by design and by its own comment.
 assert_true "the fast loop's header says it exists to remove overhead" \
   grep -qi 'overrides the execution loop' "$up/hybrid_execution.hpp"
+# Read from the loop's own source, which is asserted to BE that source before an absence in it
+# is believed.
+assert_true "the fast loop's source was read: it defines HybridExecution::execute" \
+  grep -q '^EnqueuedCallResult HybridExecution::execute(' "$up/hybrid_execution.cpp"
 assert_eq "the fast loop emits no ExecutionEvent at all at the anchor" "0" \
   "$(grep -c 'ExecutionEvent' "$up/hybrid_execution.cpp" || true)"
 assert_true "while AvmSimAPI::simulate dispatches to it whenever collect_hints is false" \
