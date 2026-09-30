@@ -363,4 +363,20 @@ assert stripped != text, 'nothing to strip; the control is staged wrong'
 open(path, 'w', encoding='utf-8').write(stripped)
 EOF"
 
+
+# --apply's no-op above is an empty diff and "rewrote 0 file(s)", which a rewriter that never writes
+# anything would also produce. So --apply must also REPAIR a tree it disagrees with: a package.json
+# moved off the pin is rewritten back, and the checker then accepts the result.
+apply_dir="$(mktemp -d -p "$SB")"
+cp -a "$SB/repo/." "$apply_dir/"
+( cd "$apply_dir" && sed -i "0,/\"@aztec\/foundation\": \"/s//\"@aztec\/foundation\": \"$CTRL_VER\"XX/" drift/package.json \
+    && sed -i 's/"XX[^"]*"/"/' drift/package.json )
+assert_true "the --apply control's mutation moved drift/package.json off the pin" \
+  grep -qF "\"@aztec/foundation\": \"$CTRL_VER\"" "$apply_dir/drift/package.json"
+apply_ctl_out="$( cd "$apply_dir" && python3 tools/repin.py --apply 2>&1 )"
+assert_contains "repin --apply rewrites the package.json it disagrees with" \
+  "rewrote 1 file(s): drift/package.json" "$apply_ctl_out"
+assert_true "...and the rewritten tree passes the pin check" \
+  bash -c "cd '$apply_dir' && python3 tools/repin.py --check"
+
 finish
