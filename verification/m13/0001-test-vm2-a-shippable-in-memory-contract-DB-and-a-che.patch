@@ -1,4 +1,4 @@
-From 034aebaea24b5764d99c89e0b7922ef24c691e87 Mon Sep 17 00:00:00 2001
+From 0a050f8882c232fab77f8ce53aa13a3bb6a59d84 Mon Sep 17 00:00:00 2001
 From: Zahary Karadjov <zahary@agent-harbor.com>
 Date: Mon, 24 Aug 2026 00:49:06 +0300
 Subject: [PATCH] test(vm2): a shippable in-memory contract DB, and a
@@ -38,16 +38,27 @@ all of it, including deployment logs a Node script decodes with upstream's own
 ContractClassPublishedEvent.fromLog and ContractInstancePublishedEvent.fromLog.
 
 The reactor no longer links vm2/testing/ at all.
+
+The contract that contractdbinputs publishes through the logs carries a
+distinct non-zero value in every preimage field the tester leaves at zero
+(artifact hash, private-functions root, initialisation and immutables hashes,
+five public-key fields), with its class id and address re-derived by
+compute_contract_class_id and compute_contract_address, so a decoder that
+drops or shifts one of those fields cannot agree with the encoder on a zero.
+The mode also prints a three-frame fixture — top calls middle calls a callee
+that writes storage and reverts — with its three deployments, its fast
+simulation input, and upstream's own revert code, surviving write count and
+deepest checkpoint id for the same transaction.
 ---
- .../cpp/src/barretenberg/vm2/CMakeLists.txt   |  33 ++-
- .../vm2/differential/avm_differential.cpp     | 278 +++++++++++++++++
- .../barretenberg/vm2/reactor/avm_reactor.cpp  | 206 ++++++++++++-
- .../standalone/checkpoint_coordinator.cpp     |  70 +++++
- .../standalone/checkpoint_coordinator.hpp     | 104 +++++++
- .../standalone/memory_contract_db.cpp         | 265 +++++++++++++++++
- .../standalone/memory_contract_db.hpp         | 113 +++++++
- .../standalone/memory_contract_db.test.cpp    | 280 ++++++++++++++++++
- 8 files changed, 1321 insertions(+), 28 deletions(-)
+ .../cpp/src/barretenberg/vm2/CMakeLists.txt   |  33 +-
+ .../vm2/differential/avm_differential.cpp     | 448 ++++++++++++++++++
+ .../barretenberg/vm2/reactor/avm_reactor.cpp  | 206 +++++++-
+ .../standalone/checkpoint_coordinator.cpp     |  70 +++
+ .../standalone/checkpoint_coordinator.hpp     | 104 ++++
+ .../standalone/memory_contract_db.cpp         | 265 +++++++++++
+ .../standalone/memory_contract_db.hpp         | 113 +++++
+ .../standalone/memory_contract_db.test.cpp    | 280 +++++++++++
+ 8 files changed, 1491 insertions(+), 28 deletions(-)
  create mode 100644 barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/checkpoint_coordinator.cpp
  create mode 100644 barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/checkpoint_coordinator.hpp
  create mode 100644 barretenberg/cpp/src/barretenberg/vm2/simulation/standalone/memory_contract_db.cpp
@@ -125,7 +136,7 @@ index 8b22b6c7dc6..68532eee640 100644
          target_link_options(avm-reactor-nogc.wasm PRIVATE
              -mexec-model=reactor
 diff --git a/barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp b/barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp
-index 09f31652ead..27d634757cb 100644
+index 09f31652ead..cd017330035 100644
 --- a/barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp
 +++ b/barretenberg/cpp/src/barretenberg/vm2/differential/avm_differential.cpp
 @@ -58,7 +58,9 @@
@@ -146,7 +157,15 @@ index 09f31652ead..27d634757cb 100644
  #include "barretenberg/serialize/msgpack_impl.hpp"
  
  #include "barretenberg/vm2/common/avm_io.hpp"
-@@ -1041,6 +1044,277 @@ void mode_reactor_inputs()
+@@ -78,6 +81,7 @@
+ #include "barretenberg/vm2/common/memory_types.hpp"
+ #include "barretenberg/vm2/common/opcodes.hpp"
+ #include "barretenberg/vm2/simulation/events/events_container.hpp"
++#include "barretenberg/vm2/simulation/lib/contract_crypto.hpp"
+ #include "barretenberg/vm2/simulation/lib/memory_merkle_db.hpp"
+ #include "barretenberg/vm2/simulation/lib/serialization.hpp"
+ #include "barretenberg/vm2/simulation_helper.hpp"
+@@ -1041,6 +1045,446 @@ void mode_reactor_inputs()
      line("reactorInputs.done", "1");
  }
  
@@ -269,6 +288,170 @@ index 09f31652ead..27d634757cb 100644
 +    return names;
 +}
 +
++// Upstream's tester deploys every contract with a zero artifact hash, private-functions root,
++// initialisation hash and immutables hash, and with five of its seven public-key fields zero. A
++// decoder that dropped one of those fields, or read it from a neighbour's position, would then
++// agree with the encoder on a zero and a comparison between the two would pass for any layout.
++// So the contract that arrives through the published-event logs carries a DISTINCT non-zero value
++// in every one of them, and its class id and address are re-derived from those values by
++// upstream's own `compute_contract_class_id` and `compute_contract_address`.
++bb::avm2::testing::DeployedContract with_nonzero_preimage(bb::avm2::testing::DeployedContract c, uint64_t seed)
++{
++    const uint64_t base = 0xa7000000ULL + (seed << 8);
++    c.contract_class.artifact_hash = FF(base + 1);
++    c.contract_class.private_functions_root = FF(base + 2);
++    c.contract_class.id = simulation::compute_contract_class_id(c.contract_class.artifact_hash,
++                                                                c.contract_class.private_functions_root,
++                                                                c.contract_class.public_bytecode_commitment);
++    c.instance.current_contract_class_id = c.contract_class.id;
++    c.instance.original_contract_class_id = c.contract_class.id;
++    c.instance.initialization_hash = FF(base + 3);
++    c.instance.immutables_hash = FF(base + 4);
++    c.instance.public_keys.nullifier_key_hash = FF(base + 5);
++    c.instance.public_keys.outgoing_viewing_key_hash = FF(base + 6);
++    c.instance.public_keys.tagging_key_hash = FF(base + 7);
++    c.instance.public_keys.message_signing_key_hash = FF(base + 8);
++    c.instance.public_keys.fallback_key_hash = FF(base + 9);
++    c.address = simulation::compute_contract_address(c.instance);
++    return c;
++}
++
++Instruction calldatacopy(uint16_t copy_size_offset, uint16_t cd_start_offset, uint16_t dst_offset)
++{
++    return InstructionBuilder(WireOpCode::CALLDATACOPY)
++        .operand(copy_size_offset)
++        .operand(cd_start_offset)
++        .operand(dst_offset)
++        .build();
++}
++Instruction call(uint16_t l2_gas_offset, uint16_t da_gas_offset, uint16_t addr_offset, uint16_t args_size_offset,
++                 uint16_t args_offset)
++{
++    return InstructionBuilder(WireOpCode::CALL)
++        .operand(l2_gas_offset)
++        .operand(da_gas_offset)
++        .operand(addr_offset)
++        .operand(args_size_offset)
++        .operand(args_offset)
++        .build();
++}
++Instruction sstore(uint16_t value_offset, uint16_t slot_offset)
++{
++    return InstructionBuilder(WireOpCode::SSTORE).operand(value_offset).operand(slot_offset).build();
++}
++
++// THE NESTED FIXTURE: a call chain three frames deep whose innermost frame REVERTS. None of the
++// seven corpus programs makes a call, so a transaction through them has one frame and the
++// per-frame checkpoints `ContextProvider` opens are never nested. Each frame writes one storage
++// slot before it calls on, so what the nested revert unwinds is visible in the transaction's
++// effects: the outer two writes survive, the innermost one must not.
++//
++//   top     writes slot 7, CALLs middle with the callee's address as its one argument, returns
++//   middle  writes slot 8, CALLs the address in its calldata[0], returns
++//   callee  writes slot 9, REVERTs
++//
++// The addresses travel as calldata because they are derived from the bytecode and cannot be
++// written into it.
++std::vector<uint8_t> nested_top()
++{
++    return BytecodeBuilder()
++        .add(set8(0, MemoryTag::U32, 0))       // zero: calldata start, return size
++        .add(set8(1, MemoryTag::U32, 1))       // one argument for the middle frame
++        .add(set8(5, MemoryTag::U32, 2))       // two calldata fields to copy
++        .add(set32(2, MemoryTag::U32, 200000)) // gas allowance for the call
++        .add(calldatacopy(5, 0, 3))            // [3] middle address, [4] callee address
++        .add(setff(6, MemoryTag::FF, FF(7)))
++        .add(setff(7, MemoryTag::FF, FF(0x7070)))
++        .add(sstore(7, 6))
++        .add(call(2, 2, 3, 1, 4))
++        .add(ret(0, 0))
++        .build();
++}
++std::vector<uint8_t> nested_middle()
++{
++    return BytecodeBuilder()
++        .add(set8(0, MemoryTag::U32, 0))
++        .add(set8(1, MemoryTag::U32, 1))
++        .add(set32(2, MemoryTag::U32, 100000))
++        .add(calldatacopy(1, 0, 3)) // [3] callee address
++        .add(setff(6, MemoryTag::FF, FF(8)))
++        .add(setff(7, MemoryTag::FF, FF(0x8080)))
++        .add(sstore(7, 6))
++        .add(call(2, 2, 3, 0, 0))
++        .add(ret(0, 0))
++        .build();
++}
++std::vector<uint8_t> nested_callee()
++{
++    return BytecodeBuilder()
++        .add(set8(0, MemoryTag::U32, 0))
++        .add(setff(6, MemoryTag::FF, FF(9)))
++        .add(setff(7, MemoryTag::FF, FF(0x9090)))
++        .add(sstore(7, 6))
++        .add(InstructionBuilder(WireOpCode::REVERT_8).operand<uint8_t>(0).operand<uint8_t>(0).build())
++        .build();
++}
++
++void emit_nested_fixture()
++{
++    const std::string p = "contractDbNested";
++    PublicTxSimulationTester tester;
++    const auto callee = tester.deploy_contract(nested_callee());
++    const auto middle = tester.deploy_contract(nested_middle());
++    const auto top = tester.deploy_contract(nested_top());
++
++    const auto after_deploy = tester.merkle_db().get_tree_roots();
++    const index_t last_nullifier = static_cast<index_t>(after_deploy.nullifier_tree.next_available_leaf_index) - 1;
++
++    auto hint_config = PublicTxSimulationTester::default_config();
++    hint_config.collect_hints = true;
++    hint_config.collect_public_inputs = true;
++    const auto hinted = tester.simulate_tx(
++        { TestEnqueuedCall{ .contract_address = top.address, .calldata = { middle.address, callee.address } } },
++        hint_config);
++    if (!hinted.hints.has_value()) {
++        std::cerr << "avm_differential: hint collection produced no hints for the nested fixture\n";
++        std::exit(2);
++    }
++    const auto after_fund = tester.merkle_db().get_tree_roots();
++    const index_t public_data_index = static_cast<index_t>(after_fund.public_data_tree.next_available_leaf_index) - 1;
++
++    line(p + ".contracts.count", "3");
++    size_t i = 0;
++    for (const auto* c : { &callee, &middle, &top }) {
++        const std::string q = p + ".setup." + dec(static_cast<uint64_t>(i));
++        emit_blob(q + ".class", c->contract_class);
++        emit_blob(q + ".instance", std::make_tuple(c->address, c->instance));
++        // The three deployment nullifiers, in the order the tester inserted them.
++        emit_blob(q + ".nullifier",
++                  tester.merkle_db().get_leaf_preimage_nullifier_tree(last_nullifier - 2 + static_cast<index_t>(i)).leaf);
++        ++i;
++    }
++    emit_blob(p + ".setup.publicdata", tester.merkle_db().get_leaf_preimage_public_data_tree(public_data_index).leaf);
++
++    // Upstream's own run of the same transaction, for the reader to compare against: its revert
++    // code, how many public-data writes survived, and the deepest merkle checkpoint id its per-frame
++    // checkpoints reached, read off the hint record of every create_checkpoint it made.
++    uint32_t deepest = 0;
++    for (const auto& h : hinted.hints->create_checkpoint_hints) {
++        deepest = std::max(deepest, h.new_checkpoint_id);
++    }
++    line(p + ".native.revertCode", dec(static_cast<uint64_t>(hinted.revert_code)));
++    line(p + ".native.dataWrites.count", dec(static_cast<uint64_t>(hinted.public_tx_effect.public_data_writes.size())));
++    line(p + ".native.createCheckpoints", dec(static_cast<uint64_t>(hinted.hints->create_checkpoint_hints.size())));
++    line(p + ".native.deepestCheckpointId", dec(static_cast<uint64_t>(deepest)));
++
++    AvmFastSimulationInputs fast{
++        .ws_revision = {},
++        .config = PublicTxSimulationTester::default_config(),
++        .tx = hinted.hints->tx,
++        .global_variables = hinted.hints->global_variables,
++        .protocol_contracts = hinted.hints->protocol_contracts,
++    };
++    emit_blob(p + ".fast", fast);
++    line(p + ".done", "1");
++}
++
 +void mode_contract_db_inputs(const std::string& names_path)
 +{
 +    line("contractDbInputs.version", "1");
@@ -302,7 +485,7 @@ index 09f31652ead..27d634757cb 100644
 +        // then replayed INSTEAD of the first one — every program halted exceptionally because the
 +        // contract being called was no longer resolvable.
 +        PublicTxSimulationTester deploy_tester;
-+        const auto deployed = deploy_tester.deploy_contract(bytecode, /*salt=*/FF(0xd0ed));
++        const auto deployed = with_nonzero_preimage(deploy_tester.deploy_contract(bytecode, /*salt=*/FF(0xd0ed)), index);
 +
 +        const auto after_deploy = tester.merkle_db().get_tree_roots();
 +        const index_t nullifier_index = static_cast<index_t>(after_deploy.nullifier_tree.next_available_leaf_index) - 1;
@@ -403,6 +586,10 @@ index 09f31652ead..27d634757cb 100644
 +        emit_blob(p + ".args.debugName", std::make_tuple(contract.address, selector));
 +        emit_blob(p + ".args.deployedAddress", deployed.address);
 +        emit_blob(p + ".args.deployedClassId", deployed.contract_class.id);
++        // The second contract by EXPLICIT registration, so the two population paths can also be
++        // compared on a contract whose every preimage field is non-zero.
++        emit_blob(p + ".args.deployedClassSetup", deployed.contract_class);
++        emit_blob(p + ".args.deployedInstanceSetup", std::make_tuple(deployed.address, deployed.instance));
 +        // An address and a class id NOBODY registers, so "found" is a discrimination rather than an
 +        // observation: every getter must answer nullopt for these.
 +        emit_blob(p + ".args.absentAddress", FF(0xabbe5e17ULL));
@@ -411,6 +598,7 @@ index 09f31652ead..27d634757cb 100644
 +    }
 +
 +    emit_blob("contractDbInputs.args.emptyDeployment", ContractDeploymentData{});
++    emit_nested_fixture();
 +    // Two DISTINCT tree writes, for the arm that shows what a naive owner produces from an injected
 +    // desynchronisation: one inside the injected level and one inside the level the owner opens, so
 +    // an unwind to the wrong level is visible in the roots rather than merely in a counter.
@@ -424,7 +612,7 @@ index 09f31652ead..27d634757cb 100644
  } // namespace
  
  int main(int argc, char** argv)
-@@ -1061,6 +1335,10 @@ int main(int argc, char** argv)
+@@ -1061,6 +1505,10 @@ int main(int argc, char** argv)
          mode_reactor_inputs();
          return 0;
      }
@@ -1584,3 +1772,6 @@ index 00000000000..b7995c65bbb
 +
 +} // namespace
 +} // namespace bb::avm2::simulation
+-- 
+2.54.0
+

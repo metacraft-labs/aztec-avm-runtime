@@ -161,4 +161,47 @@ done
 assert_eq "the class id and the commitment are non-zero on both sides for every contract" \
   "$((2 * M13_EXPECTED_PROGRAMS))" "$nontrivial"
 
+# THE COMPARISON ABOVE IS OVER UPSTREAM'S TESTER DEFAULTS, and five of its nine fields — salt,
+# immutablesHash, the two public keys, artifactHash — are zero in every program, so they agree
+# under any decoder. The same two population paths are therefore compared again over the SECOND
+# contract, whose every preimage field is a distinct non-zero value, and each field is counted as
+# evidence only when it is non-zero.
+DEPLOYED_FIELDS="instance instance.salt instance.deployer instance.initializationHash instance.immutablesHash
+instance.npkMHash instance.ovpkMHash instance.tpkMHash instance.mspkMHash instance.fbpkMHash
+class.artifactHash class.privateFunctionsRoot"
+populate_compare() { # <transcript> -> "agreed nonzero disagreed"
+  local file="$1" a=0 nz=0 d=0 prog field reg obs
+  for prog in $M13_PROGRAMS; do
+    for field in $DEPLOYED_FIELDS; do
+      reg="$(m13_field "$file" "populate.$prog.deployed.$field.registered")"
+      obs="$(m13_field "$file" "populate.$prog.deployed.$field.observed")"
+      if [ -n "$reg" ] && [ "$reg" != nil ] && [ "$reg" = "$obs" ]; then
+        a=$((a + 1)); [ "$reg" != "$zero" ] && nz=$((nz + 1))
+      else
+        d=$((d + 1))
+      fi
+    done
+  done
+  printf '%s %s %s\n' "$a" "$nz" "$d"
+}
+read -r d_agreed d_nonzero d_disagreed <<<"$(populate_compare "$POUT")"
+n_fields="$(printf '%s\n' $DEPLOYED_FIELDS | grep -c .)"
+assert_eq "the second contract: all $n_fields fields agree between the two paths, in every program" \
+  "$((n_fields * M13_EXPECTED_PROGRAMS))" "$d_agreed"
+assert_eq "and every one of those agreements is on a NON-ZERO value" \
+  "$((n_fields * M13_EXPECTED_PROGRAMS))" "$d_nonzero"
+# The swapped-field control: the observed path's salt and immutablesHash exchanged, which is the
+# shape of a decoder reading two fields from each other's positions. Over zero-valued fields this
+# changes nothing; over these it must be seen in every program.
+SWAPPED="$M13_WORK/populate.swapped.out"
+awk '
+  $1 ~ /^populate\.[a-z0-9]+\.deployed\.instance\.salt\.observed$/ { k = $1; sub(/instance\.salt/, "instance.immutablesHash", k); swap[k] = $2 }
+  $1 ~ /^populate\.[a-z0-9]+\.deployed\.instance\.immutablesHash\.observed$/ { k = $1; sub(/instance\.immutablesHash/, "instance.salt", k); swap[k] = $2 }
+  { lines[NR] = $0; keys[NR] = $1 }
+  END { for (i = 1; i <= NR; i++) { if (keys[i] in swap) print keys[i], swap[keys[i]]; else print lines[i] } }
+' "$POUT" >"$SWAPPED"
+read -r _ _ s_disagreed <<<"$(populate_compare "$SWAPPED")"
+assert_eq "a decoder reading salt and immutablesHash from each other's positions is caught in every program" \
+  "$((2 * M13_EXPECTED_PROGRAMS))" "$s_disagreed"
+
 finish
