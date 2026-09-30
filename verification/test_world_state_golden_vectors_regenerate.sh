@@ -52,7 +52,10 @@ if [ "$RC" -ne 0 ]; then
   finish
 fi
 assert_true "the capture produced JSON" python3 -c "import json;json.load(open('$SCRATCH/regen.json'))"
-if cmp -s "$SCRATCH/regen.json" "$VECTORS"; then
+# One comparison, used for the checked-in vectors here and for the perturbed copy in the negative
+# controls, so the control exercises the gate rather than a comparison of its own.
+matches_regeneration() { cmp -s "$SCRATCH/regen.json" "$1"; }
+if matches_regeneration "$VECTORS"; then
   pass "regeneration reproduces fixtures/trees/world-state-vectors.json byte for byte"
 else
   fail "regeneration differs from the checked-in vectors"
@@ -186,6 +189,15 @@ for name, ok, detail in results:
     print(("PASS" if ok else "FAIL") + "\t" + name + "\t" + detail)
 PY
 )"
+UPSTREAM_RC=$?
+# The comparison prints its rows only once every row is computed, so an exception anywhere in it
+# (a field the capture stopped writing, a height the recurrence no longer records) would print NO
+# rows, and the loop below would run zero times while the rest of the check stays green. The exit
+# status and the row count are therefore assertions of their own.
+assert_eq "the upstream comparison ran to completion" 0 "$UPSTREAM_RC"
+UPSTREAM_ROWS="$(printf '%s\n' "$UPSTREAM_REPORT" | grep -cE '^(PASS|FAIL)'$'\t' || true)"
+assert_ge "the upstream comparison produced every row it computes" 46 "${UPSTREAM_ROWS:-0}"
+
 
 while IFS=$'\t' read -r status name detail; do
   [ -n "$name" ] || continue
@@ -225,10 +237,17 @@ PY
 NOVEL_COUNT="$(grep -c . "$SCRATCH/novel-roots.txt" || true)"
 assert_ge "roots the capture introduces beyond what upstream publishes" 6 "${NOVEL_COUNT:-0}"
 
+# The probe is a function because its "not found" is the passing answer below: a probe that could
+# not run (a bad revision, a bad pathspec, a git error) would also say "not found". The positive
+# control is that the SAME probe finds a root upstream does publish.
+published_at_anchor() { ( cd "$FORK_ROOT" && git grep -q -F "${1#0x}" "$CPP_ANCHOR" -- . ) 2>/dev/null; }
+KNOWN_PUBLISHED="$(python3 -c "import json;print(json.load(open('$VECTORS'))['upstreamPublished']['genesisTrees']['NULLIFIER_TREE']['root'])")"
+assert_true "positive control: the probe finds a root upstream does publish (genesis NULLIFIER_TREE)" \
+  published_at_anchor "$KNOWN_PUBLISHED"
 FOUND_UPSTREAM=0
 while read -r root; do
   [ -n "$root" ] || continue
-  if ( cd "$FORK_ROOT" && git grep -q -F "${root#0x}" "$CPP_ANCHOR" -- . ) 2>/dev/null; then
+  if published_at_anchor "$root"; then
     fail "a 'captured' root is already published upstream: $root"
     FOUND_UPSTREAM=$((FOUND_UPSTREAM + 1))
   fi
@@ -236,8 +255,9 @@ done <"$SCRATCH/novel-roots.txt"
 assert_eq "captured roots that turned out to be upstream constants" "0" "$FOUND_UPSTREAM"
 
 echo "== the captured section covers what upstream does not"
-assert_ge "mutation steps past upstream's single published one" 6 \
-  "$(python3 -c "import json;print(len(json.load(open('$VECTORS'))['captured']['mutationSequence']))")"
+MIN_MUTATION_STEPS=6
+mutation_steps() { python3 -c "import json,sys;print(len(json.load(open(sys.argv[1]))['captured']['mutationSequence']))" "$1"; }
+assert_ge "mutation steps past upstream's single published one" "$MIN_MUTATION_STEPS" "$(mutation_steps "$VECTORS")"
 assert_eq "the zero sibling path is the full note-hash tree depth" "42" \
   "$(python3 -c "import json;print(len(json.load(open('$VECTORS'))['captured']['noteHashZeroSiblingPath']))")"
 assert_eq "genesis prefill nullifier leaves" "128" \
@@ -263,17 +283,22 @@ assert c['insideCheckpoint']!=c['beforeCheckpoint']
 # ---------------------------------------------------------------------------
 echo "== negative controls"
 # ---------------------------------------------------------------------------
-# (1) A perturbed captured root must be detected by the regeneration comparison.
+# (1) A perturbed captured root must be detected by the regeneration comparison. The perturbation
+#     is made in the file's TEXT: re-serialising it would change its bytes everywhere (escaping,
+#     the trailing newline) and the copy would differ from the regeneration with no perturbation
+#     at all. The copy must differ from the checked-in file on exactly one line.
 python3 - "$VECTORS" "$SCRATCH/perturbed.json" <<'PY'
 import json, sys
-v = json.load(open(sys.argv[1]))
-step = v["captured"]["mutationSequence"][0]
-tree = step["trees"]["NOTE_HASH_TREE"]
-tree["root"] = tree["root"][:-1] + ("0" if tree["root"][-1] != "0" else "1")
-json.dump(v, open(sys.argv[2], "w"), indent=2)
+text = open(sys.argv[1]).read()
+root = json.loads(text)["captured"]["mutationSequence"][0]["trees"]["NOTE_HASH_TREE"]["root"]
+perturbed = root[:-1] + ("0" if root[-1] != "0" else "1")
+assert text.count(root) >= 1
+open(sys.argv[2], "w").write(text.replace(root, perturbed, 1))
 PY
+assert_eq "the perturbed copy differs from the checked-in vectors on exactly one line" "1" \
+  "$(diff "$VECTORS" "$SCRATCH/perturbed.json" | grep -c '^>' || true)"
 assert_false "negative control: a perturbed captured root no longer matches regeneration" \
-  cmp -s "$SCRATCH/perturbed.json" "$SCRATCH/regen.json"
+  matches_regeneration "$SCRATCH/perturbed.json"
 
 # (2) A perturbed upstreamPublished root must fail the upstream comparison — i.e. the comparison
 #     really is against upstream's text and not against the file itself.
@@ -283,7 +308,7 @@ v=json.load(open('$VECTORS'))
 r=v['upstreamPublished']['genesisTrees']['NOTE_HASH_TREE']['root']
 print(r[:-1] + ('0' if r[-1] != '0' else '1'))
 ")"
-if ( cd "$FORK_ROOT" && git grep -q -F "${PERTURBED_ROOT#0x}" "$CPP_ANCHOR" -- . ) 2>/dev/null; then
+if published_at_anchor "$PERTURBED_ROOT"; then
   fail "negative control NOT caught: a perturbed genesis root was still found upstream"
 else
   pass "negative control caught: a perturbed genesis root is not found upstream"
@@ -296,18 +321,21 @@ else
   pass "negative control caught: the upstream read fails for a path that does not exist"
 fi
 
-# (4) A capture whose mutation sequence is emptied must fail the coverage floor, so the floor is
-#     not merely unexercised.
-EMPTIED="$(python3 -c "
-import json
-v=json.load(open('$VECTORS'))
-v['captured']['mutationSequence']=[]
-print(len(v['captured']['mutationSequence']))
-")"
-if [ "${EMPTIED:-1}" -ge 6 ]; then
-  fail "negative control NOT caught: an emptied mutation sequence still met the floor"
+# (4) A capture whose mutation sequence is emptied must fail the coverage floor: the same
+#     extractor and the same floor as the assertion above, over an emptied copy.
+python3 - "$VECTORS" "$SCRATCH/emptied.json" <<'PY'
+import json, sys
+v = json.load(open(sys.argv[1]))
+v["captured"]["mutationSequence"] = []
+json.dump(v, open(sys.argv[2], "w"), indent=2)
+PY
+EMPTIED="$(mutation_steps "$SCRATCH/emptied.json")"
+if [ -z "$EMPTIED" ]; then
+  fail "negative control could not read the emptied copy"
+elif [ "$EMPTIED" -ge "$MIN_MUTATION_STEPS" ]; then
+  fail "negative control NOT caught: an emptied mutation sequence ($EMPTIED) still met the floor ($MIN_MUTATION_STEPS)"
 else
-  pass "negative control caught: an emptied mutation sequence fails the coverage floor"
+  pass "negative control caught: an emptied mutation sequence fails the coverage floor  [$EMPTIED < $MIN_MUTATION_STEPS]"
 fi
 
 finish
