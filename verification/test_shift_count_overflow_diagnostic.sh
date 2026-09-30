@@ -27,7 +27,8 @@
 # so the include paths, macros and standard level are the same on both sides and the
 # one line is the only variable.
 #
-# Cost: two full scans of 249 translation units, about 2.5 minutes each. There is no
+# Cost: four full scans of 249 translation units (with and without -Werror, on both
+# trees), about 2.5 minutes each. There is no
 # way to skip them: the scan is what backs the "only place in vm2" claim, and a
 # claim without its measurement is what this campaign keeps having to correct.
 
@@ -125,8 +126,11 @@ assert_eq "and neither native compile emits a single warning" "0" \
 # --------------------------------------------------------------------------
 [ -x "$M5_SCAN" ] || die "missing $M5_SCAN"
 
-scan() { # <tree> -> report on stdout
-  python3 "$M5_SCAN" "$M5_WORK/$1" "$sdk" >"$M5_WORK/scan-$1.txt" 2>"$M5_WORK/scan-$1.err"
+scan() { # <tree> [<report-suffix> <scanner flag...>] -> report on stdout
+  local tree="$1" suffix="${2:-}"
+  shift; [ $# -gt 0 ] && shift
+  python3 "$M5_SCAN" "$M5_WORK/$tree" "$sdk" "$@" \
+    >"$M5_WORK/scan-$tree$suffix.txt" 2>"$M5_WORK/scan-$tree$suffix.err"
 }
 scan_val() { grep -E "^$2 " "$M5_WORK/scan-$1.txt" | awk '{print $2}'; }
 
@@ -137,12 +141,29 @@ assert_eq "the wasm32 scan of the patched tree completes" "0" "$?"
 
 assert_eq "249 non-test vm2 translation units scanned, unpatched" "249" "$(scan_val base scanned)"
 assert_eq "the same 249 after the patch" "249" "$(scan_val patched scanned)"
+
+# WHICH files shift before widening is counted on a scan where nothing is fatal.
+# The -Werror scans above stop every failing translation unit at its first
+# diagnostic (barretenberg also passes -Wfatal-errors), so the four files that fail
+# on a narrowing warning would hide any shift-count overflow that comes after it;
+# a census over them would report "none" for files it never finished reading.
+scan base -census --no-werror
+assert_eq "the non-fatal wasm32 scan of the unpatched tree completes" "0" "$?"
+scan patched -census --no-werror
+assert_eq "the non-fatal wasm32 scan of the patched tree completes" "0" "$?"
+assert_eq "it covers the same 249 translation units, unpatched" "249" "$(scan_val base-census scanned)"
+assert_eq "and after the patch" "249" "$(scan_val patched-census scanned)"
+assert_eq "with nothing fatal, every one of them compiles to the end, unpatched" "0" \
+  "$(scan_val base-census failed)"
+assert_eq "and after the patch" "0" "$(scan_val patched-census failed)"
+assert_ge "so the narrowing files are read past their first warning" 4 \
+  "$(scan_val patched-census other_warning_files)"
 assert_eq "exactly ONE of them carries -Wshift-count-overflow" "1" \
-  "$(scan_val base shift_overflow_files)"
+  "$(scan_val base-census shift_overflow_files)"
 assert_eq "and it is contract_crypto.cpp, at line $M5_TU_LINE, column 77" \
   "$M5_TU_REL:$M5_TU_LINE:77" \
-  "barretenberg/cpp/src/$(grep -E '^shift_overflow ' "$M5_WORK/scan-base.txt" | awk '{print $2}')"
-assert_eq "after the patch, none does" "0" "$(scan_val patched shift_overflow_files)"
+  "barretenberg/cpp/src/$(grep -E '^shift_overflow ' "$M5_WORK/scan-base-census.txt" | awk '{print $2}')"
+assert_eq "after the patch, none does" "0" "$(scan_val patched-census shift_overflow_files)"
 
 # Stated rather than left for a reviewer to find: the patch does not make vm2
 # compile for wasm32 under -Werror. It removes one of five reasons it does not.
@@ -192,8 +213,8 @@ assert_true "memory_trace.cpp widens before shifting by 32" \
   "$M5_WORK/base/barretenberg/cpp/src/barretenberg/vm2/tracegen/memory_trace.cpp"
 
 m5_measure M5_SCANNED_TUS "$(scan_val base scanned)"
-m5_measure M5_SHIFT_OVERFLOW_FILES_BEFORE "$(scan_val base shift_overflow_files)"
-m5_measure M5_SHIFT_OVERFLOW_FILES_AFTER "$(scan_val patched shift_overflow_files)"
+m5_measure M5_SHIFT_OVERFLOW_FILES_BEFORE "$(scan_val base-census shift_overflow_files)"
+m5_measure M5_SHIFT_OVERFLOW_FILES_AFTER "$(scan_val patched-census shift_overflow_files)"
 m5_measure M5_WERROR_FAILURES_BEFORE "$(scan_val base failed)"
 m5_measure M5_WERROR_FAILURES_AFTER "$(scan_val patched failed)"
 m5_measure M5_DIAG_LOCATION "$M5_TU_REL:$M5_TU_LINE:77"
