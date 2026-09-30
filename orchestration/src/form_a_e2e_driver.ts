@@ -36,9 +36,11 @@
 // asserts they are equal — through the REAL module, not a stub, which is the only place the claim
 // means anything.
 
+import { createHash } from 'node:crypto';
+
 import { AztecAddress } from '@aztec/stdlib/aztec-address';
 import { Fr } from '@aztec/foundation/curves/bn254';
-import { GlobalVariables } from '@aztec/stdlib/tx';
+import { GlobalVariables, Tx } from '@aztec/stdlib/tx';
 import { GasFees } from '@aztec/stdlib/gas';
 import { mockTx } from '@aztec/stdlib/testing';
 
@@ -111,13 +113,32 @@ const ARMS: readonly ArmSpec[] = [
   { name: 'noTeardown', seed: 1051, fund: true, setupCalls: 0, appLogicCalls: 1, teardownCall: false, clash: 'none' },
 ];
 
+/**
+ * The expiration every arm's transaction carries. `mockTx` stamps `expirationTimestamp` from
+ * `Date.now()`, so two arms built from one seed in different wall-clock seconds were different
+ * transactions — measured: `appLogicOnlyFunded` and `appLogicOnlyUnfunded` disagreed on their
+ * transaction hash in one run and agreed in the next. A fixed value makes the arms a function of
+ * their spec alone (DD-4). Nothing on the public path reads it: the arm globals carry a zero
+ * timestamp, so any value in the future of that is the value `mockTx` would have produced.
+ */
+const ARM_EXPIRATION_TIMESTAMP = 2_000_000_000n;
+
 async function buildTx(spec: ArmSpec, feePayer: AztecAddress) {
-  return await mockTx(spec.seed, {
+  const tx = await mockTx(spec.seed, {
     numberOfNonRevertiblePublicCallRequests: spec.setupCalls,
     numberOfRevertiblePublicCallRequests: spec.appLogicCalls,
     numberOfRevertibleNullifiers: spec.clash === 'revertible' ? 1 : 0,
     hasPublicTeardownCallRequest: spec.teardownCall,
     feePayer,
+  });
+  // Rebuilt through `Tx.create` rather than patched in place: `mockTx` has already hashed the data,
+  // and the wire form carries that hash, so an in-place edit would ship a stale transaction hash.
+  (tx.data as { expirationTimestamp: bigint }).expirationTimestamp = ARM_EXPIRATION_TIMESTAMP;
+  return await Tx.create({
+    data: tx.data,
+    chonkProof: tx.chonkProof,
+    contractClassLogFields: tx.contractClassLogFields,
+    publicFunctionCalldata: tx.publicFunctionCalldata,
   });
 }
 
@@ -261,6 +282,17 @@ async function runOne(
         appLogic: tx.getRevertiblePublicCallRequestsWithCalldata().length,
         teardown: tx.getTeardownPublicCallRequestWithCalldata() ? 1 : 0,
         wireBytes: wire.length,
+        // IDENTITY BESIDE THE LENGTH: two arms named "the same transaction" are compared on what
+        // makes them one, and two different mock transactions serialize to the same length. The
+        // hash is upstream's own; the digest covers every byte of the payload EXCEPT the proof,
+        // which `mockTx` fills with random bytes on every call (measured: two `mockTx(1011, …)`
+        // calls agree on data, calldata and hash and differ only in `chonkProof`).
+        txHash: (await tx.getTxHash()).toString(),
+        payloadSha256: createHash('sha256')
+          .update(tx.data.toBuffer())
+          .update(Buffer.concat(tx.publicFunctionCalldata.map((c: { toBuffer(): Buffer }) => c.toBuffer())))
+          .update(Buffer.concat(tx.contractClassLogFields.map((c: { toBuffer(): Buffer }) => c.toBuffer())))
+          .digest('hex'),
         // THE ALLOCATION, READ OFF THE TRANSACTION. "An exceptional halt consumes all allocated
         // L2 gas" was asserted against a hand-typed 6540000. The value is right — `mockTx`
         // defaults `gasLimits` to `new Gas(MAX_TX_DA_GAS, MAX_PROCESSABLE_L2_GAS)` and

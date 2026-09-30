@@ -201,10 +201,20 @@ assert_true "the two collision arms are distinct transactions" \
 
 # `FormAFailed` has no revert code and no result: a caller reaching for one gets `undefined`
 # rather than a plausible zero.
+#
+# Both absences are read over ONE extracted declaration, and that extraction is asserted to BE the
+# declaration first: a range that matched nothing — the interface renamed, or respelled as a
+# `type … = {` alias — would have no revertCode in it either, and the two zeros would be about an
+# empty string.
+FAILED_DECL="$(sed -n '/export interface FormAFailed/,/^}/p' "$ORCH_SRC/form_a.ts")"
+assert_true "the FormAFailed declaration was extracted, discriminant and all" \
+  str_has_sub "$FAILED_DECL" "readonly kind: 'failed';"
+assert_true "…with its classified reason, so the range spans the body and not one line" \
+  str_has_sub "$FAILED_DECL" "readonly reason: FailureReason;"
 assert_eq "the rejected outcome carries no revertCode field" "0" \
-  "$(grep -c 'revertCode' <(sed -n '/export interface FormAFailed/,/^}/p' "$ORCH_SRC/form_a.ts") || true)"
+  "$(printf '%s\n' "$FAILED_DECL" | grep -c 'revertCode' || true)"
 assert_eq "and no result field" "0" \
-  "$(grep -c 'readonly result' <(sed -n '/export interface FormAFailed/,/^}/p' "$ORCH_SRC/form_a.ts") || true)"
+  "$(printf '%s\n' "$FAILED_DECL" | grep -c 'readonly result' || true)"
 assert_ge "while the landed outcome does carry the result" 1 \
   "$(grep -c 'readonly result: PublicTxResult' <(sed -n '/export interface FormAProcessed/,/^}/p' "$ORCH_SRC/form_a.ts") || true)"
 
