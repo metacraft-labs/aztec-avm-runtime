@@ -73,7 +73,10 @@ assert_contains "the enumeration found the fuzzer's copy, which lives outside vm
 tester_cpp="barretenberg/cpp/src/barretenberg/vm2/testing/public_tx_simulation_tester.cpp"
 
 # `TestContractDB::add_contracts` — an empty body. Read as the lines between its signature and the
-# closing brace, so "it does nothing" is a measurement of the body and not of a comment.
+# closing brace, so "it does nothing" is a measurement of the body and not of a comment. The
+# signature must be FOUND first: a body read from a function that is not there is zero lines too.
+assert_eq "TestContractDB::add_contracts is defined in the tester, once" "1" \
+  "$(git -C "$FORK_ROOT" show "$ANCHOR:$tester_cpp" | grep -c '^void TestContractDB::add_contracts')"
 add_contracts_body="$(git -C "$FORK_ROOT" show "$ANCHOR:$tester_cpp" \
   | awk '/^void TestContractDB::add_contracts/ { inbody = 1; next }
          inbody && /^\{$/ { next }

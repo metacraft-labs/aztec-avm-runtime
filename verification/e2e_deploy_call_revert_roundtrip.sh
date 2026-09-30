@@ -145,8 +145,29 @@ assert_eq "the fuzzer's field order disagrees on the address for every program" 
   "$M13_EXPECTED_PROGRAMS" "$fuzzer_disagreements"
 # And the field it takes for the first public key is upstream's `immutablesHash`, which is the
 # second half of the same defect.
+FUZZER_FIRST_KEY=6
 assert_eq "the field the fuzzer reads as the first public key is upstream's immutablesHash" \
   "$(m13_field "$DECODE" "upstreamDecode.add.immutablesHash")" \
-  "$(m13_field "$(m13_inputs)" "contractDbInputs.add.logs.instance.6")"
+  "$(m13_field "$(m13_inputs)" "contractDbInputs.add.logs.instance.$FUZZER_FIRST_KEY")"
+# In this corpus `immutablesHash` is ZERO, and so are five of the seven key fields and several other
+# log positions, so the equality above cannot tell the fuzzer's offset from its neighbours. The
+# offset is pinned by the keys that are NOT zero: if the fuzzer's key k sits at log position
+# FUZZER_FIRST_KEY + k, its third and fourth keys are upstream's second and third, one position
+# early, and those two carry non-zero values in every program.
+zero="0x0000000000000000000000000000000000000000000000000000000000000000"
+shift_pinned=0
+for prog in $M13_PROGRAMS; do
+  for k in 2 3; do
+    got="$(m13_field "$(m13_inputs)" "contractDbInputs.$prog.logs.instance.$((FUZZER_FIRST_KEY + k))")"
+    want="$(m13_field "$DECODE" "upstreamDecode.$prog.publicKey.$((k - 1))")"
+    if [ -n "$want" ] && [ "$want" != "$zero" ] && [ "$got" = "$want" ]; then
+      shift_pinned=$((shift_pinned + 1))
+    else
+      fail "$prog: the fuzzer's key $k [$got] is not upstream's non-zero publicKey.$((k - 1)) [$want]"
+    fi
+  done
+done
+assert_eq "the fuzzer's keys 2 and 3 are upstream's non-zero keys 1 and 2, one position early, in every program" \
+  "$((2 * M13_EXPECTED_PROGRAMS))" "$shift_pinned"
 
 finish
