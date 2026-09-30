@@ -67,6 +67,37 @@ MISMATCHES="$(grep -c . "$MISMATCH" || true)"
 [ "$MISMATCHES" -eq 0 ] || note "first mismatches: $(head -5 "$MISMATCH" | tr '\n' ' ')"
 assert_eq "every program.* key the node host produces matches the native reference" 0 "$MISMATCHES"
 
+# THE DIRECTION IS ONLY SAFE IF WHAT IT SKIPS IS EXACTLY THE EXCEPTIONS. The comparator walks the
+# node host's keys, so a result field the host stopped emitting would never be compared at all.
+# The native keys the host does not have are therefore asserted to be EXACTLY M12's enumerated
+# exceptions — the tester's own DB at three points, four trees each, and the bytecode length — for
+# every corpus program, and nothing else.
+EXPECTED_SKIPPED="$(for p in $M17_PROGRAMS; do
+  for phase in beforeDeploy afterDeploy afterSimulate; do
+    for tree in NOTE_HASH_TREE NULLIFIER_TREE PUBLIC_DATA_TREE L1_TO_L2_MESSAGE_TREE; do
+      printf 'program.%s.%s.%s\n' "$p" "$phase" "$tree"
+    done
+  done
+  printf 'program.%s.bytes\n' "$p"
+done | LC_ALL=C sort)"
+native_only() { # <native> <node> -> program.* keys only the native transcript has, sorted
+  LC_ALL=C comm -23 \
+    <(sed -n 's/^\(program\.[^ ]*\) .*/\1/p' "$1" | LC_ALL=C sort -u) \
+    <(sed -n 's/^\(program\.[^ ]*\) .*/\1/p' "$2" | LC_ALL=C sort -u)
+}
+SKIPPED="$(native_only "$NATIVE_T" "$NODE_T")"
+assert_eq "the native keys the host does not produce are exactly M12's enumerated exceptions" \
+  "$(printf '%s\n' "$EXPECTED_SKIPPED" | grep -c .)" "$(printf '%s\n' "$SKIPPED" | grep -c . || true)"
+UNEXPLAINED="$(LC_ALL=C comm -23 <(printf '%s\n' "$SKIPPED") <(printf '%s\n' "$EXPECTED_SKIPPED") | head -5 | tr '\n' ' ')"
+assert_eq "…and no native result key is left uncompared because the host omits it" "" "$UNEXPLAINED"
+# The set above is not vacuous by construction: a copy of the node transcript with one result
+# line removed leaves that key uncompared, and the same reading names it — exactly it, and nothing
+# the real transcript did not already leave out.
+DROP_CTL="$M17_WORK/transcript-drop-control.txt"
+grep -v '^program\.add\.publicGas ' "$NODE_T" >"$DROP_CTL"
+assert_eq "control: a result key the host drops is named as uncompared" "program.add.publicGas" \
+  "$(LC_ALL=C comm -13 <(printf '%s\n' "$SKIPPED") <(native_only "$NATIVE_T" "$DROP_CTL") | tr -d '\n')"
+
 # ---------------------------------------------------------------------------
 echo "== 3. tree roots specifically, because that is what the entry asks for"
 # ---------------------------------------------------------------------------
