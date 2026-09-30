@@ -116,3 +116,8 @@ import json, sys
 d = json.load(open(sys.argv[1]))
 print(eval(sys.argv[2]))' "$1" "$2"
 }
+
+# The arm, the walker and `npm pack` all run on the dev shell's node, asserted, rather than on
+# whichever one the caller's PATH offers. The differential compares implementations, and the
+# runtime underneath them is not allowed to be a variable nobody recorded.
+use_devshell_node
