@@ -837,13 +837,21 @@ print(sum(1 for e in db if sys.argv[2] in e["file"]))' "$db" "$3"
 # having looked at anything — the same scope-of-validity defect the cold run
 # found in the ungenerated `targets.dot`. Callers of this read a build directory
 # they did not produce, so the check belongs here.
+#
+# An archive that IS there but cannot be read is the same defect one step later:
+# `llvm-nm` fails, prints nothing, and the count is 0 again. So the count is
+# printed only when `llvm-nm` succeeded AND listed undefined symbols at all (a real
+# archive of this build has hundreds); otherwise nothing is printed, and a caller
+# comparing against "0" fails instead of passing.
 m6_undefined_mdb() {
   local tree="$1" bdir="$2" archive="$3"
   [ -f "$tree/barretenberg/cpp/$bdir/lib/$archive" ] \
     || die "no $archive under $bdir — there is nothing to count mdb_ references in"
   m6_in_devshell '
     sdk="$WASI_SDK_PREFIX"
-    "$sdk/bin/llvm-nm" -u "$1" 2>/dev/null | grep -c "mdb_" || true
+    u="$("$sdk/bin/llvm-nm" -u "$1" 2>/dev/null)" || exit 3
+    [ "$(printf "%s\n" "$u" | grep -c .)" -ge 1 ] || exit 4
+    printf "%s\n" "$u" | grep -c "mdb_" || true
   ' "$tree/barretenberg/cpp/$bdir/lib/$archive" 2>/dev/null | tail -1
 }
 

@@ -148,11 +148,18 @@ assert_false "and none beside barretenberg/cpp" test -d "$AVM_CPP/../../shims"
 INCLUDES="$(m6_include_dirs "$M6_TREE_AVM" build-wasm-avm)"
 NINC="$(printf '%s\n' "$INCLUDES" | grep -c .)"
 assert_ge "the build passes -I directories to assert about" 5 "$NINC"
+# A directory that does not exist has no lmdb.h in it either, so the search below
+# is only a finding over directories that are there to be searched. One -I can
+# legitimately be absent (FetchContent's gtest, which a build of these two
+# targets never fetches); the rest must exist.
 LMDB_DIRS=""
+NINC_PRESENT=0
 while IFS= read -r d; do
   [ -n "$d" ] || continue
+  [ -d "$d" ] && NINC_PRESENT=$((NINC_PRESENT + 1))
   [ -f "$d/lmdb.h" ] && LMDB_DIRS="$LMDB_DIRS $d"
 done <<<"$INCLUDES"
+assert_ge "and all but at most one of them exist on disk to be searched" "$((NINC - 1))" "$NINC_PRESENT"
 assert_eq "not one of the $NINC include directories contains an lmdb.h" "" "${LMDB_DIRS# }"
 assert_eq "no include directory is named for lmdb either" \
   "0" "$(printf '%s\n' "$INCLUDES" | grep -ci 'lmdb')"
