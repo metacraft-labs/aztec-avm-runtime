@@ -147,13 +147,13 @@ open(p, "w", encoding="utf-8").write(s2)
 PY
 [ $? -eq 0 ] || die "could not build the negative control's perturbed input"
 
+# The perturbed input goes through the SAME generator the three runs above used, so the control
+# measures tools/gen_aztec_constants.sh itself: a generator that stopped reading its input (or
+# copied a cached header) would reproduce byte-identically and match the in-tree header, and only
+# this arm would notice.
 ctl_out="$( cd "$FORK_ROOT" && nix develop --command bash -c "
   set -e
-  node '$FORK_ROOT/protocol/constants-codegen/src/cli.ts' \
-    --input '$perturbed' \
-    --cpp '$WORK/perturbed.hpp' \
-    --selection '$FORK_ROOT/barretenberg/cpp/scripts/constants-codegen/cpp.json'
-  clang-format-20 --style='file:$FORK_ROOT/barretenberg/cpp/.clang-format' -i '$WORK/perturbed.hpp'
+  '$GEN' '$WORK/perturbed.hpp' '$perturbed'
 " 2>&1 )"
 if [ ! -s "$WORK/perturbed.hpp" ]; then
   printf '%s\n' "$ctl_out" | tail -3 | sed 's/^/      /' >&2

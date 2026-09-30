@@ -125,17 +125,23 @@ else
   finish
 fi
 
-control() { # <description> <shell-body-run-inside-the-sandbox>
-  local desc="$1" body="$2" dir
+# A control passes only when check-drift fails WITH A FAIL LINE FROM THE RULE IT IS NAMED FOR.
+# "check-drift exited non-zero" is not enough: a deleted file also breaks its provenance header,
+# and a dropped ledger row also breaks the mapping, so the named rule could be removed and the
+# control would still read as caught.
+control() { # <description> <ERE a FAIL line must match> <shell-body-run-inside-the-sandbox>
+  local desc="$1" rule="$2" body="$3" dir out
   dir="$(make_sandbox)"
   if ! ( cd "$dir" && eval "$body" ); then
     fail "$desc — the mutation itself failed to apply"
     return
   fi
-  if sandbox_check "$dir"; then
+  if out="$( cd "$dir" && "$dir/verification/check_drift.sh" 2>&1 )"; then
     fail "$desc — check-drift still PASSED; it is too weak"
+  elif str_has_line_re "$out" "^  FAIL $rule"; then
+    pass "$desc — check-drift failed on the rule it is named for"
   else
-    pass "$desc — check-drift failed, as it must"
+    fail "$desc — check-drift failed, but not on the rule it is named for [$rule]: $(printf '%s\n' "$out" | grep -E '^  FAIL|cannot run' | head -3 | tr '\n' ' ')"
   fi
 }
 
@@ -143,16 +149,20 @@ VICTIM="reference/vm2-common/gas.hpp"
 assert_file "the control's victim file exists" "$REPO_ROOT/$VICTIM"
 
 control "an unrecorded content edit to a vendored file" \
+  "unrecorded divergence: BAD.*reference/vm2-common/gas\\.hpp" \
   "printf '\n// unrecorded edit\n' >> '$VICTIM'"
 
 control "an unrecorded deletion of a vendored file" \
+  "V[0-9]+ reference/vm2-common: tracked file count matches PROVENANCE\\.md" \
   "rm -f '$VICTIM' && git rm -q --cached '$VICTIM'"
 
 control "a recorded edit dropped from the PROVENANCE.md ledger while the edit remains" \
+  "unrecorded divergence: BAD.*spike/src/public/fixtures/public_tx_simulation_tester\\.ts" \
   "grep -q 'spike/src/public/fixtures/public_tx_simulation_tester.ts | spike-pure-ts' PROVENANCE.md && \
    sed -i '/^| spike\\/src\\/public\\/fixtures\\/public_tx_simulation_tester.ts | spike-pure-ts/d' PROVENANCE.md"
 
 control "a change to the derived tree the recorded transformation does not produce" \
+  "derived tree does not reproduce: .*avm_simulator\\.ts" \
   "printf '\n// not produced by the rename\n' >> drift/src/public/avm/avm_simulator.ts"
 
 finish

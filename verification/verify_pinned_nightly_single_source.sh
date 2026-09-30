@@ -154,15 +154,25 @@ fi
 # other; the running total is CAMPAIGN-BRIEF.md's and is deliberately not repeated here.
 assert_ge "pins.json declares at least one pin witness, so the paragraph above has a subject" 1 \
   "$(printf '%s' "$witnesses" | wc -w)"
+# The extractor and the verdict are functions because the negative control below must run THIS
+# comparison over a drifted copy; a control that re-derives the comparison inline proves only
+# that its own copy works.
+witness_literals() { # <file> -> the distinct nightly literals it carries, space-separated
+  grep -oE '[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]{8}' "$1" | sort -u | tr '\n' ' ' | sed 's/ $//'
+}
+witness_verdict() { # <declared-value> <file> -> "agrees", or "carries [<literals>]"
+  local got
+  got="$(witness_literals "$2")"
+  if [ -n "$1" ] && [ "$got" = "$1" ]; then printf 'agrees'; else printf 'carries [%s]' "$got"; fi
+}
 for w in $witnesses ; do
   want="$(printf '%s\n' "$info" | sed -n "s|^WITNESSVALUE $w ||p")"
   assert_true "$w is tracked" \
     test -n "$(git -C "$REPO_ROOT" ls-files -- "$w")"
-  got="$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]{8}' "$REPO_ROOT/$w" | sort -u | tr '\n' ' ')"
-  got="${got% }"
   assert_true "$w carries a nightly literal at all, so the comparison below is not vacuous" \
-    test -n "$got"
-  assert_eq "$w witnesses exactly the pin pins.json declares for it" "$want" "$got"
+    test -n "$(witness_literals "$REPO_ROOT/$w")"
+  assert_eq "$w witnesses exactly the pin pins.json declares for it ($want)" \
+    "agrees" "$(witness_verdict "$want" "$REPO_ROOT/$w")"
 done
 
 # THE NEGATIVE CONTROL for the witness rule, over a scratch copy: a witness whose literal has
@@ -177,9 +187,8 @@ DRIFTED="$(printf '%s\n' "$WANT_FIRST" | sed 's/-nightly\.[0-9]\{8\}$/-nightly.1
 assert_true "the drifted value really differs from the declared one" \
   test "$DRIFTED" != "$WANT_FIRST"
 sed -i "s/$WANT_FIRST/$DRIFTED/g" "$WITSANDBOX/witness.json"
-DRIFTED_GOT="$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]{8}' "$WITSANDBOX/witness.json" | sort -u | tr '\n' ' ')"
-assert_eq "a witness whose literal drifted is caught by the same comparison" "not-equal" \
-  "$([ "${DRIFTED_GOT% }" = "$WANT_FIRST" ] && echo equal || echo not-equal)"
+assert_eq "a witness whose literal drifted is rejected by the same witness_verdict" \
+  "carries [$DRIFTED]" "$(witness_verdict "$WANT_FIRST" "$WITSANDBOX/witness.json")"
 rm -rf "$WITSANDBOX"
 
 # ---- the real check: nothing disagrees -------------------------------------
@@ -241,18 +250,24 @@ if n < 8:
 PY
 ( cd "$SB/repo" && git init -q . && git add -- . >/dev/null 2>&1 ) || die "could not init the pin sandbox"
 
-pin_control() { # <description> <shell-body>
-  local desc="$1" body="$2" dir
+# A control passes only when repin.py rejects the mutation WITH THE RULE IT IS NAMED FOR: every
+# mutation here also trips a neighbouring rule (a synthetic version is also undeclared prose, a
+# lockfile version change also breaks its URL), so "exited non-zero" would survive the named
+# rule being deleted.
+pin_control() { # <description> <ERE a PIN-MISMATCH line must match> <shell-body>
+  local desc="$1" rule="$2" body="$3" dir out
   dir="$(mktemp -d -p "$SB")"
   cp -a "$SB/repo/." "$dir/"
   if ! ( cd "$dir" && eval "$body" ); then
     fail "$desc — the mutation failed to apply"
     return
   fi
-  if ( cd "$dir" && python3 tools/repin.py --check >/dev/null 2>&1 ); then
+  if out="$( cd "$dir" && python3 tools/repin.py --check 2>&1 )"; then
     fail "$desc — the pin check still PASSED; it is too weak"
+  elif str_has_line_re "$out" "PIN-MISMATCH $rule"; then
+    pass "$desc — rejected by its own rule"
   else
-    pass "$desc — rejected"
+    fail "$desc — rejected, but not by the rule it is named for [$rule]: $(printf '%s\n' "$out" | grep PIN-MISMATCH | head -3 | tr '\n' ' ')"
   fi
 }
 
@@ -273,9 +288,11 @@ fi
 CTRL_VER="9.9.9-nightly.2099""0101"
 
 pin_control "a package.json dependency moved off the declared pin" \
+  "drift/package\\.json: @aztec/foundation is 9\\.9\\.9-nightly\\.2099""0101, pins\\.json says " \
   "sed -i '0,/\"@aztec\\/foundation\": \"/s//\"@aztec\\/foundation\": \"$CTRL_VER\"XX/' drift/package.json && sed -i 's/\"XX[^\"]*\"/\"/' drift/package.json"
 
 pin_control "a lockfile entry resolving to a different version than pins.json declares" \
+  "drift/package-lock\\.json: @aztec/foundation resolves to 9\\.9\\.9-nightly\\.2099""0101, pins\\.json says " \
   "python3 - <<'EOF'
 import json
 p='drift/package-lock.json'
@@ -288,6 +305,7 @@ json.dump(d, open(p,'w'), indent=2)
 EOF"
 
 pin_control "a lockfile whose tarball URL disagrees with its own version field" \
+  "drift/package-lock\\.json: @aztec/foundation url [^ ]+ does not carry version " \
   "python3 - <<'EOF'
 import json
 p='drift/package-lock.json'
@@ -300,9 +318,11 @@ json.dump(d, open(p,'w'), indent=2)
 EOF"
 
 pin_control "prose quoting a nightly version pins.json does not declare" \
+  "README\\.md quotes 9\\.9\\.9-nightly\\.2099""0101, which pins\\.json does not declare" \
   "printf '\nPinned at $CTRL_VER.\n' >> README.md"
 
 pin_control "a consumer tree pointed at the wrong declared pin" \
+  "drift/package\\.json: @aztec/[^ ]+ is [^ ]+, pins\\.json says " \
   "python3 - <<'EOF'
 import json
 p='pins.json'
@@ -315,6 +335,7 @@ EOF"
 # precisely because it is required to carry the RIGHT one; if either half could not fail, the
 # category would be an exemption wearing a check's name.
 pin_control "a pin witness whose literal drifted off the pin it names" \
+  "[^ ]+ is a declared pin witness for npm\\.[a-z_]+ \\([^)]*\\) but carries [^ ]*-nightly\\.1970""0101" \
   "python3 - <<'EOF'
 import json, re
 d = json.load(open('pins.json'))
@@ -331,6 +352,7 @@ open(path, 'w', encoding='utf-8').write(text.replace(want, drifted))
 EOF"
 
 pin_control "a pin witness that has stopped carrying a literal at all" \
+  "[^ ]+ is declared a pin witness but carries no nightly literal at all" \
   "python3 - <<'EOF'
 import json, re
 d = json.load(open('pins.json'))
