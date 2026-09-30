@@ -186,9 +186,15 @@ assert_eq "rendering from an untouched copy of the manifest reproduces the commi
 
 # --- 2. every entry is complete ---------------------------------------------
 
-python3 - "$SERIES" "$SPECS" <<'PY'
+# The rules are written ONCE and the same file judges the real manifest and every probe. A
+# second, hand-copied rule set for the probes would prove that the COPY rejects broken entries,
+# which says nothing about the rules the real ledger was judged by.
+cat >"$probe/ledger_rules.py" <<'PY'
 import json, os, re, sys
 series, specs = sys.argv[1], sys.argv[2]
+# The repository the submission scripts are named relative to: the manifest's own, unless a
+# probe copy that lives elsewhere names it.
+root = sys.argv[3] if len(sys.argv) > 3 else os.path.join(os.path.dirname(series), "..")
 STATUSES = {"prepared", "submitted", "accepted", "declined", "stalled"}
 d = json.load(open(series))
 bad = []
@@ -208,7 +214,7 @@ for p in d["patches"]:
         bad.append("%s: declined without a reason and a maintenance consequence" % p["id"])
     if st == "stalled" and not led["reason"]:
         bad.append("%s: stalled without a reason" % p["id"])
-    script = os.path.join(os.path.dirname(series), "..", led["submission_script"])
+    script = os.path.join(root, led["submission_script"])
     if not os.path.isfile(script):
         bad.append("%s: submission script missing: %s" % (p["id"], led["submission_script"]))
     elif not os.access(script, os.X_OK):
@@ -226,17 +232,24 @@ for p in d["patches"]:
                    % (p["id"], m.group(1).strip()))
 sys.exit("\n".join(bad) if bad else 0)
 PY
+python3 "$probe/ledger_rules.py" "$SERIES" "$SPECS"
 if [ "$?" -eq 0 ]; then
   pass "every ledger entry is complete for its status, and agrees with its PR.md"
 else
   fail "at least one ledger entry is incomplete (see above)"
 fi
 
-# The completeness rules, exercised negatively. Four synthetic entries, each
-# breaking exactly one rule, each of which MUST be rejected.
+# The completeness rules, exercised negatively, through the same file. Four synthetic entries,
+# each breaking exactly one rule, each of which MUST be rejected — and rejected BY THAT RULE: the
+# probes also disturb the entry's URL, which another rule (the PR.md Status line) objects to, so
+# "rejected for something" would survive the deletion of the rule under test.
 rejected=0
 for probe_case in \
-  'declined-no-reason' 'submitted-no-url' 'prepared-with-url' 'bogus-status'; do
+  'declined-no-reason:declined without a reason and a maintenance consequence' \
+  'submitted-no-url:status submitted with no upstream URL' \
+  'prepared-with-url:prepared but carries a URL' \
+  'bogus-status:is outside the closed vocabulary'; do
+  want="${probe_case#*:}"; probe_case="${probe_case%%:*}"
   python3 - "$SERIES" "$probe/probe.json" "$probe_case" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
@@ -252,29 +265,10 @@ elif case == "bogus-status":
     led.update(status="in-review")
 open(sys.argv[2], "w").write(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
 PY
-  # stderr suppressed: these four probes are SUPPOSED to be rejected, and the
-  # rejection message is the expected outcome rather than a problem to report.
-  if python3 - "$probe/probe.json" 2>/dev/null <<'PY'
-import json, sys
-STATUSES = {"prepared", "submitted", "accepted", "declined", "stalled"}
-d = json.load(open(sys.argv[1]))
-bad = []
-for p in d["patches"]:
-    led = p["ledger"]; st = led["status"]
-    if st not in STATUSES:
-        bad.append("%s: bad status" % p["id"]); continue
-    if st == "prepared" and led["url"]:
-        bad.append("%s: prepared with URL" % p["id"])
-    if st != "prepared" and not led["url"]:
-        bad.append("%s: no URL" % p["id"])
-    if st == "declined" and not (led["reason"] and led["maintenance"]):
-        bad.append("%s: declined incomplete" % p["id"])
-    if st == "stalled" and not led["reason"]:
-        bad.append("%s: stalled incomplete" % p["id"])
-sys.exit("\n".join(bad) if bad else 0)
-PY
-  then
+  if python3 "$probe/ledger_rules.py" "$probe/probe.json" "$SPECS" "$REPO_ROOT" >"$probe/probe.out" 2>&1; then
     fail "the completeness rules ACCEPTED a broken entry: $probe_case"
+  elif ! grep -qF -- "$want" "$probe/probe.out"; then
+    fail "the completeness rules rejected $probe_case, but not for [$want]: $(head -c 300 "$probe/probe.out")"
   else
     rejected=$((rejected + 1))
   fi
