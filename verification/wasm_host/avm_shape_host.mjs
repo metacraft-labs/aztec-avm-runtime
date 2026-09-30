@@ -515,6 +515,29 @@ try {
       line(`snapshot.moved.${k}`, hexOf(freshBefore[k].root) === hexOf(after[k].root) ? 0 : 1);
     }
     R.e.avm_merkle_db_destroy(fresh);
+
+    // TWO CONTROLS on the replay, because a match between two DBs fed the same bytes by the same
+    // module is also what a module that ignored its payloads would produce. Replayed with the FIRST
+    // entry's payload EXCHANGED with the next same-kind entry's — the same leaves, the same ops, in a
+    // different order, so no leaf is inserted twice — and replayed with the first entry DROPPED,
+    // the roots must no longer match the export.
+    const replayMismatches = (entries) => {
+      const h = R.e.avm_merkle_db_create();
+      for (const e of entries) {
+        const entry = OPS.find((o) => o.name === e.op);
+        R.callWithArgs(R.e[entry.exp], e.op, h, e.bytes);
+      }
+      const t = R.callNoArgs(R.e.avm_merkle_db_get_tree_roots, 'get_tree_roots', h);
+      R.e.avm_merkle_db_destroy(h);
+      return Object.keys(before).filter((k) => hexOf(before[k].root) !== hexOf(t[k].root)
+        || String(before[k].nextAvailableLeafIndex) !== String(t[k].nextAvailableLeafIndex)).length;
+    };
+    const nextSame = journal.findIndex((e, i) => i > 0 && e.op === journal[0].op);
+    if (nextSame < 0) throw new Error('the journal has no second entry of its first entry\'s kind');
+    const substituted = journal.map((e, i) => (i === 0 ? { op: e.op, bytes: journal[nextSame].bytes }
+      : i === nextSame ? { op: e.op, bytes: journal[0].bytes } : e));
+    line('snapshot.control.substituted.mismatchedTrees', replayMismatches(substituted));
+    line('snapshot.control.dropped.mismatchedTrees', replayMismatches(journal.slice(1)));
     R.e.avm_merkle_db_destroy(mdb);
     line('snapshot.done', '1');
   } else {

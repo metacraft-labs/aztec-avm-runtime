@@ -113,9 +113,16 @@ case "$XN" in ''|*[!0-9]*) die "no crossing count for $M15_REPRESENTATIVE" ;; es
 TOTAL_NS=$((XN * NS))
 note "$M15_REPRESENTATIVE: $XN crossings x ${NS} ns = ${TOTAL_NS} ns of pure boundary per transaction"
 assert_ge "the composed figure is positive" 1 "$TOTAL_NS"
-# And it is small: under a hundred microseconds of boundary for a transaction. That is the number
-# the decision turns on and it is asserted so a change to either term is caught here.
-assert_true "the whole per-transaction boundary cost is under 100 us" test "$TOTAL_NS" -lt 100000
+# The composed figure is REPORTED, not bounded. Its two terms are each bounded already — a crossing
+# under 2,000 ns above, and a transaction's hinted crossings under M15's budget of
+# 32 (M15_CROSSING_BUDGET) in verify_boundary_crossing_budget — and their product is then below 64 us
+# before any bound is written here, so a ceiling of 100 us on it could not be reached by anything
+# those two let through. NOR IS THE MODULE'S OWN DECODE MEASURED: the three figures above are an
+# empty call, the host's alloc/copy/free of a payload, and the HOST's decode of a result. How long
+# `avm.wasm` spends decoding a 1.9 KB input against a 190 KB one is not separated from simulating
+# it by anything this check runs.
+note "not measured here: the module's own msgpack decode of its input, separately from execution"
+note "the composed per-transaction boundary figure is implied by the two bounds above and is not asserted on its own"
 
 assert_file "the boundary write-up exists" "$M15_WRITEUP"
 assert_true "and it separates the encode/decode cost from execution rather than merging them" \

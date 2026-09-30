@@ -147,6 +147,19 @@ assert_eq "all four trees were checked" "4" "$MATCHED"
 # in the corpus injects an L1-to-L2 message. Named rather than counted loosely: "three of four
 # moved" would also be satisfied by the wrong three.
 assert_eq "three of the four trees were moved by the import" "3" "$MOVED"
+# The match above is between two DBs the same module built from the same bytes, which a module that
+# ignored every payload would also produce. The comparison is shown to depend on the payloads: a
+# journal with its first two same-kind payloads exchanged, and one missing its first
+# entry, must each leave at least one tree away from the exported roots.
+assert_ge "a journal with two payloads exchanged does not reproduce the export" 1 \
+  "$(m15_key "$OUT" snapshot.control.substituted.mismatchedTrees)"
+assert_ge "nor does a journal with one entry dropped" 1 \
+  "$(m15_key "$OUT" snapshot.control.dropped.mismatchedTrees)"
+# WHAT THIS DOES NOT SHOW. The journal is the host's own setup operations, the ones it applied to
+# build the state. No transaction's writes are exported: the operations a simulation makes happen
+# inside the module and never cross the boundary in either shape, so "the state a transaction left"
+# is not what is carried here.
+note "not exercised: exporting the state a SIMULATION wrote; the journal carries host-applied setup operations only"
 assert_eq "and the one that was not is the L1->L2 message tree" "0" \
   "$(m15_key "$OUT" snapshot.moved.l1ToL2MessageTree)"
 assert_eq "which the journal does not touch, so it is at genesis on both sides" \
