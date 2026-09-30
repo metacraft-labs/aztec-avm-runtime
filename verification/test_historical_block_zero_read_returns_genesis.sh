@@ -128,14 +128,22 @@ assert_contains "the only archive membership witness in the block pipeline is fo
 # one tree-name switch — the `case` label and the `return` under it — so both are excluded by their
 # own text and what remains must be nothing. The first form of this excluded only the `return` and
 # reported the label as a read, which was a true count of the wrong thing.
-VM2_ARCHIVE_READS="$(git -C "$FORK_ROOT" grep -E '(^|[^[:alnum:]_])ARCHIVE([^[:alnum:]_]|$)' "$M6_BASE_REV" -- \
+VM2_ARCHIVE_ALL="$(git -C "$FORK_ROOT" grep -E '(^|[^[:alnum:]_])ARCHIVE([^[:alnum:]_]|$)' "$M6_BASE_REV" -- \
       'barretenberg/cpp/src/barretenberg/vm2/*' 2>/dev/null \
-     | grep -v '\.test\.cpp' \
+     | grep -v '\.test\.cpp')"
+VM2_ARCHIVE_READS="$(printf '%s\n' "$VM2_ARCHIVE_ALL" \
      | grep -v 'case world_state::MerkleTreeId::ARCHIVE:' \
      | grep -v 'return "ARCHIVE";')"
+# The zero below is a remainder, and a remainder of nothing is also zero: a search that failed,
+# or a path that matched no file, would report "no archive read" as confidently as vm2 does. The
+# two lines it subtracts must therefore have been FOUND by the same search first.
+assert_eq "the search over vm2 finds the two lines of the tree-name switch it then excludes" "2" \
+  "$(printf '%s\n' "$VM2_ARCHIVE_ALL" | grep -cE 'case world_state::MerkleTreeId::ARCHIVE:|return "ARCHIVE";')"
 assert_eq "and vm2 has no archive read at all to pin, only the two lines of a name switch" "0" \
   "$(printf '%s\n' "$VM2_ARCHIVE_READS" | grep -c .)"
 DB_HPP="$(FORK_SHOW barretenberg/cpp/src/barretenberg/vm2/simulation/interfaces/db.hpp)"
+assert_eq "the AVM's host interface header was read, and declares the low-level merkle interface" "1" \
+  "$(printf '%s\n' "$DB_HPP" | grep -cE '^class LowLevelMerkleDBInterface \{')"
 assert_eq "and the AVM's host interface has no revision parameter to carry one" "0" \
   "$(printf '%s\n' "$DB_HPP" | grep -cE '\bWorldStateRevision\b')"
 
