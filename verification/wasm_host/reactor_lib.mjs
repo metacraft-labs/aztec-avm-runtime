@@ -143,6 +143,23 @@ export class Reactor {
     const out = this.result();
     return out ? unpack(out) : null;
   }
+  // Runs `fn` with every export whose name matches `re` counted as it is CALLED, and returns
+  // `{ value, calls }`. A crossing count is then an observation of the module's exports being
+  // entered, not a loop counter the host keeps beside the calls it believes it made. The counting
+  // table replaces `this.e` for the duration of `fn` only — the instance's own exports object is
+  // frozen, so it cannot be wrapped in place — and a timed arm outside it pays nothing for it.
+  countCalls(re, fn) {
+    const raw = this.e;
+    let calls = 0;
+    const counted = {};
+    for (const [k, v] of Object.entries(raw)) {
+      counted[k] = typeof v === 'function' && re.test(k) ? (...a) => { calls++; return v(...a); } : v;
+    }
+    this.e = counted;
+    let value;
+    try { value = fn(); } finally { this.e = raw; }
+    return { value, calls };
+  }
 }
 
 // ---------------------------------------------------------------------------
