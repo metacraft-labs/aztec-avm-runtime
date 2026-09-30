@@ -132,6 +132,13 @@ def check(name, ok, detail=""):
     RESULTS.append(("PASS" if ok else "FAIL", name, str(detail)))
 
 
+def note(name, detail=""):
+    """A measurement REPORTED rather than asserted. It is a NOTE row, not a PASS: a row whose
+    verdict is fixed in advance cannot fail, and counted as a pass it inflates every tally of what
+    the comparison asserted."""
+    RESULTS.append(("NOTE", name, str(detail)))
+
+
 def load(path):
     """`<label>\\t<value>` rows -> {label: [values]}."""
     data = {}
@@ -355,11 +362,11 @@ def disabled(path, budget, faster_budget):
     sd_between = st.stdev(obs) if k > 1 else 0.0
     hw_within = within_session_halfwidth({s: sessions[s] for s in complete},
                                          "patched", "unpatched")
-    check("the spread this interval covers, and the one a single session would have claimed",
-          True, f"between-session sd {sd_between:.2f}pp over {k} sessions "
+    note("the spread this interval covers, and the one a single session would have claimed",
+         f"between-session sd {sd_between:.2f}pp over {k} sessions "
                 f"(range {min(obs):+.2f}% .. {max(obs):+.2f}%); one session's own bootstrap "
                 f"would have claimed +/-{hw_within:.2f}pp")
-    check("the disabled overhead, as measured", True,
+    note("the disabled overhead, as measured",
           f"mean over {k} sessions {obs_p:+.2f}% CI [{obs_lo:+.2f}, {obs_hi:+.2f}]  "
           f"per-session range {min(obs):+.2f}% .. {max(obs):+.2f}%  "
           f"min {med_min:+.2f}%  same-bytes control {ctl_p:+.2f}% "
@@ -449,7 +456,7 @@ def enabled(path, budget, label):
     check(f"[{label}] the budget leaves headroom", budget - d_med >= 1.0,
           f"budget {budget:.0f}%, measured {d_med:+.2f}%, margin {budget - d_med:.2f}pp")
     check(f"[{label}] the budget is small enough to be able to fail", budget <= 25.0, budget)
-    check(f"[{label}] the traced overhead, as measured", True,
+    note(f"[{label}] the traced overhead, as measured",
           f"min {d_min:+.2f}%  median {d_med:+.2f}%  "
           f"off min={min(off)}us median={st.median(off):.0f}us  "
           f"on min={min(on)}us median={st.median(on):.0f}us")

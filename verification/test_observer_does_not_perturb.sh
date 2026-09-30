@@ -136,8 +136,16 @@ assert_eq "and so does the committed copy, so the comparison is against M8's own
 assert_true "every one of them is byte-identical to M8's committed transcript" cmp -s "$a" "$b"
 assert_eq "including all $M8_EXPECTED_ROOT_LINES root+size lines" "$M8_EXPECTED_ROOT_LINES" \
   "$(m8_root_lines "$default_out" | wc -l)"
+# Extracted in THIS shell and compared as files. `m8_root_lines` is a function of this shell,
+# so a `bash -c` child cannot see it: both extractions there fail, both streams are empty, and
+# `diff` of two empty streams reports them identical whatever the transcripts say.
+roots_now="$M9_WORK/m8mode.roots"; roots_m8="$M9_WORK/m8committed.roots"
+m8_root_lines "$default_out" >"$roots_now"
+m8_root_lines "$m8_committed" >"$roots_m8"
+assert_eq "the committed transcript carries all $M8_EXPECTED_ROOT_LINES root+size lines too" \
+  "$M8_EXPECTED_ROOT_LINES" "$(grep -c . "$roots_m8" || true)"
 assert_true "the root+size lines are identical to M8's, line for line" \
-  bash -c "diff <(m8_root_lines '$default_out') <(m8_root_lines '$m8_committed') >/dev/null"
+  cmp -s "$roots_now" "$roots_m8"
 assert_eq "and the driver emitted no step record in its default mode" "0" \
   "$(m9_step_record_count "$default_out")"
 

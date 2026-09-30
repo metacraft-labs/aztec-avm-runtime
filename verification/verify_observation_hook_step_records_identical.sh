@@ -196,10 +196,13 @@ done
 # The streams really are separate, and that is asserted in BOTH directions rather than being a
 # claim about silence: `common/log.cpp` sets bb_log_level = VERBOSE unconditionally under __wasm__
 # and INFO otherwise, so the wasm run logs on fd 2 and the native one does not.
+# Every AVM log line ends in a memory figure, but the FIGURE differs by target: `N/A` under wasm,
+# where the probe has no implementation, and a resident-set size natively (`(mem: 6.29 MiB)`).
+# So the leak is looked for as `(mem: `, which both spellings carry.
 assert_eq "no AVM log line leaked into the native transcript" "0" \
-  "$(grep -c '(mem: N/A)' "$(m9_steps_native)" || true)"
+  "$(grep -c '(mem: ' "$(m9_steps_native)" || true)"
 assert_eq "no AVM log line leaked into the V8 transcript" "0" \
-  "$(grep -c '(mem: N/A)' "$(m9_steps_v8)" || true)"
+  "$(grep -c '(mem: ' "$(m9_steps_v8)" || true)"
 assert_ge "the wasm run's own stderr carries the AVM's log lines" 20 \
   "$(grep -c '(mem: N/A)' "$(m9_steps_v8_err)" || true)"
 
