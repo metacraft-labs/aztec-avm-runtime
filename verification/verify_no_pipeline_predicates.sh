@@ -337,5 +337,36 @@ for fn in str_has_line str_has_sub str_has_word str_has_re str_has_line_re; do
   assert_ge "…and something calls it" 2 "$N_CALLS"
 done
 
+# ---------------------------------------------------------------------------
+# 6. NO BACKTICK OPENS A COMMAND SUBSTITUTION INSIDE A DOUBLE-QUOTED STRING
+#
+# Assertion text quotes code the way Markdown does, and inside double quotes bash reads
+# "…and the `fn` one" as a command substitution: it RUNS `fn`, the description loses the word,
+# and whatever that name is on PATH executes. Thirteen sites across seven checks did exactly this
+# — the transcripts carried `fn: command not found` and `divide_by_zero: command not found` beside
+# `ok` lines with a gap where the name should be. The scanner tracks quoting across lines and
+# skips comments and here-documents; it is run over the tree and over a probe it must read.
+# ---------------------------------------------------------------------------
+BT="$REPO_ROOT/verification/_dq_backticks.py"
+assert_file "the backtick scanner exists" "$BT"
+N_SH="$(find "$REPO_ROOT/verification" "$REPO_ROOT/tools" -name '*.sh' | grep -c . || true)"
+assert_ge "it is asked of every check shell in the tree" 300 "$N_SH"
+# shellcheck disable=SC2046
+BT_SITES="$(python3 "$BT" $(find "$REPO_ROOT/verification" "$REPO_ROOT/tools" -name '*.sh' | sort) 2>&1)"
+assert_eq "no check shell runs a backticked name inside a double-quoted string" "" "$BT_SITES"
+BT_PROBE="$PROBE_DIR/backticks.sh"
+{
+  printf '%s\n' 'assert_true "…and the `fn` one" true'
+  printf '%s\n' 'note "spans' 'two lines, `here`"'
+  printf '%s\n' "assert_true 'single quotes keep \`fn\` literal' true"
+  printf '%s\n' 'assert_true "an escaped \`fn\` is literal" true'
+  printf '%s\n' '# a comment may say `fn` freely'
+  printf '%s\n' 'x="$(awk '"'"'/`y`/'"'"' f)"'
+  printf '%s\n' "python3 - <<'PY'" 'print("`z`")' 'PY'
+} >"$BT_PROBE"
+BT_PROBE_SITES="$(python3 "$BT" "$BT_PROBE" | sed 's/^[^:]*:\([0-9]*\):.*/\1/' | tr '\n' ' ')"
+assert_eq "CONTROL: the scanner finds the two live sites in a probe, one of them on a continued line, and none of the five literal ones" \
+  "1 3 " "$BT_PROBE_SITES"
+
 rm -rf "$PROBE_DIR"; trap - EXIT
 finish

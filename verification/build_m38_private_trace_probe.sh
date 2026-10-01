@@ -176,7 +176,7 @@ for f in .envrc flake.nix flake.lock; do
   fi
 done
 [ -d "$TRACE_FORMAT_REPO/.direnv" ] || [ -f "$TRACE_FORMAT_REPO/.envrc" ] || \
-  die "$TRACE_FORMAT_REPO has no .envrc, so there is no dev shell to take `nim` from"
+  die "$TRACE_FORMAT_REPO has no .envrc, so there is no dev shell to take \`nim\` from"
 
 # THE NIM SOURCES THE WRITER'S `build.rs` COMPILES, SUPPLIED EXPLICITLY.
 #

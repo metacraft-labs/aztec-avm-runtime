@@ -95,13 +95,13 @@ assert_false "…and the to_i128 rendering is GONE from the Field arm" \
 # since it is the reason the old needle died and a future reader will otherwise re-add it.
 assert_true "…while the integer arms still reach ValueRecord::Int, so the arm is real code" \
   str_has_sub "$GLUE" 'return ValueRecord::Int { i, type_id };'
-assert_true "…through i64::try_from rather than the `as i64` that truncated" \
+assert_true "…through i64::try_from rather than the \`as i64\` that truncated" \
   str_has_sub "$GLUE" 'if let Ok(i) = i64::try_from(wide)'
 assert_true "…with a BigInt fallback, so a value too wide for an i64 is recorded rather than lost" \
   str_has_sub "$GLUE" 'ValueRecord::BigInt'
 # AND THE LOSSY SPELLING IS GONE FROM EVERY LIVE PATH, not just from the `Field` arm. Measured by
 # stripping comment lines first, because the file still DISCUSSES it at length.
-assert_eq "…and `to_i128() as i64` survives only in comments, on no live path" "0" \
+assert_eq "…and \`to_i128() as i64\` survives only in comments, on no live path" "0" \
   "$(printf '%s\n' "$GLUE" | grep -v '^[[:space:]]*//' | grep -c 'to_i128() as i64' || true)"
 assert_true "…under the type (TypeKind::Int, \"Field\"), which is the type this runtime reuses" \
   str_has_sub "$GLUE" 'PrintableType::Field => (TypeKind::Int, "Field".to_string()),'
@@ -183,11 +183,11 @@ assert_true "…and §4.4 carries the arm's CURRENT range beside it" \
 # §4.3's two escape-hatch citations, present tense, so they are today's numbers.
 UNIT_LINE="$(fr_line_of "$GLUE" 'ValueRecord::Raw { r: "()".to_string(), type_id }')"
 FN_LINE="$(fr_line_of "$GLUE" 'ValueRecord::Raw { r: "fn".to_string(), type_id }')"
-assert_true "the `()` escape hatch was located in the glue" str_has_re "$UNIT_LINE" '^[0-9]+$'
-assert_true "…and the `fn` one" str_has_re "$FN_LINE" '^[0-9]+$'
-assert_true "§4.3 cites the `()` escape hatch at the line it is actually on" \
+assert_true "the \`()\` escape hatch was located in the glue" str_has_re "$UNIT_LINE" '^[0-9]+$'
+assert_true "…and the \`fn\` one" str_has_re "$FN_LINE" '^[0-9]+$'
+assert_true "§4.3 cites the \`()\` escape hatch at the line it is actually on" \
   str_has_sub "$DOC_TEXT" "\`tracer_glue.rs:$UNIT_LINE\`"
-assert_true "…and the `fn` one" str_has_sub "$DOC_TEXT" "\`:$FN_LINE\`"
+assert_true "…and the \`fn\` one" str_has_sub "$DOC_TEXT" "\`:$FN_LINE\`"
 assert_true "…and records that M26 landed it, rather than leaving §4.4 as an instruction" \
   str_has_sub "$DOC_TEXT" 'M26 LANDED OPTION 1'
 assert_true "…and records the cost, which is that a small field now reads as 0x…04 instead of 4" \
