@@ -99,8 +99,14 @@ STAMP_TREE_COUNT="$(printf '%s\n' "$STAMP_TREE" | grep -c . || true)"
 [ "${STAMP_TREE_COUNT:-0}" -ge 100 ] || \
   die "the stamp found only ${STAMP_TREE_COUNT:-0} source files under $NOIR_ROOT/{compiler,tooling,acvm-repo};
      a stamp taken over an empty list matches every build. Check the paths."
+# THE CRATE'S OWN rust-toolchain FILE NAMES THE COMPILER, and lib_toolchain.sh holds the build to
+# that channel exactly (installed by version, repaired if a garbage collection broke it, rooted, and
+# refused unless `rustc --version` agrees). It is in the stamp so a different compiler rebuilds.
+. "$HERE/lib_toolchain.sh"
+RUST_VER="$(tc_toolchain_file_channel "$CRATE_DIR")" || die "$CRATE_DIR has no rust-toolchain file to take the channel from"
 STAMP_WANT="$( { printf '%s\n' "$STAMP_TREE" | xargs sha256sum
-                 sha256sum "$CRATE_DIR/.cargo/config.toml" "$NOIR_ROOT/Cargo.lock"; } \
+                 sha256sum "$CRATE_DIR/.cargo/config.toml" "$NOIR_ROOT/Cargo.lock"
+                 printf 'rust-%s\n' "$RUST_VER"; } \
                | sha256sum | cut -d' ' -f1)"
 
 if [ "$FORCE" = 0 ] && [ -f "$OUT" ] && [ -f "$STAMP" ] && \
@@ -130,18 +136,18 @@ command -v nix >/dev/null 2>&1 || \
 # `build_ct_writer_wasm.sh` handles with `tar -x -m`, in the other direction.
 for f in "${STAMP_INPUTS[@]}"; do touch "$f"; done
 
+TC_PATH="$(tc_rust_ensure "$RUST_VER" "$CRATE_DIR")" || die "the rust toolchain $RUST_VER could not be made usable"
 build_script='
 set -euo pipefail
 export PATH="$CARGO_HOME/bin:$PATH"
-rustup -q toolchain install stable --profile minimal >/dev/null 2>&1 || true
-rustup -q target add wasm32-unknown-unknown >/dev/null 2>&1 || true
+case "$(rustc --version)" in "rustc $RUSTUP_TOOLCHAIN "*) : ;; *) echo "rustc is not $RUSTUP_TOOLCHAIN: $(rustc --version)" >&2; exit 1 ;; esac
 cd "$CRATE_DIR"
 cargo build --release
 '
 
 say "building $CRATE_DIR for wasm32-unknown-unknown"
-CRATE_DIR="$CRATE_DIR" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" \
-  nix shell nixpkgs#rustup --command bash -c "$build_script" >&2 \
+CRATE_DIR="$CRATE_DIR" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" RUSTUP_TOOLCHAIN="$RUST_VER" \
+  PATH="$TC_PATH:$PATH" bash -c "$build_script" >&2 \
   || die "the wasm build failed"
 
 [ -f "$OUT" ] || die "the build reported success but $OUT does not exist"

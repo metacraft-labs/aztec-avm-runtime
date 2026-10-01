@@ -26,7 +26,7 @@ TEST_NAME="verify_differential_job_separate_failure_domain"
 
 WF="$REPO_ROOT/.github/workflows/avm-wasm.yml"
 assert_file "the workflow is present" "$WF"
-if command -v yq >/dev/null 2>&1; then YQ="yq"; else YQ="nix shell nixpkgs#yq-go --command yq"; fi
+if command -v yq >/dev/null 2>&1; then YQ="yq"; else YQ="nix shell --inputs-from $REPO_ROOT nixpkgs#yq-go --command yq"; fi
 
 JOB="differential-oracle"
 jobs="$($YQ -r '.jobs | keys | join(" ")' "$WF" 2>/dev/null)"

@@ -91,6 +91,28 @@ export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.cache/aztec-m24-rustup}"
 export CARGO_HOME="${CARGO_HOME:-$HOME/.cache/aztec-m24-cargo}"
 
 die() { printf 'build_avm_transpiler_wasm: %s\n' "$*" >&2; exit 1; }
+
+# THE RUST TOOLCHAINS, PINNED AND ROOTED (verification/lib_toolchain.sh). The native builds —
+# avm-transpiler and nargo — carry their own rust-toolchain.toml and are held to that channel; the
+# wasm shim carries none and is held to pins.json's `toolchain.rust`. Either way the toolchain is
+# installed by exact version with the rustup this repository's flake.lock names, reinstalled if a
+# garbage collection broke it, rooted, and refused unless `rustc --version` agrees.
+# shellcheck source=verification/lib_toolchain.sh
+. "$HERE/lib_toolchain.sh"
+# m31_cargo <crate-dir> <toolchain> <script> — run <script> under bash in <crate-dir>'s toolchain.
+m31_cargo() {
+  local dir="$1" ver="$2" script="$3" tcpath
+  if tc_toolchain_file_channel "$dir" >/dev/null 2>&1; then
+    tcpath="$(tc_rust_ensure "$ver" "$dir")" || return 1
+  else
+    tcpath="$(tc_rust_ensure "$ver")" || return 1
+  fi
+  ( cd "$dir" && PATH="$tcpath:$PATH" RUSTUP_TOOLCHAIN="$ver" bash -c '
+      set -euo pipefail
+      case "$(rustc --version)" in "rustc $RUSTUP_TOOLCHAIN "*) : ;;
+        *) echo "rustc is not $RUSTUP_TOOLCHAIN: $(rustc --version)" >&2; exit 1 ;; esac
+      '"$script" )
+}
 say() { printf 'build_avm_transpiler_wasm: %s\n' "$*" >&2; }
 
 FORCE=0
@@ -160,11 +182,8 @@ if [ "$BASELINE" = 1 ]; then
   if [ "$FORCE" = 1 ] || [ ! -x "$BNATIVE" ] || \
      [ "$(cat "$BBUILD_STAMP" 2>/dev/null)" != "$BSTAMP_WANT" ]; then
     say "building the UNPATCHED native avm-transpiler"
-    BTREE="$BTREE" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" \
-      nix shell nixpkgs#rustup --command bash -c '
-        set -euo pipefail
-        export PATH="$CARGO_HOME/bin:$PATH"
-        cd "$BTREE/avm-transpiler"
+    BCH="$(tc_toolchain_file_channel "$BTREE/avm-transpiler")" || die "the baseline avm-transpiler names no toolchain"
+    m31_cargo "$BTREE/avm-transpiler" "$BCH" '
         cargo build --release
       ' >&2 || die "the baseline native build failed"
     [ -x "$BNATIVE" ] || die "the baseline build reported success but $BNATIVE does not exist"
@@ -232,13 +251,9 @@ if [ "$FORCE" = 1 ] || [ ! -x "$NARGO" ] || \
   # GIT_COMMIT/GIT_DIRTY: `tooling/nargo_cli/build.rs` shells out to `git rev-parse HEAD` unless
   # they are set, and a `git archive` extraction has no `.git`. aztec's own `noir/bootstrap.sh`
   # sets exactly these two for exactly this reason, so this is upstream's escape and not ours.
-  TREE="$TREE" NOIR_REV="$NOIR_REV" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" \
-    nix shell nixpkgs#rustup --command bash -c '
-      set -euo pipefail
-      export PATH="$CARGO_HOME/bin:$PATH"
+  NCH="$(tc_toolchain_file_channel "$TREE/noir/noir-repo")" || die "the materialised noir names no toolchain"
+  NOIR_REV="$NOIR_REV" m31_cargo "$TREE/noir/noir-repo" "$NCH" '
       export GIT_COMMIT="$NOIR_REV" GIT_DIRTY=false SOURCE_DATE_EPOCH=0
-      rustup -q toolchain install 1.89.0 --profile minimal >/dev/null 2>&1 || true
-      cd "$TREE/noir/noir-repo"
       cargo build --release -p nargo_cli
     ' >&2 || die "the nargo build failed"
   [ -x "$NARGO" ] || die "the nargo build reported success but $NARGO does not exist"
@@ -288,15 +303,16 @@ SRC_COUNT="$(printf '%s\n' "$SRC_LIST" | grep -c . || true)"
 BUILD_WANT="$( { printf '%s\n' "$SRC_LIST" | xargs sha256sum
                  sha256sum "$TREE/noir/noir-repo/Cargo.lock"; } | sha256sum | cut -d' ' -f1)"
 
+# Each build's stamp carries the compiler that produced it: a module built by another rustc is a
+# different module, and `stable` floating 1.98.1 -> 1.99.0 changed ct-writer's bytes with no source
+# change. The native transpiler's channel is its rust-toolchain.toml's; the shim's is the pin.
+TCH="$(tc_toolchain_file_channel "$TREE/avm-transpiler")" || die "the materialised avm-transpiler names no toolchain"
+SHIM_RUST="$(tc_pinned_rust)" || die "pins.json declares no toolchain.rust.version"
 NATIVE_STAMP="$TREE/avm-transpiler/target/release/.m31-built-from"
 if [ "$FORCE" = 1 ] || [ ! -x "$NATIVE" ] || \
    [ "$(cat "$NATIVE_STAMP" 2>/dev/null)" != "$BUILD_WANT" ]; then
   say "building the native avm-transpiler"
-  TREE="$TREE" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" \
-    nix shell nixpkgs#rustup --command bash -c '
-      set -euo pipefail
-      export PATH="$CARGO_HOME/bin:$PATH"
-      cd "$TREE/avm-transpiler"
+  m31_cargo "$TREE/avm-transpiler" "$TCH" '
       cargo build --release
     ' >&2 || die "the native transpiler build failed"
   [ -x "$NATIVE" ] || die "the native build reported success but $NATIVE does not exist"
@@ -305,18 +321,13 @@ fi
 
 MODULE_STAMP="$TREE/avm-transpiler-wasm/target/wasm32-unknown-unknown/release/.m31-built-from"
 if [ "$FORCE" = 1 ] || [ ! -f "$MODULE" ] || \
-   [ "$(cat "$MODULE_STAMP" 2>/dev/null)" != "$BUILD_WANT" ]; then
+   [ "$(cat "$MODULE_STAMP" 2>/dev/null)" != "$BUILD_WANT rust-$SHIM_RUST" ]; then
   say "building avm_transpiler_wasm.wasm for wasm32-unknown-unknown"
-  TREE="$TREE" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" \
-    nix shell nixpkgs#rustup --command bash -c '
-      set -euo pipefail
-      export PATH="$CARGO_HOME/bin:$PATH"
-      rustup -q target add wasm32-unknown-unknown >/dev/null 2>&1 || true
-      cd "$TREE/avm-transpiler-wasm"
+  m31_cargo "$TREE/avm-transpiler-wasm" "$SHIM_RUST" '
       cargo build --release --target wasm32-unknown-unknown
     ' >&2 || die "the wasm build failed"
   [ -f "$MODULE" ] || die "the wasm build reported success but $MODULE does not exist"
-  printf '%s\n' "$BUILD_WANT" >"$MODULE_STAMP"
+  printf '%s\n' "$BUILD_WANT rust-$SHIM_RUST" >"$MODULE_STAMP"
 fi
 
 printf 'TREE=%s\n' "$TREE"

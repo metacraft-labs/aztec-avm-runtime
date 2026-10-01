@@ -100,9 +100,27 @@ actual_parent="$(git -C "$NIM_REPO" rev-parse "$REV^" 2>/dev/null)"
 command -v nim >/dev/null 2>&1 || die "nim is required (it comes from the workspace dev shell)"
 command -v nix >/dev/null 2>&1 || die "nix is required to resolve zstd's headers"
 
-INC="$(nix build --no-link --print-out-paths nixpkgs#zstd.dev 2>/dev/null)/include"
-LIB="$(nix build --no-link --print-out-paths nixpkgs#zstd.out 2>/dev/null)/lib"
+# zstd FROM THIS REPOSITORY'S flake.lock, ROOTED. `nixpkgs#zstd` alone resolves through the
+# invoking user's flake registry, and an unrooted `--no-link` result is exactly what a host
+# `nix store gc` deletes from under the binaries linked against it (verification/lib_toolchain.sh).
+# shellcheck source=verification/lib_toolchain.sh
+. "$HERE/lib_toolchain.sh"
+_tc_patchelf >/dev/null || die "patchelf did not resolve through $REPO_ROOT/flake.lock"
+INC="$(tc_nixpkg zstd.dev)/include" || die "nixpkgs#zstd.dev did not resolve through $REPO_ROOT/flake.lock"
+LIB="$(tc_nixpkg zstd.out)/lib" || die "nixpkgs#zstd.out did not resolve through $REPO_ROOT/flake.lock"
 [ -f "$INC/zstd.h" ] || die "zstd.h is not at $INC (nixpkgs#zstd.dev did not resolve)"
+
+# A CACHED BINARY IS REUSED ONLY IF IT STILL LOADS. Its `.rev` stamp says which source built it and
+# nothing about whether the store paths it was linked against still exist; after a garbage
+# collection it matched its stamp and died with `required file not found`. And every binary built
+# or reused here has everything it loads from ROOTED, so the next collection cannot do that again.
+ctprint_usable() { # <binary>
+  tc_elf_loadable "$1" || { say "$(basename "$1") no longer loads its libraries; rebuilding it"; return 1; }
+}
+ctprint_root() { # <binary>
+  tc_root_elf_refs "ctprint-$(basename "$1")" "$1" \
+    || die "could not root the store paths $(basename "$1") loads from"
+}
 
 # WHICH NIM BACKEND `cc` IS, ASKED RATHER THAN ASSUMED.
 #
@@ -122,7 +140,9 @@ host_nim_cc() { # <path-to-cc>
 
 build_one() { # <rev> <tree-dir> <out-binary>
   local rev="$1" tree="$2" out="$3"
-  if [ "$FORCE" = 0 ] && [ -x "$out" ] && [ "$(cat "$out.rev" 2>/dev/null)" = "$rev" ]; then
+  if [ "$FORCE" = 0 ] && [ -x "$out" ] && [ "$(cat "$out.rev" 2>/dev/null)" = "$rev" ] \
+     && ctprint_usable "$out"; then
+    ctprint_root "$out"
     say "$(basename "$out") @ ${rev:0:10} already built"
     return 0
   fi
@@ -152,6 +172,8 @@ build_one() { # <rev> <tree-dir> <out-binary>
     || die "building ct-print at $rev failed; the compiler's own output is in $out.build.log:
 $(tail -20 "$out.build.log" 2>/dev/null)"
   [ -x "$out" ] || die "the build reported success but $out is not there"
+  ctprint_usable "$out" || die "$out was just built and does not load its libraries"
+  ctprint_root "$out"
   printf '%s\n' "$rev" >"$out.rev"
   say "built $(basename "$out") @ ${rev:0:10} ($(wc -c <"$out") bytes)"
 }
@@ -166,7 +188,8 @@ $(tail -20 "$out.build.log" 2>/dev/null)"
 build_probe() { # <rev> <tree-dir> <out-binary>
   local rev="$1" tree="$2" out="$3"
   if [ "$FORCE" = 0 ] && [ -x "$out" ] && [ "$(cat "$out.rev" 2>/dev/null)" = "$rev" ] \
-     && [ ! "$REPO_ROOT/verification/ct_split_probe.nim" -nt "$out" ]; then
+     && [ ! "$REPO_ROOT/verification/ct_split_probe.nim" -nt "$out" ] && ctprint_usable "$out"; then
+    ctprint_root "$out"
     say "$(basename "$out") @ ${rev:0:10} already built"
     return 0
   fi
@@ -184,6 +207,8 @@ build_probe() { # <rev> <tree-dir> <out-binary>
     || die "building ct-split-probe at $rev failed; see $(dirname "$out")/$(basename "$out").build.log:
 $(tail -20 "$(dirname "$out")/$(basename "$out").build.log" 2>/dev/null)"
   [ -x "$out" ] || die "the build reported success but $out is not there"
+  ctprint_usable "$out" || die "$out was just built and does not load its libraries"
+  ctprint_root "$out"
   printf '%s\n' "$rev" >"$out.rev"
   say "built $(basename "$out") @ ${rev:0:10} ($(wc -c <"$out") bytes)"
 }

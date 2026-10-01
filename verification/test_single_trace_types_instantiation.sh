@@ -55,6 +55,15 @@ assert_file "the module was built, so its lock file describes a graph that compi
 LOCK="$M24_CRATE/Cargo.lock"
 assert_file "the crate has a lock file" "$LOCK"
 
+# Every cargo below runs under pins.json's `toolchain.rust`, through verification/lib_toolchain.sh:
+# the version the module was built with, from a rustup this repository's flake.lock names, with
+# every store path the toolchain loads from rooted. CONTROL B links host build scripts, and a host
+# link reaches the toolchain's `rust-lld`; when a garbage collection had taken its interpreter the
+# control died with `clang: error: unable to execute command` instead of the type error it is for.
+RUST_VER="$(tc_pinned_rust)" || die "pins.json declares no toolchain.rust.version"
+TC_PATH="$(tc_rust_ensure "$RUST_VER")" || die "the pinned rust toolchain $RUST_VER could not be made usable"
+export RUSTUP_TOOLCHAIN="$RUST_VER"
+
 # ---------------------------------------------------------------------------
 # 1. The lock file.
 # ---------------------------------------------------------------------------
@@ -115,7 +124,7 @@ matching an empty list" \
 # differential checks compare it with the shipped one), so its graph is the one asked about.
 # ---------------------------------------------------------------------------
 TREE="$(m24_require_bounded 900 "cargo tree --duplicates" \
-  nix shell nixpkgs#rustup nixpkgs#capnproto --command bash -c '
+  env PATH="$TC_PATH:$PATH" bash -c '
 set -uo pipefail
 export PATH="$CARGO_HOME/bin:$PATH"
 cd "$M24_CRATE" || exit 1
@@ -199,7 +208,7 @@ EOF
 run_probe() {
   ( cd "$DUP_WORK/probe" && rm -f Cargo.lock
     m24_run_bounded 900 "the duplicate probe" \
-      nix shell nixpkgs#rustup nixpkgs#capnproto --command bash -c '
+      env PATH="$TC_PATH:$PATH" bash -c '
 set -uo pipefail
 export PATH="$CARGO_HOME/bin:$PATH"
 cargo build --offline 2>&1

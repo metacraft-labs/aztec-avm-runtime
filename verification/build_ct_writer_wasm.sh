@@ -175,11 +175,22 @@ if [ -n "${WASI_SDK_PATH:-}" ]; then
   export CFLAGS_wasm32_unknown_unknown="${CFLAGS_wasm32_unknown_unknown:---target=wasm32-unknown-unknown}"
 fi
 
+# THE RUST TOOLCHAIN IS pins.json's `toolchain.rust`, INSTALLED BY EXACT VERSION, AND ROOTED.
+#
+# This used to install `stable`, which floats: it moved 1.98.1 -> 1.99.0 and this module went from
+# 743,420 to 744,237 bytes with no source change. `tc_rust_ensure` (lib_toolchain.sh) installs the
+# pinned version with rustup from THIS repository's flake.lock, reinstalls it if a garbage
+# collection took a store path it loads from, roots those paths, and refuses unless `rustc
+# --version` says the pin. `RUSTUP_TOOLCHAIN` then selects it for cargo and every nested rustc.
+# shellcheck source=verification/lib_toolchain.sh
+. "$HERE/lib_toolchain.sh"
+RUST_VER="$(tc_pinned_rust)" || die "pins.json declares no toolchain.rust.version"
+TC_PATH="$(tc_rust_ensure "$RUST_VER")" || die "the pinned rust toolchain $RUST_VER could not be made usable"
+
 build_script='
 set -euo pipefail
 export PATH="$CARGO_HOME/bin:$PATH"
-rustup -q toolchain install stable --profile minimal >/dev/null 2>&1 || true
-rustup -q target add wasm32-unknown-unknown >/dev/null 2>&1 || true
+case "$(rustc --version)" in "rustc $RUSTUP_TOOLCHAIN "*) : ;; *) echo "rustc is not $RUSTUP_TOOLCHAIN: $(rustc --version)" >&2; exit 1 ;; esac
 cd "$CT_WRITER_DIR"
 cargo build --release --target wasm32-unknown-unknown --target-dir "$TARGET_DIR" $FEATURES
 '
@@ -202,14 +213,15 @@ cargo test --release --no-default-features --features path-a -- --test-threads=1
 fi
 
 # `nim` and `nix` must survive into the build shell: `ct-writer/build.rs` runs both under
-# `--path-b`, and `nix shell` does not remove them from PATH -- but `PATH` is what the inner
-# `bash -c` inherits, so it is passed explicitly rather than assumed.
+# `--path-b`. The rooted rustup and capnp are put AHEAD of the caller's PATH, which is otherwise
+# passed through unchanged.
 CT_WRITER_DIR="$CT_WRITER_DIR" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" \
-  TARGET_DIR="$TARGET_DIR" FEATURES="$FEATURES" PATH="$PATH" \
+  RUSTUP_TOOLCHAIN="$RUST_VER" \
+  TARGET_DIR="$TARGET_DIR" FEATURES="$FEATURES" PATH="$TC_PATH:$PATH" \
   CC_wasm32_unknown_unknown="${CC_wasm32_unknown_unknown:-}" \
   AR_wasm32_unknown_unknown="${AR_wasm32_unknown_unknown:-}" \
   CFLAGS_wasm32_unknown_unknown="${CFLAGS_wasm32_unknown_unknown:-}" \
-  nix shell nixpkgs#rustup nixpkgs#capnproto --command bash -c "$build_script" \
+  bash -c "$build_script" \
   || die "the wasm build failed"
 
 [ -f "$OUT" ] || die "the build reported success but $OUT does not exist"

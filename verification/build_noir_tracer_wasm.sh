@@ -79,7 +79,12 @@ mkdir -p "$M30_WORK"
 
 GLUE_SHA="$(sha256sum "$WT/$ALLOWED_EDIT" | cut -d' ' -f1)"
 SRC_SHA="$(sha256sum "$CRATE_DIR"/src/*.rs "$CRATE_DIR/Cargo.toml" "$CRATE_DIR/.cargo/config.toml" 2>/dev/null | sha256sum | cut -d' ' -f1)"
-STAMP_WANT="$WT_HEAD $GLUE_SHA $SRC_SHA"
+# THE CRATE'S OWN rust-toolchain FILE NAMES THE COMPILER, and lib_toolchain.sh holds the build to
+# that channel exactly (installed by version, repaired if a garbage collection broke it, rooted, and
+# refused unless `rustc --version` agrees). It is in the stamp so a different compiler rebuilds.
+. "$HERE/lib_toolchain.sh"
+RUST_VER="$(tc_toolchain_file_channel "$CRATE_DIR")" || die "$CRATE_DIR has no rust-toolchain file to take the channel from"
+STAMP_WANT="$WT_HEAD $GLUE_SHA $SRC_SHA rust-$RUST_VER"
 
 if [ "$FORCE" = 0 ] && [ -f "$OUT" ] && [ -f "$STAMP" ] && \
    [ "$(cat "$STAMP" 2>/dev/null)" = "$STAMP_WANT" ]; then
@@ -94,18 +99,18 @@ command -v nix >/dev/null 2>&1 || die "nix is required (the rust wasm toolchain 
 # and its absence does not say so: the build dies with `exit status: 101` four crates deep,
 # which reads like a broken branch rather than a missing tool. Measured on this host, in this
 # milestone, before the tool was added — the same trap `build_ct_writer_wasm.sh` records.
+TC_PATH="$(tc_rust_ensure "$RUST_VER" "$CRATE_DIR")" || die "the rust toolchain $RUST_VER could not be made usable"
 build_script='
 set -euo pipefail
 export PATH="$CARGO_HOME/bin:$PATH"
-rustup -q toolchain install stable --profile minimal >/dev/null 2>&1 || true
-rustup -q target add wasm32-unknown-unknown >/dev/null 2>&1 || true
+case "$(rustc --version)" in "rustc $RUSTUP_TOOLCHAIN "*) : ;; *) echo "rustc is not $RUSTUP_TOOLCHAIN: $(rustc --version)" >&2; exit 1 ;; esac
 cd "$CRATE_DIR"
 cargo build --release --no-default-features
 '
 
 say "building $CRATE_DIR (--no-default-features, so no wasm-bindgen glue)"
-CRATE_DIR="$CRATE_DIR" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" \
-  nix shell nixpkgs#rustup nixpkgs#capnproto --command bash -c "$build_script" >&2 \
+CRATE_DIR="$CRATE_DIR" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" RUSTUP_TOOLCHAIN="$RUST_VER" \
+  PATH="$TC_PATH:$PATH" bash -c "$build_script" >&2 \
   || die "the tracer wasm build failed"
 
 [ -f "$BUILT" ] || die "the build reported success but $BUILT does not exist"

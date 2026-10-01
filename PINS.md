@@ -19,6 +19,7 @@ Enforced by `just verify-pinned-nightly` (`verification/verify_pinned_nightly_si
 | `anchors.trace_format_nim` | the **READER** role: the `ct-print` this repository verifies containers with, and its one-commit control |
 | `anchors.trace_format_nim_writer` | the **WRITER** role: the Nim source `ct-writer/build.rs` cross-compiles for DD-7's **Path B** — the writer the runtime ships since M41 |
 | `toolchain.nim` | the Nim compiler version `ct-writer/build.rs` REFUSES to build Path B without |
+| `toolchain.rust` | the Rust toolchain every build of a crate WITHOUT its own `rust-toolchain.toml` installs by exact version and REFUSES to run without (`verification/lib_toolchain.sh`); a crate WITH one is held to that file's channel instead |
 
 ## Why there are two npm lines and only one of them is "the pin"
 

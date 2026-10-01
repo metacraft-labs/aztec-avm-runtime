@@ -198,9 +198,13 @@ NOIR_TOOLCHAIN="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' "$OQ7_NOIR_ROOT/rust-too
 OQ7_RUSTUP_HOME="${OQ7_RUSTUP_HOME:-$HOME/.rustup}"
 [ -d "$OQ7_RUSTUP_HOME/toolchains/$NOIR_TOOLCHAIN-x86_64-unknown-linux-gnu" ] || \
   die "the Noir worktree pins rust $NOIR_TOOLCHAIN and $OQ7_RUSTUP_HOME does not carry it"
+# Held to that channel, repaired if a garbage collection took a store path it loads from, and
+# rooted (verification/lib_toolchain.sh); rustup and capnp come from this repository's flake.lock.
+TC_PATH="$(RUSTUP_HOME="$OQ7_RUSTUP_HOME" tc_rust_ensure "$NOIR_TOOLCHAIN" "$OQ7_NOIR_ROOT")" \
+  || die "the Noir toolchain $NOIR_TOOLCHAIN in $OQ7_RUSTUP_HOME could not be made usable"
 
 rc=0
-nix shell nixpkgs#rustup nixpkgs#capnproto --command bash -c '
+PATH="$TC_PATH:$PATH" bash -c '
   set -uo pipefail
   export RUSTUP_HOME="'"$OQ7_RUSTUP_HOME"'"
   export CARGO_TARGET_DIR="'"$OQ7_NOIR_ROOT"'/target"

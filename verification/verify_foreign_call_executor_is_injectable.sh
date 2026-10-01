@@ -88,8 +88,16 @@ echo "== 3. THE SUITE RUNS, AND IT IS NOT EMPTY"
 OUT="$(mktemp)"
 rc=0
 repro exec "$M38_NOIR_ROOT" -- true 2>/dev/null || true
+# rustup and capnp from this repository's flake.lock, the Noir checkout's toolchain held to its own
+# rust-toolchain.toml, repaired if a garbage collection broke it, and rooted (lib_toolchain.sh).
+# shellcheck source=verification/lib_toolchain.sh
+. "$VERIFY_DIR/lib_toolchain.sh"
+FCE_RUST="$(tc_toolchain_file_channel "$M38_NOIR_ROOT")" || die "$M38_NOIR_ROOT names no rust toolchain"
+TC_PATH="$(RUSTUP_HOME="${M38_RUSTUP_HOME:-$HOME/.rustup}" CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}" \
+  tc_rust_ensure "$FCE_RUST" "$M38_NOIR_ROOT")" \
+  || die "the Noir toolchain $FCE_RUST could not be made usable"
 timeout -s KILL "$M38_NOIR_TESTS_TIMEOUT" \
-  nix shell nixpkgs#rustup nixpkgs#capnproto --command bash -c '
+  env PATH="$TC_PATH:$PATH" bash -c '
     set -uo pipefail
     export RUSTUP_HOME="${M38_RUSTUP_HOME:-$HOME/.rustup}"
     export CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL=1
