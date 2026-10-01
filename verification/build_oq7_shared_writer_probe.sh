@@ -55,6 +55,9 @@ WANT="$(m24_pin trace_format commit)"
 
 [ -d "$OQ7_NOIR_ROOT/tooling/tracer_wasm" ] || \
   die "no Noir tracer worktree at $OQ7_NOIR_ROOT (set OQ7_NOIR_ROOT)"
+OQ7_NOIR_TOP="$(git -C "$OQ7_NOIR_ROOT" rev-parse --show-toplevel 2>/dev/null)"
+[ "$OQ7_NOIR_TOP" = "$(cd "$OQ7_NOIR_ROOT" && pwd -P)" ] || \
+  die "$OQ7_NOIR_ROOT is not the top of a git checkout of its own (git answers [$OQ7_NOIR_TOP]); its status would be another repository's"
 # THE WORKTREE MAY CARRY EXACTLY ONE EDIT, AND IT IS NAMED.
 #
 # "A probe built from uncommitted edits is evidence about nothing" is the rule, and this is the one
@@ -106,14 +109,41 @@ done
 # `codetracer_trace_types` and would not compile — which is RI-42's failure and is what
 # `test_single_trace_types_instantiation` reproduces. Asserted here rather than discovered in a
 # compiler error four crates deep.
-NOIR_CTF="$(cd "$OQ7_NOIR_ROOT" && grep -oE "path = \"\.\./[a-zA-Z0-9_-]+/codetracer_trace_types\"" Cargo.toml | head -1 | sed 's|.*"\(.*\)"|\1|')"
-[ -n "$NOIR_CTF" ] || die "could not read the Noir worktree's codetracer_trace_types path out of its Cargo.toml"
-NOIR_CTF_ABS="$(cd "$OQ7_NOIR_ROOT" && cd "$(dirname "$NOIR_CTF")" && pwd)"
-NOIR_CTF_REV="$(git -C "$NOIR_CTF_ABS" rev-parse HEAD 2>/dev/null)"
+# HOW THE TRACER TAKES ITS WRITER IS READ THE WAY CARGO READS IT, in both spellings Noir has used:
+# a `path` to a sibling checkout, or a `git` URL at a `rev`. This used to grep for the path form
+# only; when Noir moved its writer crates to a git revision the grep matched nothing usable, the
+# directory resolved to "", and `git -C ""` then answered with THIS repository's HEAD — the check
+# compared aztec-avm-runtime's own commit against the writer pin and reported the mismatch as a
+# fact about Noir. `_cargo_dep_source.py` never prints an empty answer, and every directory below is
+# asserted to be the top of its own repository before git is asked anything about it.
+NOIR_SRC="$(python3 "$VERIFY_DIR/_cargo_dep_source.py" "$OQ7_NOIR_ROOT" codetracer_trace_types 2>&1)" || \
+  die "could not resolve where the Noir worktree takes codetracer_trace_types from: $NOIR_SRC"
+read -r NOIR_SRC_KIND NOIR_SRC_A NOIR_SRC_B <<<"$NOIR_SRC"
+case "$NOIR_SRC_KIND" in
+  path)
+    NOIR_CTF_ABS="$(dirname "$NOIR_SRC_A")"
+    [ -n "$NOIR_CTF_ABS" ] && [ -d "$NOIR_CTF_ABS" ] || die "the writer checkout [$NOIR_CTF_ABS] is not a directory"
+    NOIR_CTF_TOP="$(git -C "$NOIR_CTF_ABS" rev-parse --show-toplevel 2>/dev/null)"
+    [ "$NOIR_CTF_TOP" = "$NOIR_CTF_ABS" ] || \
+      die "the writer checkout $NOIR_CTF_ABS is not the top of a git repository of its own (git answers [$NOIR_CTF_TOP]); its revision cannot be read"
+    NOIR_CTF_REV="$(git -C "$NOIR_CTF_ABS" rev-parse HEAD 2>/dev/null)"
+    NOIR_CTF_DIRTY="$(git -C "$NOIR_CTF_ABS" status --porcelain 2>/dev/null | head -5)"
+    [ -z "$NOIR_CTF_DIRTY" ] || die "the writer worktree $NOIR_CTF_ABS is dirty: $NOIR_CTF_DIRTY"
+    PROBE_TYPES_DEP="{ path = \"$NOIR_CTF_ABS/codetracer_trace_types\" }"
+    PROBE_WRITER_DEP="{ path = \"$NOIR_CTF_ABS/codetracer_trace_writer\" }"
+    NOIR_CTF_WHERE="$NOIR_CTF_ABS"
+    ;;
+  git)
+    NOIR_CTF_REV="$NOIR_SRC_B"
+    PROBE_TYPES_DEP="{ git = \"$NOIR_SRC_A\", rev = \"$NOIR_SRC_B\" }"
+    PROBE_WRITER_DEP="{ git = \"$NOIR_SRC_A\", rev = \"$NOIR_SRC_B\", package = \"codetracer_trace_writer\" }"
+    NOIR_CTF_WHERE="$NOIR_SRC_A"
+    ;;
+  *) die "unrecognised dependency source [$NOIR_SRC]" ;;
+esac
+[ -n "$NOIR_CTF_REV" ] || die "no revision could be read for the writer the Noir worktree links"
 [ "$NOIR_CTF_REV" = "$WANT" ] || \
-  die "the Noir worktree resolves its writer crates at $NOIR_CTF_ABS ($NOIR_CTF_REV) and pins.json's trace_format is $WANT"
-NOIR_CTF_DIRTY="$(git -C "$NOIR_CTF_ABS" status --porcelain 2>/dev/null | head -5)"
-[ -z "$NOIR_CTF_DIRTY" ] || die "the writer worktree $NOIR_CTF_ABS is dirty: $NOIR_CTF_DIRTY"
+  die "the Noir worktree resolves its writer crates at $NOIR_CTF_WHERE ($NOIR_CTF_REV) and pins.json's trace_format is $WANT"
 
 PROBE="$M26_WORK/oq7-probe"
 mkdir -p "$PROBE/src" "$PROBE/bin" || die "could not create $PROBE"
@@ -133,8 +163,8 @@ publish = false
 [workspace]
 
 [dependencies]
-codetracer_trace_types = { path = "$NOIR_CTF_ABS/codetracer_trace_types" }
-codetracer_trace_writer = { path = "$NOIR_CTF_ABS/codetracer_trace_writer" }
+codetracer_trace_types = $PROBE_TYPES_DEP
+codetracer_trace_writer = $PROBE_WRITER_DEP
 noir_tracer = { path = "$OQ7_NOIR_ROOT/tooling/tracer", default-features = false }
 noir_tracer_wasm = { path = "$OQ7_NOIR_ROOT/tooling/tracer_wasm", default-features = false }
 noirc_abi = { path = "$OQ7_NOIR_ROOT/tooling/noirc_abi" }
