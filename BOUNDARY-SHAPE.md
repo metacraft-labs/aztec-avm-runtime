@@ -280,6 +280,11 @@ byte, and the two shapes differ in both, so one number would hide the term the d
 - **The transport** — `avm_alloc` / copy / `avm_free` of a real blob at the two sizes the two
   shapes carry.
 - **The decode** — the host decoding the result blob, with no module call in it.
+- **The module's decode of its input** — the entry point handed its real input with the *last*
+  field element set to 0xff..ff. Upstream's `::from` parses the whole buffer and converts in
+  declaration order, and a field element refuses a non-canonical value by throwing, so the call is
+  a full decode refused before anything is simulated (the module's message says which field
+  refused it). Less the error path alone (a one-byte payload), that is the decode. No new export.
 
 | quantity | measured |
 |---|---|
@@ -287,10 +292,17 @@ byte, and the two shapes differ in both, so one number would hide the term the d
 | transport of 50 x 1,951 B (alloc / copy / free) | 23 us |
 | transport of 50 x 191,807 B | 235 us |
 | host decode of a 174,613 B result (median of 3) | 824 us |
+| module decode of the 1,951 B `AvmFastSimulationInputs` (median of 20) | 66 us — **0.1%** of a resident transaction (64 ms) |
+| module decode of the 191,807 B `AvmProvingInputs` (median of 20) | 746 us — **1.2%** of a resident transaction, **47%** of `avm_simulate_with_hinted_dbs` (1.6 ms) |
 
 Composed: `storage` makes 21 DB crossings, so its whole pure-boundary cost is **21 x 19 ns = about
 0.4 us**. The decode of one result blob costs two thousand times that. A crossing is not the
 expensive part of a crossing.
+
+The module's own decode is bounded as a fraction of a resident transaction, timed interleaved in
+the same process: under 1% for the resident input and under 5% for the hinted one. For the shipped
+shape the decode is noise; for the batched chatty arm it is half of what that arm costs, which is
+the per-byte price of carrying the world state in the payload.
 
 ---
 

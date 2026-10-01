@@ -33,7 +33,8 @@
 //   shapes <p>        one transaction through both shapes; the fields they must agree on
 //   crossings         the per-op crossing table for every corpus program, from the hints
 //   cost <p> <n>      both shapes timed, interleaved, plus the interactive drive
-//   msgpack <p> <n>   the encode/decode half separated from execution
+//   msgpack <p> <rounds> <n> [decodeRounds]
+//                     the encode/decode half separated from execution, the module's own decode included
 //   block             the seven corpus programs as one block against one world state
 //   snapshot          the host's own setup journal exported and replayed into a fresh handle
 //   simsnapshot <nh> <nf>  the state a SIMULATION wrote, exported and replayed into a second
@@ -362,6 +363,97 @@ try {
       }
       line(`msgpack.transport.${label}.bytes`, b.length);
       line(`msgpack.transport.${label}.us50`, median(ts));
+    }
+
+    // THE MODULE'S OWN DECODE of its input, separated from the simulation without a new export.
+    //
+    // Both entry points decode with upstream's `AvmFastSimulationInputs::from` /
+    // `AvmProvingInputs::from`: msgpack-c parses the whole buffer, then the structs are converted
+    // field by field in declaration order, which is also the order they were packed in. A field
+    // element's conversion REJECTS a non-canonical value (`field::msgpack_unpack`, "value >=
+    // modulus") by throwing. So the payload with its LAST field element set to 0xff..ff is parsed
+    // in full, converted up to that last field, and then refused before any simulation starts —
+    // and the entry point's wall time is the decode, plus an error path that is timed on its own
+    // with a one-byte nil payload (refused at the first conversion, nothing to parse).
+    //
+    // That the refusal came from the field that was corrupted is read back from the module's
+    // error message, not assumed; that conversion really progressed through the buffer is shown
+    // by corrupting the FIRST field element instead, which must be refused sooner; and the bytes
+    // after the last field element, which this does not convert, are reported.
+    //
+    // The field elements are found without a second reading of the wire format: the decoder
+    // returns every `bin` as a VIEW into the buffer it decoded, so a 32-byte bin's `byteOffset` is
+    // its position in the payload.
+    const ffOffsets = (b) => {
+      const offs = [];
+      const walk = (v) => {
+        if (v instanceof Uint8Array) {
+          if (v.buffer !== b.buffer) throw new Error('a decoded bin is not a view into the payload');
+          if (v.length === 32) offs.push(v.byteOffset - b.byteOffset);
+        } else if (Array.isArray(v)) v.forEach(walk);
+        else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+      };
+      walk(unpack(b));
+      return offs.sort((x, y) => x - y);
+    };
+    const corruptAt = (b, off) => { const c = b.slice(); c.fill(0xff, off, off + 32); return c; };
+    const hd = seed(name);
+    const entryFor = {
+      fast: (p, n) => R.e.avm_simulate(p, n, hd.cdb, hd.mdb),
+      proving: (p, n) => R.e.avm_simulate_with_hinted_dbs(p, n),
+    };
+    const refused = (label, bytes) => {
+      const ptr = R.put(bytes);
+      let st;
+      const t0 = process.hrtime.bigint();
+      try { st = entryFor[label](ptr, bytes.length); } finally { R.free(ptr); }
+      const t1 = process.hrtime.bigint();
+      if (st === 0) throw new Error(`${label}: a payload that must be refused was simulated`);
+      return { us: Number(t1 - t0) / 1000, message: R.errorMessage() ?? '' };
+    };
+    const decodeRounds = Number(rest[3] ?? 25);
+    const warm = Math.min(5, Math.floor(decodeRounds / 5));
+    line('msgpack.moduleDecode.rounds', decodeRounds);
+    line('msgpack.moduleDecode.warmupRounds', warm);
+    const payloads = {};
+    for (const [label, b] of [['fast', fast], ['proving', proving]]) {
+      const offs = ffOffsets(b);
+      if (offs.length < 2) throw new Error(`${label}: fewer than two field elements in the payload`);
+      payloads[label] = { b, last: corruptAt(b, offs.at(-1)), first: corruptAt(b, offs[0]) };
+      line(`msgpack.moduleDecode.${label}.fieldElements`, offs.length);
+      line(`msgpack.moduleDecode.${label}.unconvertedTailBytes`, b.length - offs.at(-1) - 32);
+    }
+    const series = {};
+    const push = (k, v) => (series[k] ??= []).push(v);
+    const messages = {};
+    for (let r = 0; r < decodeRounds; r++) {
+      // Interleaved, every arm in every round, so load that comes and goes lands on all of them.
+      for (const label of ['fast', 'proving']) {
+        const x = payloads[label];
+        const last = refused(label, x.last);
+        const first = refused(label, x.first);
+        const nil = refused(label, new Uint8Array([0xc0]));
+        const t0 = process.hrtime.bigint();
+        unpack(x.b);
+        const host = Number(process.hrtime.bigint() - t0) / 1000;
+        if (r === 0) { messages[`${label}.last`] = last.message; messages[`${label}.nil`] = nil.message; }
+        if (r >= warm) {
+          push(`${label}.last`, last.us); push(`${label}.first`, first.us);
+          push(`${label}.nil`, nil.us); push(`${label}.hostDecode`, host);
+        }
+      }
+      // The two simulations the decode is a part of, on the same payloads intact.
+      const hs = seed(name);
+      const sr = simulateResident(name, hs);
+      destroy(hs);
+      const sc = simulateChattyBatched(name);
+      if (r >= warm) { push('fast.simulate', sr.us); push('proving.simulate', sc.us); }
+    }
+    destroy(hd);
+    for (const [k, v] of Object.entries(messages)) line(`msgpack.moduleDecode.${k}.message`, JSON.stringify(v));
+    for (const [k, v] of Object.entries(series)) {
+      line(`msgpack.moduleDecode.${k}.samples`, v.length);
+      line(`msgpack.moduleDecode.${k}.medianUs`, median(v).toFixed(1));
     }
     line('msgpack.done', '1');
   } else if (mode === 'block') {
