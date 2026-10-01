@@ -33,11 +33,19 @@
 # source's, so "they match afterwards" is a statement about the import and not about two genesis
 # states agreeing. This campaign has already had two comparisons that passed on emptiness.
 #
-# WHAT IT DOES NOT COVER, stated because the honest limit is part of the answer: the journal here is
-# the operations the HOST applied. The operations the AVM performs INSIDE a simulation are visible
-# to a host only in the fully fused chatty arm, which M15 prepares and does not measure. So the
-# chatty carrier is demonstrated on host-applied state and is argued — not measured — for
-# AVM-applied state. Recorded in BOUNDARY-SHAPE.md as exactly that.
+# AND THE STATE A SIMULATION WROTE (section 2b). The AVM's DB calls inside `avm_simulate` never
+# cross the boundary, but the transaction's own record of them does: `publicTxEffect`, which
+# upstream's `MerkleDB` (vm2/simulation/gadgets/concrete_dbs.cpp) turns into one raw-DB call per
+# nullifier, note hash and public data write, plus two `pad_tree` calls sized by the protocol's
+# MAX_*_PER_TX. Each of the seven corpus transactions is simulated against a seeded DB; the setup
+# journal followed by its effect-derived journal is replayed into a SECOND module instance; and the
+# imported roots must equal the simulating instance's END roots — with the setup-only journal, a
+# dropped write, a perturbed write and the padding removed each required to miss them.
+#
+# WHAT IT STILL DOES NOT COVER: the corpus emits no note hashes, so the `append_leaves` arm of the
+# effect journal is built and never run against a non-empty list (its count is asserted 0, so a
+# corpus that starts emitting them becomes visible here rather than silently covered); and each
+# transaction is exported from its own seeded state, not a block of them accumulated in one DB.
 
 set -uo pipefail
 TEST_NAME=e2e_world_state_snapshot_across_boundary
@@ -155,11 +163,7 @@ assert_ge "a journal with two payloads exchanged does not reproduce the export" 
   "$(m15_key "$OUT" snapshot.control.substituted.mismatchedTrees)"
 assert_ge "nor does a journal with one entry dropped" 1 \
   "$(m15_key "$OUT" snapshot.control.dropped.mismatchedTrees)"
-# WHAT THIS DOES NOT SHOW. The journal is the host's own setup operations, the ones it applied to
-# build the state. No transaction's writes are exported: the operations a simulation makes happen
-# inside the module and never cross the boundary in either shape, so "the state a transaction left"
-# is not what is carried here.
-note "not exercised: exporting the state a SIMULATION wrote; the journal carries host-applied setup operations only"
+# The journal above is the host's own setup operations. The state a SIMULATION wrote is section 2b.
 assert_eq "and the one that was not is the L1->L2 message tree" "0" \
   "$(m15_key "$OUT" snapshot.moved.l1ToL2MessageTree)"
 assert_eq "which the journal does not touch, so it is at genesis on both sides" \
@@ -179,6 +183,71 @@ assert_eq "every reported root is a 0x-prefixed 64-hex value with a size" \
 assert_ge "and there are three sets of them" 12 "$(grep -c '^snapshot\.\(before\|after\|fresh\.before\)\.' "$OUT" || true)"
 
 # ---------------------------------------------------------------------------
+# 2b. THE STATE A SIMULATION WROTE, exported and imported into a second module instance.
+# ---------------------------------------------------------------------------
+# The two pad sizes are upstream's constants, read from this tree's own header and passed in, so
+# nothing in the import is taken from the END roots it is compared against.
+CONSTS_HPP="$TREE/barretenberg/cpp/src/barretenberg/aztec/aztec_constants.hpp"
+assert_file "the protocol constants header is in this milestone's tree" "$CONSTS_HPP"
+MAX_NH="$(awk '$1 == "#define" && $2 == "MAX_NOTE_HASHES_PER_TX" { print $3; exit }' "$CONSTS_HPP")"
+MAX_NF="$(awk '$1 == "#define" && $2 == "MAX_NULLIFIERS_PER_TX" { print $3; exit }' "$CONSTS_HPP")"
+for v in "$MAX_NH" "$MAX_NF"; do
+  case "$v" in ''|*[!0-9]*) die "a MAX_*_PER_TX constant was not read (got '$v')" ;; esac
+done
+SOUT="$M15_WORK/simsnapshot.txt"
+m15_host "$WASM" "$INPUTS" simsnapshot "$SOUT" "$MAX_NH" "$MAX_NF"
+assert_eq "the simulation-snapshot host exited 0" "0" "$?"
+assert_eq "it ran to the end" "1" "$(m15_key "$SOUT" simsnapshot.done)"
+assert_eq "and wrote nothing from the failure vocabulary to stderr" "0" "$(m15_stderr_unexpected "$SOUT.err")"
+assert_eq "it exported every corpus transaction" "$M15_EXPECTED_PROGRAMS" "$(m15_key "$SOUT" simsnapshot.programs.count)"
+assert_eq "the importing instance leaked no allocation" "0" "$(m15_key "$SOUT" simsnapshot.importingInstanceOwnedAllocations)"
+
+SIM_CHECKED=0
+SIM_WRITES=0
+NOTE_HASHES=0
+REVERTED=0
+for p in $M15_PROGRAMS; do
+  K="simsnapshot.$p"
+  assert_eq "$p: four trees were compared" "4" "$(m15_key "$SOUT" "$K.trees")"
+  # The simulation moved the state, so a match below is about what IT wrote and not about setup.
+  assert_eq "$p: the simulation moved three trees away from the seeded state" "3" \
+    "$(m15_key "$SOUT" "$K.treesMovedBySimulation")"
+  assert_eq "$p: the imported roots and sizes equal the simulating instance's END roots" "0" \
+    "$(m15_key "$SOUT" "$K.imported.mismatchedTrees")"
+  for t in noteHashTree nullifierTree publicDataTree l1ToL2MessageTree; do
+    assert_eq "$p: $t imported equals end" "$(m15_key "$SOUT" "$K.end.$t")" "$(m15_key "$SOUT" "$K.imported.$t")"
+  done
+  W="$(m15_key "$SOUT" "$K.simulationWrites")"
+  case "$W" in ''|*[!0-9]*) die "$p: no simulation write count (got '$W')" ;; esac
+  assert_ge "$p: the simulation's effect carries at least two writes (first nullifier, fee payment)" 2 "$W"
+  SIM_WRITES=$((SIM_WRITES + W))
+  NOTE_HASHES=$((NOTE_HASHES + $(m15_key "$SOUT" "$K.effect.noteHashes")))
+  [ "$(m15_key "$SOUT" "$K.revertCode")" != "0" ] && REVERTED=$((REVERTED + 1))
+  # Controls: each changes the export in one place and must miss the END roots.
+  assert_ge "$p: the setup journal alone does not reproduce the end state" 1 \
+    "$(m15_key "$SOUT" "$K.control.setupOnly.mismatchedTrees")"
+  assert_ge "$p: nor does the export with one simulation write dropped" 1 \
+    "$(m15_key "$SOUT" "$K.control.droppedWrite.mismatchedTrees")"
+  assert_ge "$p: nor with one simulation write's payload perturbed" 1 \
+    "$(m15_key "$SOUT" "$K.control.perturbedWrite.mismatchedTrees")"
+  # Padding appends zero leaves, which leave a root where it was: only the SIZE sees it. That is
+  # why every comparison here is root AND next index — on roots alone this control passes.
+  assert_eq "$p: nor without the end-of-transaction padding, which moves exactly the two padded trees" "2" \
+    "$(m15_key "$SOUT" "$K.control.unpadded.mismatchedTrees")"
+  SIM_CHECKED=$((SIM_CHECKED + 1))
+done
+assert_eq "all seven transactions were checked" "$M15_EXPECTED_PROGRAMS" "$SIM_CHECKED"
+assert_eq "every reported root is a 0x-prefixed 64-hex value with a size, so no comparison was of empties" \
+  "$(grep -cE '^simsnapshot\.[a-z0-9]+\.(setup|end|imported)\.[A-Za-z0-9]+Tree ' "$SOUT" || true)" \
+  "$(grep -cE '^simsnapshot\.[a-z0-9]+\.(setup|end|imported)\.[A-Za-z0-9]+Tree 0x[0-9a-f]{64} size=[0-9]+$' "$SOUT" || true)"
+assert_eq "and there are three sets of four for each transaction" $((M15_EXPECTED_PROGRAMS * 12)) \
+  "$(grep -cE '^simsnapshot\.[a-z0-9]+\.(setup|end|imported)\.[A-Za-z0-9]+Tree ' "$SOUT" || true)"
+assert_ge "the reverted transactions are among them, so a revert's surviving writes are exported too" 1 "$REVERTED"
+note "the simulation exports carried $SIM_WRITES state writes across seven transactions ($REVERTED reverted)"
+# Stated as a count so a corpus that starts emitting note hashes is visible, not silently covered.
+assert_eq "the corpus emits no note hashes, so the append arm of the effect journal is not exercised" "0" "$NOTE_HASHES"
+
+# ---------------------------------------------------------------------------
 # 3. The disposition, recorded.
 # ---------------------------------------------------------------------------
 assert_file "the boundary write-up exists" "$M15_WRITEUP"
@@ -188,5 +257,7 @@ assert_true "and that closing it there is an upstream extension rather than an i
   grep -q 'upstream extension' "$M15_WRITEUP"
 assert_true "and it states the limit of what was measured here" \
   grep -q 'host-applied state' "$M15_WRITEUP"
+assert_true "and that the state a simulation wrote is carried by its effect journal" \
+  grep -q 'simulation-applied state' "$M15_WRITEUP"
 
 finish

@@ -20,7 +20,9 @@
 // that mapping so the host and the checks cannot disagree about it.
 //
 // THE HOST STILL DOES NOT ENCODE ANYTHING. Every blob crossing into the module was produced by
-// `avm_differential`, that is by upstream's own msgpack packers in C++, and arrives as hex. The
+// `avm_differential`, that is by upstream's own msgpack packers in C++, and arrives as hex. The one
+// exception is `simsnapshot`, which replaces fixed-width payload bytes (a field element, a fixint)
+// inside such a blob and decodes every result back before using it; it writes no structure. The
 // interactive drive issues real crossings of the real interface methods with those real payloads;
 // what it cannot do is re-issue the AVM's own internal writes, because their arguments exist only
 // inside the module. That limit is stated in BOUNDARY-SHAPE.md rather than papered over: the
@@ -33,6 +35,9 @@
 //   cost <p> <n>      both shapes timed, interleaved, plus the interactive drive
 //   msgpack <p> <n>   the encode/decode half separated from execution
 //   block             the seven corpus programs as one block against one world state
+//   snapshot          the host's own setup journal exported and replayed into a fresh handle
+//   simsnapshot <nh> <nf>  the state a SIMULATION wrote, exported and replayed into a second
+//                     module instance (nh/nf: MAX_NOTE_HASHES_PER_TX / MAX_NULLIFIERS_PER_TX)
 //
 // Exit status is 0 on success and non-zero on any failure. Nothing here can turn a failing run
 // into a passing one: every unexpected status throws.
@@ -540,6 +545,174 @@ try {
     line('snapshot.control.dropped.mismatchedTrees', replayMismatches(journal.slice(1)));
     R.e.avm_merkle_db_destroy(mdb);
     line('snapshot.done', '1');
+  } else if (mode === 'simsnapshot') {
+    // THE STATE A SIMULATION WROTE, EXPORTED AND IMPORTED INTO A SECOND MODULE INSTANCE.
+    //
+    // `snapshot` above carries the host's OWN setup operations. This mode carries what the AVM
+    // wrote inside `avm_simulate`, which never crosses the boundary as DB calls: the resident DB is
+    // in the module and the AVM drives it directly. What DOES cross is the transaction's own
+    // record of those writes — `TxSimulationResult.publicTxEffect` — and upstream's `MerkleDB`
+    // (vm2/simulation/gadgets/concrete_dbs.cpp) turns each entry of it into exactly one raw-DB call:
+    //
+    //   every nullifier        -> insert_indexed_leaves_nullifier_tree(NullifierLeafValue)
+    //   every note hash        -> append_leaves(NOTE_HASH_TREE, [unique note hash])
+    //   every public data write-> insert_indexed_leaves_public_data_tree(PublicDataLeafValue)
+    //   and at the end         -> pad_tree(NOTE_HASH_TREE,  MAX_NOTE_HASHES_PER_TX - #note hashes)
+    //                             pad_tree(NULLIFIER_TREE, MAX_NULLIFIERS_PER_TX  - #nullifiers)
+    //
+    // So the export is the setup journal followed by those calls, and the import replays it into a
+    // handle in a SECOND, separately instantiated module — separate linear memory, nothing shared
+    // with the instance that simulated. The claim checked is that the imported roots equal the
+    // simulating instance's END roots, which nothing in this construction reads: the two
+    // MAX_*_PER_TX constants come from the caller (read out of upstream's aztec_constants.hpp),
+    // never from the end roots' sizes.
+    //
+    // THE HOST STILL DOES NOT ENCODE A SCHEMA. Each call's argument is an upstream-packed blob from
+    // `avm_differential` with its fixed-width payload bytes replaced: a 32-byte field element
+    // inside a `bin8(32)`, or a positive-fixint tree id / count. The template's layout is checked
+    // byte-for-byte before the splice, and every spliced blob is decoded back and compared with the
+    // values that were meant to go in, so a splice that wrote the wrong bytes is an exception here
+    // rather than a mismatch the checks would have to interpret.
+    const maxNoteHashes = Number(rest[0]);
+    const maxNullifiers = Number(rest[1]);
+    if (!Number.isInteger(maxNoteHashes) || !Number.isInteger(maxNullifiers)
+        || maxNoteHashes <= 0 || maxNullifiers <= 0 || maxNoteHashes > 127 || maxNullifiers > 127) {
+      throw new Error(`simsnapshot needs MAX_NOTE_HASHES_PER_TX and MAX_NULLIFIERS_PER_TX (got ${rest[0]} ${rest[1]})`);
+    }
+    const NULLIFIER_TREE = 0;
+    const NOTE_HASH_TREE = 1;
+    const expectBytes = (b, at, want, what) => {
+      for (let i = 0; i < want.length; i++) {
+        if (b[at + i] !== want[i]) throw new Error(`${what}: template byte ${at + i} is ${b[at + i]}, expected ${want[i]}`);
+      }
+    };
+    const ascii = (t) => [...t].map((c) => c.charCodeAt(0));
+    const ff = (v, what) => {
+      if (!(v instanceof Uint8Array) || v.length !== 32) throw new Error(`${what}: not a 32-byte field element`);
+      return v;
+    };
+    const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+    const tNull = blob('reactorInputs.args.nullifierLeaf');      // {nullifier: bin8(32)}
+    const tData = blob('reactorInputs.args.publicDataLeaf');     // {slot: bin8(32), value: bin8(32)}
+    const tAppend = blob('reactorInputs.args.appendLeaves');     // [treeId, [bin8(32)]]
+    const tPad = blob('reactorInputs.args.padTree');             // [treeId, count]
+    expectBytes(tNull, 0, [0x81, 0xa9, ...ascii('nullifier'), 0xc4, 0x20], 'nullifierLeaf');
+    if (tNull.length !== 45) throw new Error(`nullifierLeaf template is ${tNull.length} bytes, expected 45`);
+    expectBytes(tData, 0, [0x82, 0xa4, ...ascii('slot'), 0xc4, 0x20], 'publicDataLeaf');
+    expectBytes(tData, 40, [0xa5, ...ascii('value'), 0xc4, 0x20], 'publicDataLeaf');
+    if (tData.length !== 80) throw new Error(`publicDataLeaf template is ${tData.length} bytes, expected 80`);
+    expectBytes(tAppend, 0, [0x92, NOTE_HASH_TREE, 0x91, 0xc4, 0x20], 'appendLeaves');
+    if (tAppend.length !== 37) throw new Error(`appendLeaves template is ${tAppend.length} bytes, expected 37`);
+    expectBytes(tPad, 0, [0x92], 'padTree');
+    if (tPad.length !== 3 || tPad[1] > 0x7f || tPad[2] > 0x7f) throw new Error('padTree template is not [fixint, fixint]');
+
+    const nullifierArg = (v) => {
+      const b = tNull.slice(); b.set(ff(v, 'nullifier'), 13);
+      if (!same(unpack(b).nullifier, v)) throw new Error('nullifier splice did not decode back');
+      return { op: 'merkle.insert_indexed_leaves_nullifier_tree', bytes: b };
+    };
+    const dataArg = (slot, value) => {
+      const b = tData.slice(); b.set(ff(slot, 'slot'), 8); b.set(ff(value, 'value'), 48);
+      const d = unpack(b);
+      if (!same(d.slot, slot) || !same(d.value, value)) throw new Error('public data splice did not decode back');
+      return { op: 'merkle.insert_indexed_leaves_public_data_tree', bytes: b };
+    };
+    const appendArg = (v) => {
+      const b = tAppend.slice(); b.set(ff(v, 'note hash'), 5);
+      const d = unpack(b);
+      if (d[0] !== NOTE_HASH_TREE || d[1].length !== 1 || !same(d[1][0], v)) throw new Error('append splice did not decode back');
+      return { op: 'merkle.append_leaves', bytes: b };
+    };
+    const padArg = (tree, n) => {
+      if (!Number.isInteger(n) || n < 0 || n > 0x7f) throw new Error(`pad count ${n} is not a positive fixint`);
+      const b = tPad.slice(); b[1] = tree; b[2] = n;
+      const d = unpack(b);
+      if (d[0] !== tree || Number(d[1]) !== n) throw new Error('pad splice did not decode back');
+      return { op: 'merkle.pad_tree', bytes: b };
+    };
+
+    // The importing module: a second instance of the same binary. Nothing it holds was produced by
+    // the instance that simulated.
+    const R2 = await instantiateReactor(wasmPath);
+    const replayRoots = (entries) => {
+      const h = R2.e.avm_merkle_db_create();
+      if (h === 0) throw new Error('avm_merkle_db_create returned 0 in the importing instance');
+      for (const e of entries) {
+        const entry = OPS.find((o) => o.name === e.op);
+        if (!entry) throw new Error(`the journal names an op this host does not know: ${e.op}`);
+        R2.callWithArgs(R2.e[entry.exp], e.op, h, e.bytes);
+      }
+      const t = R2.callNoArgs(R2.e.avm_merkle_db_get_tree_roots, 'get_tree_roots', h);
+      R2.e.avm_merkle_db_destroy(h);
+      return t;
+    };
+    const mismatches = (want, got) => Object.keys(want).filter((k) => hexOf(want[k].root) !== hexOf(got[k].root)
+      || String(want[k].nextAvailableLeafIndex) !== String(got[k].nextAvailableLeafIndex));
+    const fmt = (v) => `${hexOf(v.root)} size=${v.nextAvailableLeafIndex}`;
+
+    const names = programs();
+    line('simsnapshot.programs.count', names.length);
+    line('simsnapshot.maxNoteHashes', maxNoteHashes);
+    line('simsnapshot.maxNullifiers', maxNullifiers);
+    for (const name of names) {
+      const P = `simsnapshot.${name}`;
+      const setup = [
+        { op: 'merkle.insert_indexed_leaves_nullifier_tree', bytes: blob(`reactorInputs.${name}.setup.nullifier`) },
+        { op: 'merkle.insert_indexed_leaves_public_data_tree', bytes: blob(`reactorInputs.${name}.setup.publicdata`) },
+      ];
+      const h = seed(name);
+      const setupRoots = R.callNoArgs(R.e.avm_merkle_db_get_tree_roots, 'get_tree_roots', h.mdb);
+      const res = simulateResident(name, h);
+      const endRoots = R.callNoArgs(R.e.avm_merkle_db_get_tree_roots, 'get_tree_roots', h.mdb);
+      destroy(h);
+      const fx = unpack(res.raw).publicTxEffect;
+      line(`${P}.revertCode`, unpack(res.raw).revertCode);
+      const sim = [];
+      for (const n of fx.nullifiers) sim.push(nullifierArg(n));
+      for (const n of fx.noteHashes) sim.push(appendArg(n));
+      for (const w of fx.publicDataWrites) sim.push(dataArg(w.leafSlot, w.value));
+      sim.push(padArg(NOTE_HASH_TREE, maxNoteHashes - fx.noteHashes.length));
+      sim.push(padArg(NULLIFIER_TREE, maxNullifiers - fx.nullifiers.length));
+      line(`${P}.effect.nullifiers`, fx.nullifiers.length);
+      line(`${P}.effect.noteHashes`, fx.noteHashes.length);
+      line(`${P}.effect.publicDataWrites`, fx.publicDataWrites.length);
+      line(`${P}.journal.setupEntries`, setup.length);
+      line(`${P}.journal.simulationEntries`, sim.length);
+      line(`${P}.journal.bytes`, [...setup, ...sim].reduce((a, e) => a + e.bytes.length, 0));
+      for (const k of Object.keys(endRoots)) {
+        line(`${P}.setup.${k}`, fmt(setupRoots[k]));
+        line(`${P}.end.${k}`, fmt(endRoots[k]));
+      }
+      line(`${P}.treesMovedBySimulation`, mismatches(setupRoots, endRoots).length);
+
+      const imported = replayRoots([...setup, ...sim]);
+      for (const k of Object.keys(imported)) line(`${P}.imported.${k}`, fmt(imported[k]));
+      line(`${P}.trees`, Object.keys(endRoots).length);
+      line(`${P}.imported.mismatchedTrees`, mismatches(endRoots, imported).length);
+
+      // Controls. Each changes the journal in one place and must leave some tree away from the
+      // END roots: the setup alone (the simulation's writes not carried at all), the simulation's
+      // LAST state-writing entry dropped, and its first state-writing entry's payload perturbed in
+      // its lowest byte.
+      line(`${P}.control.setupOnly.mismatchedTrees`, mismatches(endRoots, replayRoots(setup)).length);
+      const writes = sim.filter((e) => e.op !== 'merkle.pad_tree');
+      line(`${P}.simulationWrites`, writes.length);
+      if (writes.length > 0) {
+        const last = sim.indexOf(writes[writes.length - 1]);
+        line(`${P}.control.droppedWrite.mismatchedTrees`,
+          mismatches(endRoots, replayRoots([...setup, ...sim.filter((_, i) => i !== last)])).length);
+        const first = sim.indexOf(writes[0]);
+        const p = sim[first].bytes.slice();
+        p[p.length - 1] ^= 0x01;
+        line(`${P}.control.perturbedWrite.mismatchedTrees`,
+          mismatches(endRoots, replayRoots([...setup, ...sim.map((e, i) => (i === first ? { op: e.op, bytes: p } : e))])).length);
+      }
+      // And the padding is load-bearing too: without it the two indexed/append trees end short.
+      line(`${P}.control.unpadded.mismatchedTrees`,
+        mismatches(endRoots, replayRoots([...setup, ...sim.filter((e) => e.op !== 'merkle.pad_tree')])).length);
+    }
+    line('simsnapshot.importingInstanceOwnedAllocations', R2.owned.size);
+    line('simsnapshot.done', '1');
   } else {
     console.error(`unknown mode: ${mode}`);
     process.exit(2);

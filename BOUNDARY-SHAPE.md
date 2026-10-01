@@ -453,10 +453,27 @@ upstream-packed operations, the journal replayed into a fresh DB handle, every t
 next-available index matching, and the fresh instance asserted to have differed *before* the import
 so the match is a statement about the import rather than about two genesis states agreeing.
 
-**The honest limit**: the journal demonstrated here is of **host-applied state**. The operations the
-AVM performs *inside* a simulation are visible to a host only in the fully fused chatty arm, which
-is prepared and not measured. So the chatty carrier is measured for host-applied state and argued
-for AVM-applied state.
+That journal is of **host-applied state**. The operations the AVM performs *inside* a simulation
+never cross the boundary as DB calls in the resident shape — but the transaction's own record of
+them does: `TxSimulationResult.publicTxEffect`. Upstream's `MerkleDB`
+(`vm2/simulation/gadgets/concrete_dbs.cpp`) turns each nullifier, note hash and public data write
+into exactly one raw-DB call and ends the transaction with two `pad_tree` calls sized
+`MAX_*_PER_TX` minus the counts. So **simulation-applied state** has a carrier too, in either
+shape: the setup journal followed by the effect-derived journal, each argument an upstream-packed
+template with its 32-byte payload spliced in.
+
+Measured (`simsnapshot` mode): each of the seven corpus transactions, reverted ones included, is
+simulated against a seeded DB; its export is replayed into a **second module instance** with its
+own linear memory; and the imported roots and sizes equal the simulating instance's **end** roots
+on all four trees. The setup journal alone, the export with one write dropped, with one write's
+payload perturbed, or without the padding each miss them. The pad sizes come from
+`aztec_constants.hpp`, not from the end roots they are compared with.
+
+**The honest limit, now narrower**: the corpus emits no note hashes, so the effect journal's
+`append_leaves` arm is built and not run on a non-empty list; and each transaction is exported from
+its own seeded state rather than a block accumulated in one DB. The carrier also leans on upstream's
+effect-to-DB-call mapping, which the root equality checks for these seven transactions and nothing
+here pins for other shapes of transaction.
 
 ---
 
@@ -470,8 +487,9 @@ for AVM-applied state.
   facade's `produceBlock` opens and closes a coordinator checkpoint per transaction and per block;
   it never touches either DB's own stack, because a host driving them separately can put them out
   of step and a revert then leaves contract state and tree state describing different histories.
-- **Snapshot export and import needs the upstream extension in §7**, or the facade's snapshot is
-  limited to what the host applied. This is the one place where the resident decision costs
+- **Snapshot export and import needs the upstream extension in §7** for an O(state) snapshot of a
+  DB whose history the host did not keep; without it the facade's snapshot is a journal of what the
+  host applied plus each transaction's effect-derived writes (§7), which the host must record. This is the one place where the resident decision costs
   something, and it is the item M23 should carry.
 - **The checkpoint cost in §6 lands on the facade's per-block budget**, not on the AVM's. A block
   of *n* transactions with *d* nested calls each pays *n*(1 + *d*) deep copies of the whole world
