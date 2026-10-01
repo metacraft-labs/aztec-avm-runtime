@@ -2024,9 +2024,10 @@ verify-m23:
 # ---------------------------------------------------------------------------
 # M24 — the `.ct` writer binding and the trace event ABI.
 #
-# The build is NOT in either dev shell: the rust wasm toolchain comes from
-# `nix shell nixpkgs#rustup nixpkgs#capnproto`, with RUSTUP_HOME and CARGO_HOME
-# under ~/.cache. `capnp` is a hard build-time dependency of the writer's
+# The build is NOT in either dev shell: the rust wasm toolchain is pins.json's
+# `toolchain.rust`, installed by `verification/lib_toolchain.sh` with the rustup and
+# capnproto this repository's flake.lock names (rooted under ~/.cache/aztec-gcroots),
+# with RUSTUP_HOME and CARGO_HOME under ~/.cache. `capnp` is a hard build-time dependency of the writer's
 # dependency graph and its absence fails four crates deep with `exit status: 101`.
 # ---------------------------------------------------------------------------
 
@@ -2545,7 +2546,7 @@ verify-m29:
 #
 #   `noir_wasm.wasm`         M30's own — `../noir` (branch `blocktracer`), `compiler/wasm`,
 #                            built by `verification/build_noir_vfs_wasm.sh` through
-#                            `nix shell nixpkgs#rustup`, because neither dev shell carries a
+#                            `verification/lib_toolchain.sh`'s rustup, because neither dev shell carries a
 #                            wasm32-unknown-unknown rust std. Stamped on the CONTENT of its
 #                            sources rather than on a revision, because the milestone's own
 #                            work is uncommitted by construction.
@@ -2553,7 +2554,7 @@ verify-m29:
 #                            `verification/build_noir_tracer_wasm.sh`, which refuses to build
 #                            from a worktree carrying any edit but M26's one tolerated file
 #                            and refuses if that worktree's HEAD has become published. It also
-#                            needs `nixpkgs#capnproto`: without it the build dies with
+#                            needs capnproto: without it the build dies with
 #                            `exit status: 101` four crates deep, which reads like a broken
 #                            branch rather than a missing tool.
 #
