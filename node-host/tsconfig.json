@@ -15,6 +15,7 @@
     "runs against the nix-pinned toolchain with no npm dependency and no network."
   ],
   "compilerOptions": {
+    "types": [],
     "target": "ES2022",
     "lib": ["ES2022", "DOM"],
     "module": "NodeNext",
