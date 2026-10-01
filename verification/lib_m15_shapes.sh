@@ -355,7 +355,7 @@ PY
     libs=""
     for a in "$bdir"/lib/*.a; do libs="$libs $a"; done
     [ -n "$libs" ] || { echo "### no static libraries in $bdir/lib"; exit 92; }
-    # Same missing -L as M14's probe: barretenberg's ExternalProject leaves
+    # Same missing -L as the M14 probe: the barretenberg ExternalProject leaves
     # liblmdb.a inside the LMDB checkout under the build directory, and it is in
     # neither $bdir/lib nor the dev shell. See lib_m14_world_state.sh.
     lmdbdir="$bdir/_deps/lmdb/src/lmdb_repo/libraries/liblmdb"
