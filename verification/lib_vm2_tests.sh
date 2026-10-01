@@ -337,3 +337,111 @@ m7_require_artifacts() {
     [ -e "$p" ] || die "required artefact missing: $p"
   done
 }
+
+# ---------------------------------------------------------------------------
+# THE TRANSCRIPT SPLIT of upstream's MemoryMerkleDB equivalence gate
+# (world_state/memory_merkle_db.test.cpp, seven MemoryMerkleDBEquivalenceTest cases).
+#
+# The test drives an LMDB-backed world_state::WorldState and a MemoryMerkleDB side by side, and
+# world_state cannot be built for wasm32. verification/m7/wsr/ splits it WITHOUT editing it: the
+# upstream source is compiled byte-for-byte from the tree, with verification/m7/wsr/overlay first on
+# the quote-include path, so its world_state.hpp include lands on a header that renames `WorldState`
+# to a transcript class (see that header for the whole contract). Three builds of the one source:
+#
+#   native-record  WorldState is the REAL one, every call is forwarded and its answer recorded.
+#                  Compiled and linked as build-native-avm compiles and links bin/world_state_tests,
+#                  which is built first (upstream's own target; it brings world_state, lmdb and
+#                  their archives into that build directory, which the M7 build does not need).
+#   native-replay  no WorldState; the recorded answers are served back. The control.
+#                  Compiled and linked as build-native-avm compiles and links bin/vm2_sim_tests.
+#   wasm-replay    the same, for wasm32-wasip1. THE SUBJECT.
+#                  Compiled and linked as build-wasm-avm compiles and links bin/vm2_sim_tests,
+#                  plus verification/m7/wsr/wasm_prelude.hpp (one undefined-ctor ThreadPool
+#                  declaration so fixtures.hpp compiles under NO_MULTITHREADING).
+#
+# Flags come out of each build directory's own compile database and build.ninja
+# (verification/m7/wsr/_build_cmds.py), never typed here. Outputs go to $M7_WORK/wsr-split/.
+# ---------------------------------------------------------------------------
+M7_WSR_DIR="$REPO_ROOT/verification/m7/wsr"
+M7_WSR_UPSTREAM_TEST=world_state/memory_merkle_db.test.cpp
+M7_WSR_EXPECTED_CASES=7
+M7_WSR_OUT="$M7_WORK/wsr-split"
+
+m7_wsr_bin() { printf '%s\n' "$M7_WSR_OUT/$1/memory_merkle_db_equivalence"; }
+
+# m7_wsr_build <native-record|native-replay|wasm-replay> -> status; log at $M7_WSR_OUT/<arm>.build.log
+m7_wsr_build() {
+  local arm="$1" bdir csrc lt mode prelude="" objdir="" prebuild=""
+  case "$arm" in
+    native-record) bdir="$M7_NATIVE_BUILD"; csrc="$M7_WSR_UPSTREAM_TEST"; lt=bin/world_state_tests
+                   mode=WSR_TRANSCRIPT_RECORD; prebuild=world_state_tests ;;
+    native-replay) bdir="$M7_NATIVE_BUILD"; csrc=vm2/simulation/lib/hinting_dbs.test.cpp; lt=bin/vm2_sim_tests
+                   mode=WSR_TRANSCRIPT_REPLAY; objdir=vm2_sim_test_objects.dir ;;
+    wasm-replay)   bdir="$M7_WASM_BUILD"; csrc=vm2/simulation/lib/hinting_dbs.test.cpp; lt=bin/vm2_sim_tests
+                   mode=WSR_TRANSCRIPT_REPLAY; objdir=vm2_sim_test_objects.dir
+                   prelude="$M7_WSR_DIR/wasm_prelude.hpp" ;;
+    *) die "m7_wsr_build: unknown arm $arm" ;;
+  esac
+  mkdir -p "$M7_WSR_OUT/$arm"
+  rm -f "$(m7_wsr_bin "$arm")" "$(m7_wsr_bin "$arm").o"
+  m6_in_devshell '
+    tree="$1"; bdir="$2"; csrc="$3"; lt="$4"; mode="$5"; prelude="$6"; wsr="$7"; out="$8"; test_rel="$9"
+    objdir="${10}"; prebuild="${11}"
+    cd "$tree/barretenberg/cpp/$bdir" || exit 90
+    if [ -n "$prebuild" ]; then
+      ninja "$prebuild" 2>&1 || { echo "### prebuild_rc=1"; exit 3; }
+    fi
+    python3 "$wsr/_build_cmds.py" compile . "$csrc" $objdir >"$out.cc" || exit 91
+    python3 "$wsr/_build_cmds.py" link . "$lt" >"$out.ln" || exit 92
+    mapfile -d "" cc <"$out.cc"; mapfile -d "" ln <"$out.ln"
+    [ "${#cc[@]}" -gt 1 ] && [ "${#ln[@]}" -gt 2 ] || { echo "### no build commands read"; exit 93; }
+    flags=(); lflags=(); libs=(); part=0
+    for w in "${ln[@]}"; do
+      if [ "$w" = "--" ]; then part=$((part + 1)); continue; fi
+      case $part in 0) flags+=("$w") ;; 1) lflags+=("$w") ;; *) libs+=("$w") ;; esac
+    done
+    extra=(-iquote "$wsr/overlay" "-D$mode")
+    [ -n "$prelude" ] && extra+=(-include "$prelude")
+    src="$tree/barretenberg/cpp/src/barretenberg/$test_rel"
+    echo "### compile: ${cc[*]} ${extra[*]} -c $src"
+    "${cc[@]}" "${extra[@]}" -c "$src" -o "$out.o" 2>&1 || { echo "### compile_rc=1"; exit 1; }
+    echo "### link: ${cc[0]} ${flags[*]} ${lflags[*]} $out.o -o $out ${libs[*]}"
+    "${cc[0]}" "${flags[@]}" "${lflags[@]}" "$out.o" -o "$out" "${libs[@]}" 2>&1 || { echo "### link_rc=1"; exit 2; }
+    echo "### build_rc=0"
+  ' "$M7_TREE" "$bdir" "$csrc" "$lt" "$mode" "$prelude" "$M7_WSR_DIR" "$(m7_wsr_bin "$arm")" \
+    "$M7_WSR_UPSTREAM_TEST" "$objdir" "$prebuild" >"$M7_WSR_OUT/$arm.build.log" 2>&1
+}
+
+# m7_wsr_run <arm> <transcript> <out-file> [gtest args...] -> exit status of the run.
+#
+#   Every arm runs in its OWN directory, $M7_WSR_OUT/run-<arm>, with the transcript copied in and
+#   named by a RELATIVE path. Under node's WASI (preopens '/' and '.') this guest resolves an
+#   ABSOLUTE path against '.', measured: an absolute $WSR_TRANSCRIPT is ENOENT, and upstream's own
+#   SetUp creates `/tmp/lmdb/<n>` as `./tmp/lmdb/<n>`. m7_run_v8 runs from the fork's checkout, so
+#   these runs cannot use it: they would write into a repository this campaign does not own.
+m7_wsr_run() {
+  local arm="$1" transcript="$2" out="$3"; shift 3
+  local bin rundir; bin="$(m7_wsr_bin "$arm")"; rundir="$M7_WSR_OUT/run-$arm"
+  [ -e "$bin" ] || die "no $arm binary at $bin — nothing to run"
+  rm -rf "$rundir"; mkdir -p "$rundir"
+  if [ "$arm" = native-record ]; then
+    : >"$rundir/transcript.tsv"
+  else
+    cp "$transcript" "$rundir/transcript.tsv" || die "cannot stage the transcript $transcript"
+  fi
+  m6_in_devshell '
+    arm="$1"; bin="$2"; rundir="$3"; host="$4"; t="$5"; shift 5
+    cd "$rundir" || exit 90
+    export WSR_TRANSCRIPT=transcript.tsv
+    case "$arm" in
+      wasm-*) timeout --foreground --preserve-status -s KILL "$t" node "$host" "$bin" "$@" 2>&1 ;;
+      *)      export LD_LIBRARY_PATH="/usr/lib:${LD_LIBRARY_PATH:-}"
+              timeout --foreground --preserve-status -s KILL "$t" "$bin" "$@" 2>&1 ;;
+    esac
+  ' "$arm" "$bin" "$rundir" "$M7_V8_HOST" "$M7_RUN_TIMEOUT" "$@" >"$out" 2>&1
+  local rc=$?
+  if [ "$arm" = native-record ]; then
+    cp "$rundir/transcript.tsv" "$transcript" || die "cannot collect the recorded transcript"
+  fi
+  return "$rc"
+}

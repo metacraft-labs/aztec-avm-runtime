@@ -10,16 +10,33 @@
 # and no `world_state_reference_tests` target exists in ANY configuration. That
 # is asserted here rather than quietly reinterpreted.
 #
-# That is NOT the same as "the module is untested". Upstream tests its central
-# component from the module NEXT DOOR: `world_state/memory_merkle_db.test.cpp`
-# declares seven `MemoryMerkleDBEquivalenceTest` cases that drive an ephemeral
-# file-backed `world_state::WorldState` and a `MemoryMerkleDB` through the same
-# sequence and compare roots, sibling paths, low-leaf lookups, indexed-leaf
-# preimages and leaf values. `world_state` is LMDB-backed and server-side, so
-# that file is native-only and outside vm2's 1,803 -- but it exists, and the
-# absence of a target is not the absence of coverage. Both are asserted below.
+# The module's REAL tests are upstream's, in the module next door:
+# `world_state/memory_merkle_db.test.cpp` declares seven
+# `MemoryMerkleDBEquivalenceTest` cases that drive an ephemeral file-backed
+# `world_state::WorldState` and a `MemoryMerkleDB` through the same sequence and
+# compare roots, sibling paths, low-leaf lookups, indexed-leaf preimages and leaf
+# values. `world_state` is LMDB-backed and is not in a wasm configure, so the
+# file cannot be built for wasm as written -- and THIS CHECK RUNS ALL SEVEN UNDER
+# WASM ANYWAY, by splitting each case into its two halves without editing it
+# (verification/m7/wsr/, lib_vm2_tests.sh's m7_wsr_*):
 #
-# What IS covered, and each half is separated because they are different claims:
+#   * natively, the upstream source is compiled with an overlay header that
+#     forwards every `ws->` call to the REAL LMDB WorldState and records the call,
+#     its arguments and its answer. That run is upstream's gate passing natively,
+#     and its by-product is the transcript.
+#   * under wasm (V8), the SAME upstream source is compiled with the overlay in
+#     replay mode: no WorldState exists, each `ws->` call must be the next recorded
+#     one with byte-identical arguments, and it returns the recorded LMDB answer.
+#     So upstream's own sequences run against the wasm-built MemoryMerkleDB, and
+#     upstream's own EXPECT_EQs compare it with what the real WorldState said.
+#   * natively in replay mode, as the control.
+#   * five mutation arms over the transcript (a root, a sibling path, a low-leaf
+#     index, a recorded argument, a dropped call), each of which must turn exactly
+#     its own case red under wasm and leave the other six green.
+#
+# The seven are run by name and by count, and the transcript is consumed whole.
+#
+# Also covered, each a separate claim:
 #
 #   * The named standalone tests -- pure_sha256, pure_keccakf1600, debug_log --
 #     run and pass under wasm, by name and by count.
@@ -46,10 +63,10 @@
 # constructed, mutated, checkpointed and read by tests inside the 391, and that
 # is asserted here rather than denied.
 #
-# What is still open, and stated as the narrower thing it is: nothing here
-# COMPARES a tree root native versus wasm. M8 -- the native-versus-wasm
-# differential including tree roots -- owns that, and Tier I of the fixture
-# corpus carries the evidence for the spike's build rather than this one.
+# Roots ARE compared here, by upstream's gate: the wasm MemoryMerkleDB's roots
+# against the native LMDB WorldState's, after every step of seven sequences.
+# What stays M8's is the AVM-level differential -- the same transaction's tree
+# roots out of the wasm simulator and the native one.
 #
 # It also records the one target-level exclusion: `crypto_merkle_tree_tests` IS a
 # target in an AVM_WASM configure -- M6's patch adds it -- and it does NOT build
@@ -83,7 +100,8 @@ assert_ge "and it is that module's reference DB it drives" 1 \
   "$(grep -c 'world_state_reference/memory_merkle_db' "$WSR_UPSTREAM_TEST" || true)"
 assert_eq "with seven equivalence cases against a real world_state::WorldState" 7 \
   "$(grep -c '^TEST_F(MemoryMerkleDBEquivalenceTest,' "$WSR_UPSTREAM_TEST" || true)"
-# It is native-only, and why is asserted below, once the target lists are read.
+# Why it cannot be built for wasm AS WRITTEN is asserted below, once the target lists are read;
+# that it is RUN under wasm regardless is the section "upstream's equivalence gate, split".
 WASM_TARGETS="$M7_WORK/wsr-wasm-targets.txt"
 m6_ninja_targets "$M7_TREE" "$M7_WASM_BUILD" >"$WASM_TARGETS"
 assert_ge "the wasm build declares a target list" 100 "$(wc -l <"$WASM_TARGETS" | tr -d ' ')"
@@ -102,7 +120,7 @@ assert_ge "while the native target list does carry vm2_tests" 1 \
 # server-side, so `src/CMakeLists.txt` keeps it out of a wasm configure entirely.
 assert_ge "world_state_tests IS a target natively" 1 \
   "$(grep -c '^bin/world_state_tests$' "$NATIVE_TARGETS" || true)"
-assert_eq "and is not one under wasm, which is why its 7 cases are native-only" 0 \
+assert_eq "and is not one under wasm, which is why its 7 cases need the split below" 0 \
   "$(grep -c '^bin/world_state_tests$' "$WASM_TARGETS" || true)"
 
 # --- world_state_reference is nevertheless IN the wasm artefact -------------
@@ -236,9 +254,134 @@ for t in HintingDBsMinimalTest.ContractDBCheckpoints HintingDBsMinimalTest.Merkl
   assert_ge "$t drives the reference world state and passes under wasm" 1 \
     "$(grep -cx "$t" "$M7_WORK/wsr-passed.txt" || true)"
 done
-# What is NOT established, stated as the narrower thing it is: no test here
-# compares a tree ROOT native versus wasm. That is M8's.
-note "the reference trees are exercised by the 391; comparing their roots native-vs-wasm is M8's"
+note "the reference trees are exercised by the 391; upstream's own root comparison follows"
+
+# --- upstream's equivalence gate, split, under wasm --------------------------
+# The seven MemoryMerkleDBEquivalenceTest cases, compiled from the tree's own
+# world_state/memory_merkle_db.test.cpp three times (see lib_vm2_tests.sh,
+# "THE TRANSCRIPT SPLIT"). Upstream's source is not edited: the overlay is a
+# header found first on the quote-include path.
+WSR_TEST_REL="barretenberg/cpp/src/barretenberg/$M7_WSR_UPSTREAM_TEST"
+assert_true "the source compiled is upstream's, unmodified by any patch on the M7 tree" \
+  git -C "$M7_TREE" diff --quiet "$M6_BASE_REV" HEAD -- "$WSR_TEST_REL"
+assert_true "and unmodified in the working tree" git -C "$M7_TREE" diff --quiet HEAD -- "$WSR_TEST_REL"
+WSR_CASES="$M7_WSR_OUT/cases.txt"
+mkdir -p "$M7_WSR_OUT"
+sed -n 's/^TEST_F(\(MemoryMerkleDBEquivalenceTest\), *\([A-Za-z0-9_]*\)).*/\1.\2/p' "$WSR_UPSTREAM_TEST" \
+  | LC_ALL=C sort -u >"$WSR_CASES"
+assert_eq "the case names are derived from that source: $M7_WSR_EXPECTED_CASES of them" \
+  "$M7_WSR_EXPECTED_CASES" "$(wc -l <"$WSR_CASES" | tr -d ' ')"
+assert_eq "the overlay shadows exactly the one header the test includes" \
+  "barretenberg/world_state/world_state.hpp" \
+  "$(cd "$M7_WSR_DIR/overlay" && find . -type f | sed 's|^\./||')"
+assert_ge "and the test includes it" 1 \
+  "$(grep -c '^#include "barretenberg/world_state/world_state.hpp"$' "$WSR_UPSTREAM_TEST" || true)"
+
+for arm in native-record native-replay wasm-replay; do
+  m7_wsr_build "$arm"
+  assert_eq "the $arm build of the upstream test compiles and links" 0 $?
+  assert_file "and produced its binary" "$(m7_wsr_bin "$arm")"
+done
+assert_eq "the wasm-replay binary is a WebAssembly module" "0061736d" \
+  "$(head -c 4 "$(m7_wsr_bin wasm-replay)" | od -An -tx1 | tr -d ' \n')"
+# Which side the real WorldState is on is read off the link lines and the artefacts, not assumed.
+wsr_link() { grep '^### link:' "$M7_WSR_OUT/$1.build.log"; }
+assert_contains "the recording links the LMDB-backed world_state" "lib/libworld_state.a" "$(wsr_link native-record)"
+assert_contains "and liblmdb" "liblmdb.a" "$(wsr_link native-record)"
+for arm in native-replay wasm-replay; do
+  assert_not_contains "the $arm link line has no world_state library" "libworld_state.a" "$(wsr_link "$arm")"
+  assert_not_contains "and no lmdb" "lmdb" "$(wsr_link "$arm")"
+  assert_contains "but does link world_state_reference" "lib/libworld_state_reference.a" "$(wsr_link "$arm")"
+done
+wsr_wasm_ws="$(m6_in_devshell '"$WASI_SDK_PREFIX/bin/llvm-nm" -C "$1" 2>/dev/null | grep -c "bb::world_state::WorldState::"' \
+  "$(m7_wsr_bin wasm-replay)" 2>/dev/null | tail -1)"
+assert_eq "the wasm artefact holds no bb::world_state::WorldState symbol" 0 "${wsr_wasm_ws:-x}"
+wsr_wasm_mem="$(m6_in_devshell '"$WASI_SDK_PREFIX/bin/llvm-nm" -C "$1" 2>/dev/null | grep -c "bb::world_state::MemoryMerkleDB::"' \
+  "$(m7_wsr_bin wasm-replay)" 2>/dev/null | tail -1)"
+assert_ge "and does hold the reference's bb::world_state::MemoryMerkleDB" 1 "${wsr_wasm_mem:-0}"
+wsr_rec_ws="$(m6_in_devshell 'nm -C "$1" 2>/dev/null | grep -c "bb::world_state::WorldState::"' \
+  "$(m7_wsr_bin native-record)" 2>/dev/null | tail -1)"
+assert_ge "while the recording does hold the real WorldState" 1 "${wsr_rec_ws:-0}"
+
+# wsr_verdict <arm> <log> <rc> -- the seven passed by name, and every recorded call consumed.
+wsr_verdict() {
+  local arm="$1" log="$2" rc="$3"
+  assert_eq "$arm: the run exits 0" 0 "$rc"
+  m7_names passed "$log" >"$log.passed"
+  m7_set_equal "$arm: the passing set is the seven upstream cases" "$WSR_CASES" "$log.passed"
+  assert_eq "$arm: gtest's own summary says $M7_WSR_EXPECTED_CASES passed" \
+    "$M7_WSR_EXPECTED_CASES" "$(m7_summary_passed "$log")"
+  assert_eq "$arm: nothing failed" 0 "$(m7_names failed "$log" | grep -c . || true)"
+}
+
+# 1. Record, natively, against the real LMDB WorldState.
+WSR_TRANSCRIPT_FILE="$M7_WSR_OUT/transcript.tsv"
+rm -f "$WSR_TRANSCRIPT_FILE"
+m7_wsr_run native-record "$WSR_TRANSCRIPT_FILE" "$M7_WSR_OUT/native-record.log"
+wsr_verdict native-record "$M7_WSR_OUT/native-record.log" $?
+assert_file "the recording wrote a transcript" "$WSR_TRANSCRIPT_FILE"
+wsr_records="$(wc -l <"$WSR_TRANSCRIPT_FILE" | tr -d ' ')"
+assert_ge "with at least a hundred recorded WorldState calls" 100 "$wsr_records"
+assert_eq "and every line is a five-field record" "$wsr_records" \
+  "$(awk -F'\t' 'NF == 5' "$WSR_TRANSCRIPT_FILE" | wc -l | tr -d ' ')"
+assert_eq "recorded by exactly the seven cases" "$(cat "$WSR_CASES")" \
+  "$(cut -f1 "$WSR_TRANSCRIPT_FILE" | LC_ALL=C sort -u)"
+assert_eq "and the recorder's own per-case tally adds up to the transcript" "$wsr_records" \
+  "$(sed -n 's/^\[wsr-record\] [^ ]* records=\([0-9]*\)$/\1/p' "$M7_WSR_OUT/native-record.log" | awk '{t += $1} END {print t + 0}')"
+# Every kind of comparison upstream makes is in it, and every kind of mutation it drives.
+for m in construct get_tree_info get_sibling_path find_low_leaf_index get_indexed_leaf get_leaf \
+         append_leaves insert_indexed_leaves checkpoint commit_checkpoint revert_checkpoint; do
+  assert_ge "the transcript records $m" 1 "$(cut -f3 "$WSR_TRANSCRIPT_FILE" | grep -cx "$m" || true)"
+done
+note "transcript: $wsr_records WorldState calls over $M7_WSR_EXPECTED_CASES cases"
+
+# wsr_consumed <log> -- every case consumed all its records with no argument mismatch.
+wsr_consumed() {
+  local arm="$1" log="$2"
+  assert_eq "$arm: all seven cases report their replay" "$M7_WSR_EXPECTED_CASES" \
+    "$(grep -c '^\[wsr-replay\] ' "$log" || true)"
+  assert_eq "$arm: each consumed every recorded call, with no argument mismatch" 0 \
+    "$(grep '^\[wsr-replay\] ' "$log" | awk '{split($3,c,"="); split($4,r,"="); if (c[2] != r[2] || $5 != "args_mismatches=0") n++} END {print n + 0}')"
+  assert_eq "$arm: and between them consumed the whole transcript" "$wsr_records" \
+    "$(sed -n 's/^\[wsr-replay\] [^ ]* consumed=\([0-9]*\) .*/\1/p' "$log" | awk '{t += $1} END {print t + 0}')"
+}
+
+# 2. The control: the same replay, natively.
+m7_wsr_run native-replay "$WSR_TRANSCRIPT_FILE" "$M7_WSR_OUT/native-replay.log"
+wsr_verdict native-replay "$M7_WSR_OUT/native-replay.log" $?
+wsr_consumed native-replay "$M7_WSR_OUT/native-replay.log"
+
+# 3. THE SUBJECT: upstream's seven cases under wasm, against the real LMDB answers.
+m7_wsr_run wasm-replay "$WSR_TRANSCRIPT_FILE" "$M7_WSR_OUT/wasm-replay.log"
+wsr_verdict wasm-replay "$M7_WSR_OUT/wasm-replay.log" $?
+wsr_consumed wasm-replay "$M7_WSR_OUT/wasm-replay.log"
+
+# 4. Red first: each mutation must turn exactly its own case red under wasm, with upstream's
+#    (or the replay's) own message, and leave the other six green.
+wsr_mutant() { # <label> <expected message> <mode> <case> [<method> <n>]
+  local label="$1" msg="$2" mode="$3" case="$4"; shift 4
+  local t="$M7_WSR_OUT/mut-$label.tsv" log="$M7_WSR_OUT/mut-$label.log" rc
+  python3 "$M7_WSR_DIR/_perturb.py" "$WSR_TRANSCRIPT_FILE" "$t" "$mode" \
+    "MemoryMerkleDBEquivalenceTest.$case" "$@" >"$log.what" 2>&1
+  rc=$?
+  assert_eq "mutant $label: the perturbation hit a record ($(cat "$log.what"))" 0 "$rc"
+  m7_wsr_run wasm-replay "$t" "$log"
+  rc=$?
+  assert_false "mutant $label: the wasm run goes red" test "$rc" -eq 0
+  assert_eq "mutant $label: exactly MemoryMerkleDBEquivalenceTest.$case fails" \
+    "MemoryMerkleDBEquivalenceTest.$case" "$(m7_names failed "$log" | tr '\n' ' ' | sed 's/ $//')"
+  assert_eq "mutant $label: the other six still pass" 6 "$(m7_names passed "$log" | grep -c . || true)"
+  assert_contains "mutant $label: and says why" "$msg" "$(cat "$log")"
+}
+wsr_mutant root         "root mismatch for tree 0"         root      Checkpoints      get_tree_info 8
+wsr_mutant sibling-path "sibling path mismatch for tree 0" answer    InsertNullifiers get_sibling_path 0
+wsr_mutant low-leaf     "low leaf mismatch for tree 0"     answer    GenesisMatches   find_low_leaf_index 0
+wsr_mutant input        "(append_leaves): the arguments differ from the recorded ones" \
+                                                           args      Checkpoints      append_leaves 0
+wsr_mutant dropped-call "after its 26 recorded calls"      drop-last MixedSequence
+# And the unperturbed transcript is still green on the same binary, after all five.
+m7_wsr_run wasm-replay "$WSR_TRANSCRIPT_FILE" "$M7_WSR_OUT/wasm-replay-after.log"
+assert_eq "the unperturbed replay is green again after the mutants" 0 $?
 
 # --- the one target-level exclusion -----------------------------------------
 # M6's patch makes `crypto_merkle_tree_tests` a target in an AVM_WASM configure.

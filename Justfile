@@ -633,7 +633,8 @@ verify-vm2-tests-parity:
 verify-vm2-tests-exclusions:
     @verification/verify_vm2_tests_exclusions_enumerated.sh
 
-# The in-memory world state and the standalone gadgets, and what is linked but not exercised.
+# The in-memory world state -- upstream's seven MemoryMerkleDB equivalence cases under wasm,
+# split against a native LMDB transcript -- and the standalone gadgets.
 verify-vm2-tests-world-state:
     @verification/verify_world_state_reference_tests_pass_under_wasm.sh
 
