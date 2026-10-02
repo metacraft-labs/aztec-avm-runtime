@@ -161,10 +161,14 @@ tc_elf_loadable() {
   else
     listing="$(ldd "$f" 2>&1)" || true
   fi
-  if printf '%s\n' "$listing" | grep -q 'not found'; then
-    _tc_err "$f: $(printf '%s\n' "$listing" | grep 'not found' | head -1 | sed 's/^[[:space:]]*//')"
-    return 1
-  fi
+  # A `case`, not `printf | grep -q`: under pipefail that pipeline's status is printf's SIGPIPE
+  # rather than grep's verdict once the listing outgrows the pipe buffer (lib.sh, "STRING
+  # PREDICATES THAT ARE NOT PIPELINES"; verify_no_pipeline_predicates refuses the spelling).
+  case "$listing" in
+    *'not found'*)
+      _tc_err "$f: $(printf '%s\n' "$listing" | grep 'not found' | head -1 | sed 's/^[[:space:]]*//')"
+      return 1 ;;
+  esac
   return 0
 }
 
