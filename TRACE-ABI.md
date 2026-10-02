@@ -101,11 +101,11 @@ silently.
 
 | arm | median (µs) | min (µs) | crossings | container (B) |
 |---|---|---|---|---|
-| `batched` | 331,289 | 327,075 | 25 | 1,748,992 |
-| `perEvent` | 338,745 | 333,036 | 100,000 | 1,748,992 |
-| `control` | 332,728 | 327,002 | 25 | 1,748,992 |
-| `nopBatched` | 4,894 | 4,505 | 25 | 143,360 |
-| `nopPerEvent` | 5,293 | 4,866 | 100,000 | 143,360 |
+| `batched` | 385,864 | 375,638 | 25 | 1,748,992 |
+| `perEvent` | 391,518 | 383,489 | 100,000 | 1,748,992 |
+| `control` | 383,507 | 377,902 | 25 | 1,748,992 |
+| `nopBatched` | 4,877 | 4,636 | 25 | 143,360 |
+| `nopPerEvent` | 5,594 | 5,060 | 100,000 | 143,360 |
 
 *Every figure in this table moved when the `trace_format` pin advanced to `c8802c548f` and the
 writer's compressor became C libzstd. **The container is the headline: 4,694,016 → 1,630,208
@@ -119,14 +119,19 @@ the table above is Path B's. The 100,000-event container is **1,748,992 bytes** 
 A's 1,630,208 on C libzstd, because the two writers lay their streams out differently — and the
 writer-work arms are faster. The ratio §2 measures is again inside the margin.*
 
+*And again when both trace-format anchors moved to their `dev` tips on 2026-10-02 (run 16 in §8):
+the module is 776,323 bytes and the table above is run 16's. The containers are byte-for-byte the
+same size as run 15's — 1,748,992 and 143,360 — and the writer-work arms are slower in absolute
+terms (`batched` 331,289 → 385,864 µs); the ratio is again inside the margin.*
+
 | comparison | median | 95 % interval | reads as |
 |---|---|---|---|
-| `perEvent - batched` | **+2.09 %** | **[+1.42, +2.76] %** | within noise |
-| `control - batched` | +0.12 % | [-0.41, +0.65] % | the instrument is calibrated |
-| `nopPerEvent - nopBatched` | +9.03 % | [+5.02, +13.04] % | the crossing, priced alone |
+| `perEvent - batched` | **+1.86 %** | **[+1.39, +2.33] %** | within noise |
+| `control - batched` | -0.39 % | [-0.81, +0.02] % | the instrument is calibrated |
+| `nopPerEvent - nopBatched` | +13.67 % | [+10.48, +16.87] % | the crossing, priced alone |
 
 **Verdict: `within-noise`.** The comparator resolves a verdict only when the whole interval lies
-OUTSIDE ±3 %, and none of the fifteen runs resolves one. Within a *single* run the interval is narrow
+OUTSIDE ±3 %, and none of the sixteen runs resolves one. Within a *single* run the interval is narrow
 enough to exclude zero — twice, in opposite directions — which is exactly the pathology
 `_timing_compare.py`'s header records for a different measurement: *"six runs of the same
 measurement over the same two binaries produced mutually disjoint 95 % intervals"*. The
@@ -376,10 +381,21 @@ else can resolve is a local file wearing a pin's clothes.
 - **The module has zero wasm imports**, so it instantiates under a bare
   `WebAssembly.instantiate(bytes, {})` with no WASI shim, no `wasm-bindgen` and no glue file.
   `ct-host` has **no npm dependencies** and imports no Node module in its trace path.
-- **743,420 bytes** for the writer plus this ABI, release, `opt-level = "z"`, LTO,
-  `panic = "abort"`, one codegen unit, stripped, sha256 `1eba4de0…`. It is byte-identical to the
+- **776,323 bytes** for the writer plus this ABI, release, `opt-level = "z"`, LTO,
+  `panic = "abort"`, one codegen unit, stripped, sha256 `ad57a80e…`. It is byte-identical to the
   explicitly-flagged `--no-default-features --features path-b` build, which
   `verify_writer_path_is_selectable` asserts on every run.
+
+  ***743,420 → 776,323 (+32,903) when the two trace-format anchors moved to the `dev` tips on
+  2026-10-02** (`trace_format` → `051a298722`, both Nim roles → `f22e84710f`; `pins.json`
+  history), with the toolchain held at 1.98.1 so the delta is the writers'. Nothing in this ABI
+  changed: still **39 exports** and **0 imports**. What came in is the Nim writer's 35 commits between
+  the two anchors — scope-exit and drop records, the call-entry and reload ordering fixes, failures
+  that now fail `close()`; the byte growth is measured whole and not decomposed across them — and
+  one libc symbol: its `std/strutils` now calls `memchr`, which
+  `ct-writer/src/nim_host_shim.c` supplies, because the link failed without it. **Path A moved the
+  other way, 480,600 → 464,904**, still 47 exports: that writer lost its per-stream switches and
+  its synthesized call step.*
 
   *This is the module the runtime SHIPS, and since M41's flip it is **Path B — the Nim writer**,
   reached through its C ABI and linked as a static library by `ct-writer/build.rs`. The Path A
@@ -479,15 +495,15 @@ reconsidered if any of these changed:
 
 | quantity | measured | where |
 |---|---|---|
-| `perEvent - batched`, median | +2.09 % | §2 |
-| its 95 % interval | [+1.42, +2.76] % | §2 |
-| cost of one boundary crossing in V8 | ~4.0 ns | §2 |
-| the crossing's share of a 100k-event recording | 0.12 % | §2 |
-| writer work versus boundary work | ~830× | §2 |
+| `perEvent - batched`, median | +1.86 % | §2 |
+| its 95 % interval | [+1.39, +2.33] % | §2 |
+| cost of one boundary crossing in V8 | ~7.2 ns | §2 |
+| the crossing's share of a 100k-event recording | 0.19 % | §2 |
+| writer work versus boundary work | ~540× | §2 |
 | containers produced by the two ABIs | byte-identical | §3 |
 | host-side buffer at 250,000 events | 65,536 B, constant | §7 |
 
-**All fifteen runs, retained**, because the disagreement between them is the finding rather than a
+**All sixteen runs, retained**, because the disagreement between them is the finding rather than a
 nuisance. None is wrong; they are what this measurement does.
 
 | # | engine | `perEvent - batched` | 95 % interval | `control - batched` | `nopPerEvent - nopBatched` | crossing |
@@ -506,9 +522,10 @@ nuisance. None is wrong; they are what this measurement does.
 | 12 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M41's module, **C libzstd**) | +1.83 % | [+0.67, +2.99] % | -0.23 % | +14.03 % | ~8.7 ns |
 | 13 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, M41's module, **Path B — the Nim writer**) | +2.65 % | [-0.58, +5.87] % | -0.31 % | +11.17 % | ~5.8 ns |
 | 14 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **the SAME module as run 13**) | +1.22 % | [-1.03, +3.46] % | -0.17 % | +7.84 % | ~4.4 ns |
-| 15 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, the SAME module as runs 13 and 14) | **+2.09 %** | **[+1.42, +2.76] %** | +0.12 % | +9.03 % | ~4.0 ns |
+| 15 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, the SAME module as runs 13 and 14) | +2.09 % | [+1.42, +2.76] % | +0.12 % | +9.03 % | ~4.0 ns |
+| 16 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **both trace-format anchors at their `dev` tips**) | **+1.86 %** | **[+1.39, +2.33] %** | -0.39 % | +13.67 % | ~7.2 ns |
 
-Run 15 is the one §2 tabulates, because it is the one `arms.tsv` currently holds and the one the
+Run 16 is the one §2 tabulates, because it is the one `arms.tsv` currently holds and the one the
 check compares this file against. **Runs 2, 3 and 4 are the same engine, the same module and the
 same binary**, and runs 2 and 3 have disjoint intervals with opposite signs — which is why §2 says
 the sign is not stable rather than quoting any one run's interval as a precision. **Runs 5 to 8
@@ -551,6 +568,18 @@ refuses a module whose `ct_writer_kind()` contradicts the declared writer path, 
 `writer.ts` and `config.ts` and so the stamp. It reads **+2.09 %, [+1.42, +2.76] %** — the first
 interval on this module that excludes zero, and still wholly inside the ±3 % margin, so the
 verdict stays `within-noise`. Runs 13, 14 and 15 span +1.22 to +2.65 on one binary.
+
+**RUN 16 IS THE MODULE AFTER BOTH TRACE-FORMAT ANCHORS MOVED TO THEIR `dev` TIPS** (`pins.json`
+history, 2026-10-02): 776,323 bytes, the same ABI and host, a writer 35 commits newer. It reads
+**+1.86 %, [+1.39, +2.33] %**, inside the ±3 % margin, so the verdict stays `within-noise`; the
+control reads **-0.39 %** and the crossing-only pair **+13.67 %**. The load average was **1.93** at
+the start and **3.13** at the end. TWO EARLIER ATTEMPTS AT THESE ANCHORS ARE NOT IN THE TABLE (the first on the 776,479-byte module
+that still opened `<toplevel>` twice, the second on this one), and
+the reason is the instrument's, not a choice: they ran while unrelated builds held the host's load
+average near 30, and the control — a byte-for-byte duplicate of `batched` — read **+1.16 %,
+[-6.82, +9.14] %** and **-0.08 %, [-10.53, +10.37] %**, intervals wider than the margin, so the
+comparator refused both as uncalibrated. That refusal is the control doing its job; a run it
+refuses measures the host.
 
 **RUN 10 EXISTS BECAUSE A COMMENT WAS CORRECTED**, which is a fact about the instrument worth
 having in the record. `_m24_oq6_stamp` hashes `ct-host/src/{writer,abi,config}.ts` and

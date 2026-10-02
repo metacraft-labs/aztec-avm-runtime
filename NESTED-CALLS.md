@@ -189,20 +189,31 @@ all five of M38's arms reproduce every figure exactly.
 | steps the recorder wrote | **58** | **35** |
 | `Step` events the pinned reader reads | **60** | **36** |
 | …of those, carrying a COLUMN | **60** | **36** |
-| `Call` records | **1** | **0** |
+| `Call` records | **2** | **1** |
 | distinct `(path, line)` positions | **22** | **22** |
 | distinct source files stepped | **9** | **9** |
 | paths the container interns | **100** | **78** |
-| container bytes | **929792** | **901120** |
+| container bytes | **929792** | **909312** |
 
 `35 + 23 = 58`, and `container = probe + frames` — M38's `container = probe + 1` identity
-generalised, because `TraceSink::start` emits an entry step per traced circuit.
+generalised, because every traced circuit contributes an entry step.
+
+**One container is one recording, and a recording is started once.** The writer's `start` interns
+`<toplevel>`, opens the root frame and records the entry step (`trace-events.md`, "Starting a
+Recording"). The tracer asks for a start per circuit it steps, so the probe passes the FIRST to the
+writer as a start and records each later one as the step it names — the frame's entry step, inside
+the frame's call — and reports both counts (`startsAsked` 2, `startsWritten` 1 for `transaction`).
+Until the 2026-10-02 move of the Nim writer anchor (`pins.json` history) `start` recorded only the
+entry step, so passing every one through was harmless; at the new writer it opened a second root,
+measured as calls named `<toplevel>,<toplevel>,value`, which is why the substitution exists. The step figures above are unmoved by it.
 
 The nested frame carries the CHILD's contract address as its one call argument, which is M26's rule
 for the public half and its reason: a frame must be attributable without stepping into it.
 `parentOnly` runs the same frame with the same tape and no child in the list, and its container
-carries **zero** calls — which is what makes the one Call the nesting rather than something the
-writer does anyway.
+carries only the ROOT call, `<toplevel>` at depth 0, which `start` opens in every recording — so the
+row of call records counts the root plus the recorder's frames, and the one call BELOW the root is
+the nesting rather than something the writer does anyway. The callee's frame begins at step 36
+(the entry step and the caller's 35 precede it) and brackets its entry step and its 23.
 
 ### THE POSITION SETS ARE EQUAL, AND THAT IS THE MEASUREMENT
 

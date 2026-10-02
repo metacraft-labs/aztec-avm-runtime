@@ -1406,6 +1406,46 @@ were absorbed silently.
   `git show 233d8e0993:barretenberg/cpp/src/barretenberg/wsdb/wsdb_schema.jsonc`;
   `git show 233d8e0993:barretenberg/cpp/src/barretenberg/avm/avm_schema.json`.
 
+## D27 — the Nim writer's `start` began opening the root frame, and two consumers here opened it as well
+
+- id: D27
+- status: closed
+- opened: 2026-10-02
+- milestone: the trace-format re-pin of 2026-10-02 (`pins.json` history), measured by m24's
+  `test_ct_container_roundtrip_ct_print` and m39's `e2e_transaction_steps_into_one_container`
+- design-question: —
+- sides: `trace_writer_start` at `anchors.trace_format_nim_writer` (`f22e84710f`, which carries
+  `aa3b284 fix(writer): start() opens the call tree's root`) versus two callers in this repository
+  written against the previous anchor (`b2cc6fd885`), whose `start` recorded the entry step and
+  nothing else
+- what: At the new anchor `start` interns `<toplevel>`, opens its call — the root of the call tree,
+  `call_key` 0 at depth 0 — and records the entry step, the three records
+  `codetracer-trace-format-spec`'s `trace-events.md` ("Recorder Integration — Starting a
+  Recording") requires. Two callers here did part of that themselves, and each now opened a second
+  root. (1) `ct-writer/src/backend_nim.rs` registered `<toplevel>` and its call before `start`,
+  because the raw FFI used not to: the shipped module's container carried **2** call frames where
+  the recording has **1**, both `<toplevel>`, the second at depth 1 holding every step. (2) M38's
+  probe traces one circuit per frame into ONE writer, and the Noir tracer starts the trace for every
+  circuit it steps: M39's two-frame transaction carried `Call` records `<toplevel>,<toplevel>,value`
+  and its one-frame control `<toplevel>`, where the checks expected `value` and none.
+- why it matters: a second root is not a cosmetic duplicate. Readers root the call tree at
+  `call_key` 0, so every step lands one frame deeper than the program was, and a frame count that
+  includes the duplicate reads as a call the program never made. Nothing refused it: both
+  containers read cleanly through the pinned reader.
+- decision: **Closed on this side; the writer is right and the spec says so.** (1) The backend
+  registers neither record and lets `start` open the recording; the roundtrip check is back to
+  exactly one frame through both readers. (2) The probe passes the FIRST `start` to the writer and
+  records each later one as the step it names — the frame's entry step, which is all `start` used
+  to write — and reports `startsAsked` / `startsWritten` so the substitution is measured. The step
+  identity `container = probe + frames` is therefore unmoved, and the check now also asserts exactly
+  one root, `<toplevel>` spanning every step, in both arms. `NESTED-CALLS.md` §4's table is
+  re-derived (call records 1/0 → 2/1, the root now counted by the reader). Without the
+  substitution the second frame's start opened a second root: calls `<toplevel>,<toplevel>,value`.
+- evidence: `aztec-avm-runtime/verification/test_ct_container_roundtrip_ct_print.sh` ("the
+  recording opens with exactly one Call frame", "the recording's one frame is there");
+  `aztec-avm-runtime/verification/e2e_transaction_steps_into_one_container.sh` §2 and §4;
+  `git -C codetracer-trace-format-nim show aa3b284`.
+
 <!-- END:drift -->
 
 ---

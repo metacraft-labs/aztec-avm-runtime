@@ -1047,3 +1047,73 @@ figures conformed: m24's OQ-6 benchmark re-ran because its stamp hashes `writer.
 unmoved); and the class and its message add **0.23–0.24 KB** gzipped to every entry that can
 construct a writer, re-derived in `BROWSER-PACKAGING.md`, `WORKER-NODE.md`, `DEV-WALLET.md`,
 `LOCAL-HISTORY.md` and `PRIVATE-EXECUTION.md` (m27, m32, m34, m35, m36). None of those moved a count.
+
+---
+
+## 13. BOTH TRACE-FORMAT ANCHORS ON THE `dev` TIPS — what the move surfaced, and the sweep
+
+On 2026-10-02 `trace_format` moved `da76d8493b → 051a298722` and both Nim roles moved
+`b2cc6fd885 → f22e84710f`, each the tip of its repository's `dev` (`pins.json` history). The
+owners' four behaviour changes were the reason; what THIS repository measured is below, every item.
+
+| | Path A (`--features path-a`) | Path B (the default) |
+|---|---:|---:|
+| bytes | 480,600 → **464,904** | 743,420 → **776,323** |
+| sha256 (first 8) | — | `1eba4de0` → `ad57a80e` |
+| wasm imports | 0 | **0** |
+| exports | 47 | **39** |
+
+**Two defects on this side, both the writer being right.**
+
+- **`start` opens the recording now, and two callers here opened it too.** At `f22e84710f` the Nim
+  writer's `trace_writer_start` interns `<toplevel>`, opens the root call and records the entry
+  step, as `trace-events.md` requires. `ct-writer/src/backend_nim.rs` registered `<toplevel>` and
+  its call first, because the old FFI did not: `test_ct_container_roundtrip_ct_print` read **2**
+  frames where the recording has **1**. The backend now leaves all three records to `start`. And
+  M38's probe traces one circuit per frame into ONE writer while the Noir tracer starts every
+  circuit it steps: M39's transaction read calls `<toplevel>,<toplevel>,value`. The probe passes the
+  first `start` through and records each later one as the entry step it names, and reports
+  `startsAsked`/`startsWritten`; m39 asserts one root spanning every step in both arms (**+10**:
+  the root and start-count assertions and their numeric preconditions). `DRIFT.md` D27.
+- **`memchr`.** The Nim tree's `std/strutils` now calls it; Rust's compiler_builtins does not
+  supply it on `wasm32-unknown-unknown`, so the link died. `nim_host_shim.c` defines it.
+
+**Behaviour changes that moved nothing here, checked rather than assumed:** no `ct-writer` code
+used a removed stream switch; no container this runtime writes carries a bare-name record (the
+pinned reader, which now refuses one by name, reads every container the sweep produces); no close
+failed; and Path A's step counts in m41's equivalence arms are unmoved, because `backend_rust.rs`
+writes its `Call` event directly rather than through the trait's `register_call`.
+
+**The reader control was mis-described, and the move is what exposed it.** `pins.json` said the
+control (`baea074019`) refuses a v4 container naming `meta.dat`. On Path B containers from BOTH the
+previous and the new anchors it exits **0** with empty metadata and no events — its
+`openNewTrace` discards a `meta.dat` it cannot parse. `test_ct_container_roundtrip_ct_print`
+accepts SILENT as a control outcome and pins it to the step count it misses, so no count moved; the
+field and the check's header now say what it does.
+
+**Figures re-derived:** `TRACE-ABI.md` §7 (module) and §2/§8 (OQ-6 run 16, **+1.86 % [+1.39,
++2.33]**, verdict unmoved; two runs under a host load near 30 refused by the calibration control
+and recorded, not tabulated); `JOIN-SHAPE.md` (module); `PRIVATE-TRACE.md` §5 (both private
+containers +8,192 bytes); `NESTED-CALLS.md` §4 (call records 1/0 → 2/1, the root now counted;
+`parentOnly` 901,120 → 909,312 bytes).
+
+### The sweep
+
+| milestone | before (`cff26cb`, the old anchors) | after | |
+|---|---:|---:|---|
+| m24 | 359/0 | 359/0 | |
+| m25–m29, m31, m33–m36, m41 | 462, 342, 347, 366, 127, 450, 248, 217, 239, 150, 193 — all /0 | identical | |
+| m30 | 0/4 | **218/0** | its own build defect, fixed in `44a8376` |
+| m32 | 237/3 | 237/3 | same three failing assertions, pre-existing |
+| m37 | 171/2 | 171/2 | same two, pre-existing |
+| m38 | 58/2 (cannot run) | **150/0** | |
+| m39 | 123/1 (cannot run) | **217/0** | §12's 207 + 10 |
+| m40 | 0/2 (cannot run) | **147/0** | |
+| m1 | 186/2 | 186/2 | same two, pre-existing |
+| l2, l3, l4, l5 | 324/0, 248/63, 194/1, 316/14 | identical | same failing assertions |
+
+m38–m40's BEFORE figures are "cannot run": `../noir` carries an untracked `.pre-commit-config.yaml`
+these checks refuse, and it is not this repository's to clean. Their AFTER figures were taken
+against a clean clone of `../noir` at the same commit (`fee00409b`, branch `codetracer`) through
+`M38_NOIR_ROOT`/`M40_NOIR_ROOT`, and equal §12's 150, 207 and 147 except m39's ten added
+assertions.

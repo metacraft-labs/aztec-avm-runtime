@@ -656,10 +656,11 @@ pub extern "C" fn ct_log_event_count() -> u32 {
 // everywhere else.
 //
 // **THE SEQUENCE IS THE HOST'S AND THE STRUCTURE IS THE MODULE'S.** `ct_call` and `ct_return` do
-// not synthesize anything: `AbstractTraceWriter::register_call` emits a `Step` at the callee's
-// declaration site before the `Call`, which is right for a recorder that has not already emitted
-// the caller's step and wrong for this one — `tooling/tracer_wasm/src/ctfs_sink.rs` overrides it
-// for exactly that reason and this module writes the `Call` event directly for the same one. What
+// not synthesize anything, and neither writer does: a call is a `Call` record, and the frame's
+// first step is the next step the host emits (`trace-events.md`: a recording has exactly the steps
+// its recorder emitted, plus the entry step `start` emits). Path A writes the `Call` event
+// directly rather than through `AbstractTraceWriter::register_call`, so its arguments are emitted
+// as `Value` events first, the way `tooling/tracer_wasm/src/ctfs_sink.rs` does. What
 // the module DOES own is the depth: `ct_call_depth()` is read from here rather than counted by the
 // host, because a host counting its own calls asserts that it called and not that the module
 // recorded.

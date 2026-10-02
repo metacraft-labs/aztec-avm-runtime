@@ -215,6 +215,15 @@ except Exception:
     print("UNREADABLE"); raise SystemExit(0)
 events = doc.get("events", [])
 steps = [e for e in events if e.get("kind") == "step"]
+# THE ROOT BELONGS TO THE WRITER, THE FRAMES BELOW IT TO THE RECORDER. `start` opens `<toplevel>` at
+# depth 0 (`trace-events.md`, "Starting a Recording"), so every container has that one frame however
+# many the recorder opened. The `call*` fields below count the frames of the recorder, depth >= 1; the
+# root is reported by the `root*` fields, so a second root cannot hide inside a frame count.
+def is_root(e):
+    return e.get("depth") == 0
+entries = [e for e in events if e.get("kind") == "call_entry" and not is_root(e)]
+exits = [e for e in events if e.get("kind") == "call_exit" and not is_root(e)]
+roots = [e for e in events if e.get("kind") == "call_entry" and is_root(e)]
 field = sys.argv[1]
 if field == "steps":
     print(len(steps))
@@ -226,26 +235,28 @@ elif field == "distinctPaths":
     print(len({e["path"] for e in steps}))
 elif field == "calls":
     print(doc.get("counts", {}).get("calls", "MISSING"))
+elif field == "rootFrames":
+    print(len(roots))
+elif field == "rootNames":
+    print(",".join(e.get("function", "?") for e in roots) or "NONE")
+elif field == "rootSpan":
+    print("%s-%s" % (roots[0].get("entry_step", "MISSING"), roots[0].get("exit_step", "MISSING")) if roots else "MISSING")
 elif field == "callEntries":
-    print(sum(1 for e in events if e.get("kind") == "call_entry"))
+    print(len(entries))
 elif field == "callExits":
-    print(sum(1 for e in events if e.get("kind") == "call_exit"))
+    print(len(exits))
 elif field == "callNames":
-    print(",".join(sorted(e.get("function", "?") for e in events if e.get("kind") == "call_entry")) or "NONE")
+    print(",".join(sorted(e.get("function", "?") for e in entries)) or "NONE")
 elif field == "callArgs":
     out = []
-    for e in events:
-        if e.get("kind") != "call_entry":
-            continue
+    for e in entries:
         for a in e.get("args", []):
             v = a.get("value", {})
             out.append("%s=%s" % (a.get("varname", "?"), v.get("text", v.get("kind", "?"))))
     print(",".join(out) or "NONE")
 elif field == "callEntryStep":
-    entries = [e for e in events if e.get("kind") == "call_entry"]
     print(entries[0].get("entry_step", "MISSING") if entries else "MISSING")
 elif field == "callExitStep":
-    entries = [e for e in events if e.get("kind") == "call_entry"]
     print(entries[0].get("exit_step", "MISSING") if entries else "MISSING")
 elif field == "paths":
     print(len(doc.get("paths", [])))

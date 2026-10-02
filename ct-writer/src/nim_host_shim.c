@@ -118,6 +118,20 @@ size_t strlen(const char *s) {
   return n;
 }
 
+/* `std/strutils`' `find` over a char calls `memchr` (Nim's `c_memchr`). Rust's compiler_builtins
+ * supplies `memcpy`, `memmove`, `memset` and `memcmp` on this target but not `memchr`, so the
+ * link fails without it. It is a pure function with one correct answer, not a refusal. */
+void *memchr(const void *s, int c, size_t n) {
+  const unsigned char *p = (const unsigned char *)s;
+  unsigned char want = (unsigned char)c;
+  for (size_t i = 0; i < n; i++) {
+    if (p[i] == want) {
+      return (void *)(p + i);
+    }
+  }
+  return 0;
+}
+
 _Noreturn void exit(int code) {
   (void)code;
   __builtin_trap();

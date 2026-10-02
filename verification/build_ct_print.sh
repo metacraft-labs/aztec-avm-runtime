@@ -6,16 +6,20 @@
 # Not a check. Invoked by `m24_require_readers`.
 #
 # ---------------------------------------------------------------------------
-# TWO BUILDS, ONE COMMIT APART, AND THAT IS THE WHOLE DESIGN.
+# TWO BUILDS, A READER AND A CONTROL, AND THAT IS THE WHOLE DESIGN.
 #
 # DD-7 records that a wasm-produced Path A container cannot be read by stock `ct-print`. That is a
-# claim about a DIFFERENCE, and the honest way to hold it is to build the reader at the fix and at
-# its parent and run both against the same bytes. Anything less — a prebuilt binary in a sibling
+# claim about a DIFFERENCE, and the honest way to hold it is to build the reader and a control that
+# demonstrably cannot read the container, and run both against the same bytes. The control was
+# once the reader fix's parent, one commit apart; it is now chosen by PROPERTY -- a published
+# ancestor that fails to read this runtime's container in a way
+# `test_ct_container_roundtrip_ct_print` can name -- because a control chosen by graph position
+# breaks at every non-adjacent fix. Anything less — a prebuilt binary in a sibling
 # worktree, or a release from some other branch — is state this repository did not produce, and
 # "four checks once passed against an empty build directory" is in the campaign brief because of it.
 #
-#   ct-print       @ pins.json trace_format_nim.commit          -- has baea074, reads it
-#   ct-print-pre   @ pins.json trace_format_nim.control_commit  -- baea074^, must NOT read it
+#   ct-print       @ pins.json trace_format_nim.commit          -- reads it
+#   ct-print-pre   @ pins.json trace_format_nim.control_commit  -- an ancestor; must NOT read it
 #
 # AND A THIRD BINARY, FOR A QUESTION NEITHER OF THOSE CAN ANSWER.
 #
@@ -34,7 +38,8 @@
 #   ct-print-writer       @ pins.json trace_format_nim_writer.commit
 #   ct-split-probe-writer @ pins.json trace_format_nim_writer.commit
 #
-# The reader anchor names 2026-08-20 and the writer anchor names 2026-09-09. A Path B container is
+# When M41 added them the reader anchor named 2026-08-20 and the writer anchor 2026-09-09; today
+# both name the same `dev` tip and the pair is skipped below. While they differed, a Path B container was
 # written by the LATER tree, and its split streams carry an index layout the earlier reader does
 # not know: `ct-split-probe` at the reader anchor reports `steps.dat: index file too small for
 # trailer` and cannot find `values.off` or `events.off` at all. That is not a defect in either
@@ -93,7 +98,8 @@ esac
 for v in "$REV" "$CONTROL" "$WRITER"; do
   git -C "$NIM_REPO" cat-file -e "$v^{commit}" 2>/dev/null || die "$NIM_REPO does not have $v"
 done
-# The control MUST be the fix's parent, or the one-commit claim is not what is being built.
+# The control's ANCESTRY is asserted by the roundtrip check, not here; this only proves the
+# reader's parent resolves, i.e. that the reader revision is a real commit with history.
 actual_parent="$(git -C "$NIM_REPO" rev-parse "$REV^" 2>/dev/null)"
 [ -n "$actual_parent" ] || die "could not resolve $REV^"
 
