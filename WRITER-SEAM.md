@@ -1117,3 +1117,60 @@ these checks refuse, and it is not this repository's to clean. Their AFTER figur
 against a clean clone of `../noir` at the same commit (`fee00409b`, branch `codetracer`) through
 `M38_NOIR_ROOT`/`M40_NOIR_ROOT`, and equal §12's 150, 207 and 147 except m39's ten added
 assertions.
+
+---
+
+## 14. BOTH TRACE-FORMAT ANCHORS ON THE 2026-10 FORMAT REVISION — the `agents` tips, and the sweep
+
+On 2026-10-03 `trace_format` moved `051a298722 → 145ff42ff6` and both Nim roles moved
+`f22e84710f → 7967c179dd`, the `agents` tips, where the 2026-10 format revision landed (`pins.json`
+history; `PINS.md` rules 4a and 4b). Neither backend needed an API change to compile: `ct-writer`
+does not read `MetaDat`'s path list, sets its workdir and capabilities before the first record on
+both paths, and registers no source reload.
+
+| | Path A (`--features path-a`) | Path B (the default) |
+|---|---:|---:|
+| bytes, writer change alone | 464,904 → 494,017 | 776,323 → 802,898 |
+| bytes, with `ct_intern_path`'s refusal | **495,280** | **803,868** |
+| sha256 (first 8) | — | `ad57a80e` → `fd72c147` |
+| wasm imports / exports | 0 / 47 | 0 / 39 |
+
+**What the move surfaced** — `DRIFT.md` D28 to D31, each closed:
+
+- **`meta.dat` is fixed at the first record.** M38's probe opted in to the three column capabilities
+  once per traced circuit; the second frame's opt-ins were refused and M39's close failed. They
+  reach the writer before the first record only, counted (`capabilitiesAsked` 3 × frames,
+  `capabilitiesWritten` 3).
+- **An untabled column-aware path takes the conventional table**, so the entry step on the
+  session's source path reads column 1 where it read none: m41's driver and m40's column count.
+- **`ct-host/src/writer.ts`, audited for late path-table registration: it registers none.** It
+  interns only through `internPath`, which crosses at once rather than behind the step batch, and
+  a path id reaches a step or a frame only after `internPath` returned it. The MODULE was where the
+  rule was hidden: `ct_intern_path` answered a later, different table silently from its own list,
+  and ignored the writer's refusal of the session's own source path. Both are refused at the call
+  now; `verify_path_table_fixed_at_first_mention` measures both modules through the real host
+  (41 assertions; 12 red with the comparison removed).
+- **Exact event kinds**: `io_kind` is `TraceLogEvent` where it was `ioStderr` (m34, `_ct_frames.py`).
+- **Three caches outlived their writer** and are now invalidated by it: m25's OQ-4 containers (CTFS
+  v3, read until the reader refused v3), the browser arms (m27, m32, m34–m36, m39) and the M38 probe.
+- The reader control (`baea074019`) is now **REFUSED** (exit 1, named) where it was SILENT.
+
+### The sweep
+
+Full M0–M41 at `ee00e15`, under `direnv exec`: **TOTAL 14,162**, 42 milestones, no hole. m16 read 147
+because its milestone file had moved to `codetracer-pm/milestones/` and the check died before its
+summary; fixed in `024024b` and re-measured at **225/0**, so the tree's figure is **14,240, delta +384**
+against the reference of **13,856**:
+
+| milestone | reference | now | |
+|---|---:|---:|---|
+| m28 | 366 | 368 | +2: the one-step container baseline replaces the 100,000-byte floor |
+| m38 | 58 | **150** | `noir` clean; equal to the clean-clone 150 |
+| m39 | 123 | **221** | clean-clone 217, +4 the capability counts |
+| m40 | 0 | **149** | clean-clone 147, +2 the entry step by position and count |
+| m41 | 193 | **236** | +41 the path-table check, +2 the ruzstd filter's controls |
+| every other | | equal | |
+
+Non-zero exits: m1, m11, m20, m21, m22, m37, with the reference's failing assertions except: m11 +2
+(two new upstream commits as subjects; count unchanged at 361), m21 −2 (fixed in `2e3de3e`), m37's
+upstream distance 198 → 209. m9 ran on a quiet host and is green.
