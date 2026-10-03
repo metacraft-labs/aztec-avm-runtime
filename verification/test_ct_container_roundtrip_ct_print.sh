@@ -372,14 +372,20 @@ print(" ".join("%02x" % x for x in b))' "$CT")"
 # `ctfs-container.md` section 1 states that header byte 5 is `4`; this asserted `03`, which pinned
 # the writer's staleness in a check rather than catching it.
 #
-# BYTES 6 AND 7 ARE READ TOO, because version 4 RE-DEFINES them: under v2/v3 they were compression
-# and encryption, under v4 they are encryption and max_shards. A container could satisfy a version
-# assertion alone while carrying a compression tag in the byte a v4 reader reads as encryption, and
+# BYTES 6 AND 7 ARE READ TOO, because version 4 RE-DEFINED them: under v2/v3 they were compression
+# and encryption, from v4 on they are encryption and max_shards. A container could satisfy a version
+# assertion alone while carrying a compression tag in the byte a reader reads as encryption, and
 # would then declare itself AES-256-GCM encrypted. `00 00` is encryption=none and max_shards=0,
-# where `0` is what the spec now pins for a container that is not sharded -- both writers write it,
+# where `0` is what the spec pins for a container that is not sharded -- both writers write it,
 # so this line is the same for either.
-assert_eq "the container carries the CTFS magic, version and v4 header bytes" \
-  "c0 de 72 ac e2 04 00 00" "$MAGIC"
+#
+# THE VERSION IS 5, AND 6 WOULD BE A DIFFERENT FINDING. `ctfs-container.md` section 1 has a writer
+# write 5 unless the container uses a version-6 field -- the compact profile, which the Nim writer
+# picks below a measured raw-byte threshold. This container is the 5,001-step roundtrip, well above
+# it, so `05` is the full profile, and a `06` here would mean the threshold or the profile choice
+# moved rather than that the container is merely newer.
+assert_eq "the container carries the CTFS magic, version and v5 header bytes" \
+  "c0 de 72 ac e2 05 00 00" "$MAGIC"
 
 # ===========================================================================
 # THE SPLIT STREAMS, THROUGH THE REFERENCE READER. See this file's header for why nothing above

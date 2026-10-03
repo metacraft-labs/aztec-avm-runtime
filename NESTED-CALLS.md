@@ -193,7 +193,7 @@ all five of M38's arms reproduce every figure exactly.
 | distinct `(path, line)` positions | **22** | **22** |
 | distinct source files stepped | **9** | **9** |
 | paths the container interns | **100** | **78** |
-| container bytes | **929792** | **909312** |
+| container bytes | **851968** | **835584** |
 
 `35 + 23 = 58`, and `container = probe + frames` — M38's `container = probe + 1` identity
 generalised, because every traced circuit contributes an entry step.

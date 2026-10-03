@@ -235,13 +235,15 @@ this milestone.
 
 - The join surface added **2,854 bytes** to the module, 259,839 → 262,693, and **no imports**: the
   count is still 0 and the module still instantiates under a bare
-  `WebAssembly.instantiate(bytes, {})`. **The module is **776,323 bytes** today**, because M40 added
+  `WebAssembly.instantiate(bytes, {})`. **The module is **803,868 bytes** today**, because M40 added
   a source-step surface of two exports (+518) for a private half's steps — see `BOTH-HALVES.md` §3
   — because M41 advanced the `trace_format` pin, which made the writer's compressor C libzstd
   and took `ruzstd` out of the Path A module (+234,128 bytes), and because M41 then made the Nim
   writer — Path B — the one the runtime ships (Path A 480,600 → Path B 743,420, and back to 39
   exports; `TRACE-ABI.md` §7 names them), and because both trace-format anchors then moved to their
-  `dev` tips on 2026-10-02 (Path B 743,420 → 776,323, still 39 exports).
+  `dev` tips on 2026-10-02 (Path B 743,420 → 776,323, still 39 exports), and because both moved
+  again to the 2026-10 format revision on 2026-10-03 (776,323 → 803,868, still 39 exports; +970 of
+  it is `ct_intern_path` refusing a later, different path table).
   `TRACE-ABI.md` §7 re-derives the CURRENT figure from the built artefact on every run and so does
   this line, which is why the delta above is stated as a historical measurement rather than as an
   arithmetic that has to keep coming out: a later milestone growing the module must not be able to

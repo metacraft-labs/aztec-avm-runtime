@@ -104,6 +104,12 @@ for arm in transaction parentOnly; do
     "$(( probe_steps + frames ))" "$container_steps"
   assert_eq "$arm: the tracer asked for a start once per frame" "$frames" "$(m39_trace "$arm.startsAsked")"
   assert_eq "$arm: and exactly one reached the writer" "1" "$(m39_trace "$arm.startsWritten")"
+  # THE SAME SUBSTITUTION FOR THE THREE COLUMN CAPABILITIES. The tracer opts in to all three before
+  # every circuit's `start`; `meta.dat` is fixed at the first record and the writer refuses a later
+  # opt-in, so only the first frame's three reach it.
+  assert_eq "$arm: the tracer asked for the three column capabilities once per frame" \
+    "$(( frames * 3 ))" "$(m39_trace "$arm.capabilitiesAsked")"
+  assert_eq "$arm: and each reached the writer exactly once" "3" "$(m39_trace "$arm.capabilitiesWritten")"
 done
 # AND THE PER-FRAME COUNTS SUM TO THE WHOLE, which a total alone cannot say: a two-frame report
 # whose second frame recorded nothing has the same total as a one-frame one that recorded more.

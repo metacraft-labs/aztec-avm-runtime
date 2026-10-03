@@ -246,8 +246,18 @@ assert_true "and the two digests DIFFER, which is the column reaching the contai
 # tracer gave a column, plus the frame-entry steps a column-aware decoder answers 1 for (§3's
 # difference, from the other side). An exact figure, derived, not a lower bound: a reader that
 # surfaced a column on EVERY step would pass `>=`.
-assert_eq "the pinned reader surfaces the private container's columns: the tracer's, plus one per frame entry" \
-  "$((PCOLS + PFRAMES))" "$(m40_container "$PRIV_CT" withColumn)"
+# AND ONE MORE: THE WRITER'S OWN ENTRY STEP. `start` records it on the container's declared source
+# path, which nothing interns with a table. A column-aware writer decides a path's table at its
+# first mention and gives an untabled one the conventional table (`internal-files.md`, "paths.dat
+# Layout A"), so that step sits at its line's start -- column 1 -- like the frame entries. It is
+# asserted by position as well as counted, so the +1 is that step and not some other one.
+PRIV_ALL="$(m40_container "$PRIV_CT" positions)"
+assert_eq "the private container's first step is the writer's entry step, on the declared source path at column 1" \
+  "/aztec/private.nr:1:1" "$(printf '%s\n' "$PRIV_ALL" | sed -n '1p')"
+assert_eq "and the container holds the source steps plus that one" \
+  "$((PSTEPS + 1))" "$(printf '%s\n' "$PRIV_ALL" | grep -c .)"
+assert_eq "the pinned reader surfaces the private container's columns: the tracer's, one per frame entry, and the entry step's" \
+  "$((PCOLS + PFRAMES + 1))" "$(m40_container "$PRIV_CT" withColumn)"
 assert_ge "while it surfaces every one of the native container's" "$PCOLS" \
   "$(m40_container "$NATIVE_CT" withColumn)"
 

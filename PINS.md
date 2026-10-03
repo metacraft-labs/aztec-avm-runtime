@@ -74,12 +74,20 @@ there is exactly one **authority**, and that nothing anywhere disagrees with it.
    with a decode that misses the step count the reader recovers). It used to be the reader fix's
    parent, a one-commit difference; that was retired by M41 because a control chosen by graph
    position breaks at every non-adjacent fix, and the check asserts the property and the ancestry
-   instead. So the reader anchor no longer has to sit on a particular commit, and since 2026-10-02
-   both roles name the `dev` tip. **Do not collapse them into one field anyway**: that they agree is a
-   fact about today's `dev`, and a single anchor would retire one of the two controls. `WRITER-SEAM.md`
-   §6 records when neither reader read both writers' containers, which held the runtime's default at
-   Path A; both writers now emit container v4 and `meta.dat` v4, the reader anchor reads both, and the
-   default is Path B (`WRITER-SEAM.md` §11). §13 there records the move to the `dev` tips.
+   instead. So the reader anchor no longer has to sit on a particular commit: both roles named the
+   `dev` tip from 2026-10-02 and, since 2026-10-03, the `agents` tip, where the 2026-10 format
+   revision landed. **Do not collapse them into one field anyway**: that they agree is a fact about
+   today's `agents`, and a single anchor would retire one of the two controls. `WRITER-SEAM.md` §6
+   records when neither reader read both writers' containers, which held the runtime's default at
+   Path A; both writers now emit container v5 and `meta.dat` v6, the reader anchor reads both, and the
+   default is Path B (`WRITER-SEAM.md` §11). §13 there records the move to the `dev` tips and §14 the
+   move to the `agents` tips.
+4b. **`trace_format` and both Nim roles move TOGETHER.** From `codetracer-trace-format` `88e17ff`
+   on, `codetracer_trace_writer_nim/build.rs` builds the Nim archive through the Nim repository's
+   `build_ffi.nims` and refuses a Nim checkout older than `5241693`, so a Rust anchor at or past
+   `88e17ff` with a Nim anchor before `5241693` is a pair that does not build. And each anchor's
+   `branch_at_pin` names the branch the commit is the tip of when it is pinned; a move to another
+   branch changes that field with the commit, as `dev` → `agents` did.
 5. **A bump is not a version edit.** It is, in order:
    - `tools/repin.py --apply` (rewrites the `@aztec/*` versions in the affected trees),
    - `npm install` in each affected tree so the lockfile follows,

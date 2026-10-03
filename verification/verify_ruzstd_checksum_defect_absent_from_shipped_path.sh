@@ -120,11 +120,32 @@ assert_true "while path-b names no crate at all" grep -qE '^path-b = \[\]' "$MAN
 # ---------------------------------------------------------------------------
 NIM_SRC="$M41_CRATE/build-wasm-deps/ctf-nim"
 assert_dir "the Nim writer source the Path B module was built from is materialised" "$NIM_SRC"
-NIM_HITS="$(grep -ril 'ruzstd' "$NIM_SRC" 2>/dev/null | grep -c . || true)"
-assert_eq "and no file in it mentions ruzstd" "0" "$NIM_HITS"
+#
+# CODE, NOT PROSE. The Nim tree's own comments may NAME `ruzstd` -- `codetracer_ctfs/types.nim`
+# does, describing what the Rust db-backend decodes with -- and a comment links nothing. So the
+# question is asked of the text before any `#` on each Nim line: a mention there is code (an import, a
+# binding, a string the build passes on) and would fail this. The filter is calibrated both ways
+# below: it keeps a code line and drops a comment line, so a filter that dropped everything cannot
+# read as a clean tree.
+nim_code_mentions() { # reads lines on stdin, prints how many mention ruzstd outside a comment
+  awk 'BEGIN{IGNORECASE=1; n=0} { c=index($0, "#"); t=(c>0)?substr($0,1,c-1):$0; if (tolower(t) ~ /ruzstd/) n++ } END{print n}'
+}
+NIM_FILES_NAMING="$(grep -ril 'ruzstd' "$NIM_SRC" 2>/dev/null | grep -c . || true)"
+# Only NIM sources get the `#` rule: in C a `#` opens `#include`, so every other file is held to the
+# plain search, comments and all.
+NIM_CODE="$(find "$NIM_SRC" -type f \( -name '*.nim' -o -name '*.nims' -o -name '*.cfg' \) \
+  -exec cat {} + 2>/dev/null | nim_code_mentions)"
+OTHER_HITS="$(find "$NIM_SRC" -type f ! -name '*.nim' ! -name '*.nims' ! -name '*.cfg' \
+  -exec grep -il 'ruzstd' {} + 2>/dev/null | grep -c . || true)"
+NIM_HITS="$(( NIM_CODE + OTHER_HITS ))"
+assert_eq "and no line of code in it mentions ruzstd" "0" "$NIM_HITS"
+assert_eq "CONTROL: the filter keeps a code line that names it" "1" \
+  "$(printf 'import ruzstd/decoder  # the binding\n' | nim_code_mentions)"
+assert_eq "CONTROL: and drops a comment line that only names it" "0" \
+  "$(printf '    ## the db-backend decodes these with `ruzstd`\n' | nim_code_mentions)"
 # The same grep DOES find the compressor the Nim writer actually uses, so the search is a search.
 ZSTD_HITS="$(grep -ril 'zstd' "$NIM_SRC" 2>/dev/null | grep -c . || true)"
 assert_ge "while the same grep finds zstd, which is what it binds" 1 "$ZSTD_HITS"
-m41_say "the materialised Nim tree: $NIM_HITS files mention ruzstd, $ZSTD_HITS mention zstd"
+m41_say "the materialised Nim tree: $NIM_HITS code lines mention ruzstd ($NIM_FILES_NAMING files name it, in comments), $ZSTD_HITS files mention zstd"
 
 finish

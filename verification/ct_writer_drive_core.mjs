@@ -47,12 +47,18 @@ ADDRESS[31] = 0x2a;
 export const EXPECTED_STEPS = [
   // The start step, which Path B emits and Path A does not. Both writers place it at the SOURCE
   // path's entry line; a check comparing per-step positions must therefore compare the tail.
-  { path: SOURCE, line: 1, column: null, from: 'start' },
+  //
+  // SOURCE is never interned with a table: `ct_writer_open` hands it to `start`, which is its first
+  // mention. A column-aware writer decides a path's table at its first mention and gives an
+  // untabled one the conventional table (`internal-files.md`, "paths.dat Layout A"), so every step
+  // on SOURCE sits at a real line's start -- column 1, the same as a line-only step on a tabled
+  // path -- and not at "no column".
+  { path: SOURCE, line: 1, column: 1, from: 'start' },
   { path: INTERNED_PATH, line: 2, column: 3, from: 'ct_ingest' },
   { path: INTERNED_PATH, line: 3, column: 4, from: 'ct_ingest' },
   { path: INTERNED_PATH, line: 4, column: 5, from: 'ct_ingest' },
   { path: INTERNED_PATH, line: 5, column: 1, from: 'ct_ingest (line only)' },
-  { path: SOURCE, line: 200, column: null, from: 'ct_step, no position: the rung-3 fallback' },
+  { path: SOURCE, line: 200, column: 1, from: 'ct_step, no position: the rung-3 fallback' },
   { path: INTERNED_PATH, line: 5, column: 9, from: 'ct_source_step' },
   { path: INTERNED_PATH, line: 6, column: 1, from: 'ct_source_step (line only)' },
 ];

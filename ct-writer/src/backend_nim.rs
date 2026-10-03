@@ -443,24 +443,29 @@ impl CtWriterBackend for NimBackend {
         unsafe { trace_writer_register_return(self.handle) };
     }
 
-    fn register_path_with_line_lengths(&mut self, path: &Path, line_lengths: &[u32]) {
-        let c_path = match CStr::path(path) {
-            Ok(p) => p,
-            Err(e) => return set_error(&e),
-        };
+    fn register_path_with_line_lengths(
+        &mut self,
+        path: &Path,
+        line_lengths: &[u32],
+    ) -> Result<(), String> {
+        let c_path = CStr::path(path)?;
         let ptr = if line_lengths.is_empty() {
             core::ptr::null()
         } else {
             line_lengths.as_ptr()
         };
-        unsafe {
+        let rc = unsafe {
             trace_writer_register_path_with_line_lengths(
                 self.handle,
                 c_path.ptr(),
                 line_lengths.len() as c_int,
                 ptr,
-            );
+            )
+        };
+        if rc != 0 {
+            return Err(last_error());
         }
+        Ok(())
     }
 
     fn register_step(&mut self, path: &Path, line: i64) {

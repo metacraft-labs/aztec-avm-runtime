@@ -44,7 +44,7 @@ enqueues a second directly.
 | instructions the public half executed | **146** |
 | AVM contexts they ran in | **2** |
 | distinct opcodes among them | **15** |
-| the public half's container bytes | **147456** |
+| the public half's container bytes | **81920** |
 | steps of it positioned in aztec-nr source | **110** |
 | instructions the unseeded control executed | **1** |
 
@@ -135,7 +135,7 @@ asserted about. This is a different answer to the same need rather than the answ
 | private frames in the container | **2** |
 | ops replayed into the writer | **147** |
 | paths the private container interns | **78** |
-| the private half's container bytes | **172032** |
+| the private half's container bytes | **102400** |
 | steps the NATIVE probe produced | **64** |
 | column differences between them | **2** |
 | imports the tracer module declares | **4** |
@@ -176,15 +176,19 @@ When this was written the pinned `ct-print` rendered this container through its 
 reading that absence as "the browser's container has no columns" would have been a fact about the
 READER stated as one about the container. Neither writer emits `events.log` any more, the container
 now decodes through the split-stream reader, and that reader surfaces the columns directly — one per
-step the tracer gave a column, plus one per frame entry — which the check asserts as an exact figure.
+step the tracer gave a column, plus one per frame entry, plus the writer's own entry step — which the
+check asserts as an exact figure. The entry step counts since the 2026-10 format revision: `start`
+records it on the container's declared source path, which nothing interns with a table, and a
+column-aware writer now gives such a path the conventional table at its first mention, so the step
+sits at its line's start, column 1, where it used to carry no column.
 
 The digest pair is kept, because it measures the same thing at the writer's boundary rather than
 through a reader: the same transaction written twice with one field changed:
 
 | arm | container bytes | sha256 |
 |---|---|---|
-| the tracer's columns | 172,032 | `79bba749…` |
-| every step's column set to 0 | 172,032 | `a7f5805f…` |
+| the tracer's columns | 102,400 | `1b37695e…` |
+| every step's column set to 0 | 102,400 | `a22b73b9…` |
 
 Same op list, same steps, same paths, same size — a different digest, because a column is a delta
 opcode rather than a field. The column reaches the container.

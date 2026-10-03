@@ -114,7 +114,13 @@ pub trait CtWriterBackend: Sized {
     fn register_return(&mut self, none_type_id: u64);
 
     /// Intern a source path along with its per-line lengths.
-    fn register_path_with_line_lengths(&mut self, path: &Path, line_lengths: &[u32]);
+    ///
+    /// Fallible, and the refusal is the WRITER's: both writers decide a column-aware path's table at
+    /// its first mention and refuse a later, different one, and each records that refusal and fails
+    /// the close. Returning it here lets `ct_intern_path` refuse at the call that caused it, naming
+    /// the path, instead of a close that fails long after for a reason the host can no longer place.
+    fn register_path_with_line_lengths(&mut self, path: &Path, line_lengths: &[u32])
+        -> Result<(), String>;
 
     /// Record a step at `(path, line)`.
     fn register_step(&mut self, path: &Path, line: i64);

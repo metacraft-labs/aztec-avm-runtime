@@ -262,6 +262,9 @@ struct Session {
     events: u64,
     /// Paths interned through `ct_intern_path`, in id order. Index is the id a host quotes.
     paths: Vec<PathBuf>,
+    /// The line-length table each of `paths` was interned with, as the host offered it. A later
+    /// registration of the same path is compared against it; see `ct_intern_path`.
+    tables: Vec<Vec<u32>>,
     /// The FIFO `emit()` consumes one entry of per step.
     positions: std::collections::VecDeque<Position>,
     rungs: Vec<RungDeclaration>,
@@ -487,6 +490,7 @@ pub unsafe extern "C" fn ct_writer_open(
             columns_requested: want_columns != 0,
             events: 0,
             paths: Vec::new(),
+            tables: Vec::new(),
             positions: std::collections::VecDeque::new(),
             rungs: Vec::new(),
             positioned: 0,
@@ -797,6 +801,11 @@ pub extern "C" fn ct_rung_count() -> u32 {
 /// is accepted and ignored on a line-only recording, which is upstream's own contract for
 /// `register_path_with_line_lengths`, so a host may pass it unconditionally.
 ///
+/// Interning a path again returns its id when the table is the same or empty. A DIFFERENT table is
+/// refused with `CT_ERR_WRITER`, as is a table the writer itself refuses (the session's own source
+/// path, offered a table after `start` mentioned it, on a column-aware recording): a path's table
+/// is decided at its first mention.
+///
 /// # Safety
 /// `path_ptr` must address `path_len` readable bytes; `line_lengths_ptr` must address
 /// `line_lengths_count` readable `u32`s.
@@ -835,12 +844,39 @@ pub unsafe extern "C" fn ct_intern_path(
         }
     };
     let buf = PathBuf::from(&path);
+    // A PATH'S TABLE IS DECIDED AT ITS FIRST MENTION, AND A LATER, DIFFERENT ONE IS REFUSED.
+    //
+    // That is both writers' rule (`internal-files.md`, "paths.dat Layout A"): the table a path is
+    // first interned with is the one its steps are addressed in, and a second registration offering
+    // another would leave the file with a table that does not describe it. This module answers a
+    // repeat registration itself, from `paths`, so the writer never sees it -- and therefore this
+    // is where the rule has to be kept. The same table again, or none, is the same path and
+    // returns its id; a different one is a host interning two different files under one name, and
+    // is refused naming the path rather than resolved silently in favour of the first.
     if let Some(i) = s.paths.iter().position(|p| *p == buf) {
-        return i as i32;
+        if line_lengths.is_empty() || s.tables[i] == line_lengths {
+            set_error("");
+            return i as i32;
+        }
+        set_error(&format!(
+            "ct_intern_path: {path} is already interned with a {}-line table and this \
+             registration offers a different {}-line one; a path's table is decided at its first \
+             mention, so two different files cannot be interned under one path",
+            s.tables[i].len(),
+            line_lengths.len()
+        ));
+        return CT_ERR_WRITER;
     }
-    s.writer
-        .register_path_with_line_lengths(&buf, &line_lengths);
+    // AND THE WRITER'S OWN REFUSAL, AT THE CALL THAT CAUSED IT. The session's source path is
+    // mentioned by `start` at open, with no table; a column-aware writer gives it the conventional
+    // table there and refuses a later, different one. Ignoring the result here would leave the
+    // refusal to fail the CLOSE, long after, for a reason the host could no longer place.
+    if let Err(e) = s.writer.register_path_with_line_lengths(&buf, &line_lengths) {
+        set_error(&format!("ct_intern_path: the writer refused {path}: {e}"));
+        return CT_ERR_WRITER;
+    }
     s.paths.push(buf);
+    s.tables.push(line_lengths);
     set_error("");
     (s.paths.len() - 1) as i32
 }

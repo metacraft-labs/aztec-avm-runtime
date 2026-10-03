@@ -39,7 +39,7 @@
 #   ct-split-probe-writer @ pins.json trace_format_nim_writer.commit
 #
 # When M41 added them the reader anchor named 2026-08-20 and the writer anchor 2026-09-09; today
-# both name the same `dev` tip and the pair is skipped below. While they differed, a Path B container was
+# both name the same commit (the `agents` tip) and the pair is skipped below. While they differed, a Path B container was
 # written by the LATER tree, and its split streams carry an index layout the earlier reader does
 # not know: `ct-split-probe` at the reader anchor reports `steps.dat: index file too small for
 # trailer` and cannot find `values.off` or `events.off` at all. That is not a defect in either

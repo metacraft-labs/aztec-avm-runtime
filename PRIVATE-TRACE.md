@@ -257,12 +257,16 @@ supplies an executor.
 | distinct `(path, line)` in the container | **13** | **47** |
 | distinct source files in the container | **5** | **16** |
 | paths the container interns | **60** | **135** |
-| container bytes | **753,664** | **1,351,680** |
+| container bytes | **679,936** | **1,273,856** |
 | `Step` events the pinned `ct-print` reads back | **22** | **63** |
 
 Both container sizes grew by exactly 8,192 bytes — two 4 KiB blocks — when the Nim writer anchor
 moved to `f22e84710f` on 2026-10-02 (`pins.json` history); every other figure in the table is
 unmoved. The growth is measured whole and not attributed to a particular writer change.
+They fell again, by 73,728 and 77,824 bytes (18 and 19 blocks), when the writer moved to the 2026-10
+format revision (`7967c179dd`, 2026-10-03): container v5 stores a member of at most one block
+without a mapping block and an empty member with none, and both containers carry many small
+members. Again every other figure is unmoved.
 
 **The reader's count is one more than the recorder's, in both arms, and that is not a discrepancy.**
 `TraceSink::start` emits the entry step at line 1 before the loop begins;
