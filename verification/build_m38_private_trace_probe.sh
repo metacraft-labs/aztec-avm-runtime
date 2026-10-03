@@ -129,7 +129,15 @@ EOF
 
 SPEC_SHA="$(sha256sum "$PROBE/src/main.rs" "$PROBE/Cargo.toml" 2>/dev/null | sha256sum | cut -d' ' -f1)"
 STAMP_FILE="$PROBE/built-from"
-STAMP_WANT="$SPEC_SHA $NOIR_HEAD $CTF_REV"
+# THE NIM WRITER THE PROBE LINKS IS PART OF WHAT WAS BUILT, so its revision is in the stamp. Without
+# it a `trace_format_nim_writer` move left the cached probe in place, linked against the previous
+# writer, and every check reading the probe measured the old writer under the new pin.
+NIM_WRITER_REV="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["anchors"]["trace_format_nim_writer"]["commit"])' "$REPO_ROOT/pins.json" 2>/dev/null)"
+case "$NIM_WRITER_REV" in
+  [0-9a-f][0-9a-f]*) : ;;
+  *) die "pins.json declares no anchors.trace_format_nim_writer.commit, and this probe links the Nim writer" ;;
+esac
+STAMP_WANT="$SPEC_SHA $NOIR_HEAD $CTF_REV nim-$NIM_WRITER_REV"
 if [ "$FORCE" -eq 0 ] && [ -x "$PROBE/bin/m38probe" ] \
    && [ "$(cat "$STAMP_FILE" 2>/dev/null)" = "$STAMP_WANT" ]; then
   printf '%s: up to date (%s)\n' "$TEST_NAME" "$PROBE/bin/m38probe"
@@ -196,11 +204,7 @@ done
 # The revision supplied is THIS repository's declared writer anchor, materialised out of the object
 # store like everything else, so the probe's Nim half is pinned by `pins.json` rather than by
 # whichever commit a sibling working tree is sitting on.
-NIM_WRITER_REV="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["anchors"]["trace_format_nim_writer"]["commit"])' "$REPO_ROOT/pins.json" 2>/dev/null)"
-case "$NIM_WRITER_REV" in
-  [0-9a-f][0-9a-f]*) : ;;
-  *) die "pins.json declares no anchors.trace_format_nim_writer.commit, and this probe links the Nim writer" ;;
-esac
+# `NIM_WRITER_REV` was read from pins.json above, for the stamp.
 NIM_REPO="${TRACE_FORMAT_NIM_REPO:-$WORKSPACE_ROOT/codetracer-trace-format-nim}"
 [ -e "$NIM_REPO/.git" ] || die "no codetracer-trace-format-nim checkout at $NIM_REPO"
 git -C "$NIM_REPO" cat-file -e "$NIM_WRITER_REV^{commit}" 2>/dev/null \

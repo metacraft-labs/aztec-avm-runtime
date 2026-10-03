@@ -69,4 +69,8 @@ PATH="$TC_PATH:$PATH" RUSTUP_TOOLCHAIN="$RUST_VER" bash -c '
 for arm in int low64 bigint string raw; do
   [ -s "$M25_WORK/oq4-$arm.ct" ] || die "the probe reported success but produced no $M25_WORK/oq4-$arm.ct"
 done
+# What these containers were written WITH, for the check that reads them: the writer revision and
+# the probe source. A check that reuses them must find both unchanged.
+printf '%s %s\n' "$WANT" "$(sha256sum "$VERIFY_DIR/oq4_rendering_probe.rs" | cut -d' ' -f1)" \
+  > "$M25_WORK/oq4-built-from" || die "could not record what the containers were built from"
 printf '%s: five rendering arms in %s\n' "$TEST_NAME" "$M25_WORK"

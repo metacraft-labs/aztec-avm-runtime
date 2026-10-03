@@ -202,7 +202,14 @@ assert_true "…and records the cost, which is that a small field now reads as 0
 # ===========================================================================
 m24_require_module
 m24_require_readers
-if [ ! -s "$M25_WORK/oq4-bigint.ct" ] || [ "$VERIFY_DIR/oq4_rendering_probe.rs" -nt "$M25_WORK/oq4-bigint.ct" ]; then
+# THE CONTAINERS ARE THE WRITER'S AT THE PINNED REVISION, OR THEY ARE REBUILT. They used to be
+# rebuilt only when the probe's SOURCE was newer, so a `trace_format` move left the previous
+# writer's containers in place -- measured: five CTFS version-3 containers, written months of pin
+# moves earlier, still being read here, and read successfully until the reader stopped accepting
+# version 3. The build records the revision it wrote with; anything else rebuilds.
+OQ4_STAMP_WANT="$(m24_pin trace_format commit) $(sha256sum "$VERIFY_DIR/oq4_rendering_probe.rs" | cut -d' ' -f1)"
+if [ ! -s "$M25_WORK/oq4-bigint.ct" ] \
+   || [ "$(cat "$M25_WORK/oq4-built-from" 2>/dev/null)" != "$OQ4_STAMP_WANT" ]; then
   m24_require_bounded_logged "$M24_BUILD_TIMEOUT" "the OQ-4 rendering probe" \
     "$VERIFY_DIR/build_oq4_rendering_probe.sh" \
     || die "verification/build_oq4_rendering_probe.sh failed; see $M24_WORK/bounded-run.log"

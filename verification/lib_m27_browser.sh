@@ -254,7 +254,13 @@ PY
 # ---------------------------------------------------------------------------
 m27_arms_newer_inputs() {
   [ -s "$M27_ARMS" ] || { printf 'browser.json\n'; return 0; }
+  # THE WRITER MODULE THE ARMS SERVE IS AN INPUT TOO. `run_browser_arms.mjs` copies the default
+  # ct-writer build into the page; without it here a writer rebuild -- a trace-format pin move --
+  # left the previous writer's containers in `browser.json`, and a milestone reading them before
+  # anything else refreshed the arms measured the old writer (M25, measured: a container v4 read
+  # under the v5 reader).
   find "$AVM_WASM_PATH" "$REPO_ROOT/tools/run_browser_arms.mjs" "$REPO_ROOT/tools/browser_cdp.mjs" \
+    "$REPO_ROOT/ct-writer/target/wasm32-unknown-unknown/release/aztec_ct_writer.wasm" \
     -newer "$M27_ARMS" -print -quit 2>/dev/null || true
   find "$BROWSER_DIST" -type f ! -name '.*' -newer "$M27_ARMS" -print -quit 2>/dev/null || true
 }

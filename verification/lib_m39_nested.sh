@@ -41,6 +41,11 @@ m39_arms_newer_inputs() {
   find "$REPO_ROOT/tools/run_m39_nested_arms.mjs" -newer "$M39_ARMS" -print -quit 2>/dev/null || true
   find "$REPO_ROOT/tools/browser_cdp.mjs" -newer "$M39_ARMS" -print -quit 2>/dev/null || true
   find "$BROWSER_DIST" -type f ! -name '.*' -newer "$M39_ARMS" -print -quit 2>/dev/null || true
+  # THE WRITER MODULE THE PAGE IS SERVED IS AN INPUT, as `m40_arms_newer_inputs` already says: the
+  # runner copies the default ct-writer build into the page, so a writer rebuild -- a trace-format
+  # pin move -- must re-run the arms rather than leave the previous writer's containers in place.
+  find "$REPO_ROOT/ct-writer/target/wasm32-unknown-unknown/release/aztec_ct_writer.wasm" \
+    -newer "$M39_ARMS" -print -quit 2>/dev/null || true
 }
 
 # _m39_run_bounded <label> <timeout> <report path> <script> <work dir> [env pairs...]
