@@ -3875,7 +3875,8 @@ verify-m41:
       verify_in_memory_reader_reachable_from_browser \
       verify_container_equivalence_characterised \
       e2e_runtime_traces_through_nim_writer \
-      verify_declared_writer_path_matches_module
+      verify_declared_writer_path_matches_module \
+      verify_path_table_fixed_at_first_mention
     do
       echo "=== $check"
       verification/"$check".sh || rc=1
