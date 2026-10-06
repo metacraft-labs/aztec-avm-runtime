@@ -221,7 +221,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -430,7 +430,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -608,7 +608,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -775,7 +775,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -970,7 +970,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -1174,7 +1174,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -1396,7 +1396,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -1575,7 +1575,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -2113,7 +2113,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -2330,7 +2330,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -2568,7 +2568,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
