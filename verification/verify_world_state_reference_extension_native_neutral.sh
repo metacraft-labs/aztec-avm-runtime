@@ -42,6 +42,17 @@ done
 FORK_SHOW() { git -C "$FORK_ROOT" show "$M6_BASE_REV:$1" 2>/dev/null; }
 RUNDIR="$M14_WORK/neutral"; mkdir -p "$RUNDIR"
 
+# Acquire verified original SRS before the unchanged offline native test bodies.
+export CRS_PATH=/dev/null/native-srs-prerequisite-refused
+SRS_SETUP_RC=0
+SRS_CONTEXT="$(python3 "$VERIFY_DIR/prepare_native_srs.py" \
+  "$(dirname "$(dirname "$M14_BASE_VM2_TESTS")")" "$M14_WORK")" || SRS_SETUP_RC=$?
+assert_eq "verified original full native SRS prerequisite succeeds" "0" "$SRS_SETUP_RC"
+if [ -n "$SRS_CONTEXT" ] && [ -d "$SRS_CONTEXT" ] && [ ! -L "$SRS_CONTEXT" ]; then
+  export CRS_PATH="$SRS_CONTEXT"
+fi
+
+
 run_gtest() { # <binary> <label> <args...>
   local bin="$1" label="$2"; shift 2
   m6_in_devshell '
