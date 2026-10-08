@@ -173,6 +173,11 @@ assert_eq "and no lmdb.h exists anywhere under the wasm build tree" \
 # what the path IS — a `_deps` subtree — and the exclusion is MEASURED rather than
 # assumed: the search must find some lmdb.h at all, and every one it finds must be
 # under a `_deps`, so nothing is being waved through and nothing is inert.
+# Exercise the original pinned ExternalProject before asserting that this
+# absence search has a real positive control. Configure alone does not download
+# lmdb_repo, and vm2_sim deliberately has no edge to that native dependency.
+m6_in_devshell 'cmake --build "$1" --target lmdb_repo' "$AVM_CPP/build-native-off"
+assert_eq "the original native lmdb_repo prerequisite builds successfully" "0" "$?"
 LMDB_ALL="$(find "$M6_TREE_AVM" -name lmdb.h 2>/dev/null | sort)"
 LMDB_N=$(printf '%s\n' "$LMDB_ALL" | grep -c . || true)
 LMDB_DEPS=$(printf '%s\n' "$LMDB_ALL" | grep -c '/_deps/' || true)
