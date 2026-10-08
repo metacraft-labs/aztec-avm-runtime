@@ -137,11 +137,18 @@ ctprint_root() { # <binary>
 # nobody wrote and points at nothing a reader can act on. The `--cc:` family only has to match the
 # compiler's FLAG DIALECT, so it is derived from what the compiler says it is.
 host_nim_cc() { # <path-to-cc>
-  if "$1" --version 2>&1 | head -1 | grep -qiE 'clang'; then
-    printf 'clang\n'
+  local compiler_version compiler_first compiler_status
+  if compiler_version="$("$1" --version 2>&1)"; then
+    compiler_first="${compiler_version%%$'\n'*}"
   else
-    printf 'gcc\n'
+    compiler_status=$?
+    printf 'compiler version probe failed: %s\n%s\n' "$1" "$compiler_version" >&2
+    return "$compiler_status"
   fi
+  case "$compiler_first" in
+    *[cC][lL][aA][nN][gG]*) printf 'clang\n' ;;
+    *) printf 'gcc\n' ;;
+  esac
 }
 
 build_one() { # <rev> <tree-dir> <out-binary>
