@@ -132,6 +132,7 @@ done
 [ -d "$NOIR_REPO/.git" ] || [ -f "$NOIR_REPO/.git" ] || die "no noir checkout at $NOIR_REPO"
 [ -f "$PATCH" ] || die "the prepared upstream patch is missing: $PATCH"
 [ -d "$SHIM_SRC/src" ] || die "no shim crate at $SHIM_SRC"
+[ -f "$SHIM_SRC/Cargo.lock" ] || die "the reproducible shim Cargo.lock is missing"
 [ -d "$FIXTURES" ] || die "no contract fixtures at $FIXTURES"
 
 git -C "$AZTEC_REPO" cat-file -e "$AZTEC_REV^{commit}" 2>/dev/null || \
@@ -234,6 +235,8 @@ rm -rf "$TREE/avm-transpiler-wasm/src" "$TREE/avm-transpiler-wasm/.cargo" \
        "$TREE/avm-transpiler-wasm/Cargo.toml"
 mkdir -p "$TREE/avm-transpiler-wasm"
 cp -r "$TREE/avm-transpiler-wasm.new/." "$TREE/avm-transpiler-wasm/"
+cmp -s "$SHIM_SRC/Cargo.lock" "$TREE/avm-transpiler-wasm/Cargo.lock" || \
+  die "the staged shim Cargo.lock differs from its declared source"
 rm -rf "$TREE/avm-transpiler-wasm.new"
 # `cp` preserves nothing here (no -p), so the copies are new-mtimed and cargo cannot decline to
 # rebuild from them. That is the `cp -p` trap this campaign has now met four times, avoided by
@@ -301,7 +304,9 @@ SRC_COUNT="$(printf '%s\n' "$SRC_LIST" | grep -c . || true)"
   die "the build stamp found only ${SRC_COUNT:-0} source files; a stamp over an empty list
      matches every build. Check the paths."
 BUILD_WANT="$( { printf '%s\n' "$SRC_LIST" | xargs sha256sum
-                 sha256sum "$TREE/noir/noir-repo/Cargo.lock"; } | sha256sum | cut -d' ' -f1)"
+                 sha256sum "$TREE/noir/noir-repo/Cargo.lock" \
+                           "$TREE/avm-transpiler/Cargo.lock" \
+                           "$TREE/avm-transpiler-wasm/Cargo.lock"; } | sha256sum | cut -d' ' -f1)"
 
 # Each build's stamp carries the compiler that produced it: a module built by another rustc is a
 # different module, and `stable` floating 1.98.1 -> 1.99.0 changed ct-writer's bytes with no source
@@ -324,7 +329,7 @@ if [ "$FORCE" = 1 ] || [ ! -f "$MODULE" ] || \
    [ "$(cat "$MODULE_STAMP" 2>/dev/null)" != "$BUILD_WANT rust-$SHIM_RUST" ]; then
   say "building avm_transpiler_wasm.wasm for wasm32-unknown-unknown"
   m31_cargo "$TREE/avm-transpiler-wasm" "$SHIM_RUST" '
-      cargo build --release --target wasm32-unknown-unknown
+      cargo build --release --locked --target wasm32-unknown-unknown
     ' >&2 || die "the wasm build failed"
   [ -f "$MODULE" ] || die "the wasm build reported success but $MODULE does not exist"
   printf '%s\n' "$BUILD_WANT rust-$SHIM_RUST" >"$MODULE_STAMP"
