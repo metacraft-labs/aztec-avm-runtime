@@ -1565,6 +1565,86 @@ were absorbed silently.
 - evidence: `aztec-avm-runtime/verification/lib_m34_wallet.sh` (`m34_log_events`);
   `aztec-avm-runtime/verification/_ct_frames.py` (`ev_type`).
 
+## D32 — the reader refuses a file that is not a container when it opens it, not stream by stream
+
+- id: D32
+- status: closed
+- opened: 2026-10-08
+- milestone: the trace-format re-pin of 2026-10-08 (`pins.json` history), read by m24's
+  `test_ct_container_roundtrip_ct_print`
+- design-question: —
+- sides: `openNewTrace` at `anchors.trace_format_nim` (`051efd22b0`), which reads the container
+  header when it opens a file, to choose the full or the compact profile, and refuses a file
+  without the CTFS magic there (`not a CTFS container: the first five bytes are not the magic`);
+  versus the previous anchor (`7967c179dd`), which opened such a file and failed each stream as it
+  was read
+- what: the instrument control in `test_ct_container_roundtrip_ct_print` fed `ct_split_probe` 4,096
+  random bytes and required `ERR:steps.dat:`, `ERR:values.dat:` and `ERR:calls.dat:`. The probe now
+  stops at `OPEN` with the reader's refusal and reports no stream, so all three were red.
+- why it matters: the control exists so that "steps.dat decodes" cannot be a statement about the
+  probe. It still has to see the probe report a non-container as unreadable, never as an empty one;
+  only the place the refusal is reported moved.
+- decision: **Conformed to the open-time refusal.** The control requires `OPEN` to be an `ERR:`
+  naming a non-CTFS file, not `ok`, and no `STEP_COUNT` line carrying a number. Four assertions as
+  before, so the check stays at 94.
+- evidence: `aztec-avm-runtime/verification/test_ct_container_roundtrip_ct_print.sh` (the
+  instrument's own control); `codetracer-trace-format-nim` `a8fa27f`.
+
+## D33 — the C ABI opens a container from bytes, so its freestanding build is no longer write-only
+
+- id: D33
+- status: closed
+- opened: 2026-10-08
+- milestone: the trace-format re-pin of 2026-10-08 (`pins.json` history), read by m41's
+  `verify_in_memory_reader_reachable_from_browser`
+- design-question: —
+- sides: `codetracer_trace_writer_ffi.nim` at `anchors.trace_format_nim_writer` (`051efd22b0`),
+  which exports `ct_reader_open_bytes` outside the filesystem gate, so a freestanding wasm32 build
+  of the C ABI reaches `openNewTraceFromBytes`; versus the previous anchor (`7967c179dd`), whose C
+  ABI had only the gated, path-taking `ct_reader_open`, so Nim stripped the byte-taking constructor
+- what: the check asserted that the freestanding C ABI carried no reader constructor, and its
+  prefix match counted `ct_reader_open_bytes` as `ct_reader_open`, so the path-taking constructor
+  read as present on a target that has only the byte-taking one. Both assertions were red.
+- why it matters: the gate the check exists for still holds (`ct_reader_open` is absent from the
+  freestanding build), and the prefix match would have hidden it failing. This runtime's module
+  still exports no reader entry point: its export list is the writer ABI, counted by
+  `verify_ct_writer_wasm_zero_imports`.
+- decision: **Conformed.** An exported C name is matched as a whole word (`exportc` names are not
+  mangled); the absence of a reader constructor is replaced by two assertions of the capability —
+  the freestanding C ABI carries `ct_reader_open_bytes`, and reaches `openNewTraceFromBytes` — so
+  the check grows by one assertion.
+- evidence: `aztec-avm-runtime/verification/verify_in_memory_reader_reachable_from_browser.sh`;
+  `codetracer-trace-format-nim` `1b0b3bd`.
+
+## D34 — the pure-Rust writer honours a column request made before its first record, so the browser tracer's container is column-aware
+
+- id: D34
+- status: closed
+- opened: 2026-10-08
+- milestone: the trace-format re-pin of 2026-10-08 (`pins.json` history), read by m30's
+  `e2e_vfs_edit_recompile_retrace`
+- design-question: —
+- sides: `CtfsTraceWriter::enable_column_aware_steps` at `anchors.trace_format` (`3fada0b03c`),
+  which accepts the opt-in until the first record or path, as the Nim writer does (D28); versus the
+  previous anchor (`145ff42ff6`), which refused any opt-in once the container was open and set
+  `dropped_column_awareness()`
+- what: the Noir browser tracer (`../noir-wt4-webpage`, linking the writer at `../ctf-wt-wasm`)
+  asks for columns after opening the container and before its first record. The container now
+  carries `meta.dat`'s column-aware flag and its steps carry columns, and nothing is dropped. m30
+  asserted the opposite pair — "not column-aware" from the tracer's `ContainerInfo.column_aware`,
+  and "asked and dropped" — and the second went red. The first stayed green only because
+  `column_aware` is a constant `false` in the tracer, not a reading of the container.
+- why it matters: a field that cannot change is not evidence; it would have kept saying "not
+  column-aware" about a container that is.
+- decision: **Conformed, and measured from the container.** The page hands the container's bytes
+  back with the arms, and the check reads the column-aware flag through the pinned reader
+  (`ct_split_probe`'s `COLUMN_AWARE`) and requires `droppedColumnAwareness` false. The tracer's
+  constant is no longer read here; correcting it belongs to the Noir worktree, which this
+  repository does not edit.
+- evidence: `aztec-avm-runtime/verification/e2e_vfs_edit_recompile_retrace.sh` (§3);
+  `aztec-avm-runtime/verification/m30/page/vfs_page.mjs` (`containerB64`);
+  `noir-wt4-webpage/tooling/tracer_wasm/src/lib.rs` (`ContainerInfo`).
+
 <!-- END:drift -->
 
 ---

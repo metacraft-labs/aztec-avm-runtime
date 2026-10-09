@@ -58,7 +58,9 @@ assert_true "pins.json declares a trace_format_nim_writer anchor" \
 m41_say "trace_format_nim_writer = ${WRITER_REV:0:10}"
 
 NIM_REPO="${TRACE_FORMAT_NIM_REPO:-$(cd "$REPO_ROOT/.." && pwd)/codetracer-trace-format-nim}"
-assert_dir "the sibling trace-format-nim checkout is where the build expects it" "$NIM_REPO/.git"
+# `.git` is a directory in a clone and a file in a linked worktree; either is a checkout.
+assert_true "the sibling trace-format-nim checkout is where the build expects it" \
+  test -e "$NIM_REPO/.git"
 assert_true "and it has the pinned revision in its object store" \
   git -C "$NIM_REPO" cat-file -e "$WRITER_REV^{commit}"
 

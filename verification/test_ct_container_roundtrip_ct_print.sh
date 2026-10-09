@@ -519,20 +519,26 @@ assert_eq "and on the one source path" "$(dv PATH0)" "$(sv PATH0)"
 # --- THE INSTRUMENT'S OWN CONTROL ------------------------------------------
 #
 # Every assertion above is satisfied by a probe that cannot see a problem. Asked of a file that is
-# not a CTFS container, it must report the streams as UNREADABLE rather than as zero — and asked
-# of a file that is not there at all, it must say so against OPEN. Without these, "steps.dat
-# decodes" is a statement about the probe.
+# not a CTFS container, it must report it as UNREADABLE rather than as an empty container — and
+# asked of a file that is not there at all, it must say so against OPEN too. Without these,
+# "steps.dat decodes" is a statement about the probe.
+#
+# The reader reads a container's header when it opens it (it chooses the full or the compact
+# profile there), so a file without the CTFS magic is refused at OPEN, by name, and the probe
+# reports no stream at all. `DRIFT.md` D32.
 NOT_A_CONTAINER="$M24_WORK/not-a-container.bin"
 mkdir -p "$M24_WORK" || die "could not create $M24_WORK"
 head -c 4096 /dev/urandom >"$NOT_A_CONTAINER" 2>/dev/null || die "could not write $NOT_A_CONTAINER"
 CTRL="$(m24_split_probe "$NOT_A_CONTAINER")"
 cv() { printf '%s\n' "$CTRL" | sed -n "s/^$1"$'\t'"//p"; }
-assert_true "CONTROL: over a file that is not a container, steps.dat is reported UNREADABLE" \
-  str_has_sub "$(cv STEP_COUNT)" 'ERR:steps.dat:'
-assert_true "CONTROL: and so is values.dat" str_has_sub "$(cv VALUE_COUNT)" 'ERR:values.dat:'
-assert_true "CONTROL: and so is calls.dat" str_has_sub "$(cv CALL_COUNT)" 'ERR:calls.dat:'
+assert_true "CONTROL: over a file that is not a container, OPEN reports it UNREADABLE" \
+  str_has_sub "$(cv OPEN)" 'ERR:'
+assert_true "CONTROL: and names why — it is not a CTFS container" \
+  str_has_sub "$(cv OPEN)" 'not a CTFS container'
+assert_false "CONTROL: and it does NOT report the file as opened" \
+  str_has_re "$(cv OPEN)" '^ok$'
 assert_false "CONTROL: and it does NOT report a step count there" \
-  str_has_re "$(cv STEP_COUNT)" '^[0-9]+$'
+  str_has_line_re "$CTRL" '^STEP_COUNT'$'\t''[0-9]+$'
 MISSING_OUT="$(m24_split_probe "$M24_WORK/definitely-not-here.ct")"
 assert_true "CONTROL: a missing file is reported against OPEN, not as an empty container" \
   str_has_sub "$(printf '%s\n' "$MISSING_OUT" | sed -n "s/^OPEN"$'\t'"//p")" 'ERR:no such file'
