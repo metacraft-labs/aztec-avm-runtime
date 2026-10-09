@@ -18,9 +18,9 @@
 # `verify_transpiler_wasm_output_identical_to_native` reads it.
 #
 # THE VERSION IS NOT NAMED HERE ANY MORE, AND THAT IS A CORRECTION. This comment said "getrandom
-# 0.4.1's `unsupported` backend", and the error text above is 0.4.1's — but this crate is its own
-# workspace root with a lock resolved at build time, so the module actually links a later 0.4.x
-# (0.4.3 when M31's review measured it). The argument is only sound if the version the build
+# 0.4.1's `unsupported` backend", and the error text above is 0.4.1's. The historical unpinned
+# constructor resolved a later 0.4.x (0.4.3 when M31's review measured it). The current shim has
+# its own committed lock and is built --locked. The argument is only sound if the version the build
 # LINKS still has that backend, so `verify_transpiler_native_build_unaffected` §6 now reads the
 # version out of the build's own lock and asserts the backend exists in THAT version's source,
 # rather than quoting a version number nothing re-derives.
