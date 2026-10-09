@@ -101,11 +101,11 @@ silently.
 
 | arm | median (µs) | min (µs) | crossings | container (B) |
 |---|---|---|---|---|
-| `batched` | 406,646 | 390,218 | 25 | 765,952 |
-| `perEvent` | 414,130 | 395,983 | 100,000 | 765,952 |
-| `control` | 406,073 | 390,502 | 25 | 765,952 |
-| `nopBatched` | 5,440 | 4,613 | 25 | 69,632 |
-| `nopPerEvent` | 5,988 | 5,055 | 100,000 | 69,632 |
+| `batched` | 344,408 | 334,600 | 25 | 765,952 |
+| `perEvent` | 351,018 | 341,626 | 100,000 | 765,952 |
+| `control` | 343,871 | 334,411 | 25 | 765,952 |
+| `nopBatched` | 5,158 | 4,575 | 25 | 69,632 |
+| `nopPerEvent` | 5,643 | 4,924 | 100,000 | 69,632 |
 
 *Every figure in this table moved when the `trace_format` pin advanced to `c8802c548f` and the
 writer's compressor became C libzstd. **The container is the headline: 4,694,016 → 1,630,208
@@ -131,14 +131,19 @@ v5 stores a member of at most one block without a mapping block, and the one ste
 changed what `steps.dat` holds. The writer-work arms are slower again in absolute terms (`batched`
 385,864 → 406,646 µs); the ratio is again inside the margin.*
 
+*And again when both anchors moved to the final parity revisions on 2026-10-08 (run 18 in §8): the
+module is 874,954 bytes and the table above is run 18's. The containers are byte-for-byte the same
+size as run 17's — 765,952 and 69,632 — and the writer-work arms are faster in absolute terms
+(`batched` 406,646 → 344,408 µs); the ratio is again inside the margin.*
+
 | comparison | median | 95 % interval | reads as |
 |---|---|---|---|
-| `perEvent - batched` | **+1.62 %** | **[+1.19, +2.05] %** | within noise |
-| `control - batched` | +0.10 % | [-0.37, +0.58] % | the instrument is calibrated |
-| `nopPerEvent - nopBatched` | +11.49 % | [+7.46, +15.52] % | the crossing, priced alone |
+| `perEvent - batched` | **+2.27 %** | **[+1.66, +2.88] %** | within noise |
+| `control - batched` | -0.17 % | [-0.62, +0.28] % | the instrument is calibrated |
+| `nopPerEvent - nopBatched` | +9.51 % | [+7.14, +11.89] % | the crossing, priced alone |
 
 **Verdict: `within-noise`.** The comparator resolves a verdict only when the whole interval lies
-OUTSIDE ±3 %, and none of the seventeen runs resolves one. Within a *single* run the interval is narrow
+OUTSIDE ±3 %, and none of the eighteen runs resolves one. Within a *single* run the interval is narrow
 enough to exclude zero — twice, in opposite directions — which is exactly the pathology
 `_timing_compare.py`'s header records for a different measurement: *"six runs of the same
 measurement over the same two binaries produced mutually disjoint 95 % intervals"*. The
@@ -388,10 +393,19 @@ else can resolve is a local file wearing a pin's clothes.
 - **The module has zero wasm imports**, so it instantiates under a bare
   `WebAssembly.instantiate(bytes, {})` with no WASI shim, no `wasm-bindgen` and no glue file.
   `ct-host` has **no npm dependencies** and imports no Node module in its trace path.
-- **803,868 bytes** for the writer plus this ABI, release, `opt-level = "z"`, LTO,
-  `panic = "abort"`, one codegen unit, stripped, sha256 `fd72c147…`. It is byte-identical to the
+- **874,954 bytes** for the writer plus this ABI, release, `opt-level = "z"`, LTO,
+  `panic = "abort"`, one codegen unit, stripped, sha256 `86661c57…`. It is byte-identical to the
   explicitly-flagged `--no-default-features --features path-b` build, which
   `verify_writer_path_is_selectable` asserts on every run.
+
+  ***803,868 → 874,954 (+71,086) when both trace-format anchors moved to the final parity
+  revisions on 2026-10-08** (`trace_format` → `3fada0b03c`, both Nim roles → `051efd22b0`, the
+  `agents` tips; `pins.json` history), toolchain held at 1.98.1 and nothing in this ABI changed, so
+  the whole delta is the writer's 67 commits, measured whole and not decomposed: the spec-fixed
+  container append order, bytes stored as they are, member names that cannot be encoded refused,
+  and the C ABI's span, crossing, marker, line-hit and byte-taking reader entry points among them
+  (the module exports none of them). Still **39 exports** and **0 imports**. **Path A, 495,280 →
+  599,917**, still 47 exports.*
 
   ***776,323 → 803,868 (+27,545) when both trace-format anchors moved to the 2026-10 format
   revision on 2026-10-03** (`trace_format` → `145ff42ff6`, both Nim roles → `7967c179dd`, the
@@ -513,15 +527,15 @@ reconsidered if any of these changed:
 
 | quantity | measured | where |
 |---|---|---|
-| `perEvent - batched`, median | +1.86 % | §2 |
-| its 95 % interval | [+1.39, +2.33] % | §2 |
-| cost of one boundary crossing in V8 | ~5.5 ns | §2 |
-| the crossing's share of a 100k-event recording | 0.13 % | §2 |
-| writer work versus boundary work | ~740× | §2 |
+| `perEvent - batched`, median | +2.27 % | §2 |
+| its 95 % interval | [+1.66, +2.88] % | §2 |
+| cost of one boundary crossing in V8 | ~4.9 ns | §2 |
+| the crossing's share of a 100k-event recording | 0.14 % | §2 |
+| writer work versus boundary work | ~710× | §2 |
 | containers produced by the two ABIs | byte-identical | §3 |
 | host-side buffer at 250,000 events | 65,536 B, constant | §7 |
 
-**All seventeen runs, retained**, because the disagreement between them is the finding rather than a
+**All eighteen runs, retained**, because the disagreement between them is the finding rather than a
 nuisance. None is wrong; they are what this measurement does.
 
 | # | engine | `perEvent - batched` | 95 % interval | `control - batched` | `nopPerEvent - nopBatched` | crossing |
@@ -542,9 +556,10 @@ nuisance. None is wrong; they are what this measurement does.
 | 14 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **the SAME module as run 13**) | +1.22 % | [-1.03, +3.46] % | -0.17 % | +7.84 % | ~4.4 ns |
 | 15 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, the SAME module as runs 13 and 14) | +2.09 % | [+1.42, +2.76] % | +0.12 % | +9.03 % | ~4.0 ns |
 | 16 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **both trace-format anchors at their `dev` tips**) | +1.86 % | [+1.39, +2.33] % | -0.39 % | +13.67 % | ~7.2 ns |
-| 17 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **both anchors at the 2026-10 format revision**) | **+1.62 %** | **[+1.19, +2.05] %** | +0.10 % | +11.49 % | ~5.5 ns |
+| 17 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **both anchors at the 2026-10 format revision**) | +1.62 % | [+1.19, +2.05] % | +0.10 % | +11.49 % | ~5.5 ns |
+| 18 | node v24.19.0 / V8 13.6.233.17-node.51 (dev shell, **both anchors at the final parity revisions**) | **+2.27 %** | **[+1.66, +2.88] %** | -0.17 % | +9.51 % | ~4.9 ns |
 
-Run 17 is the one §2 tabulates, because it is the one `arms.tsv` currently holds and the one the
+Run 18 is the one §2 tabulates, because it is the one `arms.tsv` currently holds and the one the
 check compares this file against. **Runs 2, 3 and 4 are the same engine, the same module and the
 same binary**, and runs 2 and 3 have disjoint intervals with opposite signs — which is why §2 says
 the sign is not stable rather than quoting any one run's interval as a precision. **Runs 5 to 8
@@ -610,6 +625,14 @@ the host. TWO EARLIER RUNS AT THESE ANCHORS ARE NOT IN THE TABLE. The first was 
 change, which the module that ships superseded. The second, on this module, ran at a load average
 near 14 and its control read **+2.76 %, [-1.03, +6.54] %**, an interval wider than the margin, so
 the comparator refused it as uncalibrated.
+
+**RUN 18 IS THE MODULE AFTER BOTH ANCHORS MOVED TO THE FINAL PARITY REVISIONS** (`pins.json`
+history, 2026-10-08): 874,954 bytes, the same ABI and host, a writer 67 commits newer. It reads
+**+2.27 %, [+1.66, +2.88] %**, inside the ±3 % margin, so the verdict stays `within-noise`; the
+control reads **-0.17 %** and the crossing-only pair **+9.51 %**. The load average was **2.73** at
+the start and **2.74** at the end. ONE EARLIER RUN ON THIS MODULE IS NOT IN THE TABLE: it ran while
+other agents' builds held the load average above 10, and its control read **+3.98 %, [-5.40,
++13.36] %**, an interval wider than the margin, so the comparator refused it as uncalibrated.
 
 **RUN 10 EXISTS BECAUSE A COMMENT WAS CORRECTED**, which is a fact about the instrument worth
 having in the record. `_m24_oq6_stamp` hashes `ct-host/src/{writer,abi,config}.ts` and

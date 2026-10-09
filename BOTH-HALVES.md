@@ -187,8 +187,8 @@ through a reader: the same transaction written twice with one field changed:
 
 | arm | container bytes | sha256 |
 |---|---|---|
-| the tracer's columns | 102,400 | `1b37695e…` |
-| every step's column set to 0 | 102,400 | `a22b73b9…` |
+| the tracer's columns | 102,400 | `843745e2…` |
+| every step's column set to 0 | 102,400 | `f3821fc1…` |
 
 Same op list, same steps, same paths, same size — a different digest, because a column is a delta
 opcode rather than a field. The column reaches the container.

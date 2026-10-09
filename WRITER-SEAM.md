@@ -1174,3 +1174,52 @@ against the reference of **13,856**:
 Non-zero exits: m1, m11, m20, m21, m22, m37, with the reference's failing assertions except: m11 +2
 (two new upstream commits as subjects; count unchanged at 361), m21 −2 (fixed in `2e3de3e`), m37's
 upstream distance 198 → 209. m9 ran on a quiet host and is green.
+
+## 15. BOTH TRACE-FORMAT ANCHORS ON THE FINAL PARITY REVISIONS — the `agents` tips, and the sweep
+
+On 2026-10-08 `trace_format` moved `145ff42ff6 → 3fada0b03c` and both Nim roles moved
+`7967c179dd → 051efd22b0`, the `agents` tips, where both libraries reached their final parity
+revisions (`pins.json` history; `PINS.md` rules 4a and 4b). Neither backend needed an API change:
+`ct-writer` asks `trace_writer_new` for format 2, the split-stream container, so the refusal of
+formats 0 and 1 does not reach it, and it never passed the reader's removed `legacy` argument.
+`../ctf-wt-wasm` moves with the Rust anchor: the OQ-7 probe refuses to build against a writer
+that is not the anchor.
+
+| | Path A (`--features path-a`) | Path B (the default) |
+|---|---:|---:|
+| bytes | 495,280 → **599,917** | 803,868 → **874,954** |
+| sha256 (first 8) | — | `fd72c147` → `86661c57` |
+| wasm imports / exports | 0 / 47 | 0 / 39 |
+
+**What the move surfaced** — `DRIFT.md` D32 to D34, each closed:
+
+- **A file that is not a container is refused when it is opened**, by name, where the previous
+  reader opened it and failed each stream. m24's instrument control reads the refusal at `OPEN`.
+- **The C ABI opens a container from bytes.** `ct_reader_open_bytes` is outside the filesystem
+  gate, so the freestanding C ABI reaches `openNewTraceFromBytes`; the module still exports no
+  reader entry point. m41's check matches exported names whole — a prefix match counted
+  `ct_reader_open_bytes` as the gated `ct_reader_open` — and asserts the new capability.
+- **The pure-Rust writer honours a column request made before its first record**, so the Noir
+  browser tracer's container is column-aware and nothing is dropped. m30 reads that from the
+  container through the pinned reader; the tracer's own `column_aware` field is a constant.
+- M40's digest pair moved with the writer's bytes (`843745e2…` / `f3821fc1…`, still 102,400 bytes
+  each and still two digests). OQ-6 run 18 reads +2.27 %, [+1.66, +2.88] %, verdict unmoved.
+
+### The sweep
+
+Full M0–M41 under `direnv exec`: **TOTAL 14,244**, 42 milestones, no hole, **delta +4** against the
+reference of **14,240**:
+
+| milestone | reference | now | |
+|---|---:|---:|---|
+| m11 | 361 | **364** | +3: upstream drift since 2026-10-04 — 364 with 82 failing at the OLD anchors too |
+| m41 | 236 | **237** | +1: D33's capability assertions replace one absence |
+| every other | | equal | |
+
+m0 and m1 are measured with this move's own artefacts removed: m0's
+`verify_workspace_repos_registered` is 39/0 against the workspace manifests repository, and m1's
+`verify_pinned_nightly_single_source` is 31 with the reference's two failures once the history
+entry names every declared value. m9 and m24 were re-run on a quiet host after loaded runs failed
+only their timing controls (m9 813 both times; m24's OQ-6 control refused one loaded run).
+Non-zero exits: m1, m11, m20, m21, m22, m37, with the reference's failing assertions except m11
+(+4 failing, the same upstream drift).
