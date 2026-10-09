@@ -1519,7 +1519,7 @@ jobs:
             aztec-avm-runtime/verification/lib_m16_fallback.sh \
             aztec-avm-runtime/probe-mt/m16_hazard.mjs \
             aztec-avm-runtime/probe-mt/m16_adapter_probe.mjs \
-            codetracer-specs/Planned-Work/Aztec-AVM-Runtime.milestones.org ; do
+            codetracer-specs/milestones/Aztec-AVM-Runtime.milestones.org ; do
             test -f "$p" || { echo "::error::missing M16 input: $p" >&2; exit 1; }
           done
 
