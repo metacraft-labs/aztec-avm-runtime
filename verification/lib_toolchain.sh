@@ -208,7 +208,34 @@ tc_rust_toolchain_dir() { printf '%s\n' "$RUSTUP_HOME/toolchains/$1-$TC_HOST_TRI
 _tc_rust_elves() {
   local dir="$1"
   tc_elf_files "$dir/bin" "$dir/libexec" "$dir/lib/rustlib/$TC_HOST_TRIPLE/bin"
-  find "$dir/lib" -maxdepth 1 -type f -name '*.so*' 2>/dev/null
+  python3 - "$dir/lib" <<'PYLINK'
+import pathlib, re, stat, sys
+root = pathlib.Path(sys.argv[1]).resolve(strict=True)
+rows = []
+for path in sorted(root.glob('*.so*')):
+    if path.is_symlink() or not path.is_file():
+        continue
+    body = path.read_bytes()
+    if body.startswith(b'\x7fELF'):
+        rows.append(str(path))
+        continue
+    match = re.fullmatch(rb'INPUT\(([A-Za-z0-9_.+-]+)\)\n?', body)
+    if not match:
+        raise SystemExit('lib_toolchain: invalid shared-object ELF/linker-script supplier: ' + str(path))
+    lexical_target = root / match[1].decode('ascii')
+    target_identity = lexical_target.lstat()
+    if stat.S_ISLNK(target_identity.st_mode) or not stat.S_ISREG(target_identity.st_mode):
+        raise SystemExit('lib_toolchain: linker-script target must be a lexical regular ELF: ' + str(path))
+    target = lexical_target.resolve(strict=True)
+    if target.parent != root or not target.is_file():
+        raise SystemExit('lib_toolchain: linker-script target must be an actual in-directory ELF: ' + str(path))
+    with target.open('rb') as stream:
+        if stream.read(4) != b'\x7fELF':
+            raise SystemExit('lib_toolchain: linker-script target has no ELF header: ' + str(path))
+    rows.append(str(target))
+for row in sorted(set(rows)):
+    print(row)
+PYLINK
 }
 
 # _tc_rust_healthy <ver> — every ELF in the toolchain loads, and rustc says <ver>.
@@ -216,7 +243,7 @@ _tc_rust_healthy() {
   local ver="$1" dir f got elves
   dir="$(tc_rust_toolchain_dir "$ver")"
   [ -x "$dir/bin/rustc" ] || { _tc_err "$dir has no bin/rustc"; return 1; }
-  elves="$(_tc_rust_elves "$dir")"
+  elves="$(_tc_rust_elves "$dir")" || return 1
   [ "$(printf '%s\n' "$elves" | grep -c .)" -ge 3 ] || { _tc_err "$dir: too few ELF files ($elves)"; return 1; }
   while IFS= read -r f; do
     [ -n "$f" ] || continue
@@ -271,7 +298,10 @@ tc_rust_ensure() {
   ) || { _tc_err "rustup could not install toolchain $ver"; return 1; }
   _tc_rust_healthy "$ver" || { _tc_err "toolchain $ver is not usable after installing it"; return 1; }
   # shellcheck disable=SC2046
-  tc_root_elf_refs "rust-$ver-$(printf '%s' "$RUSTUP_HOME" | sha256sum | cut -c1-8)" $(_tc_rust_elves "$dir") \
+  local rootelves
+  rootelves="$(_tc_rust_elves "$dir")" || {
+    _tc_err "toolchain $ver has an invalid ELF/linker-script supplier"; return 1; }
+  tc_root_elf_refs "rust-$ver-$(printf '%s' "$RUSTUP_HOME" | sha256sum | cut -c1-8)" $rootelves \
     || { _tc_err "could not root the store paths toolchain $ver loads from"; return 1; }
   # And through the proxy, which is the path cargo itself takes.
   local got
