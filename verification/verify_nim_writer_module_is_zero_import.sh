@@ -9,7 +9,7 @@
 # "19 WASI imports", which turned out to be an artefact of building the Nim writer as a WASI
 # COMMAND with a `main`. A library-shaped build imports nothing. That claim has been made about a
 # vendored copy in another tree and about a standalone module in the trace-format repository; what
-# has never been measured until now is THIS module — the one with the thirty-eight-function ABI on
+# has never been measured until now is THIS module — the one with the thirty-nine-function ABI on
 # top — built by this repository's own `build.rs`.
 #
 # THE IMPORT COUNT IS MEASURED THREE WAYS, and they are not redundant. This mirrors
@@ -114,7 +114,11 @@ assert_contains "the engine reports ZERO imports" "IMPORTS${TAB}0" "$REPORT"
 assert_contains "the module instantiates against a literal {}" "INSTANTIATED${TAB}yes" "$REPORT"
 assert_contains "and it owns its own memory rather than being handed one" "MEMORY${TAB}own" "$REPORT"
 assert_contains "and the instance is the Nim writer" "KIND${TAB}2" "$REPORT"
-assert_contains "and it exports thirty-nine things" "EXPORTS${TAB}39" "$REPORT"
+# FORTY SINCE CCP-6: the ABI's thirty-nine and `memory`, with no compressor shim on this arm. It
+# was thirty-nine when the ABI was thirty-eight; `ct_writer_set_compact_threshold` is the one that
+# moved it, and the number is bumped here rather than relaxed because an export appearing is as
+# much a finding as one disappearing.
+assert_contains "and it exports forty things" "EXPORTS${TAB}40" "$REPORT"
 m41_say "$(printf '%s\n' "$REPORT" | grep '^BYTES')"
 
 # ---------------------------------------------------------------------------

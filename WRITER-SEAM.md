@@ -12,7 +12,7 @@ milestone's prose.*
 | the seam | none — no `[features]`, no `cfg`, `CtfsTraceWriter` named at the type level in two places | `ct-writer` has `path-a` and `path-b` (**the default since §11**), and nothing outside `backend_*.rs` names a concrete writer |
 | `ct_writer_kind()` | a literal `1` | `ActiveBackend::kind()` — the two builds disagree, which is what makes it a measurement |
 | the writer's source | one crate from `pins.json`'s `trace_format` anchor | that, plus Nim source from a NEW `trace_format_nim_writer` anchor, materialised and cross-compiled by `ct-writer/build.rs` |
-| the ABI | thirty-eight functions | thirty-eight functions, unchanged, served by both backends |
+| the ABI | thirty-eight functions | thirty-eight functions, unchanged, served by both backends (**thirty-nine since CCP-6**, which added `ct_writer_set_compact_threshold` to both — §16) |
 | the declared path | a label the host recorded without comparing it to anything | compared against `ct_writer_kind()` in `CtWriter`'s constructor; a disagreement is refused (§12) |
 
 **The default is Path B — the Nim writer — since §11.** It stayed Path A through three measured
@@ -31,6 +31,7 @@ sweep that accounts for it. Path A is still built, for the differential checks.
 | instantiates against a literal `{}` | yes | yes |
 | container from the shared driver | 176,128 bytes | 143,360 bytes |
 | wasm exports | **47** = 38 ABI + `memory` + 8 compressor shim | **39** = 38 ABI + `memory` |
+| wasm exports, since CCP-6 | **48** = 39 ABI + `memory` + 8 compressor shim | **40** = 39 ABI + `memory` |
 | `ct_writer_kind()` | 1 | 2 |
 
 **The size figure is stated without a comparison, deliberately.** Seven distinct module shapes have
@@ -114,21 +115,24 @@ directory and rebuilding from scratch produced a **byte-identical module**
 
 ---
 
-## 4. All thirty-eight ABI functions, served
+## 4. All thirty-nine ABI functions, served
 
-**Thirty-eight, counted three ways and compared AS SETS.** `grep -c 'pub extern "C" fn'` gives
-**26** — twelve of the thirty-eight are `pub unsafe extern "C" fn` and that needle cannot see them,
+**Thirty-nine, counted three ways and compared AS SETS.** `grep -c 'pub extern "C" fn'` gives
+**26** — twelve of the thirty-nine are `pub unsafe extern "C" fn` and that needle cannot see them,
 which is where the wrong figure came from. Measured by `verify_all_abi_functions_served`:
 
-- `#[unsafe(no_mangle)]` in `ct-writer/src/lib.rs`: **38**
-- `ct-host/src/abi.ts`'s four lists, 19 + 11 + 6 + 2: **38**
-- both modules' export tables, minus `memory`: **38**, and all three sets are EQUAL
+- `#[unsafe(no_mangle)]` in `ct-writer/src/lib.rs`: **39**
+- `ct-host/src/abi.ts`'s five lists, 19 + 11 + 6 + 2 + 1: **39**
+- both modules' export tables, minus `memory`: **39**, and all three sets are EQUAL
 
-**None is unserved.** Every one of the thirty-eight is exported by BOTH modules and CALLED by
+**It was thirty-eight through M41 and became thirty-nine at CCP-6** (§16), whose one addition sits
+in a FIFTH `abi.ts` list so that no earlier milestone's count moved for a change that is not its.
+
+**None is unserved.** Every one of the thirty-nine is exported by BOTH modules and CALLED by
 `verification/ct_writer_drive_core.mjs` on the way to a container — an export table is a promise
 and a call is the evidence.
 
-Two of the thirty-eight are served with a behavioural difference rather than an absence, and both
+Two of the thirty-nine are served with a behavioural difference rather than an absence, and both
 are named here because "served" is not the same as "identical":
 
 - **`ct_writer_open`'s `recording_id` argument.** Path A accepts an empty one and lets the writer
@@ -1223,3 +1227,72 @@ entry names every declared value. m9 and m24 were re-run on a quiet host after l
 only their timing controls (m9 813 both times; m24's OQ-6 control refused one loaded run).
 Non-zero exits: m1, m11, m20, m21, m22, m37, with the reference's failing assertions except m11
 (+4 failing, the same upstream drift).
+
+---
+
+## 16. CCP-6 — THE COMPACT CONTAINER PROFILE IS EMITTABLE, AND IT IS OFF
+
+**The gap, measured before it was closed.** Both trace-format libraries carry
+`ctfs-container.md` §1e's profile choice at `pins.json`'s anchors —
+`codetracer_trace_writer::compact_profile::select_profile` in the Rust tree, `selectProfile` in the
+Nim one — and both are gated on a threshold initialised to **0**. `compact_threshold` had **zero
+occurrences anywhere under `ct-writer`**: the glue never set it, so neither writer was ever asked
+for compact and no container this runtime has written could be anything but the full profile. That
+was the whole of the producer-side gap.
+
+**Which lever, and the evidence.** The shipped module is **Path B, the Nim writer** —
+`ct-writer/Cargo.toml` says `default = ["path-b"]`, `build_ct_writer_wasm.sh`'s unflagged arm builds
+the crate's default into `ct-writer/target`, and that unflagged build is byte-identical to the
+`--path-b` one (`781472ae86a73ccb…`, both 881,705 bytes on aarch64-apple-darwin). So the Rust
+`with_compact_threshold` is **not** the lever that reaches a published container; the C ABI's
+`trace_writer_set_compact_threshold` is. Both are plumbed all the same, through
+`CtWriterBackend::set_compact_threshold`, because the differential checks compare the two writers
+and a lever on one arm only would make that comparison a comparison of two configurations.
+
+**The inequality runs the way that looks backwards, and it is measured at the boundary.**
+`select_profile` emits compact when the finished container's members total **FEWER** than the
+threshold's raw bytes: the threshold is a CEILING, compact is for SMALL recordings, and `0` means
+NEVER. Measured on the shared driver's recording, whose compact directory states its own raw total:
+
+| threshold | container | version | profile byte | bytes |
+|---:|---|---:|---:|---:|
+| absent | full | 5 | — | 73,728 |
+| `0` | full | 5 | — | 73,728 |
+| `1738` — exactly the raw member total | full | 5 | — | 73,728 |
+| `1739` — one byte above it | **compact** | **6** | **1** | **2,174** |
+| `67108864` | compact | 6 | 1 | 2,174 |
+
+The four full containers are byte-identical to each other and to one built from pristine
+`origin/agents` (`c8110e763ee709b037278bc07397992601de552f1da129cc671042d57e79f932`), and the two
+compact ones are byte-identical to each other. **A one-byte control is what makes the direction a
+measurement**; `raw < threshold` is strict and the `1738` row is what proves it.
+
+**The two profiles agree on the recording.** The compact container's 17 members total 1,738 raw
+bytes and `28 + 24·17 + 1738 = 2174` closes against the file size. Read back with
+`ct-split-probe` — `openNewTrace`, built from the object store at `pins.json`'s `trace_format_nim`
+anchor — **every fact about the recording is identical**: 8 steps, 2 paths, 8 value rows, 2 calls,
+2 io events, 2 functions, 5 varnames, column-aware, and every global line index. Exactly five keys
+differ and all five are about STORAGE, not about the trace: `PLEDGE_steps.dat`, `PLEDGE_values.dat`,
+`PLEDGE_calls.dat`, `PLEDGE_events.dat` and `EXEC_CHUNK_DECOMPRESSIONS`. §1e stores the members
+RAW — every zstd frame inflated — so a compact member is not a zstd frame and the probe says so.
+The size reduction is reported and is **not** the claim; the fact-for-fact equality is.
+
+**WHY IT IS OFF, AND WHERE THAT IS GOVERNED.** A compact container is container **version 6**. The
+replay engine BlockTracer deploys is pinned BY CONTENT in `client/hydrate/engine-pin.txt`, and an
+engine without CCP-5's compact loader refuses version 6 outright. That is not a caution here, it is
+a binary's answer: **`ct-print` at the same pinned revision — whose gate is `ctfsVersionError`,
+version 5 only — refuses this runtime's compact container** with `CTFS container version 6 is not
+supported`, while reading the full one. So the capability ships OFF:
+`ct_writer_set_compact_threshold` is the one explicit act that turns it on, and nothing in this
+repository performs it with a non-zero argument except
+`verify_compact_profile_emission_is_opt_in`, which asserts exactly that.
+
+**A correction to two statements in circulation.** `pins.json`'s `trace_format_nim` prose says the
+anchor "reads container v5 and v6". That is true of the **library** — `readInternalFile`,
+`hasInternalFile`, the stream readers and `NewTraceReader` gate on `ctfsReadableVersionError` — and
+NOT of the `ct-print` binary built from it, which keeps the version-5-only gate. A brief that read
+the prose as a statement about `ct-print` was wrong in the direction that matters: the reader in the
+published path is the one that refuses.
+
+**`backend.rs` said the trait had "eighteen" methods.** It had fourteen when CCP-6 counted them, so
+the sentence had been wrong since it was written and nothing measured it. It is fifteen now.

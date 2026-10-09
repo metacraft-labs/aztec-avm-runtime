@@ -241,7 +241,7 @@ assert_eq "…M25's eleven are untouched" "11" "$(m26_arm 'd["module"]["exports"
 # AND M40's TWO, in a fourth list for the reason this one is in its own: a milestone that appended
 # to another's list would move that milestone's assertion count for a change that is not its.
 assert_eq "…M40's two source-step exports are beside them" "2" "$(m26_arm 'd["module"]["exports"]["sourceStep"]')"
-assert_eq "…and the union is the four lists" "38" "$(m26_arm 'd["module"]["exports"]["all"]')"
+assert_eq "…and the union is the five lists" "39" "$(m26_arm 'd["module"]["exports"]["all"]')"
 # The module REFUSES an empty metadata key, and the refusal does not count as a record.
 assert_eq "an empty metadata key is refused with CT_ERR_BAD_LENGTH" "status:-4" \
   "$(m26_arm 'd["module"]["logEventRefusals"]["emptyKey"]')"

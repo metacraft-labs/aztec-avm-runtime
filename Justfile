@@ -3828,6 +3828,7 @@ verify-m39:
 #   just verify-ruzstd-defect-absent        verify_ruzstd_checksum_defect_absent_from_shipped_path
 #   just verify-in-memory-reader            verify_in_memory_reader_reachable_from_browser
 #   just verify-container-equivalence       verify_container_equivalence_characterised
+#   just verify-compact-profile-opt-in      verify_compact_profile_emission_is_opt_in
 #   just e2e-runtime-traces-through-nim-writer
 #
 # EVERY ONE OF THESE BUILDS BOTH MODULES. `ct-writer` is one crate with two feature-selected
@@ -3860,6 +3861,15 @@ verify-in-memory-reader:
 verify-container-equivalence:
     @verification/verify_container_equivalence_characterised.sh
 
+# CCP-6 — the compact container profile is emittable, is OFF by default, and the two profiles agree.
+#
+# `ct_writer_set_compact_threshold` is the single opt-in. It must stay OFF in anything that
+# publishes: a compact container is container version 6 / profile 1, and the replay engine pinned BY
+# CONTENT in BlockTracer's `client/hydrate/engine-pin.txt` refuses that outright until it carries
+# CCP-5's loader. This check measures both halves — the emission works, and nothing here asks for it.
+verify-compact-profile-opt-in:
+    @verification/verify_compact_profile_emission_is_opt_in.sh
+
 e2e-runtime-traces-through-nim-writer:
     @verification/e2e_runtime_traces_through_nim_writer.sh
 
@@ -3874,6 +3884,7 @@ verify-m41:
       verify_ruzstd_checksum_defect_absent_from_shipped_path \
       verify_in_memory_reader_reachable_from_browser \
       verify_container_equivalence_characterised \
+      verify_compact_profile_emission_is_opt_in \
       e2e_runtime_traces_through_nim_writer \
       verify_declared_writer_path_matches_module \
       verify_path_table_fixed_at_first_mention

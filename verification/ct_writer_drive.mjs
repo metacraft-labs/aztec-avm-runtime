@@ -18,10 +18,24 @@ import { join } from 'node:path';
 
 import { driveWriter, EXPECTED_STEPS, DRIVEN_STEP_COUNT } from './ct_writer_drive_core.mjs';
 
-const [, , modulePath, outDir] = process.argv;
+const [, , modulePath, outDir, compactThresholdArg] = process.argv;
 if (!modulePath || !outDir) {
-  console.error('usage: ct_writer_drive.mjs <module.wasm> <out-dir>');
+  console.error('usage: ct_writer_drive.mjs <module.wasm> <out-dir> [compact-threshold]');
   process.exit(2);
+}
+
+// CCP-6. ABSENT MEANS ZERO, which means the full profile always — so every existing caller, which
+// passes two arguments, drives exactly the container it drove before this argument existed. A
+// non-zero value asks for container version 6 / profile 1, which the replay engine pinned in
+// BlockTracer's `client/hydrate/engine-pin.txt` cannot read; it is for the check that measures the
+// emission and for nothing that publishes.
+let compactThreshold = 0n;
+if (compactThresholdArg !== undefined) {
+  if (!/^[0-9]+$/.test(compactThresholdArg)) {
+    console.error(`compact-threshold must be a non-negative integer, got [${compactThresholdArg}]`);
+    process.exit(2);
+  }
+  compactThreshold = BigInt(compactThresholdArg);
 }
 
 const bytes = readFileSync(modulePath);
@@ -29,7 +43,7 @@ const { instance } = await WebAssembly.instantiate(bytes, {});
 
 let result;
 try {
-  result = driveWriter(instance.exports);
+  result = driveWriter(instance.exports, { compactThreshold });
 } catch (e) {
   console.error(`driving ${modulePath} failed: ${e.message}`);
   process.exit(1);
@@ -44,4 +58,8 @@ report.drivenStepCount = DRIVEN_STEP_COUNT;
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, 'container.ct'), container);
 writeFileSync(join(outDir, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
-console.log(`drove ${modulePath}: kind=${report.writerKind}, ${container.length} container bytes`);
+console.log(
+  `drove ${modulePath}: kind=${report.writerKind}, ${container.length} container bytes, ` +
+    `v${report.containerVersion} profile=${report.containerProfile}, ` +
+    `compactThreshold=${report.compactThreshold}`,
+);

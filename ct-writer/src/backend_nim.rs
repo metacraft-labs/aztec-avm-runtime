@@ -59,6 +59,12 @@ extern "C" {
     fn trace_writer_free(handle: Handle);
     fn trace_writer_set_recording_id(handle: Handle, recording_id: *const c_char) -> c_int;
     fn trace_writer_begin_in_memory(handle: Handle) -> c_int;
+    /// `ctfs-container.md` §1e's profile choice, made at close. Non-zero `raw_bytes` converts the
+    /// finished container to the compact profile when its members total FEWER than `raw_bytes`;
+    /// `0`, the writer's own default, writes the full profile always. See
+    /// [`CtWriterBackend::set_compact_threshold`](crate::backend::CtWriterBackend::set_compact_threshold)
+    /// for why this module leaves it at `0` and what has to move before a producer may not.
+    fn trace_writer_set_compact_threshold(handle: Handle, raw_bytes: u64) -> c_int;
     fn trace_writer_close(handle: Handle) -> c_int;
     fn trace_writer_container_ready(handle: Handle) -> c_int;
     fn trace_writer_container_len(handle: Handle) -> usize;
@@ -522,6 +528,22 @@ impl CtWriterBackend for NimBackend {
         // capability BITS in the two containers' `meta.dat` agree, which is the observable this
         // signal is about.
         false
+    }
+
+    fn set_compact_threshold(&mut self, raw_bytes: u64) -> Result<(), String> {
+        // The refusal is the WRITER's. `trace_writer_set_compact_threshold` returns non-zero for a
+        // NULL handle and for a writer that is not in CTFS multi-stream mode, and this module
+        // reports that rather than swallowing it: a host told "set" about a threshold that was
+        // never set would get a full container back and no reason, which is the silent-wrong-answer
+        // shape in the direction that matters least today and most the day the engine pin moves.
+        let rc = unsafe { trace_writer_set_compact_threshold(self.handle, raw_bytes) };
+        if rc != 0 {
+            return Err(format!(
+                "the writer refused the compact threshold {raw_bytes}: {}",
+                last_error()
+            ));
+        }
+        Ok(())
     }
 
     fn finish(&mut self) -> Result<(), String> {

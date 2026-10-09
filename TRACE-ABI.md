@@ -447,16 +447,27 @@ else can resolve is a local file wearing a pin's clothes.
   module this runtime ships the whole time. The container it produces is 65 % smaller (§2), and
   the imports are still **0**.*
 
-- **39 exports in the shipped module** — the ABI's thirty-eight and `memory`, and nothing else.
-  The Nim writer brings its own libzstd and no Rust allocator shim. **The Path A module has 47**,
+- **40 exports in the shipped module** — the ABI's thirty-nine and `memory`, and nothing else.
+  The Nim writer brings its own libzstd and no Rust allocator shim. **The Path A module has 48**,
   and that history is kept below because Path A is still built and its exports are still counted.
 
-  *Path A: **47 exports, not 39**, and the eight beyond the ABI's thirty-eight and `memory` are named:
+  *39 and 47 until CCP-6, which added `ct_writer_set_compact_threshold` — the single opt-in for
+  `ctfs-container.md` §1e's compact container profile — to both arms, measured on both modules'
+  own export tables. The BYTE figures above and below are not re-derived here: they are
+  Linux-x86_64 figures and CCP-6's local proof ran on aarch64-apple-darwin, where
+  `verification/lib_toolchain.sh` cannot install the pinned toolchain at all (its `TC_HOST_TRIPLE`
+  is the literal `x86_64-unknown-linux-gnu`), so a number taken there would be a number about
+  another host. The export is a SETTER and nothing calls it with a non-zero value: a compact container is container version 6 / profile 1, which the
+  replay engine pinned by content in BlockTracer's `client/hydrate/engine-pin.txt` refuses outright
+  until it carries CCP-5's loader. `verify_compact_profile_emission_is_opt_in` measures that the
+  default container is byte-identical to the one this module produced before the export existed.*
+
+  *Path A: **48 exports, not 40**, and the eight beyond the ABI's thirty-nine and `memory` are named:
   `rust_zstd_wasm_shim_{malloc,calloc,free,memcmp,memcpy,memmove,memset,qsort}`. They are
   `zstd-sys`'s wasm shim re-exporting what Rust's allocator resolved, and they arrived with the
   same pin move. **This was not predicted when that move was priced** — it is a change to the
   module's public surface, and it is recorded rather than absorbed. The checks that count exports
-  name them individually now, so a forty-eighth export by any other name still fails.*
+  name them individually now, so a forty-ninth export by any other name still fails.*
 
   *Re-derived on 2026-09-10, when M41 put the writer behind a seam. The move is **263,211 ->
   264,281**, and it is TWO separate movements which are stated separately because only one of them

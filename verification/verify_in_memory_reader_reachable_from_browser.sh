@@ -16,7 +16,7 @@
 # capability question rather than a speed one, and it is the half of the workload that dominates.
 #
 # WHAT THE `ct-writer` MODULE ITSELF DOES NOT DO, SAID PLAINLY. This runtime's module is
-# WRITE-ONLY: its thirty-eight entry points are a writer ABI and none of them opens a container.
+# WRITE-ONLY: its thirty-nine entry points are a writer ABI and none of them opens a container.
 # So the browser's read path is not this module. It is the trace-format repository's own
 # `wasm/standalone/trace_reader_only_standalone.nim` — the reader surface with no writer linked —
 # and that module is the third arm below.

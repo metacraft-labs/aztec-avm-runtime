@@ -9,7 +9,11 @@
 //! recorded in prose about code that could express only one of them.
 //!
 //! This trait is that switch. It is the complete set of operations this module asks a writer for
-//! — eighteen of them — and nothing else in the crate mentions a concrete writer type.
+//! — FIFTEEN of them — and nothing else in the crate mentions a concrete writer type.
+//!
+//! The number said "eighteen" until CCP-6 counted it: the trait had FOURTEEN methods at that
+//! point, so the sentence had been wrong since it was written and nothing measured it. CCP-6 adds
+//! [`CtWriterBackend::set_compact_threshold`], which makes fifteen.
 //!
 //! # Why a trait and not an enum, and why not `dyn`
 //!
@@ -137,6 +141,33 @@ pub trait CtWriterBackend: Sized {
     /// that the *writer* decides it cannot honour the request; a module that answered this from
     /// its own `want_columns` would be printing a literal back.
     fn dropped_column_awareness(&self) -> bool;
+
+    /// Ask the writer to emit `ctfs-container.md` §1e's COMPACT profile when the finished
+    /// container's compact members total fewer than `raw_bytes` raw bytes.
+    ///
+    /// # The inequality runs the way that looks backwards, and it is not a typo
+    ///
+    /// `select_profile` (and its Nim twin `selectProfile`) choose compact when the members are
+    /// **below** the threshold, so the threshold is a CEILING and the compact profile is for SMALL
+    /// recordings — the ones a reader can hold whole before its first query. `0`, which is what
+    /// both writers construct themselves with and what this module never changes unless a host
+    /// asks, therefore means NEVER: nothing is below zero.
+    ///
+    /// # DO NOT MAKE THIS NON-ZERO BY DEFAULT (CCP-6, and the reason is a deployed reader)
+    ///
+    /// A compact container is container **version 6** with its profile byte set to `1`, where this
+    /// runtime's full containers are version 5. BlockTracer's replay engine is pinned BY CONTENT in
+    /// `client/hydrate/engine-pin.txt`, and until the engine that pin names carries CCP-5's compact
+    /// loader, a compact container is refused by the only reader in the published path. So the
+    /// capability ships OFF: `ct_writer_set_compact_threshold` is the one explicit act that turns
+    /// it on, no caller in this repository performs it with a non-zero argument, and the day the
+    /// engine pin moves is the day a producer may. `client/hydrate/engine-pin.txt` is where that
+    /// coupling is governed; it is not governed here.
+    ///
+    /// Fallible, and the refusal is the WRITER's: Path B's C ABI refuses a NULL handle and a writer
+    /// that is not in CTFS multi-stream mode, and `ct_writer_set_compact_threshold` passes that
+    /// refusal back to the host rather than reporting a threshold it did not set.
+    fn set_compact_threshold(&mut self, raw_bytes: u64) -> Result<(), String>;
 
     /// Finish the event stream. Separate from [`take_container_bytes`](Self::take_container_bytes)
     /// because a writer can refuse to finish, and a refusal must be distinguishable from a

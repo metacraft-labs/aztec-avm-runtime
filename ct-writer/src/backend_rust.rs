@@ -167,6 +167,18 @@ impl CtWriterBackend for RustBackend {
         self.writer.dropped_column_awareness()
     }
 
+    fn set_compact_threshold(&mut self, raw_bytes: u64) -> Result<(), String> {
+        // `CtfsTraceWriter::set_compact_threshold` cannot fail — it stores a `u64` — so Path A can
+        // only ever report success here. The trait's method is fallible because Path B's C ABI
+        // boundary can refuse, and a trait shaped to the half that cannot fail would have nowhere
+        // to put the half that can. Path A is `codetracer_trace_writer`'s own
+        // `with_compact_threshold` lever and `select_profile` is the same function both writers
+        // reach, which is why `verify_compact_profile_emission_is_opt_in` can assert the two
+        // writers' compact containers agree.
+        self.writer.set_compact_threshold(raw_bytes);
+        Ok(())
+    }
+
     fn finish(&mut self) -> Result<(), String> {
         if let Err(e) = self.writer.finish_writing_trace_events() {
             return Err(format!("the writer refused to finish: {e}"));
