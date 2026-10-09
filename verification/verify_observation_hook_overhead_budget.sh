@@ -96,7 +96,7 @@ run_arm wasmtime m9_run_wasmtime "$patched_wasm" "$bench_dir/wasmtime.report" "$
 # is the larger one. A single budget for both would be wrong in one direction or the other.
 # ---------------------------------------------------------------------------
 pctof() { # <report> -> the median percentage the comparator measured, as an integer of tenths
-  sed -n 's/^PASS\t\[[a-z0-9]*\] the traced overhead, as measured\t.*median \([+-][0-9.]*\)%.*/\1/p' "$1" \
+  sed -n 's/^NOTE\t\[[a-z0-9]*\] the traced overhead, as measured\t.*median \([+-][0-9.]*\)%.*/\1/p' "$1" \
     | head -1
 }
 n_pct="$(pctof "$bench_dir/native.report")"

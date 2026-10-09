@@ -88,6 +88,12 @@ assert_contains "and the refusal names the stream it could not find, so it is ab
 rm -rf "$(dirname "$STUB")"
 
 echo "== 2. THE STEP COUNT IS AN IDENTITY: container = recorder + one entry step PER FRAME"
+# ONE CONTAINER IS ONE RECORDING, AND A RECORDING IS STARTED ONCE. The writer's `start` interns
+# `<toplevel>`, opens the root frame and records the entry step (`trace-events.md`, "Starting a
+# Recording"), so a second `start` into the same writer would open a second root. The tracer asks
+# for a start per circuit it steps; the probe passes the FIRST to the writer as a start and records
+# each later one as the step it names — the frame's entry step — and reports both counts, so the
+# substitution is a measurement here rather than a claim in its source.
 for arm in transaction parentOnly; do
   ct="$(m39_trace "$arm.container")"
   probe_steps="$(m39_trace "$arm.steps")"
@@ -96,6 +102,8 @@ for arm in transaction parentOnly; do
   m38_require_num "${arm}ProbeSteps=$probe_steps" "${arm}Frames=$frames" "${arm}ContainerSteps=$container_steps"
   assert_eq "$arm: the container carries the recorder's steps plus one entry step per frame" \
     "$(( probe_steps + frames ))" "$container_steps"
+  assert_eq "$arm: the tracer asked for a start once per frame" "$frames" "$(m39_trace "$arm.startsAsked")"
+  assert_eq "$arm: and exactly one reached the writer" "1" "$(m39_trace "$arm.startsWritten")"
 done
 # AND THE PER-FRAME COUNTS SUM TO THE WHOLE, which a total alone cannot say: a two-frame report
 # whose second frame recorded nothing has the same total as a one-frame one that recorded more.
@@ -117,14 +125,25 @@ for arm in transaction parentOnly; do
 done
 
 echo "== 4. THE NESTING IS THE FRAME LIST'S, AND THE ONE-FRAME ARM IS WHAT SAYS SO"
+# THE ROOT FIRST, because every count below is of the frames UNDER it. Each container has exactly
+# one root, `<toplevel>` at depth 0, spanning every step; two would mean the recording was started
+# twice, which is the defect section 2 rules out from the other side.
+for arm in transaction parentOnly; do
+  ct="$(m39_trace "$arm.container")"
+  cs="$(m39_container "$ct" steps)"
+  m38_require_num "${arm}RootSteps=$cs"
+  assert_eq "$arm: the container has exactly ONE root frame" "1" "$(m39_container "$ct" rootFrames)"
+  assert_eq "$arm: it is <toplevel>, spanning every step" "<toplevel> 0-$(( cs - 1 ))" \
+    "$(m39_container "$ct" rootNames) $(m39_container "$ct" rootSpan)"
+done
 TX_ENTRIES="$(m39_container "$TX_CT" callEntries)"
 TX_EXITS="$(m39_container "$TX_CT" callExits)"
 ONE_ENTRIES="$(m39_container "$ONE_CT" callEntries)"
 ONE_EXITS="$(m39_container "$ONE_CT" callExits)"
 m38_require_num txEntries="$TX_ENTRIES" txExits="$TX_EXITS" oneEntries="$ONE_ENTRIES" oneExits="$ONE_EXITS"
-assert_eq "the transaction's container opens one frame" "1" "$TX_ENTRIES"
+assert_eq "the transaction's container opens one frame under the root" "1" "$TX_ENTRIES"
 assert_eq "and closes it" "1" "$TX_EXITS"
-assert_eq "the one-frame control opens none" "0" "$ONE_ENTRIES"
+assert_eq "the one-frame control opens none under the root" "0" "$ONE_ENTRIES"
 assert_eq "and closes none" "0" "$ONE_EXITS"
 assert_eq "the frame the transaction opens is the CALLEE" \
   "$(m39_trace transaction.frames.1.function)" "$(m39_container "$TX_CT" callNames)"
@@ -147,8 +166,10 @@ m38_require_num entryStep="$ENTRY_STEP" exitStep="$EXIT_STEP" txSteps="$TX_STEPS
 assert_true "the frame opens after the caller has stepped" test "$ENTRY_STEP" -gt 0
 assert_true "and closes after it opens" test "$EXIT_STEP" -gt "$ENTRY_STEP"
 # THE SPAN IS THE CALLEE'S OWN STEP COUNT PLUS ITS ENTRY STEP, computed from the frame report rather
-# than from the span itself — two producers for one number. A frame that opened and closed around
-# nothing, or around the caller's steps, fails here while satisfying every count above.
+# than from the span itself — two producers for one number. A call begins at the first step after
+# it (the spec, and the Nim writer's `6fbb55f`), which is the frame's entry step. A frame that
+# opened and closed around nothing, or around the caller's steps, fails here while satisfying every
+# count above.
 assert_eq "and the span it brackets is exactly the callee's steps plus its entry step" \
   "$(( F1 + 1 ))" "$(( EXIT_STEP - ENTRY_STEP + 1 ))"
 assert_eq "so the steps before the frame are the caller's own" "$(( F0 + 1 ))" "$ENTRY_STEP"

@@ -55,7 +55,14 @@ echo "== 1. the measurement"
 note "peak: $PAGES pages / $KIB KiB; budget $M17_PEAK_PAGE_BUDGET pages"
 assert_eq "the peak is the value this milestone records" "$M17_MEASURED_PEAK_PAGES" "$PAGES"
 assert_eq "…and its KiB figure" "$M17_MEASURED_PEAK_KIB" "$KIB"
-assert_eq "the KiB figure is the page count times 64" "$((PAGES * 64))" "$KIB"
+# The KiB figure against the instance's own buffer length in bytes, which the host reads off the
+# memory rather than computing from the page readings. `pages × 64` would restate the host's own
+# arithmetic and agree with it whatever the readings were; a page reading taken at the wrong scale,
+# or from the wrong memory, disagrees with the buffer.
+BYTES="$(m17_field "$T" nodeHost.memoryBytesAtEnd)"
+assert_true "the host reports its memory's length in bytes" test -n "$BYTES"
+assert_eq "the KiB figure is the memory buffer's own length, not the page count restated" \
+  "$(( ${BYTES:-0} / 1024 ))" "$KIB"
 assert_true "the peak is within the recorded budget" test "$PAGES" -le "$M17_PEAK_PAGE_BUDGET"
 note "margin: $((M17_PEAK_PAGE_BUDGET - PAGES)) pages / $(((M17_PEAK_PAGE_BUDGET - PAGES) * 64)) KiB"
 # The budget is not the measurement. A budget equal to what was measured fails on any change and is

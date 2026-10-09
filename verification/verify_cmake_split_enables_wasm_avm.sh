@@ -165,9 +165,33 @@ UNDEF="$(m6_in_devshell '
   "$TREE/barretenberg/cpp/$M10_AVM_BUILD/lib/libvm2_sim.a")"
 assert_ge "libvm2_sim.a has undefined symbols to look through at all" 1000 \
   "$(printf '%s\n' "$UNDEF" | grep -c .)"
-for ns in 'bb::wsdb' 'bb::nodejs_module' 'bb::cdb' 'bb::ipc' 'lmdb'; do
-  assert_eq "and none of them is $ns" "0" "$(printf '%s\n' "$UNDEF" | grep -cF "$ns")"
+# What each server module could contribute is READ from its own sources rather than spelled from
+# its directory name, because the two differ: `nodejs_module` declares `bb::nodejs`, and a needle
+# built from the directory name matches no symbol that module could ever define. A namespace the
+# AVM group also declares is no discriminator (`vm2_wsdb` lives in `bb::avm2`, `world_state` in
+# `bb::world_state`), so for those the module's own class names are the needles instead.
+# `world_state` is left to the positive statement below, which is stronger than any needle.
+ns_of()      { grep -rhoE '^namespace bb::[A-Za-z0-9_]+' "$TREE/barretenberg/cpp/src/barretenberg/$1" 2>/dev/null | sed 's/^namespace //' | sort -u; }
+classes_of() { grep -rhoE '^(class|struct) [A-Z][A-Za-z0-9_]+' "$TREE/barretenberg/cpp/src/barretenberg/$1" 2>/dev/null | awk '{print $2}' | sort -u; }
+avm_ns="$(for m in $M10_AVM_GROUP; do ns_of "$m"; done | sort -u)"
+assert_ge "the AVM group's own namespaces were read from its sources" 1 \
+  "$(printf '%s\n' "$avm_ns" | grep -c .)"
+for m in $M10_SERVER_GROUP; do
+  [ "$m" = world_state ] && continue
+  needles=""
+  for ns in $(ns_of "$m"); do
+    str_has_line "$avm_ns" "$ns" || needles="$needles $ns::"
+  done
+  if [ -z "$needles" ]; then
+    needles="$(classes_of "$m" | sed 's/$/::/' | tr '\n' ' ')"
+  fi
+  assert_ge "$m has something of its own to look for (a namespace or its classes)" 1 \
+    "$(printf '%s\n' $needles | grep -c .)"
+  for n in $needles; do
+    assert_eq "and none of them is $m's $n" "0" "$(printf '%s\n' "$UNDEF" | grep -cF "$n" || true)"
+  done
 done
+assert_eq "and none of them is lmdb" "0" "$(printf '%s\n' "$UNDEF" | grep -cF 'lmdb' || true)"
 
 # `bb::world_state::` is NOT a discriminator and an earlier version of this check
 # used it as one. The namespace is SHARED: `world_state_reference` — which is in

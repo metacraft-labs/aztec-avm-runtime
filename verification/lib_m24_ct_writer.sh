@@ -36,7 +36,8 @@ M24_OQ6_TSV="$M24_OQ6_WORK/arms.tsv"
 export M24_ARMS M24_OQ6_TSV
 
 # THE RUST TOOLCHAIN IS NOT IN EITHER DEV SHELL, so every cargo invocation in this milestone runs
-# under `nix shell nixpkgs#rustup nixpkgs#capnproto` and needs these two. They are EXPORTED here
+# under the rustup and capnp `verification/lib_toolchain.sh` resolves from this repository's
+# flake.lock and roots, at pins.json's `toolchain.rust`, and needs these two. They are EXPORTED here
 # rather than set per call: a `bash -c` under `nix shell` inherits the environment but runs with
 # `set -u` in these checks, and an unset `$CARGO_HOME` there dies with `unbound variable` — which
 # is what happened, and which made `cargo tree --duplicates` produce an EMPTY output that
@@ -47,6 +48,8 @@ export M24_ARMS M24_OQ6_TSV
 # during M22's sweep.
 export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.cache/aztec-m24-rustup}"
 export CARGO_HOME="${CARGO_HOME:-$HOME/.cache/aztec-m24-cargo}"
+# shellcheck source=verification/lib_toolchain.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib_toolchain.sh"
 
 M24_CRATE="$REPO_ROOT/ct-writer"
 M24_HOST="$REPO_ROOT/ct-host"

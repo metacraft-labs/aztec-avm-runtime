@@ -94,11 +94,21 @@ done
 
 # sloppiness must stay EMPTY: every relaxation licenses returning an object for a compile that was
 # not quite the same one, which is exactly what the neutrality evidence cannot afford.
+# The empty value is read off a line that must EXIST: a failed probe, or a ccache that stopped
+# printing the key, reads as the same empty string as an empty setting.
+SLOPPY_LINES="$(shell_probe "$FORK_ROOT" 'ccache -p | grep -E "^\([^)]*\) sloppiness =" || true')"
+assert_eq "ccache reports its sloppiness setting, on exactly one line" "1" \
+  "$(printf '%s\n' "$SLOPPY_LINES" | grep -c 'sloppiness =')"
 assert_eq "sloppiness is empty, so nothing is treated as close enough" "" \
-  "$(shell_probe "$FORK_ROOT" 'ccache -p | sed -n "s/.*sloppiness = //p"' | tr -d ' ')"
+  "$(printf '%s\n' "$SLOPPY_LINES" | sed -n "s/.*sloppiness = //p" | tr -d ' ')"
 
 # Upstream has no ccache integration of its own, so the env var is the whole mechanism. Asserted, so
 # that if upstream adds one later this stops being a silent double-configuration.
+# The paths searched below must hold files, or the zero is the answer about no files at all.
+assert_ge "the CMake files searched for a launcher exist at the anchor" 3 \
+  "$(git -C "$FORK_ROOT" ls-tree -r --name-only "$M6_BASE_REV" -- \
+       barretenberg/cpp/CMakeLists.txt barretenberg/cpp/CMakePresets.json barretenberg/cpp/cmake 2>/dev/null \
+     | grep -c .)"
 assert_eq "barretenberg's own CMake still has no compiler-launcher setting" "0" \
   "$(git -C "$FORK_ROOT" grep -ciE 'ccache|COMPILER_LAUNCHER' "$M6_BASE_REV" -- \
        barretenberg/cpp/CMakeLists.txt barretenberg/cpp/CMakePresets.json 'barretenberg/cpp/cmake/*' 2>/dev/null \
@@ -274,15 +284,26 @@ m6_in_devshell '
   : >"$out"
   echo "sdk27_version=$(head -1 "$s27/VERSION")" >>"$out"
   echo "sdk33_version=$(head -1 "$s33/VERSION")" >>"$out"
-  mkdir -p "$work/tool" && cd "$work/tool" || exit 90
+  echo "s27=$s27" >>"$out"
+  echo "s33=$s33" >>"$out"
+  mkdir -p "$work/tool/bin" && cd "$work/tool" || exit 90
   printf "int probe(){return 7;}\n" > a.cpp
+  # ONE command line for all three compiles. The compiler and the sysroot are reached through two
+  # symlinks at fixed paths, and only their TARGETS change between toolchains, so the argument
+  # vector ccache hashes is byte-identical across them. The only thing left that can tell the two
+  # toolchains apart is compiler_check itself. Two different --target or --sysroot spellings would
+  # make the arguments differ, and the cache would miss whatever compiler_check said.
+  use_sdk() { ln -sfn "$1/bin/clang++" bin/clang++; ln -sfn "$1/share/wasi-sysroot" sysroot; }
+  compile() { ccache "$PWD/bin/clang++" --target=wasm32-wasip1 --sysroot="$PWD/sysroot" -O2 -c a.cpp -o "$1" 2>/dev/null; }
   ccache -z >/dev/null
-  ccache "$s33/bin/clang++" --target=wasm32-wasip1 --sysroot="$s33/share/wasi-sysroot" -O2 -c a.cpp -o a33.o 2>/dev/null
+  use_sdk "$s33"; compile a33.o
   echo "first33_rc=$?" >>"$out"
-  ccache "$s33/bin/clang++" --target=wasm32-wasip1 --sysroot="$s33/share/wasi-sysroot" -O2 -c a.cpp -o a33b.o 2>/dev/null
+  echo "argv33=$(readlink bin/clang++) $(readlink sysroot)" >>"$out"
+  compile a33b.o
   echo "second33_rc=$?" >>"$out"
-  ccache "$s27/bin/clang++" --target=wasm32-wasi --sysroot="$s27/share/wasi-sysroot" -O2 -c a.cpp -o a27.o 2>/dev/null
+  use_sdk "$s27"; compile a27.o
   echo "sdk27_rc=$?" >>"$out"
+  echo "argv27=$(readlink bin/clang++) $(readlink sysroot)" >>"$out"
   ccache -s | awk "
     /^Cacheable calls:/ { print \"cacheable=\" \$3 }
     /^  Hits:/          { if (!h++) print \"hits=\" \$2 }
@@ -304,6 +325,10 @@ assert_prefix "wasi-sdk 33 is really release 33" "33." "$(t sdk33_version)"
 assert_eq "the first wasm compile succeeded" "0" "$(t first33_rc)"
 assert_eq "the second, identical, succeeded" "0" "$(t second33_rc)"
 assert_eq "the wasi-sdk 27 compile succeeded" "0" "$(t sdk27_rc)"
+assert_false "the two toolchains are two store paths" test "$(t s27)" = "$(t s33)"
+assert_eq "and they were reached through the same two paths, retargeted" \
+  "$(t s27)/bin/clang++ $(t s27)/share/wasi-sysroot | $(t s33)/bin/clang++ $(t s33)/share/wasi-sysroot" \
+  "$(t argv27) | $(t argv33)"
 assert_eq "the same toolchain on the same bytes HIT once" "1" "$(t hits)"
 assert_eq "and the other two compiles MISSED" "2" "$(t misses)"
 assert_eq "the repeated compile produced the same object" "$(t sha33)" "$(t sha33b)"

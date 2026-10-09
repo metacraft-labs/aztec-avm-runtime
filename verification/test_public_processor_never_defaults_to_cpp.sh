@@ -75,9 +75,44 @@ assert_contains "and the free factory hard-defaults to the C++ path too" \
 
 # Nothing overrides the protected seam anywhere in the tree, which is the part of the
 # deliverable's justification that does not survive.
-N_OVERRIDES="$(git -C "$FORK_ROOT" grep -cE 'extends PublicProcessorFactory([^[:alnum:]_]|$)' "$M18_TS_ANCHOR" -- 2>/dev/null | grep -c . || true)"
+#
+# `extends` is matched across any whitespace INCLUDING a newline, and through a namespace
+# qualifier: a formatter can break a long header between `extends` and the class it names, and a
+# namespace import spells the base `server.PublicProcessorFactory`; a line-oriented grep for
+# `extends PublicProcessorFactory` reports zero for either. The candidate files are every source at
+# the anchor that names the class at all, and the reader is shown to find a subclass where one
+# exists, both in the fork and in those two shapes.
+extends_count() { # <class> [<text-file>] -> classes extending <class> in the fork at the anchor, or in <text-file>
+  python3 - "$FORK_ROOT" "$M18_TS_ANCHOR" "$1" "${2:-}" <<'PYEXT'
+import re, subprocess, sys
+root, rev, cls, textfile = sys.argv[1:5]
+pat = re.compile(r"\bextends\s+(?:[A-Za-z_$][\w$]*\s*\.\s*)?" + re.escape(cls) + r"\b")
+if textfile:
+    print(len(pat.findall(open(textfile, encoding="utf-8").read())))
+    raise SystemExit(0)
+files = subprocess.run(["git", "-C", root, "grep", "-lw", cls, rev, "--", "*.ts", "*.js", "*.mjs"],
+                       capture_output=True, text=True).stdout.splitlines()
+if not files:
+    print("NO-CANDIDATES"); raise SystemExit(0)
+n = 0
+for spec in files:
+    src = subprocess.run(["git", "-C", root, "show", spec], capture_output=True, text=True).stdout
+    n += len(pat.findall(src))
+print(n)
+PYEXT
+}
 assert_eq "no class in the whole fork extends PublicProcessorFactory, so we would be the seam's first user" \
-  "0" "$N_OVERRIDES"
+  "0" "$(extends_count PublicProcessorFactory)"
+assert_ge "control: the same reader finds a subclass in the fork where one exists (MerkleTreesFacade)" \
+  1 "$(extends_count MerkleTreesFacade)"
+WRAPPED="$(mktemp)"
+printf 'export class OurProcessorFactory extends\n  PublicProcessorFactory {\n}\n' >"$WRAPPED"
+assert_eq "control: …and finds one whose header is broken between extends and the base" \
+  "1" "$(extends_count PublicProcessorFactory "$WRAPPED")"
+printf 'export class OurProcessorFactory extends server.PublicProcessorFactory {}\n' >"$WRAPPED"
+assert_eq "control: …and one that names the base through a namespace import" \
+  "1" "$(extends_count PublicProcessorFactory "$WRAPPED")"
+rm -f "$WRAPPED"
 
 # The injection point DD-9 relies on.
 PP_CTOR="$(awk '/^  constructor\(/,/^  \) \{/' "$PP")"

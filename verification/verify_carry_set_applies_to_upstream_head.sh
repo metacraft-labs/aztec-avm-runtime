@@ -188,10 +188,28 @@ assert_ge "M10's library configures inside it" 1 "$n_m10_roots"
 # and a sentence in a JSON file is not evidence. This is the same sentence as a predicate.
 # Scoped to EXECUTION: M3's checks read `barretenberg/cpp/bootstrap.sh` as text, which is a
 # different file and a different act, so the pattern is an invocation and not a mention.
-boot_re='(^|[^a-zA-Z0-9_/.-])(\./)?bootstrap\.sh([ 	"'"'"']|$)'
-m6m10_boot="$(grep -nE "$boot_re" \
-  "$VERIFY_DIR/lib_avm_wasm.sh" "$VERIFY_DIR/lib_m10_cmake_split.sh" \
-  "$VERIFY_DIR/build_avm_wasm.sh" 2>/dev/null | grep -v '^\s*#' || true)"
+# The corpus is named once and asserted to be there: a missing file is silently skipped by grep
+# (its error discarded), and an absence over an unread corpus is not a measurement. The
+# predicate is also shown to find an invocation the corpus REALLY makes (`ninja`), not only a
+# spliced-in one. Comment lines are excluded by their `file:line:` prefix, which is how grep -n
+# prints them.
+BUILD_CORPUS=("$VERIFY_DIR/lib_avm_wasm.sh" "$VERIFY_DIR/lib_m10_cmake_split.sh" "$VERIFY_DIR/build_avm_wasm.sh")
+corpus_lines=0
+for f in "${BUILD_CORPUS[@]}"; do
+  assert_file "the build-machinery corpus includes $(basename "$f")" "$f"
+  corpus_lines=$((corpus_lines + $(grep -c . "$f" 2>/dev/null || echo 0)))
+done
+assert_ge "…and the corpus is read, not empty" 500 "$corpus_lines"
+invocation_re() { # <basename> -> the ERE for an invocation of it, not a mention of a path to it
+  printf '(^|[^a-zA-Z0-9_/.-])(\\./)?%s([ 	"'"'"']|$)' "$(printf '%s' "$1" | sed 's/[.]/\\./g')"
+}
+corpus_invocations() { # <basename> -> the non-comment corpus lines that invoke it
+  grep -nE "$(invocation_re "$1")" "${BUILD_CORPUS[@]}" 2>/dev/null | grep -v '^[^:]*:[0-9]*: *#' || true
+}
+assert_ge "control: the predicate finds an invocation the corpus really makes (ninja)" 1 \
+  "$(corpus_invocations ninja | grep -c . || true)"
+boot_re="$(invocation_re bootstrap.sh)"
+m6m10_boot="$(corpus_invocations bootstrap.sh)"
 assert_eq "neither M6's nor M10's build machinery invokes upstream's top-level bootstrap.sh" \
   "0" "$(printf '%s\n' "$m6m10_boot" | grep -c . || true)"
 
@@ -462,10 +480,8 @@ assert_eq "…and every one of them is accepted, which is the whole of the in-tr
 while IFS= read -r nip; do
   [ -n "$nip" ] || continue
   b="$(basename "$nip")"
-  b_re="(^|[^a-zA-Z0-9_/.-])(\./)?$(printf '%s' "$b" | sed 's/[.]/\\./g')([ 	\"']|\$)"
-  hits="$(grep -nE "$b_re" \
-    "$VERIFY_DIR/lib_avm_wasm.sh" "$VERIFY_DIR/lib_m10_cmake_split.sh" \
-    "$VERIFY_DIR/build_avm_wasm.sh" 2>/dev/null | grep -v '^[^:]*:[0-9]*: *#' || true)"
+  b_re="$(invocation_re "$b")"
+  hits="$(corpus_invocations "$b")"
   assert_eq "$nip: M6's and M10's build machinery never invokes it" \
     "0" "$(printf '%s\n' "$hits" | grep -c . || true)"
   cp "$VERIFY_DIR/lib_avm_wasm.sh" "$SCRATCH/lib_with_$b"

@@ -152,6 +152,13 @@ So the two stacks are **not at equal depth part-way through a transaction**, and
 asserted they were would be wrong. The gap is *outside* a simulation, where a consumer opens a
 checkpoint per transaction or per block across both DBs itself.
 
+None of the seven corpus programs makes a call, so a transaction through them alone never nests a
+per-frame checkpoint. `test_checkpoint_depth_balanced_after_nested_reverts` therefore also runs a
+three-frame fixture through the coordinator — top calls middle calls a callee that writes a slot and
+reverts — and requires the call tree to be three deep with the revert at the innermost frame, the
+callee's write to be gone from the effects (three public-data writes, not four, as upstream's own
+run of the same transaction reports), and both stacks back at their depth afterwards.
+
 ### The owner
 
 `simulation::CheckpointCoordinator`, beside the store. One `create_checkpoint` here is one on each
@@ -217,6 +224,15 @@ instance's salt, deployer, `immutablesHash` and all seven public keys — includ
 `fbpkMHash`, the two the fuzzer's decoder never reaches. The bytecode commitment is *computed* from
 the decoded bytecode on the observed side, by the same function the TypeScript publisher uses, and
 must equal the one the tester supplied on the registered side.
+
+Upstream's tester deploys every contract with a zero artifact hash, private-functions root,
+initialisation hash, immutables hash and five zero public-key fields, and two decoders agree on a
+zero whatever position they read it from. So the contract that arrives through the published-event
+logs carries a distinct non-zero value in every one of those fields, with its class id and address
+re-derived by upstream's `compute_contract_class_id` and `compute_contract_address`. Both
+comparisons — between the two population paths, and between the C++ decode and upstream's
+TypeScript one — are held to agreeing on NON-ZERO values in every field, and each has a control
+that exchanges two fields and must be caught in every program.
 
 ### The wire format is upstream's, established across the language boundary
 

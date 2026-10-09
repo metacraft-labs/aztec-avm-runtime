@@ -44,7 +44,8 @@ $(cat <<'EOS'
 
 import { PrivateCircuitPublicInputs } from '@aztec/stdlib/kernel';
 import { Fr } from '@aztec/foundation/curves/bn254';
-import { mockTx } from '@aztec/stdlib/testing';
+import { makePrivateCircuitPublicInputs, mockTx } from '@aztec/stdlib/testing';
+import { HashedValues } from '@aztec/stdlib/tx';
 
 const line = (k, v) => console.log(`${k} ${v}`);
 
@@ -95,6 +96,29 @@ line('provenance.nestedCalls', submitted.provenance.privateExecution.nestedCalls
 line('provenance.publicCalls', submitted.provenance.privateExecution.publicCalls);
 line('provenance.contract', submitted.provenance.privateExecution.contract);
 line('provenance.hasTrace', submitted.provenance.privateTrace === undefined ? 0 : 1);
+
+// THE SUMMARY OVER AN EXECUTION THAT HAS SOMETHING TO COUNT. The public-only shape above has no
+// nested calls, no calldata and a zero contract address, so the three fields it produces are the
+// values a summariser that read nothing would also produce. This execution is built from upstream's
+// own classes — the same constructor `publicOnlyPrivateExecution` uses — with a call tree three
+// levels deep (root -> a, b; a -> c; c -> d: FOUR nested calls, two of them below the first level,
+// so a walker that stopped at depth one would say two), three public calldata entries, and an
+// entrypoint whose call context names a non-zero contract.
+const deepInputs = makePrivateCircuitPublicInputs(0x5a);
+const deep = publicOnlyPrivateExecution(deepInputs, new Fr(0x5b), [
+  HashedValues.random(), HashedValues.random(), HashedValues.random(),
+]);
+const child = () => publicOnlyPrivateExecution(PrivateCircuitPublicInputs.empty(), new Fr(1n)).entrypoint;
+const a = child(), b = child(), c = child(), d = child();
+c.nestedExecutionResults.push(d);
+a.nestedExecutionResults.push(c);
+deep.entrypoint.nestedExecutionResults.push(a, b);
+const deepSummary = summarisePrivateExecution(deep, PRIVATE_SIMULATORS.wasm);
+line('deep.nestedCalls', deepSummary.nestedCalls);
+line('deep.publicCalls', deepSummary.publicCalls);
+line('deep.contract', deepSummary.contract);
+line('deep.inputContract', deepInputs.callContext.contractAddress.toString());
+line('deep.inputContractIsZero', deepInputs.callContext.contractAddress.isZero() ? 1 : 0);
 line('provenance.txIsTheBuiltOne',
   (await submitted.tx.getTxHash()).toString() === (await built.getTxHash()).toString() ? 1 : 0);
 
@@ -144,8 +168,20 @@ line('handoff.sameShape',
 // AND THE PROVENANCE WAS NOT CONSULTED. DD-1 holds for Form B's provenance too, and its `local`
 // arm now carries fields a branch could read — which is precisely why this is asserted here and not
 // only in M20's suite, where the local arm had nothing on it to read.
-const reads = provenanceReadsDuring(submitted, (sealed) => { void sealed.tx; });
-line('dd1.readsDuringExecution', reads.length);
+//
+// THE WINDOW MEASURED IS THE REAL ONE: `executeExternallySettledTx` itself, with its own seal
+// reporting every read to an observer instead of throwing. A callback of this probe's own that
+// touched only `.tx` would read zero whatever the execution path did.
+const windowReads = [];
+await executeExternallySettledTx(submitted, recordingSimulator, {
+  onProvenanceRead: (trap, property) => windowReads.push(`${trap}:${String(property)}`),
+});
+line('dd1.readsDuringExecution', windowReads.length);
+line('dd1.readsDuringExecutionList', JSON.stringify(windowReads));
+// …and the same seal DOES observe a read of the field Form B added, so the zero above is a
+// measurement of the path and not of a seal that cannot see `privateExecution`.
+const controlReads = provenanceReadsDuring(submitted, (sealed) => { void sealed.provenance.privateExecution; });
+line('dd1.controlReadsPrivateExecution', controlReads.length);
 
 line('formB.done', 1);
 EOS
@@ -200,6 +236,15 @@ assert_eq "…with the nested private calls counted by walking" "0" "$(f provena
 assert_eq "…and the enqueued public calls" "0" "$(f provenance.publicCalls)"
 assert_prefix "…and the entrypoint contract, read off the execution" "0x" "$(f provenance.contract)"
 assert_eq "…and no trace handle, because none was given" "0" "$(f provenance.hasTrace)"
+# Those three read 0, 0 and the zero address, which is also what a summary that read nothing would
+# say. The deep execution is where they are measured.
+assert_eq "over a three-level call tree the walk counts all FOUR nested calls, not the first level's two" \
+  "4" "$(f deep.nestedCalls)"
+assert_eq "…and the three public calldata entries" "3" "$(f deep.publicCalls)"
+assert_eq "…and the entrypoint's contract is the one its call context names" \
+  "$(f deep.inputContract)" "$(f deep.contract)"
+assert_eq "…which is not the zero address, so the equality is not two defaults" \
+  "0" "$(f deep.inputContractIsZero)"
 assert_eq "…and the tx it carries is the one step 3 built" "1" "$(f provenance.txIsTheBuiltOne)"
 assert_eq "with a trace handle, the simulator label follows the caller" "wasm-acvm" \
   "$(f traced.simulator)"
@@ -231,5 +276,7 @@ assert_eq "…and the external arm reports the same raw code, so Form B does not
 echo "== 7. DD-1 still holds, and now there is something on 'local' to read"
 assert_eq "nothing observed the provenance during the execution window" "0" \
   "$(f dd1.readsDuringExecution)"
+assert_eq "…and the same seal DOES count a read of the privateExecution field Form B added" "1" \
+  "$(f dd1.controlReadsPrivateExecution)"
 
 finish

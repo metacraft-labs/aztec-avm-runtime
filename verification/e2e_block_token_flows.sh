@@ -171,6 +171,20 @@ assert_prefix "…and the tripwire is armed: touching it through the builder's o
   "threw:" "$(tb_arm tokenFlows merkleTripwireControl)"
 assert_eq "…recording exactly the one deliberate observation" \
   "1" "$(tb_arm tokenFlows merkleTouchesAfterControl)"
+# A DEPTH OF ZERO IS NOT A MERGE: a store that never forked reads zero too. So the checkpoints the
+# processor opened on the contract store are COUNTED, and the zero is asserted as the consequence of
+# a conservation law — at least one was created for each of the block's two transactions, the
+# store's OWN depth rose while one was open, and every one was closed exactly once, by a commit or a
+# revert.
+CP_CREATED="$(tb_block tokenFlows mintAndTransfer checkpoints.created)"
+CP_COMMITTED="$(tb_block tokenFlows mintAndTransfer checkpoints.committed)"
+CP_REVERTED="$(tb_block tokenFlows mintAndTransfer checkpoints.reverted)"
+assert_ge "the processor opened a contract-store checkpoint per transaction of the block" 2 "$CP_CREATED"
+assert_ge "…and the store's own depth rose while one was open, so the calls really forked it" 1 \
+  "$(tb_block tokenFlows mintAndTransfer checkpoints.maxDepth)"
+assert_eq "…and closed every one it opened, by commit or by revert" \
+  "$CP_CREATED" "$(awk -v c="$CP_COMMITTED" -v r="$CP_REVERTED" \
+    'BEGIN { if (c ~ /^[0-9]+$/ && r ~ /^[0-9]+$/) print c + r; else print "UNREAD:" c "/" r }')"
 assert_eq "the contract store's checkpoint depth is back to zero after the block" \
   "0" "$(tb_block tokenFlows mintAndTransfer checkpointDepthAfter.contracts)"
 

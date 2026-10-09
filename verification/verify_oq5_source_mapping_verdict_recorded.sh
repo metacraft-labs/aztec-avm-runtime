@@ -229,7 +229,15 @@ doc_row() { # <needle-that-identifies-the-row>
 # The document writes its figures with thousands separators, so the MEASUREMENT is formatted the
 # same way rather than the document being matched loosely. A loose match is how `| 50939 |`
 # elsewhere in the file would satisfy a row assertion.
-commafy() { printf "%'d" "$1"; }
+commafy() {
+  local digits="$1" grouped=""
+  [[ "$digits" =~ ^[0-9]+$ ]] || return 1
+  while [ "${#digits}" -gt 3 ]; do
+    grouped=",${digits: -3}${grouped}"
+    digits="${digits:0:${#digits}-3}"
+  done
+  printf '%s%s' "$digits" "$grouped"
+}
 assert_true "§2.2's bytecode figure is stated in the line that names public_dispatch" \
   str_has_sub "$(doc_row 'public_dispatch        bytecode')" "$(commafy "$BYTECODE")"
 assert_true "§2.2's entry count is stated in the brillig_locations line" \

@@ -97,7 +97,7 @@ assert_true "…and the reason says so in those terms" \
   str_has_sub "$(l5_rec 'd["arms"]["resolved"]["contractRungs"][0]["reasonHead"]')" \
   "all 64 executed step(s) of this contract resolved"
 
-note "§2b the CONTROL — the same 64 steps, `sources` omitted"
+note "§2b the CONTROL — the same 64 steps, \`sources\` omitted"
 assert_eq "control declares rung 3" "3" "$(l5_rec 'd["arms"]["control"]["declaredRung"]')"
 assert_eq "…and is NOT source level" "false" "$(l5_rec 'd["arms"]["control"]["sourceLevel"]')"
 assert_eq "…with ZERO steps positioned" "0" \

@@ -6,16 +6,20 @@
 # Not a check. Invoked by `m24_require_readers`.
 #
 # ---------------------------------------------------------------------------
-# TWO BUILDS, ONE COMMIT APART, AND THAT IS THE WHOLE DESIGN.
+# TWO BUILDS, A READER AND A CONTROL, AND THAT IS THE WHOLE DESIGN.
 #
 # DD-7 records that a wasm-produced Path A container cannot be read by stock `ct-print`. That is a
-# claim about a DIFFERENCE, and the honest way to hold it is to build the reader at the fix and at
-# its parent and run both against the same bytes. Anything less — a prebuilt binary in a sibling
+# claim about a DIFFERENCE, and the honest way to hold it is to build the reader and a control that
+# demonstrably cannot read the container, and run both against the same bytes. The control was
+# once the reader fix's parent, one commit apart; it is now chosen by PROPERTY -- a published
+# ancestor that fails to read this runtime's container in a way
+# `test_ct_container_roundtrip_ct_print` can name -- because a control chosen by graph position
+# breaks at every non-adjacent fix. Anything less — a prebuilt binary in a sibling
 # worktree, or a release from some other branch — is state this repository did not produce, and
 # "four checks once passed against an empty build directory" is in the campaign brief because of it.
 #
-#   ct-print       @ pins.json trace_format_nim.commit          -- has baea074, reads it
-#   ct-print-pre   @ pins.json trace_format_nim.control_commit  -- baea074^, must NOT read it
+#   ct-print       @ pins.json trace_format_nim.commit          -- reads it
+#   ct-print-pre   @ pins.json trace_format_nim.control_commit  -- an ancestor; must NOT read it
 #
 # AND A THIRD BINARY, FOR A QUESTION NEITHER OF THOSE CAN ANSWER.
 #
@@ -34,7 +38,8 @@
 #   ct-print-writer       @ pins.json trace_format_nim_writer.commit
 #   ct-split-probe-writer @ pins.json trace_format_nim_writer.commit
 #
-# The reader anchor names 2026-08-20 and the writer anchor names 2026-09-09. A Path B container is
+# When M41 added them the reader anchor named 2026-08-20 and the writer anchor 2026-09-09; today
+# both name the same `dev` tip and the pair is skipped below. While they differed, a Path B container was
 # written by the LATER tree, and its split streams carry an index layout the earlier reader does
 # not know: `ct-split-probe` at the reader anchor reports `steps.dat: index file too small for
 # trailer` and cannot find `values.off` or `events.off` at all. That is not a defect in either
@@ -93,16 +98,35 @@ esac
 for v in "$REV" "$CONTROL" "$WRITER"; do
   git -C "$NIM_REPO" cat-file -e "$v^{commit}" 2>/dev/null || die "$NIM_REPO does not have $v"
 done
-# The control MUST be the fix's parent, or the one-commit claim is not what is being built.
+# The control's ANCESTRY is asserted by the roundtrip check, not here; this only proves the
+# reader's parent resolves, i.e. that the reader revision is a real commit with history.
 actual_parent="$(git -C "$NIM_REPO" rev-parse "$REV^" 2>/dev/null)"
 [ -n "$actual_parent" ] || die "could not resolve $REV^"
 
 command -v nim >/dev/null 2>&1 || die "nim is required (it comes from the workspace dev shell)"
 command -v nix >/dev/null 2>&1 || die "nix is required to resolve zstd's headers"
 
-INC="$(nix build --no-link --print-out-paths nixpkgs#zstd.dev 2>/dev/null)/include"
-LIB="$(nix build --no-link --print-out-paths nixpkgs#zstd.out 2>/dev/null)/lib"
+# zstd FROM THIS REPOSITORY'S flake.lock, ROOTED. `nixpkgs#zstd` alone resolves through the
+# invoking user's flake registry, and an unrooted `--no-link` result is exactly what a host
+# `nix store gc` deletes from under the binaries linked against it (verification/lib_toolchain.sh).
+# shellcheck source=verification/lib_toolchain.sh
+. "$HERE/lib_toolchain.sh"
+_tc_patchelf >/dev/null || die "patchelf did not resolve through $REPO_ROOT/flake.lock"
+INC="$(tc_nixpkg zstd.dev)/include" || die "nixpkgs#zstd.dev did not resolve through $REPO_ROOT/flake.lock"
+LIB="$(tc_nixpkg zstd.out)/lib" || die "nixpkgs#zstd.out did not resolve through $REPO_ROOT/flake.lock"
 [ -f "$INC/zstd.h" ] || die "zstd.h is not at $INC (nixpkgs#zstd.dev did not resolve)"
+
+# A CACHED BINARY IS REUSED ONLY IF IT STILL LOADS. Its `.rev` stamp says which source built it and
+# nothing about whether the store paths it was linked against still exist; after a garbage
+# collection it matched its stamp and died with `required file not found`. And every binary built
+# or reused here has everything it loads from ROOTED, so the next collection cannot do that again.
+ctprint_usable() { # <binary>
+  tc_elf_loadable "$1" || { say "$(basename "$1") no longer loads its libraries; rebuilding it"; return 1; }
+}
+ctprint_root() { # <binary>
+  tc_root_elf_refs "ctprint-$(basename "$1")" "$1" \
+    || die "could not root the store paths $(basename "$1") loads from"
+}
 
 # WHICH NIM BACKEND `cc` IS, ASKED RATHER THAN ASSUMED.
 #
@@ -113,16 +137,25 @@ LIB="$(nix build --no-link --print-out-paths nixpkgs#zstd.out 2>/dev/null)/lib"
 # nobody wrote and points at nothing a reader can act on. The `--cc:` family only has to match the
 # compiler's FLAG DIALECT, so it is derived from what the compiler says it is.
 host_nim_cc() { # <path-to-cc>
-  if "$1" --version 2>&1 | head -1 | grep -qiE 'clang'; then
-    printf 'clang\n'
+  local compiler_version compiler_first compiler_status
+  if compiler_version="$("$1" --version 2>&1)"; then
+    compiler_first="${compiler_version%%$'\n'*}"
   else
-    printf 'gcc\n'
+    compiler_status=$?
+    printf 'compiler version probe failed: %s\n%s\n' "$1" "$compiler_version" >&2
+    return "$compiler_status"
   fi
+  case "$compiler_first" in
+    *[cC][lL][aA][nN][gG]*) printf 'clang\n' ;;
+    *) printf 'gcc\n' ;;
+  esac
 }
 
 build_one() { # <rev> <tree-dir> <out-binary>
   local rev="$1" tree="$2" out="$3"
-  if [ "$FORCE" = 0 ] && [ -x "$out" ] && [ "$(cat "$out.rev" 2>/dev/null)" = "$rev" ]; then
+  if [ "$FORCE" = 0 ] && [ -x "$out" ] && [ "$(cat "$out.rev" 2>/dev/null)" = "$rev" ] \
+     && ctprint_usable "$out"; then
+    ctprint_root "$out"
     say "$(basename "$out") @ ${rev:0:10} already built"
     return 0
   fi
@@ -152,6 +185,8 @@ build_one() { # <rev> <tree-dir> <out-binary>
     || die "building ct-print at $rev failed; the compiler's own output is in $out.build.log:
 $(tail -20 "$out.build.log" 2>/dev/null)"
   [ -x "$out" ] || die "the build reported success but $out is not there"
+  ctprint_usable "$out" || die "$out was just built and does not load its libraries"
+  ctprint_root "$out"
   printf '%s\n' "$rev" >"$out.rev"
   say "built $(basename "$out") @ ${rev:0:10} ($(wc -c <"$out") bytes)"
 }
@@ -166,7 +201,8 @@ $(tail -20 "$out.build.log" 2>/dev/null)"
 build_probe() { # <rev> <tree-dir> <out-binary>
   local rev="$1" tree="$2" out="$3"
   if [ "$FORCE" = 0 ] && [ -x "$out" ] && [ "$(cat "$out.rev" 2>/dev/null)" = "$rev" ] \
-     && [ ! "$REPO_ROOT/verification/ct_split_probe.nim" -nt "$out" ]; then
+     && [ ! "$REPO_ROOT/verification/ct_split_probe.nim" -nt "$out" ] && ctprint_usable "$out"; then
+    ctprint_root "$out"
     say "$(basename "$out") @ ${rev:0:10} already built"
     return 0
   fi
@@ -184,6 +220,8 @@ build_probe() { # <rev> <tree-dir> <out-binary>
     || die "building ct-split-probe at $rev failed; see $(dirname "$out")/$(basename "$out").build.log:
 $(tail -20 "$(dirname "$out")/$(basename "$out").build.log" 2>/dev/null)"
   [ -x "$out" ] || die "the build reported success but $out is not there"
+  ctprint_usable "$out" || die "$out was just built and does not load its libraries"
+  ctprint_root "$out"
   printf '%s\n' "$rev" >"$out.rev"
   say "built $(basename "$out") @ ${rev:0:10} ($(wc -c <"$out") bytes)"
 }

@@ -56,18 +56,32 @@ note "measured: revert-reason comparisons $FRESH_REASON, exemptions $FRESH_EXEMP
 note "measured: default suite tests — $FRESH_TS_LABEL labelled (TS Simulator), $FRESH_PASSED passed"
 
 echo "== the checked-in record reproduces the measurement"
-for expr in \
-  "d['totals']['comparisons']" \
-  "d['totals']['revertReasonComparisons']" \
-  "d['totals']['revertReasonExemptions']" \
-  "d['defaultSuite']['comparisons']" \
-  "d['defaultSuite']['byFile']" \
-  "d['opcodeSpamArm']['comparisons']" \
-  "d['opcodeSpamArm']['revertReasonComparisons']"
-do
-  assert_eq "checked-in == measured: $expr" \
-    "$(read_json "$SCRATCH/fresh.json" "$expr")" "$(read_json "$RECORDED" "$expr")"
-done
+# The comparison is a function so the negative control below runs it over a mutated record. A
+# field missing from BOTH files is reported as MISSING rather than compared: read_json prints
+# nothing for a missing key, and two nothings are equal.
+RECORD_EXPRS="d['totals']['comparisons']
+d['totals']['revertReasonComparisons']
+d['totals']['revertReasonExemptions']
+d['defaultSuite']['comparisons']
+d['defaultSuite']['byFile']
+d['opcodeSpamArm']['comparisons']
+d['opcodeSpamArm']['revertReasonComparisons']"
+compare_record() { # <recorded.json> <fresh.json> -> one "SAME|DIFF|MISSING<TAB>expr<TAB>fresh<TAB>recorded" per field
+  local expr f r
+  while IFS= read -r expr; do
+    f="$(read_json "$2" "$expr")"; r="$(read_json "$1" "$expr")"
+    if [ -z "$f" ] || [ -z "$r" ]; then printf 'MISSING\t%s\t%s\t%s\n' "$expr" "$f" "$r"
+    elif [ "$f" = "$r" ]; then printf 'SAME\t%s\t%s\t%s\n' "$expr" "$f" "$r"
+    else printf 'DIFF\t%s\t%s\t%s\n' "$expr" "$f" "$r"; fi
+  done <<<"$RECORD_EXPRS"
+}
+while IFS=$'\t' read -r verdict expr f r; do
+  case "$verdict" in
+    SAME)    pass "checked-in == measured: $expr  [$f]" ;;
+    MISSING) fail "checked-in == measured: $expr is missing (measured [$f], checked-in [$r])" ;;
+    *)       fail "checked-in == measured: $expr  expected [$f], got [$r]" ;;
+  esac
+done < <(compare_record "$RECORDED" "$SCRATCH/fresh.json")
 
 echo "== the comparison count differs from the test count, and the manifest says which is which"
 assert_ge "the arm carries more labelled tests than it makes comparisons" 1 \
@@ -80,7 +94,8 @@ assert_true "the manifest names the suite that contributes zero comparisons desp
   grep -q "bench.test.ts" "$MANIFEST"
 
 echo "== every per-file comparison count is recorded in the manifest"
-PER_FILE_REPORT="$(python3 - "$SCRATCH/fresh.json" "$MANIFEST" <<'PY'
+per_file_report() { # <fresh.json> <manifest> -> "<checked> <missing> <missing-list>"
+python3 - "$1" "$2" <<'PY'
 import json, os, re, sys
 fresh = json.load(open(sys.argv[1]))
 manifest = open(sys.argv[2]).read()
@@ -95,7 +110,8 @@ for arm in ("defaultSuite", "opcodeSpamArm"):
             missing.append(f"{base}={n}")
 print(checked, len(missing), ",".join(missing))
 PY
-)"
+}
+PER_FILE_REPORT="$(per_file_report "$SCRATCH/fresh.json" "$MANIFEST")"
 CHECKED_FILES="$(echo "$PER_FILE_REPORT" | cut -d' ' -f1)"
 MISSING_FILES="$(echo "$PER_FILE_REPORT" | cut -d' ' -f2)"
 assert_ge "per-file counts checked against the manifest" 7 "${CHECKED_FILES:-0}"
@@ -106,6 +122,24 @@ echo "== M2's COLLECT_META_CHECK_RET decision, asserted as a number"
 # The whole point of flipping the constant is that the oracle's one assertion-relaxing local
 # deviation stops firing ANYWHERE. If a future edit reintroduces an exemption, this goes red.
 assert_eq "revert-reason exemptions across the entire corpus" "0" "$FRESH_EXEMPT"
+# The zero above is only a measurement if an exemption WOULD be counted. Two things make it so: the
+# simulator reports the negation of its exemption flag to the counter, and the aggregation turns a
+# record whose revert reason was not compared into an exemption. Both are checked, the second by
+# running measure_differential.aggregate over a synthetic counter directory.
+assert_true "the simulator reports each comparison's exemption to the counter" \
+  grep -qF "recordDifferentialComparison(!cppReasonExemptNoMetadata);" \
+  "$DIFFSIM/src/public/public_tx_simulator/cpp_vs_ts_public_tx_simulator.ts"
+mkdir -p "$SCRATCH/counters-synthetic"
+printf '%s\n' '{"file":"a.test.ts","test":"t","revertReasonCompared":true,"pairs":1}' \
+  '{"file":"a.test.ts","test":"t","revertReasonCompared":false,"pairs":1}' \
+  >"$SCRATCH/counters-synthetic/1.jsonl"
+SYNTH_EXEMPT="$(PYTHONDONTWRITEBYTECODE=1 python3 -c "
+import sys; sys.path.insert(0, sys.argv[1])
+from pathlib import Path
+import measure_differential as m
+print(m.aggregate(Path(sys.argv[2]))['revertReasonExemptions'])
+" "$REPO_ROOT/tools" "$SCRATCH/counters-synthetic" 2>&1)"
+assert_eq "positive control: an uncompared revert reason is counted as an exemption" "1" "$SYNTH_EXEMPT"
 assert_eq "every comparison had its revert reason asserted" "$FRESH_TOTAL" "$FRESH_REASON"
 assert_true "opcode_spam.test.ts ships COLLECT_META_CHECK_RET = true in this tree" \
   grep -q '^const COLLECT_META_CHECK_RET = true;$' \
@@ -131,8 +165,12 @@ echo "== both arms ran GREEN, so D4's tripwire is a gate rather than a note"
 FRESH_DEFAULT_FAILED="$(read_json "$SCRATCH/fresh.json" "d['defaultSuite']['testCounts']['totalFailed']")"
 FRESH_SPAM_FAILED="$(read_json "$SCRATCH/fresh.json" "d['opcodeSpamArm']['testCounts']['totalFailed']")"
 FRESH_SPAM_PASSED="$(read_json "$SCRATCH/fresh.json" "d['opcodeSpamArm']['testCounts']['totalPassed']")"
-assert_eq "the default suite ran with no failing test" "0" "${FRESH_DEFAULT_FAILED:-1}"
-assert_eq "the opcode-spam arm ran with no failing test" "0" "${FRESH_SPAM_FAILED:-1}"
+# The gate is a function so the negative control below applies it to a red measurement.
+arm_green() { [ "$(read_json "$1" "d['$2']['testCounts']['totalFailed']")" = "0" ]; }
+assert_true "the default suite ran with no failing test  [${FRESH_DEFAULT_FAILED:-missing}]" \
+  arm_green "$SCRATCH/fresh.json" defaultSuite
+assert_true "the opcode-spam arm ran with no failing test  [${FRESH_SPAM_FAILED:-missing}]" \
+  arm_green "$SCRATCH/fresh.json" opcodeSpamArm
 assert_ge "the opcode-spam arm ran all its cases" 142 "${FRESH_SPAM_PASSED:-0}"
 
 echo "== D4's pin is the exact one the ledger describes, not a weakened restatement of it"
@@ -143,8 +181,10 @@ assert_true "the pinned inner reason is the exact address-bound message" \
   grep -qF "const D4_EXPECTED_INNER_REASON = 'sendl2tol1msg: recipient address is too large';" "$SPAM_TEST"
 assert_true "upstream's three-item allowedReasons list is restated verbatim for the not-contained assertion" \
   grep -qF "const D4_UPSTREAM_ALLOWED_REASONS = ['assertion failed', 'out of gas', 'not enough l2gas'];" "$SPAM_TEST"
+# A function, so the negative control below runs this exact test over a weakened copy.
+d4_outcomes_pinned() { grep -qF "const D4_EXPECTED_ASSERTION_OUTCOMES = [true, false, true];" "$1"; }
 assert_true "the pinned assertion outcomes are exactly [true, false, true]" \
-  grep -qF "const D4_EXPECTED_ASSERTION_OUTCOMES = [true, false, true];" "$SPAM_TEST"
+  d4_outcomes_pinned "$SPAM_TEST"
 assert_true "…and upstream's list is asserted NOT to contain the reason, rather than widened" \
   grep -qF "expect(D4_UPSTREAM_ALLOWED_REASONS.some(r => innerReason?.includes(r))).toBe(false);" "$SPAM_TEST"
 
@@ -159,18 +199,17 @@ assert_true "the manifest forbids quoting 216 as 216 equally strong comparisons"
 # ---------------------------------------------------------------------------
 echo "== negative controls"
 
-# (1) A mutated record must not reproduce the measurement.
+# (1) A mutated record must not reproduce the measurement: compare_record, the function that
+#     judged the real record, must report exactly the mutated field as DIFF.
 python3 - "$RECORDED" "$SCRATCH/bad-record.json" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
 d["totals"]["comparisons"] += 1
 json.dump(d, open(sys.argv[2], "w"))
 PY
-if [ "$(read_json "$SCRATCH/bad-record.json" "d['totals']['comparisons']")" = "$FRESH_TOTAL" ]; then
-  fail "negative control NOT caught: a mutated comparison total compared equal"
-else
-  pass "negative control caught: a mutated comparison total does not reproduce the measurement"
-fi
+BAD_RECORD_DIFFS="$(compare_record "$SCRATCH/bad-record.json" "$SCRATCH/fresh.json" | awk -F'\t' '$1!="SAME"{print $1" "$2}')"
+assert_eq "negative control caught: a mutated comparison total does not reproduce the measurement" \
+  "DIFF d['totals']['comparisons']" "$BAD_RECORD_DIFFS"
 
 # (2) A manifest whose per-file number is wrong must be rejected by the same code path.
 cp "$MANIFEST" "$SCRATCH/bad-manifest.md"
@@ -183,20 +222,9 @@ t = open(p).read().replace("avm_gadgets 27", "avm_gadgets 270")
 assert "avm_gadgets 27," not in t and "avm_gadgets 27\n" not in t
 open(p, "w").write(t)
 PY
-BAD_REPORT="$(python3 - "$SCRATCH/fresh.json" "$SCRATCH/bad-manifest.md" <<'PY'
-import json, os, re, sys
-fresh = json.load(open(sys.argv[1]))
-manifest = open(sys.argv[2]).read()
-missing = 0
-for arm in ("defaultSuite", "opcodeSpamArm"):
-    for path, counts in fresh[arm]["byFile"].items():
-        base = os.path.basename(path).replace(".test.ts", "")
-        if not re.search(rf"\b{re.escape(base)}\s+{counts['comparisons']}\b", manifest):
-            missing += 1
-print(missing)
-PY
-)"
-assert_ge "negative control caught: a wrong per-file count in the manifest" 1 "${BAD_REPORT:-0}"
+BAD_REPORT="$(per_file_report "$SCRATCH/fresh.json" "$SCRATCH/bad-manifest.md")"
+assert_eq "negative control caught: a wrong per-file count in the manifest" \
+  "1 avm_gadgets=27" "$(echo "$BAD_REPORT" | cut -d' ' -f2-)"
 
 # (3) The counter is not vacuous — it tracks a single suite's real comparison count.
 #     custom_bc makes 13 comparisons in the recorded measurement; run it alone and require 13.
@@ -231,12 +259,8 @@ d = json.load(open(sys.argv[1]))
 d[sys.argv[3]]["testCounts"]["totalFailed"] = 1
 json.dump(d, open(sys.argv[2], "w"))
 PY
-  RED="$(read_json "$SCRATCH/red-$arm.json" "d['$arm']['testCounts']['totalFailed']")"
-  if [ "${RED:-0}" = "0" ]; then
-    fail "negative control NOT caught: a red $arm still reported zero failures"
-  else
-    pass "negative control caught: a measurement with a failing test in $arm is rejected"
-  fi
+  assert_false "negative control caught: the arm_green gate rejects a measurement with a failing test in $arm" \
+    arm_green "$SCRATCH/red-$arm.json" "$arm"
 done
 
 # (6) D4's pin must not be weakenable by editing the constants. The same greps, against a copy with
@@ -252,10 +276,7 @@ t = open(p).read().replace(
 )
 open(p, "w").write(t)
 PY
-if grep -qF "const D4_EXPECTED_ASSERTION_OUTCOMES = [true, false, true];" "$SCRATCH/weakened-spam.ts"; then
-  fail "negative control NOT caught: the weakened D4 outcome pattern still matched"
-else
-  pass "negative control caught: relaxing D4's expected outcome pattern is detected by the same grep"
-fi
+assert_false "negative control caught: d4_outcomes_pinned rejects a relaxed D4 outcome pattern" \
+  d4_outcomes_pinned "$SCRATCH/weakened-spam.ts"
 
 finish

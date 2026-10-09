@@ -109,8 +109,12 @@ assert_eq "the native configure was told never to find_package a dependency" "NE
   "$(m6_cache "$M8_TREE" "$M8_NATIVE_BUILD" FETCHCONTENT_TRY_FIND_PACKAGE_MODE)"
 assert_ge "…so googletest is built from source in this tree" 1 \
   "$(grep -c 'libgtest\.a$' "$NATIVE_TARGETS" || true)"
+# Read from the binary's own dynamic section, so a failed tool is an empty answer rather than a
+# zero: the NEEDED list is asserted non-empty before its absence of libgtest is believed.
+GATE_NEEDED="$(m6_in_devshell 'readelf -d "$1"' "$GATE_BIN" 2>/dev/null | grep '(NEEDED)' || true)"
+assert_ge "the gate binary's dynamic dependencies were read" 1 "$(printf '%s\n' "$GATE_NEEDED" | grep -c . || true)"
 assert_eq "…and the gate binary does not link a system libgtest" "0" \
-  "$(ldd "$GATE_BIN" 2>/dev/null | grep -c 'libgtest' || true)"
+  "$(printf '%s\n' "$GATE_NEEDED" | grep -c 'libgtest' || true)"
 
 # ---------------------------------------------------------------------------
 echo "== 3. run it"
@@ -188,7 +192,7 @@ if python3 -c "import yaml" >/dev/null 2>&1; then
 elif command -v yq >/dev/null 2>&1; then
   YAML_JOBS="$(yq -r '.jobs | keys | join(" ")' "$WORKFLOW" 2>/dev/null)"
 elif command -v nix >/dev/null 2>&1; then
-  YAML_JOBS="$(nix shell nixpkgs#yq-go --command yq -r '.jobs | keys | join(" ")' "$WORKFLOW" 2>/dev/null)"
+  YAML_JOBS="$(nix shell --inputs-from "$REPO_ROOT" nixpkgs#yq-go --command yq -r '.jobs | keys | join(" ")' "$WORKFLOW" 2>/dev/null)"
 fi
 if [ -n "$YAML_JOBS" ]; then
   assert_contains "the workflow parses as YAML and declares the M8 job as a job" \
@@ -228,10 +232,9 @@ WF_RUNS_JSON="$(gh run list --repo metacraft-labs/aztec-avm-runtime \
   || die "could not query the workflow's run history from GitHub"
 WF_SUCCESSES="$(printf '%s' "$WF_RUNS_JSON" | python3 -c '
 import json, sys
-try:
-    rows = json.load(sys.stdin)
-except Exception:
-    rows = []
+rows = json.load(sys.stdin)
+if not isinstance(rows, list):
+    sys.exit(1)
 print(sum(1 for r in rows if r.get("conclusion") == "success"))' 2>/dev/null)"
 case "$WF_SUCCESSES" in
   ''|*[!0-9]*) die "could not count the successful runs (got: $WF_SUCCESSES)" ;;

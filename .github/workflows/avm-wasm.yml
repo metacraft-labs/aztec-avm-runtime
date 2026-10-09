@@ -1519,7 +1519,7 @@ jobs:
             aztec-avm-runtime/verification/lib_m16_fallback.sh \
             aztec-avm-runtime/probe-mt/m16_hazard.mjs \
             aztec-avm-runtime/probe-mt/m16_adapter_probe.mjs \
-            codetracer-specs/Planned-Work/Aztec-AVM-Runtime.milestones.org ; do
+            codetracer-specs/milestones/Aztec-AVM-Runtime.milestones.org ; do
             test -f "$p" || { echo "::error::missing M16 input: $p" >&2; exit 1; }
           done
 
@@ -2753,7 +2753,7 @@ jobs:
 
   noir-call-frames:
     name: Noir call frames — the tree the recorder writes, and the subtrees a view folds
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, linux, x64, ephemeral, incus]
     # THE CHEAPEST JOB IN THIS FILE, ON PURPOSE. It builds no wasm, launches no browser and reaches
     # no network at run time. `test_noir_frames_open_at_function_boundaries` drives
     # `ContractSourceMap.framesFor` and `NoirFrameTracker` — the same code `replay/src/recording.ts`
@@ -2876,7 +2876,7 @@ jobs:
 
   browser-gate:
     name: the browser gate — no Node.js dependencies
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, linux, x64, ephemeral, incus]
     # M28, and it is the campaign's LAST milestone. Every other job in this file gates a
     # capability; this one gates an ABSENCE, which is a different thing to get right. It runs on
     # every push and every pull request to `dev` and `main` (see the `on:` block at the top of this

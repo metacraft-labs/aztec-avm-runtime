@@ -105,26 +105,55 @@ assert_eq "upstream's own readers decoded the deployment logs" "0" "$decode_rc"
 [ -s "$DECODE" ] || die "the upstream decode produced nothing — see $DECODE_ERR"
 m13_assert_field "for all seven programs" "$DECODE" "upstreamDecode.programs" "$M13_EXPECTED_PROGRAMS"
 
-compared=0
-mismatched=0
-for prog in $M13_PROGRAMS; do
-  for field in classId artifactHash privateFunctionsRoot bytecodeBytes address salt deployer \
-               initializationHash immutablesHash \
-               publicKey.0 publicKey.1 publicKey.2 publicKey.3 publicKey.4 publicKey.5 publicKey.6; do
-    ts="$(m13_field "$DECODE" "upstreamDecode.$prog.$field")"
-    cpp="$(m13_field "$(m13_inputs)" "contractDbInputs.$prog.deployed.$field")"
-    compared=$((compared + 1))
-    if [ -z "$ts" ] || [ "$ts" != "$cpp" ]; then
-      fail "$prog.$field: upstream's reader says [$ts], the C++ side says [$cpp]"
-      mismatched=$((mismatched + 1))
-    fi
+DECODED_FIELDS="classId artifactHash privateFunctionsRoot bytecodeBytes address salt deployer
+initializationHash immutablesHash
+publicKey.0 publicKey.1 publicKey.2 publicKey.3 publicKey.4 publicKey.5 publicKey.6"
+zero="0x0000000000000000000000000000000000000000000000000000000000000000"
+# decode_compare <upstream-decode-file> [quiet] -> "compared mismatched nonzero"
+decode_compare() {
+  local file="$1" quiet="${2:-}" c=0 m=0 nz=0 prog field ts cpp
+  for prog in $M13_PROGRAMS; do
+    for field in $DECODED_FIELDS; do
+      ts="$(m13_field "$file" "upstreamDecode.$prog.$field")"
+      cpp="$(m13_field "$(m13_inputs)" "contractDbInputs.$prog.deployed.$field")"
+      c=$((c + 1))
+      if [ -z "$ts" ] || [ "$ts" != "$cpp" ]; then
+        [ -n "$quiet" ] || fail "$prog.$field: upstream's reader says [$ts], the C++ side says [$cpp]"
+        m=$((m + 1))
+      elif [ "$ts" != "$zero" ] && [ "$ts" != "0" ]; then
+        nz=$((nz + 1))
+      fi
+    done
   done
-done
+  printf '%s %s %s\n' "$c" "$m" "$nz"
+}
+# Counted inside a command substitution, where a `fail` would be lost with the subshell; a
+# disagreement is therefore re-walked in this shell, which is where each one is reported by name.
+read -r compared mismatched nonzero <<<"$(decode_compare "$DECODE" quiet)"
+[ "$mismatched" = 0 ] || decode_compare "$DECODE" >/dev/null
 # Sixteen fields per program, as a PRODUCT rather than a constant, so a program added to the corpus
 # cannot leave a stale total behind.
 assert_eq "sixteen fields per program compared across the two decoders" \
   "$((16 * M13_EXPECTED_PROGRAMS))" "$compared"
 assert_eq "and none disagreed" "0" "$mismatched"
+# An agreement on a zero is an agreement any decoder reaches, whatever position it reads. The
+# deployed contract carries a non-zero value in every one of the sixteen, so every agreement above
+# must be on one.
+assert_eq "and every one of those agreements is on a non-zero value" \
+  "$((16 * M13_EXPECTED_PROGRAMS))" "$nonzero"
+# The swapped-field control: upstream's decode with initializationHash and immutablesHash exchanged,
+# which is what a reader taking them from each other's positions produces. It must disagree in both
+# fields of every program.
+SWAPPED_DECODE="$M13_WORK/upstream-decode.swapped.out"
+awk '
+  $1 ~ /\.initializationHash$/ { k = $1; sub(/initializationHash$/, "immutablesHash", k); swap[k] = $2 }
+  $1 ~ /\.immutablesHash$/     { k = $1; sub(/immutablesHash$/, "initializationHash", k); swap[k] = $2 }
+  { lines[NR] = $0; keys[NR] = $1 }
+  END { for (i = 1; i <= NR; i++) { if (keys[i] in swap) print keys[i], swap[keys[i]]; else print lines[i] } }
+' "$DECODE" >"$SWAPPED_DECODE"
+read -r _ s_mismatched _ <<<"$(decode_compare "$SWAPPED_DECODE" quiet)"
+assert_eq "a reader that swaps initializationHash and immutablesHash is caught in every program" \
+  "$((2 * M13_EXPECTED_PROGRAMS))" "$s_mismatched"
 
 # THE NEGATIVE CONTROL. `FuzzerContractDB::from_logs` reads the instance log as
 # (tag, version, address, …) where upstream writes (tag, address, version, …) — its own comment says
@@ -145,8 +174,29 @@ assert_eq "the fuzzer's field order disagrees on the address for every program" 
   "$M13_EXPECTED_PROGRAMS" "$fuzzer_disagreements"
 # And the field it takes for the first public key is upstream's `immutablesHash`, which is the
 # second half of the same defect.
+FUZZER_FIRST_KEY=6
 assert_eq "the field the fuzzer reads as the first public key is upstream's immutablesHash" \
   "$(m13_field "$DECODE" "upstreamDecode.add.immutablesHash")" \
-  "$(m13_field "$(m13_inputs)" "contractDbInputs.add.logs.instance.6")"
+  "$(m13_field "$(m13_inputs)" "contractDbInputs.add.logs.instance.$FUZZER_FIRST_KEY")"
+# In this corpus `immutablesHash` is ZERO, and so are five of the seven key fields and several other
+# log positions, so the equality above cannot tell the fuzzer's offset from its neighbours. The
+# offset is pinned by the keys that are NOT zero: if the fuzzer's key k sits at log position
+# FUZZER_FIRST_KEY + k, its third and fourth keys are upstream's second and third, one position
+# early, and those two carry non-zero values in every program.
+zero="0x0000000000000000000000000000000000000000000000000000000000000000"
+shift_pinned=0
+for prog in $M13_PROGRAMS; do
+  for k in 2 3; do
+    got="$(m13_field "$(m13_inputs)" "contractDbInputs.$prog.logs.instance.$((FUZZER_FIRST_KEY + k))")"
+    want="$(m13_field "$DECODE" "upstreamDecode.$prog.publicKey.$((k - 1))")"
+    if [ -n "$want" ] && [ "$want" != "$zero" ] && [ "$got" = "$want" ]; then
+      shift_pinned=$((shift_pinned + 1))
+    else
+      fail "$prog: the fuzzer's key $k [$got] is not upstream's non-zero publicKey.$((k - 1)) [$want]"
+    fi
+  done
+done
+assert_eq "the fuzzer's keys 2 and 3 are upstream's non-zero keys 1 and 2, one position early, in every program" \
+  "$((2 * M13_EXPECTED_PROGRAMS))" "$shift_pinned"
 
 finish

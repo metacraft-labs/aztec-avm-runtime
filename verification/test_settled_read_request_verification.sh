@@ -162,6 +162,8 @@ const NOTE_HASH = SETTLED_READ_TREES[0];
 const settledNullifier = new Fr(918273645n);
 const neverInserted = new Fr(918273646n);
 line('nullifier.before', show((await source.findLeavesIndexes(null, NULLIFIER, [settledNullifier]))[0]));
+// The tree's size before the insert is the index an append-at-the-end insert lands at.
+line('nullifier.sizeBefore', BigInt((await write.getTreeInfo(NULLIFIER)).size));
 seeding.insertNullifier(settledNullifier);
 const afterIdx = (await source.findLeavesIndexes(null, NULLIFIER, [settledNullifier]))[0];
 line('nullifier.after', show(afterIdx));
@@ -223,7 +225,13 @@ f() { m21_field "$OUT" "$1"; }
 assert_eq "before the insert the world state reports the leaf as NOT settled" \
   "undefined" "$(f nullifier.before)"
 assert_true "after the insert it reports an index" test "$(f nullifier.after)" != "undefined"
-assert_ge "…and it is a real index" 0 "$(f nullifier.after)"
+# THE INDEX IS THE ONE THE INSERT USED: the tree's size just before it. `>= 0` would accept any
+# integer at all, including the index of the value's low leaf, which is the wrong answer
+# `is_already_present` exists to prevent.
+assert_true "the nullifier tree's size before the insert was read" \
+  str_has_re "$(f nullifier.sizeBefore)" '^[1-9][0-9]*$'
+assert_eq "…and the index reported after the insert is exactly that size" \
+  "$(f nullifier.sizeBefore)" "$(f nullifier.after)"
 assert_eq "a value that was never inserted is still reported unsettled" \
   "undefined" "$(f nullifier.unsettled)"
 assert_eq "and the world state's own leaf preimage at that index carries the value asked for" \

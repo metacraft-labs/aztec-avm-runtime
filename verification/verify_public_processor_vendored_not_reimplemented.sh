@@ -239,16 +239,38 @@ assert_eq "side_effect_errors.ts: the complete added set" \
   "import { CheckedPublicExecutionError } from './public_errors.ts';" \
   "$(printf '%s\n' "$SEE_DIFF" | sed -n 's/^> //p')"
 
-# `guarded_merkle_tree.ts` — one parameter property. DD-3's class, unchanged in every other line.
+# `guarded_merkle_tree.ts` — the two exact edits declared in PROVENANCE.md:
+# parameter-property lowering and the existing type-only getIpcPath pin bridge.
 GMT_DIFF="$(m22_vendor_diff public_processor/guarded_merkle_tree.ts \
   yarn-project/simulator/src/public/public_processor/guarded_merkle_tree.ts)"
 assert_eq "guarded_merkle_tree.ts: the complete removed set" \
-  "  constructor(private target: MerkleTreeWriteOperations) {" \
+  "$(cat <<'M22_GMT_REMOVED'
+  constructor(private target: MerkleTreeWriteOperations) {
+    return this.target.getIpcPath();
+M22_GMT_REMOVED
+)" \
   "$(printf '%s\n' "$GMT_DIFF" | sed -n 's/^< //p')"
 assert_eq "guarded_merkle_tree.ts: the complete added set" \
-  "  private target: MerkleTreeWriteOperations;
+  "$(cat <<'M22_GMT_ADDED'
+  private target: MerkleTreeWriteOperations;
   constructor(target: MerkleTreeWriteOperations) {
-    this.target = target;" \
+    this.target = target;
+  // THE SIXTH OF M18'S SIX TYPE ERRORS, and the only one not about this repository's own code.
+  // `getIpcPath` is a real method on upstream's `MerkleTreeWriteOperations` — this vendored file is
+  // a faithful copy of a revision that has it, and `resident_merkle_operations.ts` implements it
+  // too (as a deliberate refusal: the world state is resident, so there is no IPC path to give).
+  // The PINNED @aztec/stdlib tarball that `just typecheck-orchestration` resolves is older and its
+  // interface does not declare it, so `this.target.getIpcPath()` is TS2339 against the pin while
+  // being correct against the source this file was taken from.
+  //
+  // Deleting the method would be the wrong repair twice over: it would diverge this vendored copy
+  // from upstream, and `wasm_avm_public_tx_simulator.ts` and `avm_inputs.ts` both document reading
+  // an IPC path through this surface. So the pin gap is narrowed HERE, at the one delegation that
+  // spans it, rather than widened into the class's declared interface. When the pin moves forward
+  // to a stdlib that declares `getIpcPath`, this cast becomes redundant and can go.
+    return (this.target as MerkleTreeWriteOperations & { getIpcPath(): string }).getIpcPath();
+M22_GMT_ADDED
+)" \
   "$(printf '%s\n' "$GMT_DIFF" | sed -n 's/^> //p')"
 
 # `public_processor_metrics.ts` — one import specifier, and the NAMES are unchanged.

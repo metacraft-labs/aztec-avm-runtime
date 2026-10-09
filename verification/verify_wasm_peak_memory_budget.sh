@@ -121,7 +121,22 @@ print(heaviest)
 PY
 )"
 note "heaviest corpus program, by measurement: $HEAVIEST"
-assert_contains "the heaviest program is one of the seven" "$HEAVIEST" "add revert loop sha256 poseidon2 storage burn"
+# The identification is ASSERTED against the measurement rather than against the list it was
+# chosen from, which it would satisfy by construction (and an empty answer would satisfy a
+# substring test outright): after the heaviest program the linear memory is the whole-run peak,
+# and — unless it is the first program — it is strictly more than after the program before it.
+assert_true "the heaviest program is one of the seven, by name" \
+  str_has_word "add revert loop sha256 poseidon2 storage burn" "$HEAVIEST"
+H_PAGES="$(sed -n "s/^diag wasm.peakLinearMemoryPages.after.$HEAVIEST //p" "$V8_T")"
+assert_eq "after the heaviest program linear memory is at the whole-run peak" "$PAGES" "$H_PAGES"
+H_PREV_PROG="$(printf '%s\n' add revert loop sha256 poseidon2 storage burn | grep -B1 -x "$HEAVIEST" | head -1)"
+if [ -n "$HEAVIEST" ] && [ "$H_PREV_PROG" != "$HEAVIEST" ]; then
+  H_PREV="$(sed -n "s/^diag wasm.peakLinearMemoryPages.after.$H_PREV_PROG //p" "$V8_T")"
+  assert_true "…and it is where the sequence last rose ($H_PREV_PROG=$H_PREV < $HEAVIEST=$H_PAGES)" \
+    test "${H_PREV:-x}" -lt "${H_PAGES:-0}"
+else
+  assert_eq "…and, being the first program, the sequence never rose after it" "$FIRST" "$PAGES"
+fi
 # The `burn` program is the largest WORKLOAD by far, and it is not the largest footprint. Stated as
 # an assertion because it is the thing the milestone's own wording would have led a reader to
 # assume.

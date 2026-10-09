@@ -319,8 +319,14 @@ try {
     if (!Number.isInteger(batch) || batch <= 0) { console.error('batch must be a positive integer'); process.exit(2); }
 
     const { cdb, mdb } = seed(program);
-    const r = simulate(program, 'faststeps', cdb, mdb);
-    const declared = r.executionSteps ? r.executionSteps.length : 0;
+    // From the call into `avm_simulate` to the decoded step array in hand, every entry into a
+    // step-stream export is counted, so "the stream arrived inside the result" is a measured
+    // number of crossings and not a claim the host makes about itself.
+    const inResult = R.countCalls(/^avm_steps_/, () => {
+      const r = simulate(program, 'faststeps', cdb, mdb);
+      return r.executionSteps ? r.executionSteps.length : 0;
+    });
+    const declared = inResult.value;
     const count = R.e.avm_steps_count();
     line('steps.program', program);
     line('steps.inResultCount', declared);
@@ -328,9 +334,9 @@ try {
     line('steps.batchSize', batch);
 
     // The whole stream is ALSO inside the single `avm_simulate` result, under upstream's own
-    // `executionSteps` field, at a cost of ZERO further crossings. That is the strongest form of
-    // "one call per batch" and it is reported as a fact rather than left implicit.
-    line('steps.crossingsForWholeStreamInResult', 0);
+    // `executionSteps` field. That is the strongest form of "one call per batch", and the number of
+    // step-stream crossings it took is the one counted above.
+    line('steps.crossingsForWholeStreamInResult', inResult.calls);
 
     // BATCHED: ceil(count / batch) crossings. PER EVENT: the same export, one step per call —
     // the rejected shape, measured through the SAME code path, so the comparison is between two
@@ -357,10 +363,15 @@ try {
       arms.batched.push(drain(batch));
       arms.perEvent.push(drain(1));
     }
+    // The crossing count of each arm is the number of times the module's step export was ENTERED,
+    // counted on one further, untimed drain, so the timed repetitions above carry no counting
+    // wrapper. The loop's own counter is ceil(count / step) by construction and says nothing.
+    const entered = { batched: R.countCalls(/^avm_steps_batch$/, () => drain(batch)).calls,
+                      perEvent: R.countCalls(/^avm_steps_batch$/, () => drain(1)).calls };
     for (const label of ['batched', 'perEvent']) {
       const runs = arms[label];
       runs.forEach((r, i) => line(`steps.${label}.us.${i}`, r.us));
-      line(`steps.${label}.crossings`, runs[0].crossings);
+      line(`steps.${label}.crossings`, entered[label]);
       line(`steps.${label}.decoded`, runs[0].decoded);
       line(`steps.${label}.us`, Math.min(...runs.map((r) => r.us)));
     }

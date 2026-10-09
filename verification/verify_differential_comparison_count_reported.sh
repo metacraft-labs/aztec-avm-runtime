@@ -104,12 +104,12 @@ assert_file "the workflow is present" "$WF"
 if command -v yq >/dev/null 2>&1; then
   step_names="$(yq -r '.jobs["differential-oracle"].steps[].name' "$WF" 2>/dev/null)"
 else
-  step_names="$(nix shell nixpkgs#yq-go --command yq -r '.jobs["differential-oracle"].steps[].name' "$WF" 2>/dev/null)"
+  step_names="$(nix shell --inputs-from "$REPO_ROOT" nixpkgs#yq-go --command yq -r '.jobs["differential-oracle"].steps[].name' "$WF" 2>/dev/null)"
 fi
 [ -n "$step_names" ] || die "the workflow could not be parsed; a job named in a comment is not a job"
 assert_contains "the differential job has a step that reports the headline" "THE HEADLINE" "$step_names"
 runs="$(if command -v yq >/dev/null 2>&1; then yq -r '.jobs["differential-oracle"].steps[].run // ""' "$WF"; \
-        else nix shell nixpkgs#yq-go --command yq -r '.jobs["differential-oracle"].steps[].run // ""' "$WF"; fi)"
+        else nix shell --inputs-from "$REPO_ROOT" nixpkgs#yq-go --command yq -r '.jobs["differential-oracle"].steps[].run // ""' "$WF"; fi)"
 assert_contains "and that step actually invokes the tool" "report-comparisons" "$runs"
 assert_contains "and the recipe exists" "report-comparisons:" "$(cat "$REPO_ROOT/Justfile")"
 

@@ -130,6 +130,14 @@ else
   fail "patched form DIFFERS between the two targets — see $M5_WORK/patched-forms.diff"
 fi
 
+# The agreement and disagreement counts below are loops over the HOST's upstream
+# rows, and "agrees on none" and "disagrees on none" are both what an empty loop
+# says. So the rows they iterate over are counted first, on both targets.
+assert_eq "the host transcript carries the upstream form for all 13 shared sizes" "13" \
+  "$(form "$M5_WORK/first_field.native.txt" upstream | grep -c .)"
+assert_eq "and so does the wasm32 transcript" "13" \
+  "$(form "$M5_WORK/first_field.wasm.txt" upstream | grep -c .)"
+
 agree=0
 while read -r size value; do
   wasm_value="$(awk -v s="$size" '$1=="ff" && $2=="upstream" && $3==s {print $4}' \

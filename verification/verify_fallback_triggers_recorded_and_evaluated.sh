@@ -46,8 +46,27 @@ command -v python3 >/dev/null 2>&1 || die "python3 is not available"
 [ -f "$M16_DOC" ] || die "FALLBACK.md does not exist at $M16_DOC"
 [ -f "$M16_PARSER" ] || die "the trigger parser is missing at $M16_PARSER"
 
-MILESTONES="$WORKSPACE_ROOT/codetracer-specs/Planned-Work/Aztec-AVM-Runtime.milestones.org"
-[ -f "$MILESTONES" ] || die "the milestone file is not at $MILESTONES"
+# Both repository aliases and document paths are published workspace conventions.
+# Refuse ambiguous authorities rather than selecting whichever path was searched first.
+milestone_candidates=()
+for candidate in \
+  "$WORKSPACE_ROOT/codetracer-specs/Planned-Work/Aztec-AVM-Runtime.milestones.org" \
+  "$WORKSPACE_ROOT/codetracer-specs/milestones/Aztec-AVM-Runtime.milestones.org" \
+  "$WORKSPACE_ROOT/codetracer-pm/milestones/Aztec-AVM-Runtime.milestones.org"
+do
+  if [ -f "$candidate" ]; then
+    same_authority=0
+    for authority in "${milestone_candidates[@]}"; do
+      if [ "$candidate" -ef "$authority" ]; then
+        same_authority=1
+        break
+      fi
+    done
+    [ "$same_authority" -eq 1 ] || milestone_candidates+=("$candidate")
+  fi
+done
+[ "${#milestone_candidates[@]}" -eq 1 ] || die "expected exactly one owning Aztec milestone authority; found ${#milestone_candidates[@]}"
+MILESTONES="${milestone_candidates[0]}"
 
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT

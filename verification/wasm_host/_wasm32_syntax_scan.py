@@ -18,6 +18,12 @@ Only three things are removed from each command line, and each for a reason:
 `-Werror` is KEPT unless --no-werror is passed, because whether the diagnostic is
 fatal is exactly the question for a wasm build; the caller asks for both.
 
+--no-werror also removes `-Wfatal-errors`. barretenberg compiles with both, and
+under both clang stops at a translation unit's FIRST diagnostic: a file that fails
+on a narrowing warning at line 20 never reports a shift-count overflow at line 90.
+A census of which files carry a diagnostic is therefore only complete when nothing
+is fatal, and --no-werror is the mode that answers "which files carry it".
+
 Output is line-oriented and machine-readable, one fact per line:
 
     scanned <n>
@@ -82,7 +88,7 @@ def main() -> int:
                 continue
             if a == "-c" or a.startswith("-march=") or a in ("-pthread", "-fcolor-diagnostics"):
                 continue
-            if a == "-Werror" and not werror:
+            if a in ("-Werror", "-Wfatal-errors") and not werror:
                 continue
             argv.append(a)
         argv[0] = f"{sdk}/bin/clang++"

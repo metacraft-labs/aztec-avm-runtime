@@ -16,6 +16,9 @@
 # `serializeWithMessagePack` recognises an `Fr` by the class object of ITS OWN install, so "which
 # install" is a correctness question and not a tidiness one.
 
+# Its data helpers run inside command substitutions; see lib_subshell_die.sh.
+. "$VERIFY_DIR/lib_subshell_die.sh"
+
 M21_WORK="${M21_WORK:-$HOME/.cache/aztec-m21-form-b}"
 export M21_WORK
 
@@ -80,6 +83,6 @@ EOF
 # reads one back. The terminal sentinel is `formB.done`, and the checks REFUSE on its absence
 # through lib.sh's one implementation rather than adding an eighth spelling.
 m21_field() { # <file> <key>
-  [ -f "$1" ] || die "m21_field: no such file: $1"
+  [ -f "$1" ] || die_even_in_subshell "m21_field: no such file: $1"
   awk -v k="$2" '$1 == k { $1 = ""; sub(/^ /, ""); print; exit }' "$1"
 }

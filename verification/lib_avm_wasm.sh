@@ -307,7 +307,7 @@ m6_prepare_tree() {
       git -C "$FORK_ROOT" worktree add --detach "$dir" "$M6_BASE_REV" >/dev/null 2>&1 \
         || die "could not create the $name worktree at $dir"
       for p in "${patches[@]+"${patches[@]}"}"; do
-        if ! git -C "$dir" am "$p" >>"$M6_WORK/$name-am.log" 2>&1; then
+        if ! git -C "$dir" -c commit.gpgsign=false am "$p" >>"$M6_WORK/$name-am.log" 2>&1; then
           git -C "$dir" am --abort >/dev/null 2>&1 || true
           die "git am of $(basename "$p") failed on the $name tree — see $M6_WORK/$name-am.log"
         fi
@@ -659,8 +659,29 @@ m6_graph() {
 # m6_graph removes the directory.
 m6_graph_edges_file() {
   local f="$1/m6-graph-$2/edges"
-  [ -s "$f" ] || m6_graph "$1" "$2" >/dev/null
+  m6_graph_current "$1" "$2" || m6_graph "$1" "$2" >/dev/null
+  m6_graph_current "$1" "$2" || die "could not generate a current target graph for $1/$2"
   printf '%s\n' "$f"
+}
+
+# m6_graph_current <tree> <build-dir> -> 0 if the graph on disk describes the build
+# directory's CURRENT configuration, non-zero otherwise.
+#
+# The graph lives beside the build directory, not inside it, so removing and
+# reconfiguring the build directory leaves the previous graph in place. "Present"
+# is therefore not "current": a reader that regenerated only when the file was
+# missing answered every node, shape and closure question from whatever
+# configuration last produced a graph — measured at a month old for build-m10-wasm-avm
+# while its CMakeCache.txt was minutes old. `cmake --graphviz` writes the graph after
+# it has rewritten CMakeCache.txt and build.ninja, so a current graph is strictly
+# newer than both, and any configure since (a fresh one, or ninja re-running cmake)
+# makes it older.
+m6_graph_current() {
+  local dot="$1/m6-graph-$2/targets.dot" edges="$1/m6-graph-$2/edges"
+  local b="$1/barretenberg/cpp/$2"
+  [ -f "$dot" ] && [ -f "$edges" ] || return 1
+  [ -f "$b/CMakeCache.txt" ] && [ -f "$b/build.ninja" ] || return 1
+  [ "$dot" -nt "$b/CMakeCache.txt" ] && [ "$dot" -nt "$b/build.ninja" ]
 }
 
 # ---------------------------------------------------------------------------
@@ -681,18 +702,19 @@ m6_graph_dot() { printf '%s\n' "$1/m6-graph-$2/targets.dot"; }
 # Both DIE rather than return empty when the graph has not been generated. The
 # cold run caught why: a `grep -c` over an absent file is 0, and an assertion
 # that a forbidden name appears 0 times then passes without having looked at
-# anything. Every reader of the graph regenerates it if it is missing.
+# anything. Every reader of the graph regenerates it unless it is CURRENT (see
+# m6_graph_current): missing and stale are the same failure.
 m6_graph_nodes() {
   local dot; dot="$(m6_graph_dot "$1" "$2")"
-  [ -f "$dot" ] || { m6_graph "$1" "$2" >/dev/null; }
-  [ -f "$dot" ] || die "could not generate the target graph for $1/$2"
+  m6_graph_current "$1" "$2" || m6_graph "$1" "$2" >/dev/null
+  m6_graph_current "$1" "$2" || die "could not generate a current target graph for $1/$2"
   grep -oE '\[ label = "[^"]+", shape' "$dot" | sed -E 's/^\[ label = "([^"]+)", shape$/\1/' | sort -u
 }
 
 m6_graph_shape() {
   local dot; dot="$(m6_graph_dot "$1" "$2")"
-  [ -f "$dot" ] || { m6_graph "$1" "$2" >/dev/null; }
-  [ -f "$dot" ] || die "could not generate the target graph for $1/$2"
+  m6_graph_current "$1" "$2" || m6_graph "$1" "$2" >/dev/null
+  m6_graph_current "$1" "$2" || die "could not generate a current target graph for $1/$2"
   grep -oE "\[ label = \"$3\", shape = [a-z]+" "$dot" \
     | sed -E 's/.*shape = //' | head -1
 }
@@ -837,13 +859,21 @@ print(sum(1 for e in db if sys.argv[2] in e["file"]))' "$db" "$3"
 # having looked at anything — the same scope-of-validity defect the cold run
 # found in the ungenerated `targets.dot`. Callers of this read a build directory
 # they did not produce, so the check belongs here.
+#
+# An archive that IS there but cannot be read is the same defect one step later:
+# `llvm-nm` fails, prints nothing, and the count is 0 again. So the count is
+# printed only when `llvm-nm` succeeded AND listed undefined symbols at all (a real
+# archive of this build has hundreds); otherwise nothing is printed, and a caller
+# comparing against "0" fails instead of passing.
 m6_undefined_mdb() {
   local tree="$1" bdir="$2" archive="$3"
   [ -f "$tree/barretenberg/cpp/$bdir/lib/$archive" ] \
     || die "no $archive under $bdir — there is nothing to count mdb_ references in"
   m6_in_devshell '
     sdk="$WASI_SDK_PREFIX"
-    "$sdk/bin/llvm-nm" -u "$1" 2>/dev/null | grep -c "mdb_" || true
+    u="$("$sdk/bin/llvm-nm" -u "$1" 2>/dev/null)" || exit 3
+    [ "$(printf "%s\n" "$u" | grep -c .)" -ge 1 ] || exit 4
+    printf "%s\n" "$u" | grep -c "mdb_" || true
   ' "$tree/barretenberg/cpp/$bdir/lib/$archive" 2>/dev/null | tail -1
 }
 

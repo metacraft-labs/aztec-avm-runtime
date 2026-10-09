@@ -94,6 +94,18 @@ sibling paths, low-leaf lookups, indexed-leaf preimages and leaf values — its 
 `bin/world_state_tests` is a native target and not a wasm one; that is why those seven are outside
 this suite, and it is a target-level fact rather than a property of the tests.
 
+**Those seven ARE run under wasm, by a split rather than a port.** `verification/m7/wsr/` compiles
+upstream's `memory_merkle_db.test.cpp` byte-for-byte, with an overlay header first on the
+quote-include path that replaces the test's `WorldState`: natively it forwards every call to the
+real LMDB-backed `WorldState` and records the call, its arguments and its answer (160 calls over
+the seven cases); under wasm (V8) no `WorldState` exists, each call must match the next recorded
+one argument-for-argument, and it returns the recorded LMDB answer. Upstream's own sequences and
+`EXPECT_EQ`s therefore run the wasm-built `MemoryMerkleDB` against the real `WorldState`'s roots,
+sibling paths, low-leaf lookups, preimages and leaf values. All seven pass under wasm and in the
+native replay control, every recorded call is consumed, and five transcript mutations (a root, a
+sibling path, a low-leaf index, a recorded argument, a dropped call) each turn exactly their own
+case red. Asserted by `verify_world_state_reference_tests_pass_under_wasm.sh`.
+
 **2. The reference trees ARE exercised by the 391.** The chain, each link asserted by
 `verify_world_state_reference_tests_pass_under_wasm.sh`:
 
@@ -127,11 +139,13 @@ Measured directly on the native binary of the same tree (`gdb -batch`,
 get_minimal_proving_inputs ← TestFactoryImpl<HintingDBsMinimalTest_ContractDBCheckpoints_Test>::CreateTest`.
 So the trees are constructed, mutated, checkpointed and read.
 
-**3. What is still open is narrower than "not exercised".** No test here compares a tree **root**
-native versus wasm. The 391 exercise the trees identically on all three runtimes and agree per test,
-which is evidence that they behave the same; it is not a root-value differential. M8 owns that;
-Tier I of the corpus (`native-with-roots.results` / `wasm-with-roots.results`) already carries 56
-identical tree-root lines native versus wasm, for the spike's build rather than this one.
+**3. What is still open is narrower than "not exercised".** None of the 391 compares a tree
+**root** native versus wasm; the split gate in item 1 does, for the reference DB on its own (the
+wasm `MemoryMerkleDB`'s roots against the native LMDB `WorldState`'s, after every step). What stays
+M8's is the AVM-level differential: the same transaction's tree roots out of the wasm simulator and
+the native one. Tier I of the corpus (`native-with-roots.results` / `wasm-with-roots.results`)
+already carries 56 identical tree-root lines native versus wasm, for the spike's build rather than
+this one.
 
 Also true, and unchanged: `libworld_state_reference.a` is on the wasm test binary's link line, 73
 `MemoryMerkleDB` symbols are in the artefact, and the module's *vocabulary* (`MerkleTreeId`,

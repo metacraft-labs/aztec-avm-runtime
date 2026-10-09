@@ -397,6 +397,10 @@ impl<D: TraceForeignCallExecutor> TraceForeignCallExecutor for TapeExecutor<D> {
 
 struct CountingSink<'a> {
     inner: NimWriterSink<'a>,
+    /// How many times a tracer asked to start the recording, and how many of those reached the
+    /// writer. One container is ONE recording, so exactly one `start` may reach it; see `start`.
+    starts_asked: usize,
+    starts_written: usize,
     steps: Vec<(String, i64, Option<i64>)>,
     paths: Vec<String>,
     calls: usize,
@@ -417,8 +421,25 @@ impl<'a> TraceSink for CountingSink<'a> {
     fn set_workdir(&mut self, workdir: &std::path::Path) {
         self.inner.set_workdir(workdir);
     }
+    // THE RECORDING IS STARTED ONCE, HOWEVER MANY CIRCUITS ARE TRACED INTO IT.
+    //
+    // `trace_circuit_with_executor` starts the trace for every circuit it steps, and this program
+    // steps one circuit per FRAME into ONE writer. The writer's `start` opens the recording: it
+    // interns `<toplevel>`, opens its call — the root of the call tree — and records the entry step
+    // (`trace-events.md`, "Recorder Integration — Starting a Recording"). A second `start` into the
+    // same writer would therefore open a SECOND `<toplevel>` frame. So only the first reaches the
+    // writer as a `start`; every later one is recorded as what it asks for inside an open recording,
+    // a step at the position it names — the frame's entry step, inside the `Call` this program
+    // registered for the frame. The container keeps one entry step per traced circuit and one root.
     fn start(&mut self, path: &std::path::Path, line: codetracer_trace_types::Line) {
-        self.inner.start(path, line);
+        self.starts_asked += 1;
+        if self.starts_written == 0 {
+            self.starts_written += 1;
+            self.inner.start(path, line);
+        } else {
+            // No column: `start` has none to give, and the entry step it used to record had none.
+            self.inner.register_step_with_column(path, line, None);
+        }
     }
     fn enable_column_aware_steps(&mut self) {
         self.inner.enable_column_aware_steps();
@@ -761,6 +782,8 @@ fn main() {
     let mut writer = create_trace_writer(&program_name, &[], TraceEventsFileFormat::Ctfs);
     let mut sink = CountingSink {
         inner: NimWriterSink::new(&mut *writer),
+        starts_asked: 0,
+        starts_written: 0,
         steps: vec![],
         paths: vec![],
         calls: 0,
@@ -1116,6 +1139,8 @@ fn main() {
         "registeredPaths": sink.paths.len(),
         "calls": sink.calls,
         "returns": sink.returns,
+        "startsAsked": sink.starts_asked,
+        "startsWritten": sink.starts_written,
         "traceErrors": sink.errors,
         "oracleLedger": *ledger.borrow(),
         "refusedOracles": *refused.borrow(),

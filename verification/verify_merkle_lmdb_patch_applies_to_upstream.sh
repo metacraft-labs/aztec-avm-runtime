@@ -88,9 +88,31 @@ fi
 # `yarn install`, which the build has to run to get nodejs_module to configure,
 # rewrites `nodejs_module/yarn.lock` and `.yarnrc.yml`, and that is our build
 # seeding rather than anything the patch did.
-patch_paths="$(git -C "$M3_WORK/base" apply --numstat "$M3_PATCH_FILE" 2>/dev/null | cut -f3-)"
-leftovers="$(cd "$M3_WORK/patched" && git status --porcelain -- $patch_paths 2>/dev/null)"
-assert_eq "no path the patch touches is left uncommitted in the applied tree" "" "$leftovers"
+#
+# "The paths the patch touches" are BOTH sides of every `diff --git a/X b/Y` header: numstat names
+# only the destination of a rename, and a file resurrected at the path a rename moved away from is
+# exactly the leftover that would put the LMDB tree store back into crypto_merkle_tree's sources.
+# The status must also have run: an empty answer is what a failed `git status` prints too.
+patch_paths="$(python3 - "$M3_PATCH_FILE" <<'PY'
+import re, sys
+paths = set()
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    m = re.match(r"^diff --git a/(\S+) b/(\S+)$", line)
+    if m:
+        paths.update(m.groups())
+print("\n".join(sorted(paths)))
+PY
+)"
+n_numstat="$(git -C "$M3_WORK/base" apply --numstat "$M3_PATCH_FILE" 2>/dev/null | grep -c . || true)"
+n_renames="$(grep -c '^rename from ' "$M3_PATCH_FILE" || true)"
+assert_eq "the pathspec is every destination plus the source of every rename" \
+  "$((n_numstat + n_renames))" "$(printf '%s\n' "$patch_paths" | grep -c . || true)"
+mapfile -t patch_path_list <<<"$patch_paths"
+if leftovers="$(cd "$M3_WORK/patched" && git status --porcelain --untracked-files=all -- "${patch_path_list[@]}")"; then
+  assert_eq "no path the patch touches is left uncommitted in the applied tree" "" "$leftovers"
+else
+  fail "git status could not be read in the applied tree"
+fi
 
 # ---------------------------------------------------------------------------
 # ...and it configures and builds

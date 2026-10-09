@@ -45,8 +45,13 @@ ANCHOR="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ancho
 assert_eq "the cpp anchor is a full sha1" 40 "${#ANCHOR}"
 
 # ---- the header really is generated, not checked in ------------------------
-tracked="$(git -C "$FORK_ROOT" ls-tree --name-only "$ANCHOR" \
-  barretenberg/cpp/src/barretenberg/aztec/aztec_constants.hpp)"
+# An empty ls-tree is also what a misspelt directory or an unreadable anchor returns, so the same
+# probe must first find the file that IS tracked beside it.
+AZTEC_DIR="barretenberg/cpp/src/barretenberg/aztec"
+assert_eq "positive control: the same probe finds aztec_hash_policy.hpp tracked beside it" \
+  "$AZTEC_DIR/aztec_hash_policy.hpp" \
+  "$(git -C "$FORK_ROOT" ls-tree --name-only "$ANCHOR" "$AZTEC_DIR/aztec_hash_policy.hpp")"
+tracked="$(git -C "$FORK_ROOT" ls-tree --name-only "$ANCHOR" "$AZTEC_DIR/aztec_constants.hpp")"
 assert_eq "aztec_constants.hpp is NOT tracked at the pinned anchor" "" "$tracked"
 assert_true "its generator IS tracked at the pinned anchor" \
   git -C "$FORK_ROOT" cat-file -e "$ANCHOR:protocol/constants-codegen/src/cli.ts"
@@ -147,13 +152,13 @@ open(p, "w", encoding="utf-8").write(s2)
 PY
 [ $? -eq 0 ] || die "could not build the negative control's perturbed input"
 
+# The perturbed input goes through the SAME generator the three runs above used, so the control
+# measures tools/gen_aztec_constants.sh itself: a generator that stopped reading its input (or
+# copied a cached header) would reproduce byte-identically and match the in-tree header, and only
+# this arm would notice.
 ctl_out="$( cd "$FORK_ROOT" && nix develop --command bash -c "
   set -e
-  node '$FORK_ROOT/protocol/constants-codegen/src/cli.ts' \
-    --input '$perturbed' \
-    --cpp '$WORK/perturbed.hpp' \
-    --selection '$FORK_ROOT/barretenberg/cpp/scripts/constants-codegen/cpp.json'
-  clang-format-20 --style='file:$FORK_ROOT/barretenberg/cpp/.clang-format' -i '$WORK/perturbed.hpp'
+  '$GEN' '$WORK/perturbed.hpp' '$perturbed'
 " 2>&1 )"
 if [ ! -s "$WORK/perturbed.hpp" ]; then
   printf '%s\n' "$ctl_out" | tail -3 | sed 's/^/      /' >&2

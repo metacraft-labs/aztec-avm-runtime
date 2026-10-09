@@ -59,6 +59,8 @@
 TEST_NAME="e2e_ts_wasm_phase_revert_semantics"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 . "$VERIFY_DIR/lib_token_blocks.sh"
+# The arms run on the dev shell's node, asserted, not on the inherited PATH's.
+use_devshell_node
 
 tb_summary_on_abnormal_exit
 tb_require_arms

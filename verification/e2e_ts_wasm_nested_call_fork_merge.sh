@@ -67,6 +67,8 @@
 TEST_NAME="e2e_ts_wasm_nested_call_fork_merge"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 . "$VERIFY_DIR/lib_token_blocks.sh"
+# The arms run on the dev shell's node, asserted, not on the inherited PATH's.
+use_devshell_node
 
 tb_summary_on_abnormal_exit
 tb_require_arms
@@ -155,8 +157,8 @@ done
 # this assertion is what would say so.
 assert_eq "a nested call and a flat one checkpoint the contract store identically" \
   "$(tb_block nested flatCall checkpoints)" "$(tb_block nested nestedCall checkpoints)"
-assert_eq "…which is one per transaction, committed" \
-  '{"created":1,"committed":1,"reverted":0}' "$(tb_block nested flatCall checkpoints)"
+assert_eq "…which is one per transaction, committed, never nested deeper than one" \
+  '{"created":1,"committed":1,"reverted":0,"maxDepth":1}' "$(tb_block nested flatCall checkpoints)"
 # So the per-frame fork is the MODULE's. The module carries the coordinator's own lockstep
 # assertion, asserted present in Part 0; M13's `avm_contract_db_host.mjs` is what drives it, and
 # this check does not claim to.

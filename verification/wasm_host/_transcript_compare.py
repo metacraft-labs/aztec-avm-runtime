@@ -45,6 +45,13 @@ def check(name, ok, detail=""):
     RESULTS.append(("PASS" if ok else "FAIL", name, str(detail)))
 
 
+def note(name, detail=""):
+    """A measurement REPORTED rather than asserted. It is a NOTE row, not a PASS: a row whose
+    verdict is fixed in advance cannot fail, and counted as a pass it inflates every tally of what
+    this comparison asserted."""
+    RESULTS.append(("NOTE", name, str(detail)))
+
+
 def read(path):
     with open(path, encoding="utf-8") as fh:
         return fh.read().split("\n")
@@ -156,13 +163,13 @@ def main():
             for i in range(1, len(values)):
                 if values[i] > values[i - 1]:
                     heaviest = per_program[i][0]
-            check("the heaviest corpus program is identified by measurement", True,
+            note("the heaviest corpus program, by measurement",
                   f"{heaviest} ({max(values)} pages); full sequence " +
                   " ".join(f"{p}={v}" for p, v in per_program))
             # And the honest caveat, asserted rather than written down somewhere else: the spread
             # across the corpus is small, because the footprint is dominated by the world state's
             # genesis prefill and the module's static data rather than by the program.
-            check("the corpus spread in peak pages is recorded", True,
+            note("the corpus spread in peak pages",
                   f"min={min(values)} max={max(values)} spread={max(values) - min(values)}")
 
     # --- everything else must be identical, per line -------------------------------------------

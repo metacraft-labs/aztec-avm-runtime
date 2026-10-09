@@ -232,7 +232,13 @@ PY
 m5_native_configure() {
   local tree="$1"
   [ -x "$M5_NATIVE_CONFIGURE" ] || die "missing $M5_NATIVE_CONFIGURE"
-  [ -f "$tree/barretenberg/cpp/build/compile_commands.json" ] && return 0
+  # A configured tree is reused only when its own configure log records success:
+  # the caller asserts "cmake exits 0" on this status, and a compile database left
+  # beside a configure that failed is not that.
+  if [ -f "$tree/barretenberg/cpp/build/compile_commands.json" ] \
+     && [ "$(sed -n 's/^### configure_rc=//p' "$tree/m5-native-configure.log" 2>/dev/null | tail -1)" = "0" ]; then
+    return 0
+  fi
   m5_in_devshell '"$1" "$2"' "$M5_NATIVE_CONFIGURE" "$tree" \
     >"$tree/m5-native-configure.log" 2>&1
 }

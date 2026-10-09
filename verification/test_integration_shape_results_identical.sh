@@ -63,6 +63,7 @@ assert_eq "and it is complete" "1" "$(m15_key "$INPUTS" reactorInputs.done)"
 # ---------------------------------------------------------------------------
 SCRATCH="$M15_WORK/shapes"; rm -rf "$SCRATCH"; mkdir -p "$SCRATCH"
 COMPARED=0
+WRITES_COMPARED=0
 for p in $M15_PROGRAMS; do
   OUT="$SCRATCH/$p.txt"
   m15_host "$WASM" "$INPUTS" shapes "$OUT" "$p"
@@ -74,7 +75,7 @@ for p in $M15_PROGRAMS; do
   # The two halves, extracted by prefix and compared as whole files. `sed` strips the arm name so
   # what is left is field-for-field.
   sed -n 's/^resident\.//p' "$OUT" | grep -v '^inputBytes\|^steps\|^resultBytes\|^publicInputsPresent\|^roots\.' | LC_ALL=C sort >"$SCRATCH/$p.res"
-  sed -n 's/^chatty\.//p'   "$OUT" | grep -v '^inputBytes\|^steps\|^resultBytes\|^publicInputsPresent\|^residentTreesPresent' | LC_ALL=C sort >"$SCRATCH/$p.cha"
+  sed -n 's/^chatty\.//p'   "$OUT" | grep -v '^inputBytes\|^steps\|^resultBytes\|^publicInputsPresent' | LC_ALL=C sort >"$SCRATCH/$p.cha"
   # Non-emptiness FIRST. Two empty files are identical and prove nothing.
   assert_ge "$p: the resident arm reported comparable fields" 8 "$(m15_lines "$SCRATCH/$p.res")"
   assert_eq "$p: and the chatty arm reported the same number of them" \
@@ -84,12 +85,32 @@ for p in $M15_PROGRAMS; do
 
   # Named individually as well, so a diff that passed because both sides were reformatted the same
   # way is not the whole evidence.
-  for f in revertCode totalGas publicGas billedGas txFee nullifiers.count noteHashes.count dataWrites.count; do
+  for f in revertCode totalGas publicGas billedGas txFee nullifiers.count noteHashes.count dataWrites.count \
+           publicLogs.count l2ToL1Msgs.count; do
     rv="$(m15_key "$OUT" "resident.$f")"
     cv="$(m15_key "$OUT" "chatty.$f")"
     assert_true "$p: $f is non-empty on both sides" test -n "$rv" -a -n "$cv"
     assert_eq "$p: $f agrees" "$rv" "$cv"
   done
+  # No corpus program emits a note hash, a public log or an L2-to-L1 message, so those three counts
+  # agree at 0 in every program and discriminate nothing on their own; they are compared so that
+  # one appearing on one side only is caught. The non-zero content this comparison rests on is the
+  # public-data writes below, of which every program makes at least one.
+  # Every public-data write by CONTENT, slot and value, one line per write. Only the count was ever
+  # compared before, and a world-state read that answers wrongly changes what a program writes
+  # while leaving how many writes it makes, its gas and its fee exactly as they were.
+  nwrites="$(m15_key "$OUT" resident.dataWrites.count)"
+  written=0
+  for i in $(seq 0 $(( ${nwrites:-0} - 1 ))); do
+    rv="$(m15_key "$OUT" "resident.dataWrites.$i")"; cv="$(m15_key "$OUT" "chatty.dataWrites.$i")"
+    if str_has_re "$rv" '^0x[0-9a-f]{64} 0x[0-9a-f]{64}$' && [ "$rv" = "$cv" ]; then
+      written=$((written + 1))
+    else
+      fail "$p: public-data write $i differs, or is not a slot and a value — resident [$rv], chatty [$cv]"
+    fi
+  done
+  assert_eq "$p: all ${nwrites:-0} public-data writes agree by slot and value" "${nwrites:-0}" "$written"
+  WRITES_COMPARED=$((WRITES_COMPARED + written))
   # THE STEP STREAM IS NOT COMPARED HERE, and the reason is upstream's rather than ours: with the
   # default `PublicSimulatorConfig` neither entry point collects execution steps, so both arms
   # report zero and comparing them would be comparing two zeroes. What IS asserted is that they
@@ -104,14 +125,28 @@ for p in $M15_PROGRAMS; do
   assert_eq "$p: the resident arm produced public inputs" "1" "$(m15_key "$OUT" resident.publicInputsPresent)"
   assert_eq "$p: the hinted arm did not — upstream's own config, not a dropped field" "0" \
     "$(m15_key "$OUT" chatty.publicInputsPresent)"
-  # And the chatty arm holds no world state at all, which is the shape's defining property.
-  assert_eq "$p: the chatty arm has no resident trees to read" "0" \
-    "$(m15_key "$OUT" chatty.residentTreesPresent)"
+  # And the chatty arm holds no world state at all, which is the shape's defining property. It is
+  # read off the arm that ran: the entry point it called takes no DB handle, and not one DB export
+  # was entered while it ran. The resident arm is the control for both readings: its entry point
+  # takes two handles, and seeding its world state goes through those exports.
+  assert_eq "$p: the chatty arm called the hinted entry point" "avm_simulate_with_hinted_dbs" \
+    "$(m15_key "$OUT" shapes.chattyEntry)"
+  assert_eq "$p: whose only parameters are the input's pointer and length — no DB handle" "2" \
+    "$(m15_key "$OUT" shapes.chattyEntryArity)"
+  assert_eq "$p: while the resident entry point takes both handles besides" "4" \
+    "$(m15_key "$OUT" shapes.residentEntryArity)"
+  assert_eq "$p: the chatty arm entered no DB export at all" "0" \
+    "$(m15_key "$OUT" shapes.chattyDbExportCalls)"
+  assert_ge "$p: where the resident arm entered them to build its world state, so the count counts" 6 \
+    "$(m15_key "$OUT" shapes.residentDbExportCalls)"
   assert_ge "$p: while the resident arm reported four tree roots" 4 \
     "$(grep -c '^resident\.roots\.' "$OUT" || true)"
   COMPARED=$((COMPARED + 1))
 done
 assert_eq "all seven corpus programs were compared" "$M15_EXPECTED_PROGRAMS" "$COMPARED"
+# The content comparison above is a loop over each program's writes, and a loop over nothing
+# asserts nothing: the corpus must put real writes through it.
+assert_ge "public-data writes were compared by content across the corpus" 7 "$WRITES_COMPARED"
 
 # The payload asymmetry, which is the whole trade and is recorded here as a number rather than as
 # an adjective: the chatty arm's boundary payload carries the world state the resident arm keeps.
@@ -122,10 +157,10 @@ assert_ge "the chatty arm's input is at least fifty times the resident arm's" \
   $((FAST * 50)) "$PROV"
 
 # ---------------------------------------------------------------------------
-# The comparison can fail. Three mutations, each of a DIFFERENT field, because a discriminator
+# The comparison can fail. Four mutations, each of a DIFFERENT field, because a discriminator
 # exercised on one field is a discriminator for one field.
 # ---------------------------------------------------------------------------
-for mut in revertCode txFee nullifiers.count; do
+for mut in revertCode txFee nullifiers.count dataWrites.0; do
   sed "s/^$mut \(.*\)$/$mut MUTATED/" "$SCRATCH/$M15_REPRESENTATIVE.cha" >"$SCRATCH/mut-$mut"
   assert_false "the mutation of $mut changed the file" \
     cmp -s "$SCRATCH/$M15_REPRESENTATIVE.cha" "$SCRATCH/mut-$mut"

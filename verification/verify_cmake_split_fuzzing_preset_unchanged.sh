@@ -77,6 +77,7 @@ assert_not_contains "and it says nothing about vm2" "vm2" "$GUARD_COMMENT"
 # CMake's own target graph.
 m10_native_preset_configure "$BEFORE" fuzzing-avm "$M10_FUZZ_AVM_BUILD"; RC=$?
 assert_eq "the unpatched tree configures the fuzzing-avm preset" "0" "$RC"
+declare -A A_RC=(); A_RC[fuzzing-avm]="$RC"
 assert_eq "and that preset really does set MULTITHREADING=ON" "ON" \
   "$(m6_cache "$BEFORE" "$M10_FUZZ_AVM_BUILD" MULTITHREADING)"
 assert_eq "FUZZING is on there" "ON" "$(m6_cache "$BEFORE" "$M10_FUZZ_AVM_BUILD" FUZZING)"
@@ -121,6 +122,7 @@ done
 # MULTITHREADING=OFF, and world_state absent.
 m10_native_preset_configure "$BEFORE" fuzzing "$M10_FUZZ_BUILD"; RC=$?
 assert_eq "the unpatched tree configures the fuzzing preset" "0" "$RC"
+A_RC[fuzzing]="$RC"
 assert_eq "the fuzzing preset sets MULTITHREADING=OFF" "OFF" \
   "$(m6_cache "$BEFORE" "$M10_FUZZ_BUILD" MULTITHREADING)"
 F_NODES="$(m6_graph_nodes "$BEFORE" "$M10_FUZZ_BUILD")"
@@ -175,8 +177,10 @@ for preset in fuzzing fuzzing-avm fuzzing-avm-tooling; do
   # `before` was configured above for the first two; do it for the third, and
   # configure `after` for all three. Either way an assertion is made, so the
   # assertion count does not depend on which parts ran earlier.
-  if [ -f "$BEFORE/barretenberg/cpp/$bdir/CMakeCache.txt" ]; then
-    pass "$preset was configured before the split by part A  [$bdir]"
+  # Decided by what part A did IN THIS RUN, not by whether a cache file exists: a build directory
+  # left by an earlier run also has one, and would then be compared without being configured.
+  if [ -n "${A_RC[$preset]:-}" ]; then
+    assert_eq "$preset was configured before the split by part A  [$bdir]" "0" "${A_RC[$preset]}"
   else
     m10_native_preset_configure "$BEFORE" "$preset" "$bdir"; rc=$?
     assert_eq "$preset configures before the split" "0" "$rc"

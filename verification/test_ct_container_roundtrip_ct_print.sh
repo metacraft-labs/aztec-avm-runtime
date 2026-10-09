@@ -14,14 +14,19 @@
 # Path A container cannot be read by stock `ct-print`, because the Rust zstd frame compressor
 # leaves every frame unpledged. That is a claim about a DIFFERENCE, so it is held as one:
 # `build_ct_print.sh` builds the reader at `pins.json`'s `trace_format_nim` commit AND at its
-# `control_commit` — the parent of the one-line fix — and both are run against the same bytes.
-# Without the second, "our reader reads it" is satisfied by a container any reader would read, and
-# the reason for pinning a special reader would be unevidenced.
+# `control_commit` — a published ANCESTOR of the reader that must fail to read this container —
+# and both are run against the same bytes. Without the second, "our reader reads it" is satisfied
+# by a container any reader would read, and the reason for pinning a special reader would be
+# unevidenced. The control is chosen for what it DOES, not for where it sits; "THE CONTROL" below
+# says why.
 #
-# THE SYMPTOM IS ASSERTED, NOT JUST THE STATUS, and it is not the symptom §9.3 predicted: the
-# pre-fix reader exits 1 with `chunk compressed data extends beyond events.log`, not with a
-# `RangeDefect`. Pinning the text is what stops the pre-fix arm passing for some unrelated reason
-# — a missing file, a bad argument — which would make the whole comparison meaningless.
+# THE OUTCOME IS CLASSIFIED, NOT JUST THE STATUS. A refusal must say something and must not be a
+# decode; a silent decode must miss the step count the reader recovers. Either rules out the
+# control passing for some unrelated reason — a missing file, a bad argument — which would make
+# the whole comparison meaningless. (The first control here was the reader fix's parent, and it
+# exited 1 with `chunk compressed data extends beyond events.log`. The control at
+# `pins.json`'s `trace_format_nim.control_commit` today exits 0 over this container with empty
+# metadata, a step count of 27 where there are 5,001, and no events at all: SILENT.)
 #
 # ===========================================================================
 # EVERY ASSERTION ABOVE WAS SATISFIED OUT OF `events.log`, AND THE SPLIT STREAMS WERE NEVER READ.

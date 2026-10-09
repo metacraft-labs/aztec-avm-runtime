@@ -127,6 +127,30 @@ EXCEPTIONS = {
     "test_trace_step_count_matches_instruction_count": "M25's pending entry, cited by ct_download.ts AND by BROWSER-PACKAGING.md section 7, each in the paragraph that says the step count is not an instruction count -- the second site was attached to this one-file exemption without widening it, found by M27's review",
 }
 
+# One explicitly pending subject reference, not a claim that its test passes.
+# It is limited to the genuine subject-discovery tool and both pending markers;
+# occurrences elsewhere still need a real implementation. The published L3 entry
+# forbids synthesising a settled reverted transaction. Existing pending cases
+# above remain unchanged; this stricter case cannot exempt an arbitrary name.
+PENDING_REFERENCES = {
+    "test_reverted_transaction_recorded_as_reverted": (
+        "tools/scan_reverted_transactions.mjs",
+        ("stays named-but-pending until a subject exists", "test_reverted_transaction_recorded_as_reverted stays pending"),
+        ("// `test_reverted_transaction_recorded_as_reverted` (L3) needs one, and it needs a REAL one: L2's", "? 'NO REVERTED SETTLED TRANSACTION IN THIS RANGE — test_reverted_transaction_recorded_as_reverted stays pending'"),
+        "L3 explicitly pending genuine settled-revert subject; no passing or skipped test is claimed"),
+}
+# A hypothetical rename explicitly rejected by the existing genuine check.
+# This does not claim a second implementation or change root-comparison behavior.
+HISTORICAL_REFERENCES = {
+    "verify_hydrated_roots_declared": (
+        "verification/verify_hydrated_roots_match_state_reference.sh",
+        ("The check is kept under its original name deliberately.", 'TEST_NAME="verify_hydrated_roots_match_state_reference"'),
+        ("# is comfortable with — `verify_hydrated_roots_declared` — would be this campaign's own defect in",),
+        "The original hydrated-root question/check is retained; this exact line rejects a hypothetical rename"),
+}
+EXPLICIT_ABSENT_REFERENCES = {**PENDING_REFERENCES, **HISTORICAL_REFERENCES}
+matched_pending = set()
+
 verification = os.path.join(repo, "verification")
 resolved = set()
 func = re.compile(r"^\s*((?:verify|test|e2e)_[a-z0-9_]+)\s*\(\)", re.M)
@@ -206,6 +230,12 @@ for base in roots:
                 seen.add(name)
                 if name in resolved or name in EXCEPTIONS:
                     continue
+                if name in EXPLICIT_ABSENT_REFERENCES:
+                    allowed_file, markers, allowed_mentions, reason = EXPLICIT_ABSENT_REFERENCES[name]
+                    mention_line = text.splitlines()[text.count("\n", 0, m.start())].strip()
+                    if rel == allowed_file and mention_line in allowed_mentions and all(marker in text for marker in markers):
+                        matched_pending.add(name)
+                        continue
                 unresolved.setdefault(name, rel)
 
 for name in sorted(unresolved):
@@ -215,6 +245,12 @@ for name in sorted(unresolved):
 for name in sorted(EXCEPTIONS):
     if name not in seen:
         print("DEAD-EXCEPTION %s %s" % (name, EXCEPTIONS[name]))
+# The declaration must disappear when the real check lands or the subject
+# reference is removed: dead pending declarations are ordinary dead exceptions.
+for name, (allowed_file, markers, allowed_mentions, reason) in sorted(EXPLICIT_ABSENT_REFERENCES.items()):
+    if name in resolved or name not in matched_pending:
+        print("DEAD-EXCEPTION %s %s" % (name, reason))
+print("EXPLICIT-ABSENT-REFERENCES %d" % len(matched_pending))
 print("SEEN %d" % len(seen))
 print("PREFIXES %d" % len(prefixes))
 print("EXCEPTIONS %d" % len(EXCEPTIONS))

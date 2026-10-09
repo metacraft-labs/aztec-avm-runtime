@@ -186,8 +186,18 @@ RC_NOGATE=$?
 LOG_NOGATE="$(m6_log "$NOGATE" build-gate27)"
 assert_eq "without the FATAL_ERROR, wasi-sdk 27 configures an AVM_WASM build successfully" \
   "0" "$RC_NOGATE"
-assert_contains "having failed the same probe" "BB_WASM_EXCEPTIONS_SUPPORTED" \
-  "$(cat "$NOGATE/barretenberg/cpp/build-gate27/CMakeFiles/CMakeConfigureLog.yaml" 2>/dev/null)"
+# That the control ran the same probe and it FAILED is asserted on the probe's
+# own record, not on its variable's name, which the configure log carries whether
+# the probe passed or failed: the control must name 27's compiler, its probe
+# must have died on the unwinder 27 does not ship, and its result must not be
+# cached as supported.
+assert_contains "the control ran under wasi-sdk 27's compiler" "$SDK27/bin/clang++" "$LOG_NOGATE"
+NOGATE_CFGLOG="$(cat "$NOGATE/barretenberg/cpp/build-gate27/CMakeFiles/CMakeConfigureLog.yaml" 2>/dev/null)"
+assert_contains "having run the same probe" "BB_WASM_EXCEPTIONS_SUPPORTED" "$NOGATE_CFGLOG"
+assert_contains "and failed it, on the missing unwinder" \
+  "wasm-ld: error: unable to find library -lunwind" "$NOGATE_CFGLOG"
+assert_false "and its result is not cached as supported" \
+  test "$(m6_cache "$NOGATE" build-gate27 BB_WASM_EXCEPTIONS_SUPPORTED)" = "1"
 assert_eq "so the exit-1 above was the gate and nothing else" \
   "yes" "$([ "$RC_G27" -ne 0 ] && [ "$RC_NOGATE" -eq 0 ] && echo yes || echo no)"
 m6_reset_tree nogate

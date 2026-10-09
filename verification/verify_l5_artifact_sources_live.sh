@@ -140,7 +140,7 @@ assert_eq "EVERY camelCase artifact needed its Buffers revived before it hashed 
 # first version of this arm asked it anyway — so all six artifacts reported "revival was needed"
 # and the measurement discriminated nothing.
 assert_eq "…and no snake_case artifact was asked the question, because it is meaningless for that
-  shape — `null` rather than a `false` that would read as 'revival was not needed'" "0" \
+  shape — \`null\` rather than a \`false\` that would read as 'revival was not needed'" "0" \
   "$(live 'len([a for a in d["explorer"]["artifacts"] if a.get("shape") == "snake_case" and a.get("revivalWasNeeded") is not None])')"
 assert_eq "…and after revival, every camelCase artifact verifies too" "0" \
   "$(live 'len([a for a in d["explorer"]["artifacts"] if a.get("shape") == "camelCase" and not a.get("verified")])')"

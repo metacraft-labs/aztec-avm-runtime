@@ -310,10 +310,13 @@ assert_eq "the native driver exits 0" "0" "$?"
 m8_run_v8 "$WASM_BIN" "$V8_T" "$(m8_v8_stderr)"
 assert_eq "the wasm driver exits 0 on V8, running the SHIPPED binary unmodified" "0" "$?"
 m8_require_artifacts "$NATIVE_T" "$V8_T" "$(m8_native_stderr)" "$(m8_v8_stderr)"
+# Every AVM log line ends in a memory figure, but the FIGURE differs by target: `N/A` under wasm,
+# where the probe has no implementation, and a resident-set size natively (`(mem: 6.29 MiB)`).
+# So the leak is looked for as `(mem: `, which both spellings carry.
 assert_eq "no AVM log line leaked into the native transcript" "0" \
-  "$(grep -c '(mem: N/A)' "$NATIVE_T" || true)"
+  "$(grep -c '(mem: ' "$NATIVE_T" || true)"
 assert_eq "no AVM log line leaked into the wasm transcript" "0" \
-  "$(grep -c '(mem: N/A)' "$V8_T" || true)"
+  "$(grep -c '(mem: ' "$V8_T" || true)"
 assert_ge "…and the AVM really did log, so the separation is not a statement about silence" 20 \
   "$(grep -c '(mem: N/A)' "$(m8_v8_stderr)" || true)"
 assert_eq "the two transcripts carry the same number of non-diagnostic lines" \

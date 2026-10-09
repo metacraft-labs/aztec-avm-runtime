@@ -24,6 +24,16 @@
         { pkgs, ... }:
         let
           wasi-sdk = pkgs.callPackage ./nix/wasi-sdk.nix { };
+          # Original RI25 golden bytes, not the newer fork's different fixture.
+          minimalTxTestData = pkgs.fetchurl {
+            url = "https://raw.githubusercontent.com/AztecProtocol/aztec-packages/3a68d68ac29aaf04fc6251c80a8eb874043cb260/barretenberg/cpp/src/barretenberg/vm2/testing/minimal_tx.testdata.bin";
+            sha256 = "e030497fba43eda15395a1ac3f7974edb687ba78c39614667ef6b012704acdb2";
+          };
+          bbNativeRuntime =
+            if pkgs.stdenv.hostPlatform.isLinux then
+              pkgs.callPackage ./nix/bb-native-runtime.nix { }
+            else
+              null;
         in
         {
           packages.wasi-sdk = wasi-sdk;
@@ -99,6 +109,8 @@
             # barretenberg's wasm toolchain file and its bootstrap scripts both
             # read WASI_SDK_PREFIX; CMAKE_TOOLCHAIN_FILE consumers read
             # WASI_SDK_PATH. Export both so neither spelling has to be guessed.
+            AZTEC_AVM_MINIMAL_TX_TEST_DATA = "${minimalTxTestData}";
+
             WASI_SDK_PATH = "${wasi-sdk}";
             WASI_SDK_PREFIX = "${wasi-sdk}";
 
@@ -110,7 +122,12 @@
               pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ]
             );
 
-            shellHook = ''
+            shellHook = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+              # The locked native CLI needs the owning libc loader as well
+              # as the NAPI module's existing library path. Explicit caller
+              # overrides remain authoritative in bb.js's supported API.
+              export BB_BINARY_PATH="''${BB_BINARY_PATH:-${bbNativeRuntime}/bin/bb}"
+            '' + ''
               # ---- compiler cache -------------------------------------------------
               # The same six exports the fork's shell makes, with the same defaults and
               # the same `:-` overridability, so a build that moves from one shell to

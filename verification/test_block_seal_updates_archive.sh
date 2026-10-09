@@ -129,11 +129,20 @@ done
 assert_false "a one-character variant of the updateArchive line does not match" \
   str_has_line "$COPY" "  await worldTrees.updateArchive(headers);"
 
-echo "== and `sealBlock` calls it rather than reimplementing it"
+echo '== and `sealBlock` calls it rather than reimplementing it'
 SEAL="$(cat "$REPO_ROOT/orchestration/src/block_assembly.ts")"
 assert_true "sealBlock calls makeTXEBlockHeader" \
   str_has_sub "$SEAL" "await makeTXEBlockHeader(guarded as never, globalVariables)"
-assert_true "…and then updateArchive" str_has_sub "$SEAL" "await guarded.updateArchive(header)"
+assert_true "…and updateArchive" str_has_sub "$SEAL" "await guarded.updateArchive(header)"
+# "THEN" is an order, and it is read as one: the header is built before the archive is updated with
+# it, inside sealBlock's own body.
+SEAL_ORDER="$(printf '%s\n' "$SEAL" | awk '
+  /^export async function sealBlock\(/ { inside = 1 }
+  inside && /await makeTXEBlockHeader\(guarded as never, globalVariables\)/ && !h { h = NR }
+  inside && /await guarded\.updateArchive\(header\)/ && !u { u = NR }
+  inside && /^}/ { exit }
+  END { if (h && u) print (h < u ? "header-then-archive" : "archive-then-header"); else print "NOT-BOTH-IN-sealBlock" }')"
+assert_eq "…in that order, both inside sealBlock" "header-then-archive" "$SEAL_ORDER"
 # NOTHING OF OURS RE-IMPLEMENTS THE CHAINING, AND THE NEEDLE IS CALL-SHAPED. A bare-text search
 # for `lastArchive` is satisfied by prose — this campaign's "a citation is the opposite of a
 # dependency" — and `chain.ts` and `block_assembly.ts` both EXPLAIN the chaining in comments. What
