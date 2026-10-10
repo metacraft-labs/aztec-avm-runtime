@@ -9,6 +9,28 @@
 //                      every node call the replay made — including the per-slot hydration reads —
 //                      is in the fixture and the check that comes after it is offline.
 //
+// AND ONE INPUT THAT IS NEITHER A MODE NOR A MOCK:
+//
+//   --body-store auto|<base>   answer `getTxByHash` from Aztec's published `TxFileStore` instead of
+//                              from the node's mempool, which is the ONE call that has a horizon.
+//                              `auto` reads the base from the published network config. Everything
+//                              else still comes from the node. `--body-file <path>` is the same
+//                              join with a body already on disk.
+//
+// WHAT THAT UNLOCKS, MEASURED ON MAINNET 2026-10-10: transaction
+// 0x00c67f6f…753ed18d settled in block 68062 and the chain tip was 118225 — 50,163 blocks past the
+// mempool's horizon, `getTxByHash` answering null. With the store joined in, the replay reproduced
+// the corpus's own frozen row EXACTLY: 2 hydration rounds, 1 nullifier + 2 public-data leaves
+// seeded, 208 instructions, 13/13 published effects matched, the same six skipped values with the
+// same reasons, the same four tree-root pairs. The SAME run on 0x0f191b2d…e8699dbb (block 68231):
+// 338 instructions, 20/20 matched. COST: 8 JSON-RPC requests and ONE store GET per transaction, of
+// which the `getNodeInfo` is once per deployment and not per transaction.
+//
+// SO THE HISTORY IS NOT FROZEN. The corpus's containers are CTFS version 3 and the reader at
+// `pins.json`'s `trace_format_nim` anchor refuses them by name ("this reader reads version 5 only.
+// Re-record"); the re-recording above writes version 5 with a `meta.dat` v6 header, and both
+// `ct-print` and `ct-split-probe` at that anchor open it and read every stream.
+//
 // The capture mode is the only honest way to build the fixture. L1's capture recorded the calls
 // `fetchSettledTransaction` makes, which are known in advance; L2's hydration calls are NOT known in
 // advance — the AVM discovers them — so the only list that can be right is the one produced by
@@ -22,7 +44,10 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 
+import { BarretenbergSync } from '@aztec/bb.js';
+import { jsonStringify } from '@aztec/foundation/json-rpc';
 import { defaultFetch } from '@aztec/foundation/json-rpc/client';
+import { Tx } from '@aztec/stdlib/tx';
 import { TxHash } from '@aztec/stdlib/tx/tx-hash';
 
 import {
@@ -73,6 +98,188 @@ const ctWriterPath = arg('ct-writer', process.env.CT_WRITER_WASM_PATH
   ?? 'ct-writer/target/wasm32-unknown-unknown/release/aztec_ct_writer.wasm');
 const json = argv.includes('--json');
 
+// ---- THE BODY STORE: HOW A TRANSACTION BELOW THE FINALIZED TIP IS STILL REPLAYABLE -------------
+//
+// `getTxByHash` SERVES FROM THE MEMPOOL AND THE MEMPOOL DELETES AT THE FINALIZED TIP. That is
+// `settled_transaction.ts`'s measured horizon, and it is the ONLY thing that stopped this driver
+// from being pointed at a historical transaction: every other call a replay makes — `getTxEffect`,
+// `getBlockData`, `getContract`, `getContractClass`, `getPublicDataWitness`,
+// `getNullifierMembershipWitness` — reads the ARCHIVE and prunes never.
+//
+// Aztec publishes the bodies its node-internal `TxFileStore` holds, keyless over HTTPS, one
+// content-addressed `.bin` per transaction hash. So the horizon is closed by a JOIN and not by an
+// archive node: the node supplies everything about the block, the store supplies the body.
+//
+// NOTHING HERE IS PASTED. The base URL is read from `txCollectionFileStoreUrls` in
+// `AztecProtocol/networks`' `network_config.json`; the path segment beneath it is
+// `aztec-<l1ChainId>-<rollupVersion>-<rollupAddress>`, DERIVED FROM THE NODE'S OWN `getNodeInfo`.
+// A location computed from the deployment the hash came from cannot silently drift onto a
+// different deployment, which a pasted constant can and would not announce.
+//
+// AND THE PAYLOAD SELF-VERIFIES TWICE, because `Tx.toBuffer()` serialises `txHash` first:
+//
+//   1. the leading 32 bytes must BE the key that was requested; and
+//   2. `tx.getTxHash()`, RECOMPUTED from the deserialised data, must be that key as well.
+//
+// (1) alone proves only that the object is labelled with the key. (2) proves the bytes under the
+// label hash to it, which is what makes a single untrusted source usable at all. A response that
+// fails either is REFUSED BY NAME rather than replayed — a body that is not this transaction's
+// would produce a confident wrong trace, which is the whole class of defect this campaign exists
+// to prevent.
+//
+// THE SHIM SITS UNDER `recordingFetch`, NOT OVER IT. The synthesised answer is therefore recorded
+// into `--capture`'s fixture like any other, so a fixture captured this way plays back offline with
+// no store and no network — and upstream's own zod validates the synthesised `Tx` on every
+// playback, which is why it is serialised through `jsonStringify` rather than hand-built.
+const bodyStoreArg = arg('body-store');
+const bodyFile = arg('body-file');
+const NETWORK_CONFIG_URL =
+  'https://raw.githubusercontent.com/AztecProtocol/networks/main/network_config.json';
+
+/** Every node call this run made, counted — see `--json`'s `nodeCalls`. */
+const nodeCalls = { httpPosts: 0, rpcRequests: 0, byMethod: {} };
+/** Every body-store GET this run made, and what each one was. */
+const bodyStoreCalls = { gets: 0, verified: 0, outcomes: [] };
+
+/** A `JsonRpcFetch` that counts what it forwards and forwards everything. */
+function countingFetch(inner) {
+  return async (host, body, extraHeaders, noRetry, config) => {
+    const requests = Array.isArray(body) ? body : body === undefined ? [] : [body];
+    nodeCalls.httpPosts += 1;
+    nodeCalls.rpcRequests += requests.length;
+    for (const r of requests) {
+      if (typeof r?.method === 'string') {
+        nodeCalls.byMethod[r.method] = (nodeCalls.byMethod[r.method] ?? 0) + 1;
+      }
+    }
+    return inner(host, body, extraHeaders, noRetry, config);
+  };
+}
+
+class BodyStoreRefused extends Error {
+  constructor(outcome, reason) {
+    super(`body store: ${outcome} — ${reason}`);
+    this.name = 'BodyStoreRefused';
+    this.kind = 'body-store-refused';
+    this.outcome = outcome;
+  }
+}
+
+/** `aztec-<l1ChainId>-<rollupVersion>-<rollupAddress>`, from the node's own answer. */
+function storePathFor(nodeInfo) {
+  return `aztec-${nodeInfo.l1ChainId}-${nodeInfo.rollupVersion}-`
+    + `${nodeInfo.l1ContractAddresses.rollupAddress.toString()}`;
+}
+
+/** The store base for a network, out of the published config. Never a constant. */
+async function storeBaseFor(network) {
+  const res = await fetch(NETWORK_CONFIG_URL);
+  if (!res.ok) {
+    throw new BodyStoreRefused('unavailable',
+      `${NETWORK_CONFIG_URL} answered HTTP ${res.status}, so the store location is not known. `
+      + 'This tool will not invent one.');
+  }
+  const config = await res.json();
+  const bases = config?.[network]?.txCollectionFileStoreUrls;
+  if (!Array.isArray(bases) || bases.length === 0) {
+    throw new BodyStoreRefused('unavailable',
+      `the published network config declares no txCollectionFileStoreUrls for "${network}".`);
+  }
+  // The two-independent-sources rule is UNMET here and is recorded as unmet rather than relaxed.
+  return { base: bases[0], sources: bases.length };
+}
+
+/**
+ * Turn a body's bytes into the `getTxByHash` RESULT the client expects, verifying twice.
+ *
+ * Returns the JSON upstream's `Tx.schema` parses — produced by `jsonStringify(tx)` so that the
+ * synthesised answer is byte-for-byte the shape the node would have sent.
+ */
+async function txResultFromBody(txHash, bytes) {
+  const want = txHash.toLowerCase();
+  if (bytes.length < 32) {
+    throw new BodyStoreRefused('truncated',
+      `${bytes.length} bytes cannot carry the 32-byte key a body serialises first.`);
+  }
+  const saw = `0x${Buffer.from(bytes.subarray(0, 32)).toString('hex')}`;
+  if (saw !== want) {
+    throw new BodyStoreRefused('mismatched',
+      `the leading 32 bytes are ${saw}, not the requested ${want}. This is some other `
+      + "transaction's body and replaying it would produce a confident wrong trace.");
+  }
+  await BarretenbergSync.initSingleton();
+  const tx = Tx.fromBuffer(Buffer.from(bytes));
+  const recomputed = (await tx.getTxHash()).toString().toLowerCase();
+  if (recomputed !== want) {
+    throw new BodyStoreRefused('hash-recomputation-failed',
+      `the payload is LABELLED ${want} but its data hashes to ${recomputed}. The label is not `
+      + 'the bytes, and only the recomputation can tell.');
+  }
+  return JSON.parse(jsonStringify(tx));
+}
+
+/**
+ * A `JsonRpcFetch` that answers `getTxByHash` from the body store and forwards everything else.
+ *
+ * `fetchBody(hash)` returns `{status, bytes}`. A 404 is PASSED THROUGH to the node rather than
+ * turned into an error, so the engine's own `SettledTransactionNotFound` still names `getTxByHash`
+ * — "the store has a hole" and "this tool broke" are different sentences.
+ */
+function bodyStoreFetch(inner, fetchBody) {
+  return async (host, body, extraHeaders, noRetry, config) => {
+    const isBatch = Array.isArray(body);
+    const requests = isBatch ? body : body === undefined ? [] : [body];
+    const served = new Map();
+    const forward = [];
+    for (const req of requests) {
+      const method = typeof req?.method === 'string' ? req.method : '';
+      // THE PARAM IS NOT A STRING YET. `fetchImpl` is handed the request as JS OBJECTS — upstream's
+      // client serialises with `jsonStringify` inside `defaultFetch`, AFTER this seam — so
+      // `params[0]` here is a live `TxHash`, not the `0x…` the wire carries. Reading it as a string
+      // silently matches nothing, which is a shim that looks installed and intercepts nothing.
+      const raw = Array.isArray(req?.params) ? req.params[0] : undefined;
+      const asText = typeof raw === 'string' ? raw : raw == null ? '' : String(raw);
+      const key = /^0x[0-9a-f]{64}$/i.test(asText) ? asText.toLowerCase() : undefined;
+      if (/getTxByHash$/i.test(method) && key !== undefined) {
+        const { status, bytes } = await fetchBody(key);
+        if (status === 200) {
+          served.set(req.id, await txResultFromBody(key, bytes));
+          continue;
+        }
+        if (status === 404) {
+          console.error(`replay: body store has NO object for ${key} (404) — asking the node, `
+            + 'which is expected to answer null below the finalized tip');
+        } else {
+          throw new BodyStoreRefused('unavailable',
+            `the store answered HTTP ${status} for ${key}. Nothing is known about whether it `
+            + 'holds this body; this is a fact about the run, not about the corpus.');
+        }
+      }
+      forward.push(req);
+    }
+    if (served.size === 0) {
+      return inner(host, body, extraHeaders, noRetry, config);
+    }
+    const collected = [];
+    let headers = new Headers();
+    if (forward.length > 0) {
+      const answer = await inner(host, isBatch ? forward : forward[0], extraHeaders, noRetry,
+        config);
+      headers = answer.headers ?? headers;
+      const rs = Array.isArray(answer.response)
+        ? answer.response
+        : answer.response === undefined ? [] : [answer.response];
+      collected.push(...rs);
+    }
+    for (const [id, result] of served) {
+      collected.push({ jsonrpc: '2.0', id, result });
+    }
+    const byId = new Map(collected.map(r => [r?.id, r]));
+    const ordered = requests.map(r => byId.get(r?.id)).filter(r => r !== undefined);
+    return { response: isBatch ? ordered : ordered[0], headers };
+  };
+}
+
 if (!modulePath) {
   console.error('replay: --module <avm.wasm> (or AVM_WASM_PATH) is required. The shipped module is '
     + 'the one M9\'s observer patch is in; an unpatched build refuses the encoding by name.');
@@ -96,7 +303,46 @@ if (fixturePath) {
     process.exit(2);
   }
   sink = { calls: [], batchHeaders: {}, headerNames: COMPONENTS_VERSION_FIELDS.map(f => `x-aztec-${f.toLowerCase()}`) };
-  client = createReplayNodeClient({ url, fetchImpl: recordingFetch(defaultFetch, sink) });
+  // THE STORE LOCATION IS RESOLVED LAZILY, AND THAT IS THE POINT: it is derived from
+  // `getNodeInfo`, which means it needs the client that is being built here. Resolving it on first
+  // use is what makes the derivation possible at all without a second, unguarded wire path — the
+  // `getNodeInfo` call goes through this same counted client and lands in the capture like any
+  // other.
+  const network = url.includes('testnet') ? 'testnet' : 'mainnet';
+  let storeLocation = null;
+  const fetchBody = async (hash) => {
+    if (bodyFile) {
+      const bytes = await readFile(bodyFile);
+      bodyStoreCalls.outcomes.push({ hash, source: bodyFile, outcome: 'local-file',
+        bytes: bytes.length });
+      return { status: 200, bytes };
+    }
+    if (storeLocation === null) {
+      const resolved = bodyStoreArg === 'auto'
+        ? await storeBaseFor(network)
+        : { base: bodyStoreArg, sources: 1 };
+      storeLocation = { ...resolved, path: storePathFor(await client.getNodeInfo()) };
+      console.error(`replay: body store ${storeLocation.base}/${storeLocation.path}/txs/ `
+        + `(${storeLocation.sources} published source(s)`
+        + `${storeLocation.sources < 2 ? ', so the two-source rule is UNMET and recorded as unmet' : ''})`);
+    }
+    const target = `${storeLocation.base}/${storeLocation.path}/txs/${hash}.bin`;
+    bodyStoreCalls.gets += 1;
+    const res = await fetch(target);
+    const bytes = res.ok ? Buffer.from(await res.arrayBuffer()) : Buffer.alloc(0);
+    bodyStoreCalls.outcomes.push({ hash, url: target, status: res.status, bytes: bytes.length });
+    if (res.status === 200) {
+      bodyStoreCalls.verified += 1;
+      console.error(`replay: body store GET ${target} -> 200, ${bytes.length} bytes`);
+    }
+    return { status: res.status, bytes };
+  };
+  const counted = countingFetch(defaultFetch);
+  client = createReplayNodeClient({
+    url,
+    fetchImpl: recordingFetch(
+      bodyStoreArg || bodyFile ? bodyStoreFetch(counted, fetchBody) : counted, sink),
+  });
   txHash = arg('tx');
   if (!txHash) {
     // Walk back from the tip for a transaction whose BODY the node still serves. The horizon is a
@@ -372,6 +618,11 @@ const report = {
   roots: outcome.roots.declarations,
   rootsAnyAgree: outcome.roots.anyAgrees,
   skipped: outcome.rounds.flatMap(r => r.skipped.map(s => ({ value: s.value, reason: s.reason }))),
+  // WHAT THIS ONE TRANSACTION COST, which is the number that decides whether a corpus-wide
+  // re-recording is hours or months. `rpcRequests` is the honest count — upstream BATCHES, so
+  // `httpPosts` is smaller and is not what a rate limiter counts.
+  nodeCalls: fixturePath ? null : nodeCalls,
+  bodyStore: bodyStoreArg || bodyFile ? bodyStoreCalls : null,
 };
 
 if (json) {
@@ -388,6 +639,14 @@ if (json) {
     + `(${report.verdict.matched} matched, ${report.verdict.mismatched} mismatched)`);
   for (const m of report.mismatches) {
     console.log(`   MISMATCH ${m.field}: published ${m.published} replayed ${m.replayed}`);
+  }
+  if (report.nodeCalls) {
+    console.log(`node calls: ${report.nodeCalls.rpcRequests} JSON-RPC request(s) in `
+      + `${report.nodeCalls.httpPosts} HTTP POST(s)`
+      + (report.bodyStore ? `, plus ${report.bodyStore.gets} body-store GET(s)` : ''));
+    for (const [m, n] of Object.entries(report.nodeCalls.byMethod).sort((a, b) => b[1] - a[1])) {
+      console.log(`   ${String(n).padStart(4)}  ${m}`);
+    }
   }
   console.log('\ntree roots — EXPECTED TO DIFFER, and the reason travels with the outcome:');
   for (const d of report.roots) {
