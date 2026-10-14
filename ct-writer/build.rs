@@ -50,6 +50,20 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/nim_host_shim.c");
     println!("cargo:rerun-if-env-changed=CT_TRACE_FORMAT_NIM_REPO");
+    // CCP-7: the two hooks that let a SANDBOX build Path B. Declared here so a
+    // change to any of them re-runs this script, which is the whole point of
+    // them being environment and not arguments.
+    for k in [
+        "CT_TRACE_FORMAT_NIM_SRC",
+        "CT_TRACE_FORMAT_NIM_SRC_REV",
+        "CT_WASM_CLANG",
+        "CT_WASM_LLVM_AR",
+        "CT_WASM_LLD_BIN",
+        "CT_WASM_SYSROOT_INCLUDE",
+        "CT_ZSTD_SRC",
+    ] {
+        println!("cargo:rerun-if-env-changed={k}");
+    }
 
     if std::env::var("CARGO_FEATURE_PATH_B").is_err() {
         // Path A only. Nothing to build, and saying so is cheaper than a comment.
@@ -180,6 +194,89 @@ fn materialise(manifest: &Path, repo_root: &Path, pins: &Pins) -> PathBuf {
     let stamp = manifest.join("build-wasm-deps/ctf-nim-materialised-at");
     let rev = &pins.writer_commit;
 
+    // ── A PLAIN SOURCE TREE, FOR A BUILD THAT HAS NO OBJECT STORE ──────────
+    //
+    // Everything below this block needs a `.git` directory, because `git
+    // archive <rev>` reads the object database and that is deliberate: a
+    // worktree is a thing other work moves, and the revision is the contract.
+    // A NIX SANDBOX HAS NEITHER. A flake input materialises as a bare source
+    // tree with no `.git` at all, and the sandbox has no network to clone one,
+    // so the hook above cannot be satisfied there however it is pointed. That
+    // is the whole reason BlockTracer's `ctWriterWasm` derivation — which
+    // builds this crate to produce the module that writes every container the
+    // site publishes — can only build Path A today, and therefore cannot ask
+    // for a compact container at all: measured 2026-10-14, the module it
+    // produces carries 38 ABI functions and no
+    // `ct_writer_set_compact_threshold`.
+    //
+    // So: `CT_TRACE_FORMAT_NIM_SRC` names a tree that is ALREADY at the pinned
+    // revision, and `CT_TRACE_FORMAT_NIM_SRC_REV` is the caller SAYING which
+    // revision that is. Both are required together, and the revision is
+    // CHECKED against `pins.json` rather than trusted: a tree cannot prove its
+    // own provenance, so the declaration is what is held to the pin, and a
+    // caller that declares the wrong one is refused here rather than
+    // discovered in the module's bytes. `pins.json` stays the single
+    // authority — this hook can only agree with it.
+    //
+    // It is not a way to build from an arbitrary tree. Passing the SRC hook
+    // without the REV hook, or with a REV that is not the pin, fails.
+    if let Ok(src) = std::env::var("CT_TRACE_FORMAT_NIM_SRC") {
+        let declared = std::env::var("CT_TRACE_FORMAT_NIM_SRC_REV").unwrap_or_else(|_| {
+            die("CT_TRACE_FORMAT_NIM_SRC is set and CT_TRACE_FORMAT_NIM_SRC_REV is not. \
+                 A source tree cannot prove which revision it is, so the caller must say, \
+                 and this build checks what it says against pins.json.")
+        });
+        if declared.trim() != rev {
+            die(&format!(
+                "CT_TRACE_FORMAT_NIM_SRC_REV says {declared:?}, and pins.json declares \
+                 anchors.trace_format_nim_writer.commit {rev}. Refusing: the pin is the \
+                 authority and this hook can only agree with it."
+            ));
+        }
+        let src = PathBuf::from(&src);
+        if !src.join("src/codetracer_trace_writer_ffi.nim").is_file() {
+            die(&format!(
+                "CT_TRACE_FORMAT_NIM_SRC is {}, which carries no \
+                 src/codetracer_trace_writer_ffi.nim. That is the file nim compiles for Path \
+                 B, so its absence is the whole build and is worth naming before the \
+                 compiler does.",
+                src.display()
+            ));
+        }
+        if std::fs::read_to_string(&stamp)
+            .map(|s| s.trim() == rev)
+            .unwrap_or(false)
+        {
+            return dest;
+        }
+        let _ = std::fs::remove_dir_all(&dest);
+        std::fs::create_dir_all(&dest).unwrap_or_else(|e| die(&format!("mkdir {dest:?}: {e}")));
+        // `cp -R` AND THEN `chmod -R u+w`, because a nix store path is read-only
+        // and nim writes its build plan beside the sources it reads. The `-m`
+        // reasoning below applies here as well: `touch` the tree so a
+        // re-materialisation at a different revision cannot leave the new
+        // sources older than a previous revision's objects.
+        let status = Command::new("bash")
+            .arg("-c")
+            .arg(format!(
+                "set -euo pipefail\ncp -R {src}/. {dest}/\nchmod -R u+w {dest}\n\
+                 find {dest} -exec touch {{}} +",
+                src = shq(&src),
+                dest = shq(&dest)
+            ))
+            .status()
+            .unwrap_or_else(|e| die(&format!("cp of the Nim source could not be spawned: {e}")));
+        if !status.success() {
+            die(&format!(
+                "copying the Nim source from {} failed",
+                src.display()
+            ));
+        }
+        std::fs::write(&stamp, format!("{rev}\n"))
+            .unwrap_or_else(|e| die(&format!("stamp: {e}")));
+        return dest;
+    }
+
     let repo = std::env::var("CT_TRACE_FORMAT_NIM_REPO")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
@@ -274,6 +371,30 @@ struct Toolchain {
 }
 
 impl Toolchain {
+    // ── WHY EACH PIECE CAN COME FROM THE ENVIRONMENT ───────────────────────
+    //
+    // `nix build --inputs-from <repo>` resolves against THIS repository's
+    // flake.lock rather than the invoking user's registry, which is what makes
+    // it a pin rather than a spelling, and that argument is unchanged and is
+    // still the default.
+    //
+    // It cannot run inside a nix build. A sandbox has no daemon socket and no
+    // network, so `Toolchain::resolve` aborts there before a single file is
+    // compiled — which is why nothing that builds this crate hermetically can
+    // select Path B, and therefore why the writer BlockTracer publishes with is
+    // Path A and cannot emit a compact container.
+    //
+    // A derivation already has these five on hand: it declares them as inputs
+    // and nix resolves them against ITS pinned nixpkgs, which is the same kind
+    // of pin by the same argument. So each is overridable on its own, and each
+    // that is not set is resolved exactly as before — a caller that sets none
+    // sees no change, and `nix` is never spawned when all five are set, which
+    // is the property the sandbox needs.
+    //
+    // EACH IS CHECKED RATHER THAN TAKEN. An override naming something absent
+    // fails here, by name, instead of surfacing minutes later as `linker `lld`
+    // not found` on the last step of a build that compiled everything — the
+    // failure mode this file already records for a missing `lld`.
     fn resolve(repo_root: &Path) -> Toolchain {
         let p = |attr: &str| -> PathBuf {
             PathBuf::from(run(
@@ -284,16 +405,50 @@ impl Toolchain {
                     .arg(attr),
             ))
         };
-        let clang = p("nixpkgs#llvmPackages.clang-unwrapped");
-        let bintools = p("nixpkgs#llvmPackages.bintools-unwrapped");
-        let lld = p("nixpkgs#lld");
-        let wasilibc = p("nixpkgs#pkgsCross.wasi32.wasilibc.dev");
-        let zstd_src = p("nixpkgs#zstd.src");
+        // `nix build` is not spawned for an attribute that is overridden: the
+        // closure is called inside the `unwrap_or_else`, not before it.
+        let from_env = |var: &str, attr: &str, sub: &str| -> PathBuf {
+            match std::env::var(var) {
+                Ok(v) if !v.trim().is_empty() => {
+                    let path = PathBuf::from(v.trim());
+                    if !path.exists() {
+                        die(&format!(
+                            "{var} is {}, which does not exist. An override that names \
+                             something absent is refused here rather than at the last link \
+                             step of a build that compiled everything.",
+                            path.display()
+                        ));
+                    }
+                    path
+                }
+                _ => {
+                    let out = p(attr);
+                    if sub.is_empty() {
+                        out
+                    } else {
+                        out.join(sub)
+                    }
+                }
+            }
+        };
+        let clang = from_env("CT_WASM_CLANG", "nixpkgs#llvmPackages.clang-unwrapped", "bin/clang");
+        let llvm_ar = from_env(
+            "CT_WASM_LLVM_AR",
+            "nixpkgs#llvmPackages.bintools-unwrapped",
+            "bin/llvm-ar",
+        );
+        let lld_bin = from_env("CT_WASM_LLD_BIN", "nixpkgs#lld", "bin");
+        let sysroot_include = from_env(
+            "CT_WASM_SYSROOT_INCLUDE",
+            "nixpkgs#pkgsCross.wasi32.wasilibc.dev",
+            "include/wasm32-wasip1",
+        );
+        let zstd_src = from_env("CT_ZSTD_SRC", "nixpkgs#zstd.src", "");
         Toolchain {
-            clang: clang.join("bin/clang"),
-            llvm_ar: bintools.join("bin/llvm-ar"),
-            lld_bin: lld.join("bin"),
-            sysroot_include: wasilibc.join("include/wasm32-wasip1"),
+            clang,
+            llvm_ar,
+            lld_bin,
+            sysroot_include,
             zstd_src,
         }
     }
