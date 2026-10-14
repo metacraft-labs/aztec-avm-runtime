@@ -61,6 +61,7 @@ fn main() {
         "CT_WASM_LLD_BIN",
         "CT_WASM_SYSROOT_INCLUDE",
         "CT_ZSTD_SRC",
+        "CT_NIM_EXTRA_PATHS",
     ] {
         println!("cargo:rerun-if-env-changed={k}");
     }
@@ -83,6 +84,13 @@ fn main() {
     let pins = Pins::read(&repo_root.join("pins.json"));
     let nim_src = materialise(&manifest, &repo_root, &pins);
     require_nim_version(&pins);
+    // READ AND VALIDATED HERE, NOT WHERE IT IS USED. `nim_static_lib` runs
+    // AFTER the libzstd cross-build, so validating these paths at the point of
+    // use would spend that whole build before reporting a typo in an
+    // environment variable — and, on a host where the zstd build cannot
+    // succeed, would never report it at all. Measured: with a stand-in clang
+    // the zstd step failed first and the bad path went unmentioned.
+    let nim_paths = nim_extra_paths();
 
     let out = PathBuf::from(env("OUT_DIR"));
     let target = env("TARGET");
@@ -109,7 +117,7 @@ fn main() {
         tools.sysroot_include.display(),
         tools.zstd_src.display()
     );
-    nim_static_lib(&out, &nim_src, &tools, &flags);
+    nim_static_lib(&out, &nim_src, &tools, &flags, &nim_paths);
     compile_shim(&out, &tools, &flags);
     println!("cargo:rustc-link-search=native={}", zstd.display());
 
@@ -491,7 +499,35 @@ fn build_zstd_wasm(out: &Path, t: &Toolchain) -> PathBuf {
 // The Nim writer, compiled and archived
 // ---------------------------------------------------------------------------
 
-fn nim_static_lib(out: &Path, nim_src: &Path, t: &Toolchain, pass_c: &str) {
+/// `CT_NIM_EXTRA_PATHS`, split, trimmed and checked.
+///
+/// Empty entries are skipped rather than refused: a colon-joined list built in
+/// a shell or a nix expression picks up leading, trailing and doubled
+/// separators without anyone meaning them, and refusing those would be a check
+/// about string assembly rather than about the paths.
+fn nim_extra_paths() -> Vec<String> {
+    let Ok(extra) = std::env::var("CT_NIM_EXTRA_PATHS") else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for part in extra.split(':') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        if !Path::new(part).exists() {
+            die(&format!(
+                "CT_NIM_EXTRA_PATHS names {part}, which does not exist. An entry that names \
+                 something absent is refused here rather than as `cannot open file` from a \
+                 compiler that cannot say which path was wrong."
+            ));
+        }
+        out.push(part.to_string());
+    }
+    out
+}
+
+fn nim_static_lib(out: &Path, nim_src: &Path, t: &Toolchain, pass_c: &str, nim_paths: &[String]) {
     let nimcache = out.join("nimcache");
     let entry = nim_src.join("src/codetracer_trace_writer_ffi.nim");
     if !entry.is_file() {
@@ -529,6 +565,32 @@ fn nim_static_lib(out: &Path, nim_src: &Path, t: &Toolchain, pass_c: &str) {
         .arg("-d:ctHostClock")
         .arg("-d:ctLeanRecord")
         .env("PATH", prepend_path(&t.lld_bin));
+    // ── THE .nimble's `requires`, WHICH NOTHING HERE HAS EVER SUPPLIED ─────
+    //
+    // `codetracer_trace_format.nimble` requires `stew` and `results`, and
+    // `stew` transitively requires `unittest2`. The only `-p:` above is the
+    // writer's own `src`, so on a machine where those three are not already
+    // discoverable — a nimble dir, a parent `config.nims` — this compile fails
+    // with `cannot open file: results`, which reads as a broken checkout.
+    // Measured 2026-10-14 inside a nix sandbox, which is exactly such a
+    // machine, after CCP-7's other two hooks had got the build that far.
+    //
+    // THAT IS AN AMBIENT DEPENDENCY, and the writer repository's own flake
+    // already names the fix: its `nimDepPaths` is described there as the
+    // "`--path:` arguments that make the .nimble's `requires` importable from a
+    // bare `nim c` (the package build below, AND THE FFI STATIC LIB THE RUST
+    // SIBLING'S build.rs COMPILES)". It had no way to reach this file. This is
+    // that way.
+    //
+    // Colon-separated, in order, each becoming one `-p:`. The REVISIONS are the
+    // caller's to pin — the writer repository's `flake.lock` is where they are
+    // declared — because a sha1 typed into a build script is a second authority
+    // by another name, which is the argument `pins.json` already carries here.
+    // Unset leaves the invocation byte-for-byte as it was.
+    for part in nim_paths {
+        nim.arg(format!("-p:{part}"));
+    }
+
     nim.arg(&entry);
     run("nim c --compileOnly over the writer FFI", &mut nim);
 
