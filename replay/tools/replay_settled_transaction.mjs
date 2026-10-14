@@ -96,6 +96,34 @@ const modulePath = arg('module', process.env.AVM_WASM_PATH);
 const ctOut = arg('ct');
 const ctWriterPath = arg('ct-writer', process.env.CT_WRITER_WASM_PATH
   ?? 'ct-writer/target/wasm32-unknown-unknown/release/aztec_ct_writer.wasm');
+// CCP-6: ASK FOR THE COMPACT CONTAINER PROFILE, in RAW member bytes. Absent or `0` means never
+// (`ctfs-container.md` §1e: the threshold is a CEILING and nothing is below zero), which is this
+// driver's default and the default the capability shipped with.
+//
+// IT IS AN OPTION RATHER THAN A DEFAULT, AND ONE OF THE TWO REASONS FOR THAT HAS EXPIRED.
+// The reason recorded when the lever landed was that BlockTracer's deployed replay engine could
+// not read a version-6 container. Measured 2026-10-12, that is no longer true: the engine pinned
+// at `blocktracer`'s `client/hydrate/engine-pin.txt` is now `9f332ae0ddfabe6b…`, which carries
+// CCP-5's compact loader, and `blocktracer/tools/deploy/engine-opens.mjs` drove it over a compact
+// container through the engine's own VFS — it OPENED, reporting facts identical to the full
+// profile's.
+//
+// What still argues for off-by-default is the OTHER reader in this repository's acceptance path:
+// `just replay-record read=1` holds the container to `ct-print --full`, and `ct-print` at the
+// pinned revision keeps a version-5-only gate and refuses a compact container BY NAME. The reader
+// that opens compact is `ct-split-probe`. So asking for compact also means choosing the reader
+// that can read it back, which is the caller's decision and not this file's.
+const compactThreshold = (() => {
+  const raw = arg('compact-threshold');
+  if (raw === undefined) return 0n;
+  if (!/^[0-9]+$/.test(raw)) {
+    console.error(`replay: --compact-threshold must be a non-negative integer of RAW bytes, got `
+      + `'${raw}'. It is a ceiling: the profile is compact when the finished container's members `
+      + `total FEWER than this, and 0 means never.`);
+    process.exit(2);
+  }
+  return BigInt(raw);
+})();
 const json = argv.includes('--json');
 
 // ---- THE BODY STORE: HOW A TRANSACTION BELOW THE FINALIZED TIP IS STILL REPLAYABLE -------------
@@ -459,6 +487,16 @@ if (ctOut) {
     }, WRITER_PATH_B_NIM),
     { batchRecords: 64 },
   );
+  // SET BEFORE ANY RECORD IS WRITTEN, AND ANNOUNCED. The module's own initial value is 0, so
+  // calling this with 0 changes nothing — but it is called unconditionally, because an export that
+  // is only exercised when a flag is set is an export whose absence is discovered by the one run
+  // that needs it. `verify_compact_profile_emission_is_opt_in` makes the same argument for the
+  // same reason.
+  writer.setCompactThreshold(compactThreshold);
+  console.error(`replay: compact threshold ${compactThreshold} raw byte(s)`
+    + (compactThreshold === 0n
+      ? ' — the FULL profile, which is this driver\'s default'
+      : ' — COMPACT if the finished members total fewer than that (ctfs-container.md §1e)'));
   // THE STEP PASS. The hydration pass ran with `collectHints` on and therefore produced NO step
   // stream — see RECORDING_PASS_REASON. This runs the same seed again with the flags the other way
   // round, and REFUSES if the two passes do not describe the same execution.

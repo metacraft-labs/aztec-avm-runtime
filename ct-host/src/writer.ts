@@ -420,6 +420,59 @@ export class CtWriter {
   }
 
   /**
+   * Ask for the COMPACT container profile when the finished recording's raw members total FEWER
+   * than `rawBytes` (`ctfs-container.md` §1d/§1e). `0` — the module's own initial value — means
+   * never, because nothing is below zero, so not calling this is "full profile" and calling it
+   * with `0` says the same thing explicitly.
+   *
+   * ## Why the host needs a method at all, when `abi.ts` already declares the export
+   *
+   * It declared it and nothing reachable from a recording could call it.
+   * `ct_writer_set_compact_threshold` has been in `COMPACT_PROFILE_EXPORTS` — and therefore in
+   * `ALL_REQUIRED_EXPORTS`, and therefore checked at construction — since the capability landed,
+   * but `CtWriter` exposed no way to reach it, so the only caller in the repository was
+   * `verify_compact_profile_emission_is_opt_in`, driving the instance directly. The capability
+   * was testable and not usable: the production path (`replay_settled_transaction.mjs`, which
+   * writes the containers BlockTracer publishes) had no way to ask for it.
+   *
+   * ## The threshold is a CEILING, in RAW bytes, and both halves are normative
+   *
+   * `ctfs-container.md` §1e: a writer MUST measure the threshold against the recording's raw
+   * member bytes, before any compression. Compact is for a container that is RESIDENT before its
+   * first query, and residency is a property of logical size — a rule on compressed size would
+   * make the profile a function of compressibility, which is a difference no reader can act on.
+   * The spec's own measurement: two recordings of 79,995 identical raw bytes compress to 54 and
+   * 78,441 bytes, 1,452x apart.
+   *
+   * ## It stays OFF by default, and ONE of the two reasons has expired
+   *
+   * The reason recorded when the capability landed was that BlockTracer's deployed replay engine
+   * could not read a version-6 container. **That is no longer true, measured on 2026-10-12.**
+   * `blocktracer`'s `client/hydrate/engine-pin.txt` now pins `9f332ae0ddfabe6b…`, which carries
+   * CCP-5's compact loader; its `tools/deploy/engine-opens.mjs` drove that engine over a compact
+   * container through the engine's own VFS and it OPENED, reporting facts identical to the full
+   * profile's — same paths, functions, types, varnames, step and call counts.
+   *
+   * What still argues for `0` as the default is the OTHER reader in this repository's own
+   * acceptance path: `just replay-record read=1` holds a container to `ct-print --full`, and
+   * `ct-print` at the pinned revision keeps a version-5-only gate and refuses a compact container
+   * by name. The reader that opens compact is `ct-split-probe`. So a caller asking for compact
+   * must also choose the reader that can read it back, which is a decision for the caller and not
+   * a default this method should make for it.
+   */
+  setCompactThreshold(rawBytes: number | bigint): void {
+    this.assertOpen();
+    const v = BigInt(rawBytes);
+    if (v < 0n) {
+      throw new RangeError(`compact threshold must not be negative (got ${v})`);
+    }
+    const status = this.ex.ct_writer_set_compact_threshold(v);
+    if (status !== CT_OK) {
+      throw new CtWriterError('ct_writer_set_compact_threshold', status, this.lastError());
+    }
+  }
+
+  /**
    * Write one `TraceLogEvent` with an arbitrary metadata key. M26's join record goes through here.
    *
    * The key is not validated against a list, for the module's reason: a host that policed keys

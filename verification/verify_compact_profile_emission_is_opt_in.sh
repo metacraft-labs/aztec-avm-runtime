@@ -35,6 +35,35 @@
 # ships OFF, and §6 asserts that nothing in this tree asks for it: the only non-zero threshold
 # passed anywhere is the one this check passes.
 #
+# ── THE ENGINE HALF OF THAT ARGUMENT EXPIRED ON 2026-10-12. THE CHECK IS UNCHANGED AND THE REASON
+#    IS NOT. ────────────────────────────────────────────────────────────────────────────────────
+#
+# BlockTracer re-pinned its engine to `9f332ae0ddfabe6b…` (17,821,148 bytes), published 2026-10-11
+# from codetracer `cloud` at `571c64cc`. It carries CCP-5's compact loader — all four of the
+# strings whose absence was the recorded blocker — and it accepts container {5,6}.
+#
+# AND IT WAS WATCHED OPENING ONE, which is a different claim from the strings being present.
+# `blocktracer/tools/deploy/engine-opens.mjs` pushes a container into the engine's own in-memory
+# VFS through `vfs_write_file` and calls `load_trace_from_vfs` — the pair `client/hydrate/worker.js`
+# itself uses — in node, with no browser. Over a COMPACT conversion of `tour_values` it answered
+# OPENED, and reported facts identical to the full profile's: 1 path, 2 functions, 15 types, 24
+# varnames, 3038 addressable positions, 34 steps at chunk_size 4096, 2 calls at chunk_size 256.
+#
+# So "no replay on every published page" is no longer the consequence of emitting compact, and
+# `ctfs-container.md` §1c's rollout rule — reader support ships everywhere before any writer emits
+# it — is now SATISFIED rather than violated.
+#
+# ── WHY THE DEFAULT IS STILL ZERO, AND IT IS §5's READER RATHER THAN THE ENGINE ────────────────
+#
+# The reader this repository holds its own containers to. `just replay-record read=1` runs
+# `ct-print --full`, and §5 below measures that `ct-print` at the pinned revision keeps a
+# version-5-only gate and REFUSES a compact container by name. The reader that opens compact is
+# `ct-split-probe`. A caller that asks for compact must therefore also choose the reader that can
+# read it back, and that is a decision for the caller — which is why `CtWriter.setCompactThreshold`
+# and the driver's `--compact-threshold` exist as an option with a zero default rather than as a
+# default this tree picks. §6 now scopes its searches over the production driver too, so "ships
+# OFF" stays a measured property of the whole tree and not of two directories.
+#
 # §5 turns "a reader in the path cannot read it" into a measurement rather than a caution, with two
 # real binaries at the SAME pinned revision:
 #
@@ -261,10 +290,36 @@ FAKE_EXPORT="ct_writer_set_compact_threshold""_default_on"
 assert_false "…and a fabricated spelling is not found anywhere, so the searches above discriminate" \
   git -C "$REPO_ROOT" grep -q --untracked "$FAKE_EXPORT"
 
+# THE PRODUCTION DRIVER IS NOW IN SCOPE, AND IT WAS NOT. The three searches above scope to
+# `verification` and `tools`, which was the whole tree that could reach the lever while
+# `CtWriter` exposed no method for it: the only caller was this check, driving the instance
+# directly. `CtWriter.setCompactThreshold` changed that, and the driver that writes the containers
+# BlockTracer publishes — `replay/tools/replay_settled_transaction.mjs` — now takes
+# `--compact-threshold`. A pathspec of `tools` does NOT match `replay/tools`, so without this the
+# claim "the capability ships OFF" would have become a claim about two directories.
+threshold_callers() { # [extra git-grep args...]
+  git -C "$REPO_ROOT" grep -nE --untracked -- '--compact-threshold[= ]+[1-9][0-9]*' "$@" \
+    | grep -vE ':[0-9]+:[[:space:]]*(#|//|\*)' || true
+}
+assert_eq "nothing anywhere in the tree asks the production driver for a non-zero threshold" "" \
+  "$(threshold_callers)"
+# THE CONTROL: the search is a search. The same pattern with a zero finds the driver's own
+# default, so an empty result above is "nobody asks for compact" and not "the pattern is wrong".
+assert_true "THE CONTROL: the same search shape finds the option where it is DECLARED" \
+  bash -c "git -C '$REPO_ROOT' grep -q \"arg('compact-threshold')\" -- replay/tools/replay_settled_transaction.mjs"
+assert_true "…and the driver sets the threshold unconditionally, so the export is exercised on every run" \
+  bash -c "git -C '$REPO_ROOT' grep -q 'writer.setCompactThreshold(compactThreshold)' -- replay/tools/replay_settled_transaction.mjs"
+assert_true "…and its default is 0, which §1e makes 'never' rather than 'unset'" \
+  bash -c "git -C '$REPO_ROOT' grep -q 'if (raw === undefined) return 0n;' -- replay/tools/replay_settled_transaction.mjs"
+
 # ---------------------------------------------------------------------------
 # 7. THE ENGINE COUPLING IS STATED WHERE THE LEVER IS, and names the file that governs it.
 # ---------------------------------------------------------------------------
-for f in ct-writer/src/lib.rs ct-writer/src/backend.rs ct-host/src/abi.ts; do
+# `ct-host/src/writer.ts` JOINED THIS LIST WHEN IT GAINED THE METHOD. The rule is that wherever
+# the lever is reachable, the file that governs the coupling is named — and `setCompactThreshold`
+# is now the reachable form of it, so a reader who finds the method finds the governing file
+# without leaving the page.
+for f in ct-writer/src/lib.rs ct-writer/src/backend.rs ct-host/src/abi.ts ct-host/src/writer.ts; do
   assert_true "$f names client/hydrate/engine-pin.txt, where the engine coupling is governed" \
     bash -c "grep -q 'client/hydrate/engine-pin.txt' '$REPO_ROOT/$f'"
 done

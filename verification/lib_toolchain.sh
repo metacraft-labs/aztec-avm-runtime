@@ -36,6 +36,17 @@
 
 TC_REPO_ROOT="${TC_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 TC_GCROOTS="${AZTEC_GCROOTS:-$HOME/.cache/aztec-gcroots}"
+# HARDCODED, AND THAT MAKES THIS LIBRARY LINUX-ONLY. Every path below is derived from it —
+# `tc_rust_toolchain_dir` spells `$RUSTUP_HOME/toolchains/<version>-$TC_HOST_TRIPLE` — so on any
+# other host rustup installs a toolchain under its OWN triple and the directory this library looks
+# for cannot ever exist. That is a deliberate scope (the paragraphs above are about ELF
+# interpreters and RUNPATHs, which is a Linux subject), but the REFUSAL did not say so:
+# `tc_ensure_rust` installed, found nothing at the expected path, and reported "toolchain 1.98.1 is
+# not usable after installing it". Measured on darwin 2026-10-12, where the cache held
+# `1.98.1-x86_64-unknown-linux-gnu` with no `bin/rustc` and the real toolchain was sitting beside
+# it under `aarch64-apple-darwin`: the message reads as a broken rustup install, and it cost a
+# round of chasing one. `tc_ensure_rust` now names the host first, so one predicate stops standing
+# for two causes.
 TC_HOST_TRIPLE="x86_64-unknown-linux-gnu"
 
 _tc_err() { printf 'lib_toolchain: %s\n' "$*" >&2; }
@@ -269,7 +280,22 @@ tc_rust_ensure() {
     fi
     rustup -q target add --toolchain "$ver" wasm32-unknown-unknown >/dev/null 2>&1 || exit 1
   ) || { _tc_err "rustup could not install toolchain $ver"; return 1; }
-  _tc_rust_healthy "$ver" || { _tc_err "toolchain $ver is not usable after installing it"; return 1; }
+  if ! _tc_rust_healthy "$ver"; then
+    # NAME THE HOST BEFORE NAMING THE TOOLCHAIN. Every path here is built from
+    # `$TC_HOST_TRIPLE`, which is hardcoded to Linux (see its declaration), so on another host
+    # this branch is reached for a reason that has nothing to do with the install.
+    local host
+    host="$(uname -s 2>/dev/null || echo unknown)"
+    if [ "$host" != "Linux" ]; then
+      _tc_err "this library resolves rust toolchains under \$RUSTUP_HOME/toolchains/$ver-$TC_HOST_TRIPLE,"
+      _tc_err "which is a LINUX path, and this host is $host. rustup installs under its own triple, so"
+      _tc_err "that directory cannot exist here and the install is not what failed. The toolchain-pinned"
+      _tc_err "builds are Linux-only by design; run them on a Linux host or in CI."
+      return 1
+    fi
+    _tc_err "toolchain $ver is not usable after installing it"
+    return 1
+  fi
   # shellcheck disable=SC2046
   tc_root_elf_refs "rust-$ver-$(printf '%s' "$RUSTUP_HOME" | sha256sum | cut -c1-8)" $(_tc_rust_elves "$dir") \
     || { _tc_err "could not root the store paths toolchain $ver loads from"; return 1; }
