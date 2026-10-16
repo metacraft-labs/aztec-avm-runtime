@@ -193,6 +193,59 @@ class BodyStoreRefused extends Error {
   }
 }
 
+/**
+ * Which published network a node belongs to, FROM THE NODE'S OWN ANSWER.
+ *
+ * This used to be `url.includes('testnet') ? 'testnet' : 'mainnet'` — the store
+ * base guessed from the spelling of the RPC URL while the store PATH beside it
+ * was already derived from `getNodeInfo`. Two answers to one question, and only
+ * one of them asked the node.
+ *
+ * It is wrong for every URL that does not happen to contain the word. Measured
+ * against a node serving the RETIRED testnet rollup from a published snapshot
+ * at `http://127.0.0.1:8099`:
+ *
+ *   replay: body store https://aztec-labs-snapshots.com/MAINNET/txs/
+ *                      aztec-11155111-1821665230-0xd73a91…/txs/
+ *
+ * — the mainnet base joined to a Sepolia path, which 404s on every body, and
+ * then reports `SettledTransactionNotFound`, which reads as "the chain does not
+ * have this transaction" rather than "this tool looked in the wrong place".
+ *
+ * `l1ChainId` is the fact. 1 is Ethereum and 11155111 is Sepolia, and the
+ * published config is keyed by the names below. AN UNKNOWN CHAIN ID IS REFUSED
+ * rather than defaulted: defaulting is what produced the wrong answer above,
+ * and a third network would inherit it silently.
+ */
+const NETWORK_BY_L1_CHAIN_ID = { 1: 'mainnet', 11155111: 'testnet' };
+
+function networkFor(nodeInfo) {
+  const id = Number(nodeInfo?.l1ChainId);
+  const network = NETWORK_BY_L1_CHAIN_ID[id];
+  if (!network) {
+    throw new BodyStoreRefused('unavailable',
+      `the node reports l1ChainId ${nodeInfo?.l1ChainId}, which this tool has no published `
+      + `network name for (it knows ${Object.entries(NETWORK_BY_L1_CHAIN_ID)
+          .map(([k, v]) => `${k}=${v}`).join(', ')}). Pass --body-store <base> explicitly. `
+      + 'Guessing would send every body request to another network\'s store, which answers 404 '
+      + 'and reads as a missing transaction.');
+  }
+  return network;
+}
+
+/**
+ * `aztec-mainnet` / `aztec-testnet`, from the node rather than from the URL.
+ *
+ * The two call sites this replaces both sat beside the fact they were guessing:
+ * the capture provenance wrote `chain: url.includes('testnet') ? …` on the line
+ * ABOVE `l1ChainId: nodeInfo.l1ChainId`. A local node, a proxy, or any host
+ * without the word "testnet" in it was labelled `aztec-mainnet`, and that label
+ * is what the artifact resolver uses to pick an explorer.
+ */
+function chainNameFor(nodeInfo) {
+  return `aztec-${networkFor(nodeInfo)}`;
+}
+
 /** `aztec-<l1ChainId>-<rollupVersion>-<rollupAddress>`, from the node's own answer. */
 function storePathFor(nodeInfo) {
   return `aztec-${nodeInfo.l1ChainId}-${nodeInfo.rollupVersion}-`
@@ -336,7 +389,6 @@ if (fixturePath) {
   // use is what makes the derivation possible at all without a second, unguarded wire path — the
   // `getNodeInfo` call goes through this same counted client and lands in the capture like any
   // other.
-  const network = url.includes('testnet') ? 'testnet' : 'mainnet';
   let storeLocation = null;
   const fetchBody = async (hash) => {
     if (bodyFile) {
@@ -346,10 +398,14 @@ if (fixturePath) {
       return { status: 200, bytes };
     }
     if (storeLocation === null) {
+      // ONE `getNodeInfo`, and BOTH halves of the location come out of it — the
+      // base (via its l1ChainId) and the path. They used to come from different
+      // sources, which is how a mainnet base was joined to a Sepolia path.
+      const nodeInfo = await client.getNodeInfo();
       const resolved = bodyStoreArg === 'auto'
-        ? await storeBaseFor(network)
+        ? await storeBaseFor(networkFor(nodeInfo))
         : { base: bodyStoreArg, sources: 1 };
-      storeLocation = { ...resolved, path: storePathFor(await client.getNodeInfo()) };
+      storeLocation = { ...resolved, path: storePathFor(nodeInfo) };
       console.error(`replay: body store ${storeLocation.base}/${storeLocation.path}/txs/ `
         + `(${storeLocation.sources} published source(s)`
         + `${storeLocation.sources < 2 ? ', so the two-source rule is UNMET and recorded as unmet' : ''})`);
@@ -429,7 +485,7 @@ if (ctOut) {
     // uptime — the rule `verify-l1`'s header states. With no chain named the resolver asks the
     // installed package and nothing else, which is enough for a protocol contract and honestly
     // reports "no artifact proved" for a third-party one.
-    chain: fixturePath ? undefined : (url.includes('testnet') ? 'aztec-testnet' : 'aztec-mainnet'),
+    chain: fixturePath ? undefined : chainNameFor(await client.getNodeInfo()),
   });
   for (const contract of settled.contracts) {
     if (!contract.resolved || contract.contractClass === undefined) continue;
@@ -698,7 +754,7 @@ if (capturePath) {
     format: SETTLED_FIXTURE_FORMAT,
     provenance: {
       endpoint: url,
-      chain: url.includes('testnet') ? 'aztec-testnet' : 'aztec-mainnet',
+      chain: chainNameFor(nodeInfo),
       l1ChainId: nodeInfo.l1ChainId,
       rollupVersion: nodeInfo.rollupVersion,
       l1RollupAddress: nodeInfo.l1ContractAddresses.rollupAddress.toString(),
