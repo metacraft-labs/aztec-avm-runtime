@@ -7,7 +7,8 @@
 # The M0 verification set (see
 # codetracer-specs/Planned-Work/Aztec-AVM-Runtime.milestones.org):
 #
-#   just check-repo-hygiene            flake + lock + .envrc + no uncommitted generated files
+#   just check-repo-hygiene            flake + lock + .envrc + no uncommitted generated files,
+#                                      and verify-advertised-systems
 #   just verify-devshell-runtime       verify_nix_devshell_aztec_avm_runtime
 #   just verify-devshell-fork          verify_nix_devshell_aztec_packages_fork
 #   just verify-exception-flags        verify_wasi_sdk_33_exception_flags
@@ -207,6 +208,10 @@ _default:
 # Assert each repo has a flake, a lock, an .envrc and no uncommitted generated files.
 check-repo-hygiene:
     @verification/check_repo_hygiene.sh
+
+# Every output of every system either flake lists in `systems` evaluates (nix eval, no build).
+verify-advertised-systems:
+    @verification/verify_advertised_systems_construct.sh
 
 # nix develop provides node 24, yarn 4, wasi-sdk 33, wasmtime, binaryen, wabt, cmake, ninja, clang 20 + the exported variables.
 verify-devshell-runtime:

@@ -33,6 +33,7 @@
 
 let
   # sha256 of each official release tarball, obtained with `nix store prefetch-file`.
+  # One entry per system the flakes advertise; x86_64-darwin is not one (see flake.nix).
   releases = {
     "33.0" = {
       x86_64-linux = {
@@ -42,10 +43,6 @@ let
       aarch64-linux = {
         asset = "arm64-linux";
         hash = "sha256-T5juc4x6u0XIGpTRRh/FPMVp0c0BSYlRyBhNhBoCeEQ=";
-      };
-      x86_64-darwin = {
-        asset = "x86_64-macos";
-        hash = "sha256-GPPyAbqXNOakRVsLZBBpA5WlXp/6n29QZvZgg6lLk7M=";
       };
       aarch64-darwin = {
         asset = "arm64-macos";
@@ -60,10 +57,6 @@ let
       aarch64-linux = {
         asset = "arm64-linux";
         hash = "sha256-TPTFU8RkDmPngEQhRvh9g/3/Vzf5iMBqbjsvAijjdmU=";
-      };
-      x86_64-darwin = {
-        asset = "x86_64-macos";
-        hash = "sha256-Fj39R/mJsaaCdEwa4fDgmoP/XEu6ydzYVGkJq1TNpaE=";
       };
       aarch64-darwin = {
         asset = "arm64-macos";

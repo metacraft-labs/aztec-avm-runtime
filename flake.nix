@@ -13,10 +13,13 @@
   outputs =
     inputs@{ flake-parts, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } {
+      # No x86_64-darwin: the locked nixpkgs (26.11) refuses it, the 26.05 branch that still has it
+      # lacks the Nim pins.json requires, and no CI runner this repository uses is Intel Darwin.
+      # A system is listed only if every output evaluates for it, which
+      # verification/verify_advertised_systems_construct.sh checks.
       systems = [
         "x86_64-linux"
         "aarch64-linux"
-        "x86_64-darwin"
         "aarch64-darwin"
       ];
 
