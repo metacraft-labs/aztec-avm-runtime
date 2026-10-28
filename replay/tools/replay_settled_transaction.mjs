@@ -44,7 +44,7 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 
-import { BarretenbergSync } from '@aztec/bb.js';
+import { Barretenberg, BarretenbergSync } from '@aztec/bb.js';
 import { jsonStringify } from '@aztec/foundation/json-rpc';
 import { defaultFetch } from '@aztec/foundation/json-rpc/client';
 import { Tx } from '@aztec/stdlib/tx';
@@ -270,6 +270,15 @@ async function storeBaseFor(network) {
   return { base: bases[0], sources: bases.length };
 }
 
+async function initializeReplayCrypto() {
+  // Tx parsing decompresses points synchronously; transaction hashing uses the
+  // async singleton. Neither operation proves or verifies a proof, so the
+  // upstream hash-only option avoids fetching an unused proving CRS when the
+  // native backend is unavailable and Barretenberg falls back to WASM.
+  await BarretenbergSync.initSingleton();
+  await Barretenberg.initSingleton({ skipSrsInit: true });
+}
+
 /**
  * Turn a body's bytes into the `getTxByHash` RESULT the client expects, verifying twice.
  *
@@ -288,7 +297,7 @@ async function txResultFromBody(txHash, bytes) {
       `the leading 32 bytes are ${saw}, not the requested ${want}. This is some other `
       + "transaction's body and replaying it would produce a confident wrong trace.");
   }
-  await BarretenbergSync.initSingleton();
+  await initializeReplayCrypto();
   const tx = Tx.fromBuffer(Buffer.from(bytes));
   const recomputed = (await tx.getTxHash()).toString().toLowerCase();
   if (recomputed !== want) {
@@ -374,10 +383,9 @@ let url;
 
 if (fixturePath) {
   const fixture = loadSettledFixture(JSON.parse(await readFile(fixturePath, 'utf8')), fixturePath);
-  // The upstream Tx schema decompresses non-empty Chonk proofs while parsing
-  // the recorded response. Live body-store reads already initialize this
-  // singleton before deserialization; offline playback needs the same setup.
-  await BarretenbergSync.initSingleton();
+  // Use the same hash/decompression setup as live body-store reads, including
+  // the WASM fallback with no network or pre-existing proving CRS cache.
+  await initializeReplayCrypto();
   url = fixture.provenance.endpoint;
   txHash = fixture.provenance.txHash;
   client = createReplayNodeClient({ url, fetchImpl: fixtureFetch(fixture) });
