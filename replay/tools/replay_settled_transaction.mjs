@@ -374,6 +374,10 @@ let url;
 
 if (fixturePath) {
   const fixture = loadSettledFixture(JSON.parse(await readFile(fixturePath, 'utf8')), fixturePath);
+  // The upstream Tx schema decompresses non-empty Chonk proofs while parsing
+  // the recorded response. Live body-store reads already initialize this
+  // singleton before deserialization; offline playback needs the same setup.
+  await BarretenbergSync.initSingleton();
   url = fixture.provenance.endpoint;
   txHash = fixture.provenance.txHash;
   client = createReplayNodeClient({ url, fetchImpl: fixtureFetch(fixture) });
