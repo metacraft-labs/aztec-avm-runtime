@@ -70,7 +70,7 @@
 // Both are recorded rather than silently applied, and `verify_node_client_surface_narrow` asserts
 // the classification of both by name so that reversing either is a red line and not an edit.
 
-import type { AztecNode } from '@aztec/stdlib/interfaces/client';
+import type { AztecNode } from '@aztec-labs/stdlib/interfaces/client';
 
 /**
  * THE PERMITTED SURFACE. Fourteen of `AztecNode`'s fifty-five, each with the datum it supplies and

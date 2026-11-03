@@ -18,7 +18,7 @@
     "",
     "CONSEQUENCE, STATED SO IT IS NOT DISCOVERED: this package and orchestration/ have DIFFERENT",
     "@aztec/stdlib installs, and importing across the boundary is a wrong answer rather than an",
-    "inefficiency — `serializeWithMessagePack` recognises an `Fr` by the class object of its own",
+    "inefficiency \u2014 `serializeWithMessagePack` recognises an `Fr` by the class object of its own",
     "install, which lib_m21_form_b.sh already records. That is the stated rejection reason for",
     "not importing orchestration/src/settled_read_source.ts's `strictSurface`; replay/src has its",
     "own, citing M21's design decision by decision.",
@@ -35,16 +35,16 @@
     "",
     "NO @aztec/aztec.js AND NO @aztec/pxe. A PXE is the private half's home and a replayed",
     "transaction has no private half; aztec.js would bring a wallet, a key store and a note",
-    "database for a client that only reads. The one thing this package needs from that direction —",
-    "`createAztecNodeClient` — is in @aztec/stdlib/interfaces/client, which is already here."
+    "database for a client that only reads. The one thing this package needs from that direction \u2014",
+    "`createAztecNodeClient` \u2014 is in @aztec/stdlib/interfaces/client, which is already here."
   ],
   "dependencies": {
-    "@aztec/foundation": "5.3.0-nightly.20260819",
-    "@aztec/protocol-contracts": "5.3.0-nightly.20260819",
-    "@aztec/stdlib": "5.3.0-nightly.20260819"
+    "@aztec-labs/foundation": "6.0.0",
+    "@aztec-labs/protocol-contracts": "6.0.0",
+    "@aztec-labs/stdlib": "6.0.0"
   },
   "devDependencies": {
-    "@aztec/noir-protocol-circuits-types": "5.3.0-nightly.20260819"
+    "@aztec-labs/noir-protocol-circuits-types": "6.0.0"
   },
   "engines": {
     "node": ">=24.0.0"

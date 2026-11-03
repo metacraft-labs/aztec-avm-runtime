@@ -73,9 +73,9 @@
 //     seeded, from the PARENT, with their pre-images; the published values are the YARDSTICK and
 //     never an input. Feeding them in is how a comparison comes to compare a value with itself.
 
-import type { BlockNumber } from '@aztec/foundation/branded-types';
-import { Fr } from '@aztec/foundation/curves/bn254';
-import { MerkleTreeId } from '@aztec/stdlib/trees';
+import type { BlockNumber } from '@aztec-labs/foundation/branded-types';
+import { Fr } from '@aztec-labs/foundation/curves/bn254';
+import { MerkleTreeId } from '@aztec-labs/stdlib/trees';
 
 import type { MembershipWitnessSource } from './membership_witness_source.ts';
 

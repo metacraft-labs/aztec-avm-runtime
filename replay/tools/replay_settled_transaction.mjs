@@ -22,8 +22,8 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 
-import { defaultFetch } from '@aztec/foundation/json-rpc/client';
-import { TxHash } from '@aztec/stdlib/tx/tx-hash';
+import { defaultFetch } from '@aztec-labs/foundation/json-rpc/client';
+import { TxHash } from '@aztec-labs/stdlib/tx/tx-hash';
 
 import {
   RUNG_BYTECODE_VALUE,
