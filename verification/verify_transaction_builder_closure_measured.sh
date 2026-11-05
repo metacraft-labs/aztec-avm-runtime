@@ -195,16 +195,25 @@ INV="$REPO_ROOT/REUSE-INVENTORY.md"
 assert_file "the reuse inventory exists" "$INV"
 INV_TEXT="$(cat "$INV" 2>/dev/null)"
 inv_row() { printf '%s\n' "$INV_TEXT" | grep -F -- "$1" | head -1; }
+commafy() {
+  local digits="$1" grouped=""
+  [[ "$digits" =~ ^[0-9]+$ ]] || return 1
+  while [ "${#digits}" -gt 3 ]; do
+    grouped=",${digits: -3}${grouped}"
+    digits="${digits:0:${#digits}-3}"
+  done
+  printf '%s%s' "$digits" "$grouped"
+}
 assert_true "RI-72 exists" str_has_line "$INV_TEXT" "### RI-72 — Upstream's transaction builder, and the closure it drags"
 assert_true "…and states the full closure in the sentence that names it" \
   str_has_sub "$(inv_row 'full transitive relative-import closure of')" \
-    "$(printf "%'d" "$FULL_FILES") files and $(printf "%'d" "$FULL_LINES") lines"
+    "$(commafy "$FULL_FILES") files and $(commafy "$FULL_LINES") lines"
 assert_true "…and the reduced one in ITS own sentence" \
   str_has_sub "$(inv_row 'calldata-and-call-request half is')" \
-    "$(printf "%'d" "$MIN_FILES") files and $(printf "%'d" "$MIN_LINES") lines"
+    "$(commafy "$MIN_FILES") files and $(commafy "$MIN_LINES") lines"
 assert_true "…and the 5-file variant with its own count" \
   str_has_sub "$(inv_row 'calldata-and-call-request half is')" \
-    "$(printf "%'d" "$RED_FILES") files and $(printf "%'d" "$RED_LINES") lines"
+    "$(commafy "$RED_FILES") files and $(commafy "$RED_LINES") lines"
 assert_true "the inventory records that the forbidden dependency is in the static factory only" \
   str_has_sub "$INV_TEXT" 'static factory'
 # …and that it records the CORRECTED reason. NOT asserted as the ABSENCE of the retracted sentence:

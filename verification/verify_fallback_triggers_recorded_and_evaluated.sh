@@ -54,8 +54,25 @@ command -v python3 >/dev/null 2>&1 || die "python3 is not available"
 # summary however it exits.
 SCRATCH=""
 trap '_rc=$?; [ -n "$SCRATCH" ] && rm -rf "$SCRATCH"; ( exit $_rc ); _abnormal_exit_summary' EXIT
-MILESTONES="$WORKSPACE_ROOT/codetracer-pm/milestones/Aztec-AVM-Runtime.milestones.org"
-[ -f "$MILESTONES" ] || die "the milestone file is not at $MILESTONES"
+# The specs repository is `codetracer-pm` in this workspace, but CI clones it under its former name
+# `codetracer-specs` (see the clone steps in .github/workflows/avm-wasm.yml), and a workspace may carry
+# both names as one directory. Accept either name at the current `milestones/` path; two names for
+# one directory (`-ef`) count once, and two distinct files are refused rather than picked between.
+milestone_candidates=()
+for candidate in \
+  "$WORKSPACE_ROOT/codetracer-pm/milestones/Aztec-AVM-Runtime.milestones.org" \
+  "$WORKSPACE_ROOT/codetracer-specs/milestones/Aztec-AVM-Runtime.milestones.org"
+do
+  [ -f "$candidate" ] || continue
+  same_authority=0
+  for authority in "${milestone_candidates[@]+"${milestone_candidates[@]}"}"; do
+    if [ "$candidate" -ef "$authority" ]; then same_authority=1; break; fi
+  done
+  [ "$same_authority" -eq 1 ] || milestone_candidates+=("$candidate")
+done
+[ "${#milestone_candidates[@]}" -eq 1 ] \
+  || die "expected exactly one Aztec-AVM-Runtime milestone file under codetracer-pm/ or codetracer-specs/ milestones/; found ${#milestone_candidates[@]}"
+MILESTONES="${milestone_candidates[0]}"
 
 SCRATCH="$(mktemp -d)"
 

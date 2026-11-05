@@ -36,8 +36,8 @@ avm-transpiler = { path = "../avm-transpiler" }
 # different DEFLATE implementations agreeing to the byte. `verify_transpiler_native_build_unaffected`
 # §6 asserts the difference exists and prints which crates, so this is data and not a sentence.
 #
-# It also means THIS BUILD IS NOT PINNED: nothing passes `--locked` and no lock for this crate is
-# committed, so a cold build resolves whatever is newest and semver-compatible. That is recorded as
-# an Outstanding task on M31 rather than papered over here, because committing a lock is a decision
-# about what this crate is (a reproducible artefact, or a thin shim that follows its dependency)
-# and not a tidy-up.
+# This shim is a reproducible artefact with its OWN committed Cargo.lock, staged by the
+# constructor and built --locked. Its complete graph intentionally remains distinct from the
+# upstream native graph; the measured different-version assertion remains required. Both locks
+# participate in the build stamp. Historical unpinned graph observations above are retained as
+# measurements of the former constructor, not claims about the current locked graph.

@@ -58,7 +58,7 @@ env:
 jobs:
   carry-set-still-applies:
     name: the carry set still applies to upstream HEAD
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, linux, x64, ephemeral, incus]
     # No build: this replays patches and reads git history. Minutes, not hours.
     timeout-minutes: 45
     steps:

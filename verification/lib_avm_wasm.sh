@@ -307,7 +307,7 @@ m6_prepare_tree() {
       git -C "$FORK_ROOT" worktree add --detach "$dir" "$M6_BASE_REV" >/dev/null 2>&1 \
         || die "could not create the $name worktree at $dir"
       for p in "${patches[@]+"${patches[@]}"}"; do
-        if ! git -C "$dir" am "$p" >>"$M6_WORK/$name-am.log" 2>&1; then
+        if ! git -C "$dir" -c commit.gpgsign=false am "$p" >>"$M6_WORK/$name-am.log" 2>&1; then
           git -C "$dir" am --abort >/dev/null 2>&1 || true
           die "git am of $(basename "$p") failed on the $name tree — see $M6_WORK/$name-am.log"
         fi
