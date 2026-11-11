@@ -107,6 +107,14 @@
               pkgs.python3
               pkgs.gnused
               pkgs.parallel
+
+              # `verification/prepare_native_srs.py` downloads the original G2 SRS with the
+              # shell's own curl and refuses any curl outside /nix/store ("Immutable declared
+              # curl required"). Without this entry the shell had no curl at all: a workstation
+              # found its profile's store curl through the ambient PATH, and a CI runner found
+              # /usr/bin/curl, so the SRS prerequisite failed there and every native test that
+              # needs the SRS (verify-m14's vm2_tests) failed with it.
+              pkgs.curl
             ];
 
             # barretenberg's wasm toolchain file and its bootstrap scripts both

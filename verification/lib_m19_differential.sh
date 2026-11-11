@@ -92,11 +92,20 @@ m19_require_packages() {
 
 # Run the three-way arm. `$1` is a log file; any further arguments are `NAME=VALUE` environment
 # entries (the fault injections). Returns jest's exit status.
+# `NO_COLOR=1` IS LOAD-BEARING FOR THE CHECKS THAT GREP THIS LOG. Jest's code frame colours its output
+# when the environment says it is in CI (CI=true on a runner) and wraps every token and every
+# punctuation mark in ANSI escapes (the frame's colouring is picocolors', which `--no-colors` does
+# not reach but NO_COLOR does): `gasUsed.totalGas` is printed as
+# `gasUsed<ESC>[33m.<ESC>[39mtotalGas`, so `test_bitwise_dyn_gas_divergence_detected`'s needle
+# `gasUsed.` was absent from a log that did contain the failing assertion (run 42994775110: the
+# check passed on a workstation and failed on the runner with the same arm and the same module).
+# The text is the evidence these checks read, so it is requested uncoloured rather than the needles
+# being loosened.
 m19_run_arm() { # <logfile> [ENV=VALUE...]
   local log="$1"; shift
   ( cd "$DIFFSIM_DIR" \
-    && env NODE_NO_WARNINGS=1 RUN_THREE_WAY=1 AVM_WASM_PATH="$AVM_WASM_PATH" "$@" \
-       node --experimental-vm-modules ./node_modules/.bin/jest "$M19_SUITE" ) >"$log" 2>&1
+    && env NODE_NO_WARNINGS=1 NO_COLOR=1 RUN_THREE_WAY=1 AVM_WASM_PATH="$AVM_WASM_PATH" "$@" \
+       node --experimental-vm-modules ./node_modules/.bin/jest --no-colors "$M19_SUITE" ) >"$log" 2>&1
 }
 
 # jest's own summary line, parsed once. `Tests:  17 passed, 17 total`.
