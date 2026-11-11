@@ -187,6 +187,28 @@ fi
 RUST_VER="$(tc_pinned_rust)" || die "pins.json declares no toolchain.rust.version"
 TC_PATH="$(tc_rust_ensure "$RUST_VER")" || die "the pinned rust toolchain $RUST_VER could not be made usable"
 
+# THE NIM WRITER'S OWN DEPENDENCIES, FOR EVERY ARM THAT BUILDS IT (path-b and the default).
+#
+# `ct-writer/build.rs` compiles the Nim writer, which imports `results` and `stew`; nothing in the
+# materialised tree carries them, and on a machine without a `~/.nimble` (a fresh CI runner) the
+# compile died with `cannot open file: results`. `build.rs` reads `CT_NIM_EXTRA_PATHS` for exactly
+# this and leaves the revisions to the caller. They are taken from the `flake.lock` of the writer
+# revision `pins.json` names, read out of the object store like the tree itself (lib_nim_deps.sh).
+if [ "$ARM" != a ]; then
+  # shellcheck source=verification/lib_nim_deps.sh
+  . "$HERE/lib_nim_deps.sh"
+  NIM_REPO="${CT_TRACE_FORMAT_NIM_REPO:-$WORKSPACE_ROOT/codetracer-trace-format-nim}"
+  read -r _ _ NIM_WRITER_REV <<<"$(python3 "$HERE/_ct_print_anchors.py" "$REPO_ROOT/pins.json")"
+  [ -n "$NIM_WRITER_REV" ] || die "pins.json declares no trace_format_nim_writer.commit"
+  NIM_LOCK="$(mktemp)" || die "could not create a temporary file"
+  git -C "$NIM_REPO" show "$NIM_WRITER_REV:flake.lock" >"$NIM_LOCK" \
+    || die "$NIM_REPO has no flake.lock at $NIM_WRITER_REV (is the checkout complete, and does it have that commit?)"
+  nim_deps_resolve "$NIM_LOCK"
+  rm -f "$NIM_LOCK"
+  CT_NIM_EXTRA_PATHS="$(IFS=:; printf '%s' "${NIM_DEP_DIRS[*]}")"
+  export CT_NIM_EXTRA_PATHS
+fi
+
 build_script='
 set -euo pipefail
 export PATH="$CARGO_HOME/bin:$PATH"

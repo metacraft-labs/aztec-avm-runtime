@@ -111,6 +111,8 @@ command -v nix >/dev/null 2>&1 || die "nix is required to resolve zstd's headers
 # `nix store gc` deletes from under the binaries linked against it (verification/lib_toolchain.sh).
 # shellcheck source=verification/lib_toolchain.sh
 . "$HERE/lib_toolchain.sh"
+# shellcheck source=verification/lib_nim_deps.sh
+. "$HERE/lib_nim_deps.sh"
 _tc_patchelf >/dev/null || die "patchelf did not resolve through $REPO_ROOT/flake.lock"
 INC="$(tc_nixpkg zstd.dev)/include" || die "nixpkgs#zstd.dev did not resolve through $REPO_ROOT/flake.lock"
 LIB="$(tc_nixpkg zstd.out)/lib" || die "nixpkgs#zstd.out did not resolve through $REPO_ROOT/flake.lock"
@@ -174,11 +176,12 @@ build_one() { # <rev> <tree-dir> <out-binary>
   local hostcc nimcc
   hostcc="$(command -v cc)" || die "no host C compiler on PATH (cc)"
   nimcc="$(host_nim_cc "$hostcc")"
+  nim_deps_resolve "$tree/flake.lock"
   # THE OUTPUT IS KEPT, NOT DISCARDED. `>/dev/null 2>&1` with a `die` that says "re-run without the
   # output suppressed to see why" is a diagnostic that requires the reader to do the work again by
   # hand; this campaign's own rule is that a check that dies must say why on the first run. The log
   # goes beside the binary so the next failure is one `cat` away.
-  ( cd "$tree" && nim c -d:release --mm:arc -p:src \
+  ( cd "$tree" && nim c -d:release --mm:arc -p:src "${NIM_DEP_DIRS[@]/#/-p:}" \
       "--cc:$nimcc" "--$nimcc.exe:$hostcc" "--$nimcc.linkerexe:$hostcc" \
       --passC:"-I$INC" --passL:"-L$LIB" \
       -o:"$out" src/codetracer_ct_print.nim ) >"$out.build.log" 2>&1 \
@@ -213,7 +216,8 @@ build_probe() { # <rev> <tree-dir> <out-binary>
   local hostcc nimcc
   hostcc="$(command -v cc)" || die "no host C compiler on PATH (cc)"
   nimcc="$(host_nim_cc "$hostcc")"
-  ( cd "$tree" && nim c -d:release --mm:arc -p:src \
+  nim_deps_resolve "$tree/flake.lock"
+  ( cd "$tree" && nim c -d:release --mm:arc -p:src "${NIM_DEP_DIRS[@]/#/-p:}" \
       "--cc:$nimcc" "--$nimcc.exe:$hostcc" "--$nimcc.linkerexe:$hostcc" \
       --passC:"-I$INC" --passL:"-L$LIB" \
       -o:"$out" ct_split_probe.nim ) >"$(dirname "$out")/$(basename "$out").build.log" 2>&1 \

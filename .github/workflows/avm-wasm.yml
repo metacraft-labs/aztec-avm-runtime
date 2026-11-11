@@ -2993,6 +2993,18 @@ jobs:
           path: codetracer-trace-format-nim
           gh-token: ${{ steps.app-token.outputs.token }}
 
+      # THE WRITER THE SAME SMOKE BUILDS AND SERVES. After the reader was provided the smoke went on
+      # to `m24_require_module`, which runs `verification/build_ct_writer_wasm.sh`, which
+      # `git archive`s `$WORKSPACE_ROOT/codetracer-trace-format` at `pins.json`'s `trace_format`
+      # anchor. Same branch (`agents`, `branch_at_pin`), same full-depth clone.
+      - name: Clone codetracer-trace-format (the trace writer's source)
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-trace-format
+          ref: agents
+          path: codetracer-trace-format
+          gh-token: ${{ steps.app-token.outputs.token }}
+
       - name: Setup Dev Environment
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:

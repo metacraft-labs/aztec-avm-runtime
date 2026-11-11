@@ -136,6 +136,15 @@ m24_require_bounded_logged() {
      Its output, as far as it got, is in $log
      Command: $*"
   fi
+  # THE LOG IS PRINTED ON FAILURE, NOT JUST NAMED. A runner's `$HOME/.cache` is gone when the job
+  # ends and no step uploads it, so "see $log" pointed at a file nobody could read: the browser
+  # gate failed on a `build_ct_print.sh` compile error that was in this log and visible nowhere.
+  # The tail goes to stderr, which is where `die` writes, so it lands in the job log beside the
+  # message that names it.
+  if [ "$rc" -ne 0 ]; then
+    printf '%s: %s failed (status %s); last 60 lines of %s:\n' "${TEST_NAME:-m24}" "$label" "$rc" "$log" >&2
+    tail -n 60 "$log" >&2
+  fi
   return "$rc"
 }
 

@@ -61,6 +61,11 @@ command -v node >/dev/null 2>&1 || die "node is required"
 echo "== 0. one arm run, in a real browser, and it is the one this tree would produce"
 
 m24_require_readers
+# THE WRITER MODULE THE PAGE SERVES, BUILT HERE WHEN IT IS NOT ALREADY. `run_browser_arms.mjs`
+# copies `ct_writer.wasm` into the page and dies with "no ct_writer.wasm" when it is absent; on a
+# developer's tree an earlier milestone left one behind, on a fresh runner nothing did. It is
+# `m24_require_module` that knows how to build it (stale or missing -> `build_ct_writer_wasm.sh`).
+m24_require_module
 m27_require_arms
 
 CHROMIUM="$(m27_run chromium)"
