@@ -14,14 +14,19 @@
 # Path A container cannot be read by stock `ct-print`, because the Rust zstd frame compressor
 # leaves every frame unpledged. That is a claim about a DIFFERENCE, so it is held as one:
 # `build_ct_print.sh` builds the reader at `pins.json`'s `trace_format_nim` commit AND at its
-# `control_commit` — the parent of the one-line fix — and both are run against the same bytes.
-# Without the second, "our reader reads it" is satisfied by a container any reader would read, and
-# the reason for pinning a special reader would be unevidenced.
+# `control_commit` — a published ANCESTOR of the reader that must fail to read this container —
+# and both are run against the same bytes. Without the second, "our reader reads it" is satisfied
+# by a container any reader would read, and the reason for pinning a special reader would be
+# unevidenced. The control is chosen for what it DOES, not for where it sits; "THE CONTROL" below
+# says why.
 #
-# THE SYMPTOM IS ASSERTED, NOT JUST THE STATUS, and it is not the symptom §9.3 predicted: the
-# pre-fix reader exits 1 with `chunk compressed data extends beyond events.log`, not with a
-# `RangeDefect`. Pinning the text is what stops the pre-fix arm passing for some unrelated reason
-# — a missing file, a bad argument — which would make the whole comparison meaningless.
+# THE OUTCOME IS CLASSIFIED, NOT JUST THE STATUS. A refusal must say something and must not be a
+# decode; a silent decode must miss the step count the reader recovers. Either rules out the
+# control passing for some unrelated reason — a missing file, a bad argument — which would make
+# the whole comparison meaningless. (The first control here was the reader fix's parent, and it
+# exited 1 with `chunk compressed data extends beyond events.log`. The control at
+# `pins.json`'s `trace_format_nim.control_commit` today exits 0 over this container with empty
+# metadata, a step count of 27 where there are 5,001, and no events at all: SILENT.)
 #
 # ===========================================================================
 # EVERY ASSERTION ABOVE WAS SATISFIED OUT OF `events.log`, AND THE SPLIT STREAMS WERE NEVER READ.
@@ -367,14 +372,20 @@ print(" ".join("%02x" % x for x in b))' "$CT")"
 # `ctfs-container.md` section 1 states that header byte 5 is `4`; this asserted `03`, which pinned
 # the writer's staleness in a check rather than catching it.
 #
-# BYTES 6 AND 7 ARE READ TOO, because version 4 RE-DEFINES them: under v2/v3 they were compression
-# and encryption, under v4 they are encryption and max_shards. A container could satisfy a version
-# assertion alone while carrying a compression tag in the byte a v4 reader reads as encryption, and
+# BYTES 6 AND 7 ARE READ TOO, because version 4 RE-DEFINED them: under v2/v3 they were compression
+# and encryption, from v4 on they are encryption and max_shards. A container could satisfy a version
+# assertion alone while carrying a compression tag in the byte a reader reads as encryption, and
 # would then declare itself AES-256-GCM encrypted. `00 00` is encryption=none and max_shards=0,
-# where `0` is what the spec now pins for a container that is not sharded -- both writers write it,
+# where `0` is what the spec pins for a container that is not sharded -- both writers write it,
 # so this line is the same for either.
-assert_eq "the container carries the CTFS magic, version and v4 header bytes" \
-  "c0 de 72 ac e2 04 00 00" "$MAGIC"
+#
+# THE VERSION IS 5, AND 6 WOULD BE A DIFFERENT FINDING. `ctfs-container.md` section 1 has a writer
+# write 5 unless the container uses a version-6 field -- the compact profile, which the Nim writer
+# picks below a measured raw-byte threshold. This container is the 5,001-step roundtrip, well above
+# it, so `05` is the full profile, and a `06` here would mean the threshold or the profile choice
+# moved rather than that the container is merely newer.
+assert_eq "the container carries the CTFS magic, version and v5 header bytes" \
+  "c0 de 72 ac e2 05 00 00" "$MAGIC"
 
 # ===========================================================================
 # THE SPLIT STREAMS, THROUGH THE REFERENCE READER. See this file's header for why nothing above
@@ -508,20 +519,26 @@ assert_eq "and on the one source path" "$(dv PATH0)" "$(sv PATH0)"
 # --- THE INSTRUMENT'S OWN CONTROL ------------------------------------------
 #
 # Every assertion above is satisfied by a probe that cannot see a problem. Asked of a file that is
-# not a CTFS container, it must report the streams as UNREADABLE rather than as zero — and asked
-# of a file that is not there at all, it must say so against OPEN. Without these, "steps.dat
-# decodes" is a statement about the probe.
+# not a CTFS container, it must report it as UNREADABLE rather than as an empty container — and
+# asked of a file that is not there at all, it must say so against OPEN too. Without these,
+# "steps.dat decodes" is a statement about the probe.
+#
+# The reader reads a container's header when it opens it (it chooses the full or the compact
+# profile there), so a file without the CTFS magic is refused at OPEN, by name, and the probe
+# reports no stream at all. `DRIFT.md` D32.
 NOT_A_CONTAINER="$M24_WORK/not-a-container.bin"
 mkdir -p "$M24_WORK" || die "could not create $M24_WORK"
 head -c 4096 /dev/urandom >"$NOT_A_CONTAINER" 2>/dev/null || die "could not write $NOT_A_CONTAINER"
 CTRL="$(m24_split_probe "$NOT_A_CONTAINER")"
 cv() { printf '%s\n' "$CTRL" | sed -n "s/^$1"$'\t'"//p"; }
-assert_true "CONTROL: over a file that is not a container, steps.dat is reported UNREADABLE" \
-  str_has_sub "$(cv STEP_COUNT)" 'ERR:steps.dat:'
-assert_true "CONTROL: and so is values.dat" str_has_sub "$(cv VALUE_COUNT)" 'ERR:values.dat:'
-assert_true "CONTROL: and so is calls.dat" str_has_sub "$(cv CALL_COUNT)" 'ERR:calls.dat:'
+assert_true "CONTROL: over a file that is not a container, OPEN reports it UNREADABLE" \
+  str_has_sub "$(cv OPEN)" 'ERR:'
+assert_true "CONTROL: and names why — it is not a CTFS container" \
+  str_has_sub "$(cv OPEN)" 'not a CTFS container'
+assert_false "CONTROL: and it does NOT report the file as opened" \
+  str_has_re "$(cv OPEN)" '^ok$'
 assert_false "CONTROL: and it does NOT report a step count there" \
-  str_has_re "$(cv STEP_COUNT)" '^[0-9]+$'
+  str_has_line_re "$CTRL" '^STEP_COUNT'$'\t''[0-9]+$'
 MISSING_OUT="$(m24_split_probe "$M24_WORK/definitely-not-here.ct")"
 assert_true "CONTROL: a missing file is reported against OPEN, not as an empty container" \
   str_has_sub "$(printf '%s\n' "$MISSING_OUT" | sed -n "s/^OPEN"$'\t'"//p")" 'ERR:no such file'

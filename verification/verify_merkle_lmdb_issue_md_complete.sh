@@ -49,7 +49,10 @@ m3_prepare_trees
 assert_contains "PR.md names the upstream project" "**Upstream project:**" "$doc"
 assert_contains "PR.md declares its Kind (the non-defect workflow's extra field)" \
   "**Kind:**" "$doc"
-assert_contains "and the Kind is a refactor" "refactor" "$doc"
+# The Kind LINE is read, not the document: "refactor" is also in the suggested title and the body,
+# so a Kind of "bug fix" would still leave the word present.
+pr_kind="$(printf '%s\n' "$doc" | sed -n 's/^\*\*Kind:\*\* *//p' | head -1)"
+assert_prefix "and the Kind is a refactor" "refactor" "$pr_kind"
 assert_contains "PR.md carries a Status line" "**Status:**" "$doc"
 assert_contains "PR.md states it is not yet filed and has no upstream URL" \
   "not filed" "$doc"
@@ -115,9 +118,12 @@ assert_eq "and the arithmetic PR.md states holds" \
 assert_contains "PR.md states the identical-test-name result, not only the counts" \
   "identical as a set" "$doc"
 assert_file "and that comparison's output is on disk" "$M3_WORK/names-before.txt"
-assert_eq "the recorded name lists are the same size" \
-  "$(wc -l <"$M3_WORK/names-before.txt" | tr -d ' ')" \
-  "$(wc -l <"$M3_WORK/names-after.txt" | tr -d ' ')"
+# PR.md's claim is set identity, so the lists are compared as sets and must hold the tests that
+# ran: two empty lists (an enumeration that failed in both trees) are the same size too.
+assert_eq "the recorded before-list holds every test that ran before" \
+  "${M3_BEFORE_CMT_RAN:-missing}" "$(wc -l <"$M3_WORK/names-before.txt" | tr -d ' ')"
+assert_true "the recorded name lists are identical as sets" \
+  cmp -s <(sort -u "$M3_WORK/names-before.txt") <(sort -u "$M3_WORK/names-after.txt")
 
 # ---------------------------------------------------------------------------
 # The evidence claims, re-derived from the base tree
@@ -141,9 +147,12 @@ assert_eq "measured: vm2_sim + world_state_reference use exactly five merkle_tre
 # The unused include that reached vm2_sim, and its removal.
 assert_true "measured: before, response.hpp includes the LMDB tree store" \
   grep -q 'lmdb_store/lmdb_tree_store.hpp' "$MT/response.hpp"
+# assert_false over grep also passes when the file is missing (grep exits 2), so the patched
+# response.hpp must be there, and must still be the header the before-assertion read.
+RESPONSE_AFTER="$M3_WORK/patched/barretenberg/cpp/src/barretenberg/crypto/merkle_tree/response.hpp"
+assert_file "the patched tree still has crypto/merkle_tree/response.hpp" "$RESPONSE_AFTER"
 assert_false "measured: after, it does not" \
-  grep -q 'lmdb_store/lmdb_tree_store.hpp' \
-    "$M3_WORK/patched/barretenberg/cpp/src/barretenberg/crypto/merkle_tree/response.hpp"
+  grep -q 'lmdb_store/lmdb_tree_store.hpp' "$RESPONSE_AFTER"
 assert_contains "PR.md states response.hpp named nothing from that include" \
   "named nothing from it" "$doc"
 

@@ -108,6 +108,23 @@ for p in $M15_PROGRAMS; do
   [ "$n" -gt "$MAXSEEN" ] && MAXSEEN="$n"
 done
 note "the corpus maximum is $MAXSEEN against a budget of $M15_CROSSING_BUDGET"
+
+# ---------------------------------------------------------------------------
+# The shape M15 ships, held to the same budget by ITS OWN crossings.
+# ---------------------------------------------------------------------------
+# Everything above reads upstream's hint record, which a change to the reactor or to the host
+# cannot move: it would pass unchanged for a resident shape that consulted the host on every
+# memory access. The resident shape's own crossings are counted by the host at the module's
+# exports, for the same seven transactions, from handing the input in to holding the result — and
+# a transaction cannot cross fewer than three times (allocate the input, simulate, read the result).
+for p in $M15_PROGRAMS; do
+  r="$(m15_key "$OUT" "crossings.$p.residentBoundaryCalls")"
+  case "$r" in ''|*[!0-9]*) fail "$p: no counted resident crossing total (got '$r')"; continue ;; esac
+  note "$p: the resident shape crossed $r times"
+  assert_ge "$p: the resident shape's crossings were counted, at least allocate, simulate and read back" 3 "$r"
+  assert_true "$p: and they are within the per-transaction crossing budget of $M15_CROSSING_BUDGET ($r)" \
+    test "$r" -le "$M15_CROSSING_BUDGET"
+done
 assert_true "the budget is a ceiling with room, not the measurement itself" \
   test "$MAXSEEN" -lt "$M15_CROSSING_BUDGET"
 # ...and not so much room that nothing could exceed it. A budget three times the worst case would

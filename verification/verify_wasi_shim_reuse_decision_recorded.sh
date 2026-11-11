@@ -73,9 +73,23 @@ assert_true "bb.js's shim is in it too, or the enumeration missed the file the d
   grep -qx "$M17_BBJS_SHIM" "$SITES"
 # The enumeration is over more than one directory, which is the whole point of asking it this way.
 assert_ge "the sites are spread over several directories" 5 "$N_DIRS"
-assert_eq "…and NODE-HOST.md records the same count of directories" \
-  "1" "$(printf '%s' "$DOC" | grep -c "Eight files, in eight" || true)"
-assert_eq "the enumeration's file count is the one the document records" "8" "$N_SITES"
+# The document's two numbers are READ from its sentence and compared with the two MEASURED here,
+# so neither side is a literal the other merely happens to equal: an enumeration that moved to
+# seven directories, or a document edited to say so, fails by name.
+number_of() { # <english-word> -> digits, or the word itself if it is not one of these
+  case "$(printf '%s' "$1" | tr 'A-Z' 'a-z')" in
+    one) echo 1 ;; two) echo 2 ;; three) echo 3 ;; four) echo 4 ;; five) echo 5 ;; six) echo 6 ;;
+    seven) echo 7 ;; eight) echo 8 ;; nine) echo 9 ;; ten) echo 10 ;; eleven) echo 11 ;;
+    twelve) echo 12 ;; *) printf '%s\n' "$1" ;;
+  esac
+}
+DOC_COUNTS="$(printf '%s\n' "$DOC" | sed -n 's/.* \([A-Z][a-z]*\) files, in \([a-z]*\).*/\1 \2/p' | head -1)"
+assert_true "NODE-HOST.md states the enumeration as files and directories" test -n "$DOC_COUNTS"
+assert_eq "…and the count of directories it records is the one measured" \
+  "$N_DIRS" "$(number_of "${DOC_COUNTS#* }")"
+assert_eq "the enumeration's file count is the one the document records" \
+  "$N_SITES" "$(number_of "${DOC_COUNTS%% *}")"
+assert_eq "…and that is the eight this milestone recorded" "8" "$N_SITES"
 
 # ---------------------------------------------------------------------------
 echo "== 3. what bb.js's shim actually covers, measured name by name"
@@ -100,12 +114,36 @@ for n in $M17_BBJS_COVERED; do
 done
 # And it supplies three imports avm.wasm does not have. That is what makes it the wrong shim rather
 # than a partial one: it is a shim for a DIFFERENT module.
+#
+# "avm.wasm does not import it" is read from avm.wasm, in EVERY namespace. Two of the three —
+# `logstr` and `throw_or_abort_impl` — are `env` imports in bb.js, so a reading confined to the
+# WASI namespace (which is what the eleven above are) could never contain them and would report
+# them absent whatever the module declared. The module's own import list is read with the engine's
+# `WebAssembly.Module.imports`, and REACTOR-ABI.md's whole import table is held to it name for name,
+# so neither the document nor the binary can gain an import the other does not record.
+m17_measured
+MODULE_IMPORTS="$(m6_in_devshell '
+  node -e "const { readFileSync } = require(\"fs\");
+for (const i of WebAssembly.Module.imports(new WebAssembly.Module(readFileSync(process.argv[1]))))
+  console.log(i.module + \".\" + i.name);" "$1"' "$(m12_wasm_bin avm.wasm)" | LC_ALL=C sort -u)"
+DOC_IMPORTS="$(sed -n 's/^| `\([a-z_0-9]*\.[a-z_0-9]*\)` |.*/\1/p' "$M17_REACTOR_ABI" | LC_ALL=C sort -u)"
+assert_eq "avm.wasm's import list was read from the module, in every namespace" "12" \
+  "$(printf '%s\n' "$MODULE_IMPORTS" | grep -c . || true)"
+assert_eq "…and REACTOR-ABI.md's import table is that list exactly, namespace and name" \
+  "$MODULE_IMPORTS" "$DOC_IMPORTS"
+assert_eq "…and the reading sees the env namespace, not only WASI" "env.memory" \
+  "$(printf '%s\n' "$MODULE_IMPORTS" | grep '^env\.' || true)"
 for n in $M17_BBJS_EXTRA; do
   assert_true "bb.js's shim supplies $n, which avm.wasm does not import" \
     grep -qE "(^|[^a-z_])$n[[:space:]]*:" "$SHIM"
-  assert_eq "…and $n is genuinely absent from avm.wasm's import list" "0" \
-    "$(printf '%s\n' "$WASI_NAMES" | grep -cx "$n")"
+  assert_eq "…and $n is genuinely absent from avm.wasm's import list, in any namespace" "0" \
+    "$(printf '%s\n' "$MODULE_IMPORTS" | grep -c "\.$n\$" || true)"
+  assert_eq "…and from REACTOR-ABI.md's import table" "0" \
+    "$(printf '%s\n' "$DOC_IMPORTS" | grep -c "\.$n\$" || true)"
 done
+# The same by-name reading finds a name the module DOES import, so the zeros are absences.
+assert_eq "control: the same reading finds proc_exit, which avm.wasm does import" "1" \
+  "$(printf '%s\n' "$MODULE_IMPORTS" | grep -c '\.proc_exit$' || true)"
 # The shim's own comment says what it is for, and it is not this.
 assert_contains "bb.js's shim says in its own comment what it implements" \
   "We literally only need to support random_get" "$(cat "$SHIM")"

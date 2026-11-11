@@ -25,6 +25,9 @@
 # PRECONDITIONS ARE PRECONDITIONS, NOT SKIPS. A check that cannot find a module dies with the
 # command that builds one. It never reports "0 problems" against a run that did not happen.
 
+# Its data helpers run inside command substitutions; see lib_subshell_die.sh.
+. "$VERIFY_DIR/lib_subshell_die.sh"
+
 M20_WORK="${M20_WORK:-$HOME/.cache/aztec-m20-form-a}"
 export M20_WORK
 
@@ -56,7 +59,7 @@ m20_require_anchor() {
 # empty haystack turns a `grep -c` into an assertion about nothing.
 m20_anchor_file() { # <path-in-fork>
   git -C "$FORK_ROOT" show "$M20_CPP_ANCHOR:$1" 2>/dev/null \
-    || die "the anchor has no $1 (the layout moved; this check's premise is stale)"
+    || die_even_in_subshell "the anchor has no $1 (the layout moved; this check's premise is stale)"
 }
 
 m20_require_packages() {

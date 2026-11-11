@@ -189,11 +189,56 @@ ARCHIVE_H="$(m14_noir_constant ARCHIVE_HEIGHT)"
 assert_eq "ARCHIVE_HEIGHT is 30, from noir-projects' constants.nr" "30" "$ARCHIVE_H"
 assert_eq "so a TypeScript archive tree would be this many nodes" "2147483647" \
   "$(python3 -c "print(2 ** ($ARCHIVE_H + 1) - 1)")"
-TS_FULL_HEIGHT="$(git -C "$FORK_ROOT" grep -l -E '^export (class|abstract class) [A-Za-z0-9_]*(Tree|MerkleTree)([^[:alnum:]_]|$)' \
+# Every exported TypeScript class whose NAME says tree, WITH its declaration line, so the verdict
+# below is about each class's own definition. A file name says nothing about what a class stores:
+# a sparse tree declared in `smt.ts` or `lazy_tree.ts` would pass any test made on the path.
+TS_TREE_DECLS="$(git -C "$FORK_ROOT" grep -E '^export (class|abstract class) [A-Za-z0-9_]*(Tree|MerkleTree)([^[:alnum:]_]|$)' \
                    "$M6_BASE_REV" -- 'yarn-project/**/*.ts' 2>/dev/null \
-                 | sed -E "s|^$M6_BASE_REV:||" | grep -v '\.test\.ts' | sort | tr '\n' ' ')"
-note "TypeScript tree classes at the anchor: $TS_FULL_HEIGHT"
-assert_not_contains "none of them is a sparse full-height tree" "sparse" "$TS_FULL_HEIGHT"
+                 | sed -E "s|^$M6_BASE_REV:||" | grep -v '\.test\.ts:')"
+TS_TREE_CLASSES="$(printf '%s\n' "$TS_TREE_DECLS" \
+  | sed -nE 's/^[^:]+:export (abstract )?class ([A-Za-z0-9_]+).*/\2/p' | LC_ALL=C sort)"
+note "TypeScript tree classes at the anchor: $(printf '%s' "$TS_TREE_CLASSES" | tr '\n' ' ')"
+# An identity, not a floor: a class that appears is a class nobody has classified, and it fails
+# here rather than inheriting a verdict it was never given.
+assert_eq "the anchor's TypeScript tree classes are exactly these seven" \
+"AvmGetLeafPreimageHintNullifierTree
+AvmGetLeafPreimageHintPublicDataTree
+AvmSequentialInsertHintNullifierTree
+AvmSequentialInsertHintPublicDataTree
+IndexedMerkleTree
+MerkleTree
+PrivateFunctionsTree" "$TS_TREE_CLASSES"
+# Each is classified from its OWN declaration: the node-count check itself, a subclass of it (whose
+# constructor runs that check), a holder of one, or an AVM hint record, which carries a leaf
+# preimage and no nodes at all. None of the four shapes can represent a height-30 tree without
+# materialising its 2^31 - 1 nodes.
+unclassified=0
+while IFS= read -r decl; do
+  [ -n "$decl" ] || continue
+  cls="$(printf '%s' "$decl" | sed -nE 's/^[^:]+:export (abstract )?class ([A-Za-z0-9_]+).*/\2/p')"
+  file="${decl%%:*}"
+  case "$decl" in
+    *":export class MerkleTree {") verdict="the node-count check itself" ;;
+    *" extends MerkleTree {") verdict="a subclass whose constructor runs that check" ;;
+    *" extends AvmGetLeafPreimageHintFactory("*|*" extends AvmSequentialInsertHintFactory("*)
+      verdict="an AVM hint record" ;;
+    *)
+      if [ "$cls" = PrivateFunctionsTree ] \
+         && str_has_line "$(FORK_SHOW "$file")" "  private tree?: MerkleTree;"; then
+        verdict="a holder of a MerkleTree"
+      else
+        verdict=""
+      fi ;;
+  esac
+  if [ -n "$verdict" ]; then
+    note "$cls ($file): $verdict"
+  else
+    fail "the TypeScript class $cls ($file) is none of the four shapes that cannot be a sparse full-height tree"
+    unclassified=$((unclassified + 1))
+  fi
+done <<<"$TS_TREE_DECLS"
+assert_eq "none of them is a sparse full-height tree: all seven are classified from their own declarations" \
+  "0" "$unclassified"
 
 # ===========================================================================
 echo

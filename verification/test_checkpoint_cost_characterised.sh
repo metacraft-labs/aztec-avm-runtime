@@ -143,6 +143,7 @@ assert_true "and the one it carries is the archive tree" \
 assert_false "which the anchor arm does not have" \
   grep -q 'archive_tree' "$BASE_TREE/barretenberg/cpp/src/barretenberg/world_state_reference/memory_merkle_db.hpp"
 
+BENCH_BUILT=0
 for arm in base ext; do
   case "$arm" in base) t="$BASE_TREE" ;; *) t="$EXT_TREE" ;; esac
   # M14's own `m14_build_native` deletes the build directory first, which is right for M14 and
@@ -160,6 +161,11 @@ for arm in base ext; do
   assert_eq "$arm: the native configure succeeded" "0" "$M14_NATIVE_CONFIGURE_RC"
   assert_eq "$arm: and world_state_reference built" "0" "$M14_NATIVE_BUILD_RC"
   assert_file "$arm: the library is on disk" "$t/barretenberg/cpp/$M14_NATIVE_BUILD/lib/libworld_state_reference.a"
+  # The binary goes BEFORE the build, so the one found afterwards is one this run produced. The
+  # build writes to a fixed path that outlives every run: when a compile fails the previous run's
+  # binary is still sitting there, executable, linked against libraries that have since been
+  # rebuilt, and every number below would be read off it.
+  rm -f "$(m15_bench_bin "$t")"
   m15_build_bench "$t"
   M15_BENCH_CC_RC=$?
   # M14'S CALLER DOES THIS AND M15'S NEVER DID, WHICH IS WHY THIS ASSERTION HAS BEEN A BARE
@@ -174,8 +180,16 @@ for arm in base ext; do
   assert_eq "$arm: the benchmark compiled against that tree" "0" "$M15_BENCH_CC_RC"
   [ "$M15_BENCH_CC_RC" -eq 0 ] || note "$arm: bench build rc=$M15_BENCH_CC_RC; tail of $t/m15-bench.log:
 $(tail -30 "$t/m15-bench.log" 2>/dev/null || echo '(the log does not exist — the devshell wrapper never ran the script)')"
-  assert_file "$arm: and its binary is there" "$(m15_bench_bin "$t")"
+  assert_file "$arm: and its binary is there, built by this run" "$(m15_bench_bin "$t")"
+  [ -x "$(m15_bench_bin "$t")" ] && BENCH_BUILT=$((BENCH_BUILT + 1))
 done
+# Nothing below is measured unless BOTH arms' binaries came out of this run's compile. A timing
+# section run against whatever an earlier run left behind would print its numbers and pass its
+# bounds while saying nothing about the trees prepared above.
+if [ "$BENCH_BUILT" -ne 2 ]; then
+  fail "only $BENCH_BUILT of the two benchmark binaries was built by this run, so nothing was measured"
+  finish
+fi
 # The two binaries are not the same program, which is what makes comparing them a comparison. This
 # campaign has already had one check that compared a binary with itself.
 assert_false "the two arms' benchmark binaries differ" \
@@ -498,7 +512,16 @@ assert_true "it records the checkpoint cost as an UPSTREAM optimisation, not a r
   grep -q 'upstream optimisation with independent merit' "$M15_WRITEUP"
 assert_true "it names the deep copy as the cause" \
   grep -q 'std::stack<State>' "$M15_WRITEUP"
-assert_true "and it carries the measured ratio rather than an adjective" \
-  grep -qE 'create_checkpoint.*(1[0-9]|[2-9])[0-9]{2}%|ratio' "$M15_WRITEUP"
+# The ratio is read out of the sentence that states it, as the number it is, and held to the same
+# band this check holds the measurement to. A search for the word "ratio" anywhere in the document
+# is satisfied by a write-up that has replaced every figure with an adjective.
+WRITEUP_RATIOS="$(tr '\n' ' ' <"$M15_WRITEUP" \
+  | sed -nE 's/.*A ten-fold population costs \*\*([0-9]+\.[0-9])x\*\* more per `create_checkpoint`.* growth at \*\*([0-9]+\.[0-9])x\*\*.*/\1 \2/p')"
+assert_true "and it carries the measured ratio rather than an adjective: two decade ratios, as numbers ($WRITEUP_RATIOS)" \
+  str_has_re "$WRITEUP_RATIOS" '^[0-9]+\.[0-9] [0-9]+\.[0-9]$'
+for wr in $WRITEUP_RATIOS; do
+  assert_true "the recorded ratio ${wr}x is inside the band this check measures against, 4x to 100x" \
+    awk -v r="$wr" 'BEGIN { exit !(r >= 4.0 && r <= 100.0) }'
+done
 
 finish

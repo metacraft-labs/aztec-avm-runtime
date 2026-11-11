@@ -362,7 +362,14 @@ NAIVE="$(cat $EAGER_FILES_LIST | grep -o 'node:' | wc -l | tr -d ' ')"
 assert_ge "a NAIVE substring count over the bytes finds 'node:' occurrences…" 1 "$NAIVE"
 assert_true "…every one of which is inside an identifier such as getNode( — which is why §4 reads
      the metafile's specifiers and not the bytes" \
-  bash -c "! cat $EAGER_FILES_LIST | grep -oE \"[\\\"']node:[a-z_/]+[\\\"']\" | grep -q ."
+  python3 - $EAGER_FILES_LIST <<'PY_NODE_SPECIFIERS'
+import pathlib, re, sys
+# Read all actual eager bytes; a missing/unreadable chunk refuses normally.
+# The exact original quoted builtin-specifier property is unchanged.
+pattern = re.compile(rb"[\"']node:[a-z_/]+[\"']")
+stream = b"".join(pathlib.Path(name).read_bytes() for name in sys.argv[1:])
+raise SystemExit(1 if pattern.search(stream) else 0)
+PY_NODE_SPECIFIERS
 
 # And the things a native reach would actually leave behind.
 for pat in 'process.binding' '__dirname' 'require("fs")' 'cpp_'; do

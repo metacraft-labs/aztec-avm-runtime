@@ -122,6 +122,10 @@ try {
       t.line('nodeHost.pagesAtStart', compiled.memoryImport.min);
       t.line('nodeHost.peakPages', Math.max(...pagesAfter));
       t.line('nodeHost.peakKiB', Math.max(...pagesAfter) * 64);
+      // The linear memory's own length in BYTES, read off the buffer rather than derived from the
+      // page readings, so the KiB figure above can be checked against something it was not
+      // computed from. Memory never shrinks, so after the last program this is the peak.
+      t.line('nodeHost.memoryBytesAtEnd', reactor.memory.buffer.byteLength);
       t.line('nodeHost.pageSpreadAcrossPrograms', Math.max(...pagesAfter) - Math.min(...pagesAfter));
       t.line('nodeHost.ownedAllocationsAtExit', reactor.ownedAllocations);
       t.line('nodeHost.leakedAtTrap', reactor.leakedAtTrap);
@@ -202,6 +206,11 @@ try {
     // is the exact failure this line exists to detect, and only a reading of the caught object
     // detects it.
     let trapHasRevertCode = -1;
+    // One allocation the host OWNS when the trap happens, so the abandonment accounting has
+    // something to account for: a trap on an instance holding nothing would leave `leakedAtTrap` at
+    // zero whether `poison()` counted the abandoned allocations or not.
+    reactor.put(new Uint8Array(64));
+    const ownedWhenTrapped = reactor.ownedAllocations;
     try {
       const o = reactor.simulateAtRawPointer(outOfBounds, 0x1000, contractDb, merkleDb);
       trapWasOutcome = o.kind === 'tx-outcome' ? 1 : 0;
@@ -220,7 +229,9 @@ try {
     // probe that answered 0 for everything would satisfy the assertion on the trap by itself.
     t.line('traprevert.revert.hasRevertCodeProperty', 'revertCode' in reverted ? 1 : 0);
     t.line('traprevert.trap.instancePoisoned', reactor.poisoned ? 1 : 0);
+    t.line('traprevert.trap.ownedWhenTrapped', ownedWhenTrapped);
     t.line('traprevert.trap.leakedAtTrap', reactor.leakedAtTrap);
+    t.line('traprevert.trap.ownedAfterTrap', reactor.ownedAllocations);
 
     // ARM 5 — the poisoned instance refuses further work rather than answering from a dead memory.
     let afterTrap = 'no-error';

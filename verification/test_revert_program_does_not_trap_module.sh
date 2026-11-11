@@ -123,7 +123,11 @@ done
 # fires. It did not fire.
 assert_eq "the host's throw_or_abort_impl hook did not fire" "0" \
   "$(grep -c 'throw_or_abort_impl' "$V8_ERR" || true)"
-assert_eq "the guest did not trap" "0" "$(grep -c 'unreachable\|RuntimeError' "$V8_ERR" || true)"
+# The host reports ANY trap — unreachable, out-of-bounds, a bad indirect call — as one line,
+# `<module>: guest failed: <message>`, so that line is what is looked for.
+assert_eq "the guest did not trap" "0" "$(grep -c 'guest failed:\|unreachable\|RuntimeError' "$V8_ERR" || true)"
+assert_true "the host does print that line when a guest fails, so its absence means something" \
+  grep -q 'guest failed:' "$M7_V8_HOST"
 # …and the hook exists, so its silence is a measurement.
 assert_true "the host does carry an abort hook, so its silence means something" \
   grep -q 'throw_or_abort_impl' "$M7_V8_HOST"

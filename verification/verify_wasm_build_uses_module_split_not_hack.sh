@@ -148,11 +148,18 @@ assert_false "and none beside barretenberg/cpp" test -d "$AVM_CPP/../../shims"
 INCLUDES="$(m6_include_dirs "$M6_TREE_AVM" build-wasm-avm)"
 NINC="$(printf '%s\n' "$INCLUDES" | grep -c .)"
 assert_ge "the build passes -I directories to assert about" 5 "$NINC"
+# A directory that does not exist has no lmdb.h in it either, so the search below
+# is only a finding over directories that are there to be searched. One -I can
+# legitimately be absent (FetchContent's gtest, which a build of these two
+# targets never fetches); the rest must exist.
 LMDB_DIRS=""
+NINC_PRESENT=0
 while IFS= read -r d; do
   [ -n "$d" ] || continue
+  [ -d "$d" ] && NINC_PRESENT=$((NINC_PRESENT + 1))
   [ -f "$d/lmdb.h" ] && LMDB_DIRS="$LMDB_DIRS $d"
 done <<<"$INCLUDES"
+assert_ge "and all but at most one of them exist on disk to be searched" "$((NINC - 1))" "$NINC_PRESENT"
 assert_eq "not one of the $NINC include directories contains an lmdb.h" "" "${LMDB_DIRS# }"
 assert_eq "no include directory is named for lmdb either" \
   "0" "$(printf '%s\n' "$INCLUDES" | grep -ci 'lmdb')"
@@ -166,6 +173,11 @@ assert_eq "and no lmdb.h exists anywhere under the wasm build tree" \
 # what the path IS — a `_deps` subtree — and the exclusion is MEASURED rather than
 # assumed: the search must find some lmdb.h at all, and every one it finds must be
 # under a `_deps`, so nothing is being waved through and nothing is inert.
+# Exercise the original pinned ExternalProject before asserting that this
+# absence search has a real positive control. Configure alone does not download
+# lmdb_repo, and vm2_sim deliberately has no edge to that native dependency.
+m6_in_devshell 'cmake --build "$1" --target lmdb_repo' "$AVM_CPP/build-native-off"
+assert_eq "the original native lmdb_repo prerequisite builds successfully" "0" "$?"
 LMDB_ALL="$(find "$M6_TREE_AVM" -name lmdb.h 2>/dev/null | sort)"
 LMDB_N=$(printf '%s\n' "$LMDB_ALL" | grep -c . || true)
 LMDB_DEPS=$(printf '%s\n' "$LMDB_ALL" | grep -c '/_deps/' || true)

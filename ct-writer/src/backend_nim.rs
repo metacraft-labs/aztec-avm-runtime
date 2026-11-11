@@ -59,6 +59,12 @@ extern "C" {
     fn trace_writer_free(handle: Handle);
     fn trace_writer_set_recording_id(handle: Handle, recording_id: *const c_char) -> c_int;
     fn trace_writer_begin_in_memory(handle: Handle) -> c_int;
+    /// `ctfs-container.md` §1e's profile choice, made at close. Non-zero `raw_bytes` converts the
+    /// finished container to the compact profile when its members total FEWER than `raw_bytes`;
+    /// `0`, the writer's own default, writes the full profile always. See
+    /// [`CtWriterBackend::set_compact_threshold`](crate::backend::CtWriterBackend::set_compact_threshold)
+    /// for why this module leaves it at `0` and what has to move before a producer may not.
+    fn trace_writer_set_compact_threshold(handle: Handle, raw_bytes: u64) -> c_int;
     fn trace_writer_close(handle: Handle) -> c_int;
     fn trace_writer_container_ready(handle: Handle) -> c_int;
     fn trace_writer_container_len(handle: Handle) -> usize;
@@ -319,9 +325,6 @@ impl CtWriterBackend for NimBackend {
         let c_recording = CStr::new(recording_id)?;
         let c_workdir = CStr::path(workdir)?;
         let c_source = CStr::path(source)?;
-        // Literally `<toplevel>`, in angle brackets — the name the spec fixes and the pure-Rust
-        // writer interns. Not the entry function's own name: a recording has BOTH.
-        let c_toplevel = CStr::new("<toplevel>")?;
 
         unsafe {
             let handle = trace_writer_new(c_program.ptr(), FFI_TRACE_FORMAT_BINARY);
@@ -360,31 +363,18 @@ impl CtWriterBackend for NimBackend {
                 trace_writer_enable_column_breakpoints_support(handle);
                 trace_writer_enable_column_motions_support(handle);
             }
-            // `<toplevel>` AND ITS CALL, WHICH THE RAW FFI DOES NOT EMIT.
+            // `trace_writer_start` OPENS THE RECORDING, ALL OF IT: it interns `<toplevel>`, opens
+            // its call, and records the entry step, in that order — the three records
+            // `codetracer-trace-format-spec`'s `trace-events.md`, "Recorder Integration — Starting a
+            // Recording", requires, and the same three the pure-Rust writer's `start` emits.
             //
-            // `trace_writer_start` records the entry STEP — its docstring says so — and nothing
-            // else. The safe Rust wrapper around this same ABI
-            // (`codetracer_trace_writer_nim/src/lib.rs`, `fn start`) does three things and says it
-            // "Mirrors AbstractTraceWriter::start": it interns `<toplevel>`, opens its call, and
-            // interns the `None` type. Calling the low-level symbol directly skipped the first two.
+            // So this backend registers NONE of them itself. Doing it as well opens the frame
+            // twice: a second `<toplevel>` call at depth 1 under the root, every step attributed to
+            // it, and `calls.dat` carrying two frames where the recording has one.
+            // `test_ct_container_roundtrip_ct_print` asserts exactly one, through both readers.
             //
-            // That is not cosmetic. `<toplevel>` must be the FIRST function interned so that it
-            // takes `function_id` 0, and its call must be the first so that it takes `call_key` 0
-            // at depth 0 — readers root the call tree there, and the pure-Rust writer asserts the
-            // identity with `assert!(function_id == TOP_LEVEL_FUNCTION_ID)`. A container without it
-            // has no root to hang the tree from, which is exactly the `function/call 2 vs 1`
-            // difference this crate's equivalence check used to carry as a catalogued excuse.
-            //
-            // The contract is pinned in `codetracer-trace-format-spec`'s `trace-events.md`,
-            // "Recorder Integration — Starting a Recording". Ordered as the spec orders it:
-            // function, then call, then the step that `trace_writer_start` emits.
-            let toplevel = trace_writer_ensure_function_id(
-                handle,
-                c_toplevel.ptr(),
-                c_source.ptr(),
-                1,
-            );
-            trace_writer_register_call(handle, toplevel);
+            // `<toplevel>` is therefore `function_id` 0 and its call `call_key` 0 at depth 0
+            // without this file arranging it, and readers root the call tree there.
             trace_writer_start(handle, c_source.ptr(), 1);
             Ok(me)
         }
@@ -459,24 +449,29 @@ impl CtWriterBackend for NimBackend {
         unsafe { trace_writer_register_return(self.handle) };
     }
 
-    fn register_path_with_line_lengths(&mut self, path: &Path, line_lengths: &[u32]) {
-        let c_path = match CStr::path(path) {
-            Ok(p) => p,
-            Err(e) => return set_error(&e),
-        };
+    fn register_path_with_line_lengths(
+        &mut self,
+        path: &Path,
+        line_lengths: &[u32],
+    ) -> Result<(), String> {
+        let c_path = CStr::path(path)?;
         let ptr = if line_lengths.is_empty() {
             core::ptr::null()
         } else {
             line_lengths.as_ptr()
         };
-        unsafe {
+        let rc = unsafe {
             trace_writer_register_path_with_line_lengths(
                 self.handle,
                 c_path.ptr(),
                 line_lengths.len() as c_int,
                 ptr,
-            );
+            )
+        };
+        if rc != 0 {
+            return Err(last_error());
         }
+        Ok(())
     }
 
     fn register_step(&mut self, path: &Path, line: i64) {
@@ -533,6 +528,22 @@ impl CtWriterBackend for NimBackend {
         // capability BITS in the two containers' `meta.dat` agree, which is the observable this
         // signal is about.
         false
+    }
+
+    fn set_compact_threshold(&mut self, raw_bytes: u64) -> Result<(), String> {
+        // The refusal is the WRITER's. `trace_writer_set_compact_threshold` returns non-zero for a
+        // NULL handle and for a writer that is not in CTFS multi-stream mode, and this module
+        // reports that rather than swallowing it: a host told "set" about a threshold that was
+        // never set would get a full container back and no reason, which is the silent-wrong-answer
+        // shape in the direction that matters least today and most the day the engine pin moves.
+        let rc = unsafe { trace_writer_set_compact_threshold(self.handle, raw_bytes) };
+        if rc != 0 {
+            return Err(format!(
+                "the writer refused the compact threshold {raw_bytes}: {}",
+                last_error()
+            ));
+        }
+        Ok(())
     }
 
     fn finish(&mut self) -> Result<(), String> {

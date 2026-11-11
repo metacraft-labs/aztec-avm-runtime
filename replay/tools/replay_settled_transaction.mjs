@@ -9,6 +9,28 @@
 //                      every node call the replay made — including the per-slot hydration reads —
 //                      is in the fixture and the check that comes after it is offline.
 //
+// AND ONE INPUT THAT IS NEITHER A MODE NOR A MOCK:
+//
+//   --body-store auto|<base>   answer `getTxByHash` from Aztec's published `TxFileStore` instead of
+//                              from the node's mempool, which is the ONE call that has a horizon.
+//                              `auto` reads the base from the published network config. Everything
+//                              else still comes from the node. `--body-file <path>` is the same
+//                              join with a body already on disk.
+//
+// WHAT THAT UNLOCKS, MEASURED ON MAINNET 2026-10-10: transaction
+// 0x00c67f6f…753ed18d settled in block 68062 and the chain tip was 118225 — 50,163 blocks past the
+// mempool's horizon, `getTxByHash` answering null. With the store joined in, the replay reproduced
+// the corpus's own frozen row EXACTLY: 2 hydration rounds, 1 nullifier + 2 public-data leaves
+// seeded, 208 instructions, 13/13 published effects matched, the same six skipped values with the
+// same reasons, the same four tree-root pairs. The SAME run on 0x0f191b2d…e8699dbb (block 68231):
+// 338 instructions, 20/20 matched. COST: 8 JSON-RPC requests and ONE store GET per transaction, of
+// which the `getNodeInfo` is once per deployment and not per transaction.
+//
+// SO THE HISTORY IS NOT FROZEN. The corpus's containers are CTFS version 3 and the reader at
+// `pins.json`'s `trace_format_nim` anchor refuses them by name ("this reader reads version 5 only.
+// Re-record"); the re-recording above writes version 5 with a `meta.dat` v6 header, and both
+// `ct-print` and `ct-split-probe` at that anchor open it and read every stream.
+//
 // The capture mode is the only honest way to build the fixture. L1's capture recorded the calls
 // `fetchSettledTransaction` makes, which are known in advance; L2's hydration calls are NOT known in
 // advance — the AVM discovers them — so the only list that can be right is the one produced by
@@ -22,7 +44,10 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 
+import { Barretenberg, BarretenbergSync } from '@aztec/bb.js';
+import { jsonStringify } from '@aztec/foundation/json-rpc';
 import { defaultFetch } from '@aztec/foundation/json-rpc/client';
+import { Tx } from '@aztec/stdlib/tx';
 import { TxHash } from '@aztec/stdlib/tx/tx-hash';
 
 import {
@@ -71,7 +96,279 @@ const modulePath = arg('module', process.env.AVM_WASM_PATH);
 const ctOut = arg('ct');
 const ctWriterPath = arg('ct-writer', process.env.CT_WRITER_WASM_PATH
   ?? 'ct-writer/target/wasm32-unknown-unknown/release/aztec_ct_writer.wasm');
+// CCP-6: ASK FOR THE COMPACT CONTAINER PROFILE, in RAW member bytes. Absent or `0` means never
+// (`ctfs-container.md` §1e: the threshold is a CEILING and nothing is below zero), which is this
+// driver's default and the default the capability shipped with.
+//
+// IT IS AN OPTION RATHER THAN A DEFAULT, AND ONE OF THE TWO REASONS FOR THAT HAS EXPIRED.
+// The reason recorded when the lever landed was that BlockTracer's deployed replay engine could
+// not read a version-6 container. Measured 2026-10-12, that is no longer true: the engine pinned
+// at `blocktracer`'s `client/hydrate/engine-pin.txt` is now `9f332ae0ddfabe6b…`, which carries
+// CCP-5's compact loader, and `blocktracer/tools/deploy/engine-opens.mjs` drove it over a compact
+// container through the engine's own VFS — it OPENED, reporting facts identical to the full
+// profile's.
+//
+// What still argues for off-by-default is the OTHER reader in this repository's acceptance path:
+// `just replay-record read=1` holds the container to `ct-print --full`, and `ct-print` at the
+// pinned revision keeps a version-5-only gate and refuses a compact container BY NAME. The reader
+// that opens compact is `ct-split-probe`. So asking for compact also means choosing the reader
+// that can read it back, which is the caller's decision and not this file's.
+const compactThreshold = (() => {
+  const raw = arg('compact-threshold');
+  if (raw === undefined) return 0n;
+  if (!/^[0-9]+$/.test(raw)) {
+    console.error(`replay: --compact-threshold must be a non-negative integer of RAW bytes, got `
+      + `'${raw}'. It is a ceiling: the profile is compact when the finished container's members `
+      + `total FEWER than this, and 0 means never.`);
+    process.exit(2);
+  }
+  return BigInt(raw);
+})();
 const json = argv.includes('--json');
+
+// ---- THE BODY STORE: HOW A TRANSACTION BELOW THE FINALIZED TIP IS STILL REPLAYABLE -------------
+//
+// `getTxByHash` SERVES FROM THE MEMPOOL AND THE MEMPOOL DELETES AT THE FINALIZED TIP. That is
+// `settled_transaction.ts`'s measured horizon, and it is the ONLY thing that stopped this driver
+// from being pointed at a historical transaction: every other call a replay makes — `getTxEffect`,
+// `getBlockData`, `getContract`, `getContractClass`, `getPublicDataWitness`,
+// `getNullifierMembershipWitness` — reads the ARCHIVE and prunes never.
+//
+// Aztec publishes the bodies its node-internal `TxFileStore` holds, keyless over HTTPS, one
+// content-addressed `.bin` per transaction hash. So the horizon is closed by a JOIN and not by an
+// archive node: the node supplies everything about the block, the store supplies the body.
+//
+// NOTHING HERE IS PASTED. The base URL is read from `txCollectionFileStoreUrls` in
+// `AztecProtocol/networks`' `network_config.json`; the path segment beneath it is
+// `aztec-<l1ChainId>-<rollupVersion>-<rollupAddress>`, DERIVED FROM THE NODE'S OWN `getNodeInfo`.
+// A location computed from the deployment the hash came from cannot silently drift onto a
+// different deployment, which a pasted constant can and would not announce.
+//
+// AND THE PAYLOAD SELF-VERIFIES TWICE, because `Tx.toBuffer()` serialises `txHash` first:
+//
+//   1. the leading 32 bytes must BE the key that was requested; and
+//   2. `tx.getTxHash()`, RECOMPUTED from the deserialised data, must be that key as well.
+//
+// (1) alone proves only that the object is labelled with the key. (2) proves the bytes under the
+// label hash to it, which is what makes a single untrusted source usable at all. A response that
+// fails either is REFUSED BY NAME rather than replayed — a body that is not this transaction's
+// would produce a confident wrong trace, which is the whole class of defect this campaign exists
+// to prevent.
+//
+// THE SHIM SITS UNDER `recordingFetch`, NOT OVER IT. The synthesised answer is therefore recorded
+// into `--capture`'s fixture like any other, so a fixture captured this way plays back offline with
+// no store and no network — and upstream's own zod validates the synthesised `Tx` on every
+// playback, which is why it is serialised through `jsonStringify` rather than hand-built.
+const bodyStoreArg = arg('body-store');
+const bodyFile = arg('body-file');
+const NETWORK_CONFIG_URL =
+  'https://raw.githubusercontent.com/AztecProtocol/networks/main/network_config.json';
+
+/** Every node call this run made, counted — see `--json`'s `nodeCalls`. */
+const nodeCalls = { httpPosts: 0, rpcRequests: 0, byMethod: {} };
+/** Every body-store GET this run made, and what each one was. */
+const bodyStoreCalls = { gets: 0, verified: 0, outcomes: [] };
+
+/** A `JsonRpcFetch` that counts what it forwards and forwards everything. */
+function countingFetch(inner) {
+  return async (host, body, extraHeaders, noRetry, config) => {
+    const requests = Array.isArray(body) ? body : body === undefined ? [] : [body];
+    nodeCalls.httpPosts += 1;
+    nodeCalls.rpcRequests += requests.length;
+    for (const r of requests) {
+      if (typeof r?.method === 'string') {
+        nodeCalls.byMethod[r.method] = (nodeCalls.byMethod[r.method] ?? 0) + 1;
+      }
+    }
+    return inner(host, body, extraHeaders, noRetry, config);
+  };
+}
+
+class BodyStoreRefused extends Error {
+  constructor(outcome, reason) {
+    super(`body store: ${outcome} — ${reason}`);
+    this.name = 'BodyStoreRefused';
+    this.kind = 'body-store-refused';
+    this.outcome = outcome;
+  }
+}
+
+/**
+ * Which published network a node belongs to, FROM THE NODE'S OWN ANSWER.
+ *
+ * This used to be `url.includes('testnet') ? 'testnet' : 'mainnet'` — the store
+ * base guessed from the spelling of the RPC URL while the store PATH beside it
+ * was already derived from `getNodeInfo`. Two answers to one question, and only
+ * one of them asked the node.
+ *
+ * It is wrong for every URL that does not happen to contain the word. Measured
+ * against a node serving the RETIRED testnet rollup from a published snapshot
+ * at `http://127.0.0.1:8099`:
+ *
+ *   replay: body store https://aztec-labs-snapshots.com/MAINNET/txs/
+ *                      aztec-11155111-1821665230-0xd73a91…/txs/
+ *
+ * — the mainnet base joined to a Sepolia path, which 404s on every body, and
+ * then reports `SettledTransactionNotFound`, which reads as "the chain does not
+ * have this transaction" rather than "this tool looked in the wrong place".
+ *
+ * `l1ChainId` is the fact. 1 is Ethereum and 11155111 is Sepolia, and the
+ * published config is keyed by the names below. AN UNKNOWN CHAIN ID IS REFUSED
+ * rather than defaulted: defaulting is what produced the wrong answer above,
+ * and a third network would inherit it silently.
+ */
+const NETWORK_BY_L1_CHAIN_ID = { 1: 'mainnet', 11155111: 'testnet' };
+
+function networkFor(nodeInfo) {
+  const id = Number(nodeInfo?.l1ChainId);
+  const network = NETWORK_BY_L1_CHAIN_ID[id];
+  if (!network) {
+    throw new BodyStoreRefused('unavailable',
+      `the node reports l1ChainId ${nodeInfo?.l1ChainId}, which this tool has no published `
+      + `network name for (it knows ${Object.entries(NETWORK_BY_L1_CHAIN_ID)
+          .map(([k, v]) => `${k}=${v}`).join(', ')}). Pass --body-store <base> explicitly. `
+      + 'Guessing would send every body request to another network\'s store, which answers 404 '
+      + 'and reads as a missing transaction.');
+  }
+  return network;
+}
+
+/**
+ * `aztec-mainnet` / `aztec-testnet`, from the node rather than from the URL.
+ *
+ * The two call sites this replaces both sat beside the fact they were guessing:
+ * the capture provenance wrote `chain: url.includes('testnet') ? …` on the line
+ * ABOVE `l1ChainId: nodeInfo.l1ChainId`. A local node, a proxy, or any host
+ * without the word "testnet" in it was labelled `aztec-mainnet`, and that label
+ * is what the artifact resolver uses to pick an explorer.
+ */
+function chainNameFor(nodeInfo) {
+  return `aztec-${networkFor(nodeInfo)}`;
+}
+
+/** `aztec-<l1ChainId>-<rollupVersion>-<rollupAddress>`, from the node's own answer. */
+function storePathFor(nodeInfo) {
+  return `aztec-${nodeInfo.l1ChainId}-${nodeInfo.rollupVersion}-`
+    + `${nodeInfo.l1ContractAddresses.rollupAddress.toString()}`;
+}
+
+/** The store base for a network, out of the published config. Never a constant. */
+async function storeBaseFor(network) {
+  const res = await fetch(NETWORK_CONFIG_URL);
+  if (!res.ok) {
+    throw new BodyStoreRefused('unavailable',
+      `${NETWORK_CONFIG_URL} answered HTTP ${res.status}, so the store location is not known. `
+      + 'This tool will not invent one.');
+  }
+  const config = await res.json();
+  const bases = config?.[network]?.txCollectionFileStoreUrls;
+  if (!Array.isArray(bases) || bases.length === 0) {
+    throw new BodyStoreRefused('unavailable',
+      `the published network config declares no txCollectionFileStoreUrls for "${network}".`);
+  }
+  // The two-independent-sources rule is UNMET here and is recorded as unmet rather than relaxed.
+  return { base: bases[0], sources: bases.length };
+}
+
+async function initializeReplayCrypto() {
+  // Tx parsing decompresses points synchronously; transaction hashing uses the
+  // async singleton. Neither operation proves or verifies a proof, so the
+  // upstream hash-only option avoids fetching an unused proving CRS when the
+  // native backend is unavailable and Barretenberg falls back to WASM.
+  await BarretenbergSync.initSingleton();
+  await Barretenberg.initSingleton({ skipSrsInit: true });
+}
+
+/**
+ * Turn a body's bytes into the `getTxByHash` RESULT the client expects, verifying twice.
+ *
+ * Returns the JSON upstream's `Tx.schema` parses — produced by `jsonStringify(tx)` so that the
+ * synthesised answer is byte-for-byte the shape the node would have sent.
+ */
+async function txResultFromBody(txHash, bytes) {
+  const want = txHash.toLowerCase();
+  if (bytes.length < 32) {
+    throw new BodyStoreRefused('truncated',
+      `${bytes.length} bytes cannot carry the 32-byte key a body serialises first.`);
+  }
+  const saw = `0x${Buffer.from(bytes.subarray(0, 32)).toString('hex')}`;
+  if (saw !== want) {
+    throw new BodyStoreRefused('mismatched',
+      `the leading 32 bytes are ${saw}, not the requested ${want}. This is some other `
+      + "transaction's body and replaying it would produce a confident wrong trace.");
+  }
+  await initializeReplayCrypto();
+  const tx = Tx.fromBuffer(Buffer.from(bytes));
+  const recomputed = (await tx.getTxHash()).toString().toLowerCase();
+  if (recomputed !== want) {
+    throw new BodyStoreRefused('hash-recomputation-failed',
+      `the payload is LABELLED ${want} but its data hashes to ${recomputed}. The label is not `
+      + 'the bytes, and only the recomputation can tell.');
+  }
+  return JSON.parse(jsonStringify(tx));
+}
+
+/**
+ * A `JsonRpcFetch` that answers `getTxByHash` from the body store and forwards everything else.
+ *
+ * `fetchBody(hash)` returns `{status, bytes}`. A 404 is PASSED THROUGH to the node rather than
+ * turned into an error, so the engine's own `SettledTransactionNotFound` still names `getTxByHash`
+ * — "the store has a hole" and "this tool broke" are different sentences.
+ */
+function bodyStoreFetch(inner, fetchBody) {
+  return async (host, body, extraHeaders, noRetry, config) => {
+    const isBatch = Array.isArray(body);
+    const requests = isBatch ? body : body === undefined ? [] : [body];
+    const served = new Map();
+    const forward = [];
+    for (const req of requests) {
+      const method = typeof req?.method === 'string' ? req.method : '';
+      // THE PARAM IS NOT A STRING YET. `fetchImpl` is handed the request as JS OBJECTS — upstream's
+      // client serialises with `jsonStringify` inside `defaultFetch`, AFTER this seam — so
+      // `params[0]` here is a live `TxHash`, not the `0x…` the wire carries. Reading it as a string
+      // silently matches nothing, which is a shim that looks installed and intercepts nothing.
+      const raw = Array.isArray(req?.params) ? req.params[0] : undefined;
+      const asText = typeof raw === 'string' ? raw : raw == null ? '' : String(raw);
+      const key = /^0x[0-9a-f]{64}$/i.test(asText) ? asText.toLowerCase() : undefined;
+      if (/getTxByHash$/i.test(method) && key !== undefined) {
+        const { status, bytes } = await fetchBody(key);
+        if (status === 200) {
+          served.set(req.id, await txResultFromBody(key, bytes));
+          continue;
+        }
+        if (status === 404) {
+          console.error(`replay: body store has NO object for ${key} (404) — asking the node, `
+            + 'which is expected to answer null below the finalized tip');
+        } else {
+          throw new BodyStoreRefused('unavailable',
+            `the store answered HTTP ${status} for ${key}. Nothing is known about whether it `
+            + 'holds this body; this is a fact about the run, not about the corpus.');
+        }
+      }
+      forward.push(req);
+    }
+    if (served.size === 0) {
+      return inner(host, body, extraHeaders, noRetry, config);
+    }
+    const collected = [];
+    let headers = new Headers();
+    if (forward.length > 0) {
+      const answer = await inner(host, isBatch ? forward : forward[0], extraHeaders, noRetry,
+        config);
+      headers = answer.headers ?? headers;
+      const rs = Array.isArray(answer.response)
+        ? answer.response
+        : answer.response === undefined ? [] : [answer.response];
+      collected.push(...rs);
+    }
+    for (const [id, result] of served) {
+      collected.push({ jsonrpc: '2.0', id, result });
+    }
+    const byId = new Map(collected.map(r => [r?.id, r]));
+    const ordered = requests.map(r => byId.get(r?.id)).filter(r => r !== undefined);
+    return { response: isBatch ? ordered : ordered[0], headers };
+  };
+}
 
 if (!modulePath) {
   console.error('replay: --module <avm.wasm> (or AVM_WASM_PATH) is required. The shipped module is '
@@ -86,6 +383,9 @@ let url;
 
 if (fixturePath) {
   const fixture = loadSettledFixture(JSON.parse(await readFile(fixturePath, 'utf8')), fixturePath);
+  // Use the same hash/decompression setup as live body-store reads, including
+  // the WASM fallback with no network or pre-existing proving CRS cache.
+  await initializeReplayCrypto();
   url = fixture.provenance.endpoint;
   txHash = fixture.provenance.txHash;
   client = createReplayNodeClient({ url, fetchImpl: fixtureFetch(fixture) });
@@ -96,7 +396,49 @@ if (fixturePath) {
     process.exit(2);
   }
   sink = { calls: [], batchHeaders: {}, headerNames: COMPONENTS_VERSION_FIELDS.map(f => `x-aztec-${f.toLowerCase()}`) };
-  client = createReplayNodeClient({ url, fetchImpl: recordingFetch(defaultFetch, sink) });
+  // THE STORE LOCATION IS RESOLVED LAZILY, AND THAT IS THE POINT: it is derived from
+  // `getNodeInfo`, which means it needs the client that is being built here. Resolving it on first
+  // use is what makes the derivation possible at all without a second, unguarded wire path — the
+  // `getNodeInfo` call goes through this same counted client and lands in the capture like any
+  // other.
+  let storeLocation = null;
+  const fetchBody = async (hash) => {
+    if (bodyFile) {
+      const bytes = await readFile(bodyFile);
+      bodyStoreCalls.outcomes.push({ hash, source: bodyFile, outcome: 'local-file',
+        bytes: bytes.length });
+      return { status: 200, bytes };
+    }
+    if (storeLocation === null) {
+      // ONE `getNodeInfo`, and BOTH halves of the location come out of it — the
+      // base (via its l1ChainId) and the path. They used to come from different
+      // sources, which is how a mainnet base was joined to a Sepolia path.
+      const nodeInfo = await client.getNodeInfo();
+      const resolved = bodyStoreArg === 'auto'
+        ? await storeBaseFor(networkFor(nodeInfo))
+        : { base: bodyStoreArg, sources: 1 };
+      storeLocation = { ...resolved, path: storePathFor(nodeInfo) };
+      console.error(`replay: body store ${storeLocation.base}/${storeLocation.path}/txs/ `
+        + `(${storeLocation.sources} published source(s)`
+        + `${storeLocation.sources < 2 ? ', so the two-source rule is UNMET and recorded as unmet' : ''})`);
+    }
+    const target = `${storeLocation.base}/${storeLocation.path}/txs/${hash}.bin`;
+    bodyStoreCalls.gets += 1;
+    const res = await fetch(target);
+    const bytes = res.ok ? Buffer.from(await res.arrayBuffer()) : Buffer.alloc(0);
+    bodyStoreCalls.outcomes.push({ hash, url: target, status: res.status, bytes: bytes.length });
+    if (res.status === 200) {
+      bodyStoreCalls.verified += 1;
+      console.error(`replay: body store GET ${target} -> 200, ${bytes.length} bytes`);
+    }
+    return { status: res.status, bytes };
+  };
+  const counted = countingFetch(defaultFetch);
+  client = createReplayNodeClient({
+    url,
+    fetchImpl: recordingFetch(
+      bodyStoreArg || bodyFile ? bodyStoreFetch(counted, fetchBody) : counted, sink),
+  });
   txHash = arg('tx');
   if (!txHash) {
     // Walk back from the tip for a transaction whose BODY the node still serves. The horizon is a
@@ -155,7 +497,7 @@ if (ctOut) {
     // uptime — the rule `verify-l1`'s header states. With no chain named the resolver asks the
     // installed package and nothing else, which is enough for a protocol contract and honestly
     // reports "no artifact proved" for a third-party one.
-    chain: fixturePath ? undefined : (url.includes('testnet') ? 'aztec-testnet' : 'aztec-mainnet'),
+    chain: fixturePath ? undefined : chainNameFor(await client.getNodeInfo()),
   });
   for (const contract of settled.contracts) {
     if (!contract.resolved || contract.contractClass === undefined) continue;
@@ -213,6 +555,16 @@ if (ctOut) {
     }, WRITER_PATH_B_NIM),
     { batchRecords: 64 },
   );
+  // SET BEFORE ANY RECORD IS WRITTEN, AND ANNOUNCED. The module's own initial value is 0, so
+  // calling this with 0 changes nothing — but it is called unconditionally, because an export that
+  // is only exercised when a flag is set is an export whose absence is discovered by the one run
+  // that needs it. `verify_compact_profile_emission_is_opt_in` makes the same argument for the
+  // same reason.
+  writer.setCompactThreshold(compactThreshold);
+  console.error(`replay: compact threshold ${compactThreshold} raw byte(s)`
+    + (compactThreshold === 0n
+      ? ' — the FULL profile, which is this driver\'s default'
+      : ' — COMPACT if the finished members total fewer than that (ctfs-container.md §1e)'));
   // THE STEP PASS. The hydration pass ran with `collectHints` on and therefore produced NO step
   // stream — see RECORDING_PASS_REASON. This runs the same seed again with the flags the other way
   // round, and REFUSES if the two passes do not describe the same execution.
@@ -372,6 +724,11 @@ const report = {
   roots: outcome.roots.declarations,
   rootsAnyAgree: outcome.roots.anyAgrees,
   skipped: outcome.rounds.flatMap(r => r.skipped.map(s => ({ value: s.value, reason: s.reason }))),
+  // WHAT THIS ONE TRANSACTION COST, which is the number that decides whether a corpus-wide
+  // re-recording is hours or months. `rpcRequests` is the honest count — upstream BATCHES, so
+  // `httpPosts` is smaller and is not what a rate limiter counts.
+  nodeCalls: fixturePath ? null : nodeCalls,
+  bodyStore: bodyStoreArg || bodyFile ? bodyStoreCalls : null,
 };
 
 if (json) {
@@ -389,6 +746,14 @@ if (json) {
   for (const m of report.mismatches) {
     console.log(`   MISMATCH ${m.field}: published ${m.published} replayed ${m.replayed}`);
   }
+  if (report.nodeCalls) {
+    console.log(`node calls: ${report.nodeCalls.rpcRequests} JSON-RPC request(s) in `
+      + `${report.nodeCalls.httpPosts} HTTP POST(s)`
+      + (report.bodyStore ? `, plus ${report.bodyStore.gets} body-store GET(s)` : ''));
+    for (const [m, n] of Object.entries(report.nodeCalls.byMethod).sort((a, b) => b[1] - a[1])) {
+      console.log(`   ${String(n).padStart(4)}  ${m}`);
+    }
+  }
   console.log('\ntree roots — EXPECTED TO DIFFER, and the reason travels with the outcome:');
   for (const d of report.roots) {
     console.log(`   ${d.tree.padEnd(20)} resident ${d.resident.slice(0, 18)}…  chain ${d.chain.slice(0, 18)}…  ${d.agrees ? 'AGREES' : 'differs'}`);
@@ -401,7 +766,7 @@ if (capturePath) {
     format: SETTLED_FIXTURE_FORMAT,
     provenance: {
       endpoint: url,
-      chain: url.includes('testnet') ? 'aztec-testnet' : 'aztec-mainnet',
+      chain: chainNameFor(nodeInfo),
       l1ChainId: nodeInfo.l1ChainId,
       rollupVersion: nodeInfo.rollupVersion,
       l1RollupAddress: nodeInfo.l1ContractAddresses.rollupAddress.toString(),

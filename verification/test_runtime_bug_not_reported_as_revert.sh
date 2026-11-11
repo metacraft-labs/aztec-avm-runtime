@@ -194,6 +194,13 @@ note "real-module trap probe: ${TRAP_OUT:-<no output>}"
 assert_true "the trap probe produced output" test -n "$TRAP_OUT"
 assert_eq "the module did NOT return normally from a pointer past the end of linear memory" "0" \
   "$(python3 -c 'import json,sys; print(1 if json.loads(sys.argv[1])["thrown"]=="returned-normally" else 0)' "$TRAP_OUT")"
+# WHAT it threw is the subject, not merely that something was thrown. "Not classified" is true of
+# every error the classifier does not know — a TypeError from a renamed method, a host assertion —
+# so without these two the arm would pass having never reached the module's linear memory at all.
+assert_eq "what it threw is the node host's AvmTrap, the type a wasm trap is converted into" "AvmTrap" \
+  "$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["thrown"])' "$TRAP_OUT")"
+assert_eq "…whose kind is trap, so it came from the engine and not from host code" "trap" \
+  "$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["kind"])' "$TRAP_OUT")"
 assert_eq "and whatever it threw is NOT classified as a transaction outcome" "UNCLASSIFIED" \
   "$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["classified"])' "$TRAP_OUT")"
 

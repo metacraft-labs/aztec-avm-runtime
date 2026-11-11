@@ -643,6 +643,39 @@ in_shell_status() { # <repo-root> <script-text> -> exit status, output on stdout
 }
 
 # ---------------------------------------------------------------------------
+# use_devshell_node — node, npm and npx from THIS REPOSITORY's dev shell, asserted.
+#
+# A check that runs bare `node` runs whatever the caller's PATH resolves, and on a workstation that
+# is as likely to be a version manager's node as the flake's: the same check is then a different
+# measurement depending on whether direnv happened to load. The dev shell's node is resolved with
+# `nix develop` itself, its directory is put FIRST on PATH so every later `node`/`npm` in the check
+# and in anything it spawns is that one, and two assertions say so: it is a /nix/store path, and it
+# is the v24 aztec-packages' .nvmrc pins. The resolution is cached per flake input hash, so a
+# milestone pays for one evaluation rather than one per check; a cached path that no longer exists
+# is re-resolved rather than trusted.
+# ---------------------------------------------------------------------------
+use_devshell_node() {
+  local key cache node=""
+  key="$(cat "$REPO_ROOT/flake.nix" "$REPO_ROOT/flake.lock" "$REPO_ROOT"/nix/*.nix 2>/dev/null \
+    | sha256sum | cut -c1-16)"
+  cache="$HOME/.cache/aztec-devshell-node/$key"
+  [ -f "$cache" ] && node="$(cat "$cache")"
+  if [ -z "$node" ] || [ ! -x "$node" ]; then
+    node="$(in_shell "$REPO_ROOT" 'printf "devshell-node=%s\n" "$(command -v node)"' \
+      | sed -n 's/^devshell-node=//p' | tail -1)"
+    [ -n "$node" ] && [ -x "$node" ] \
+      || die "could not resolve node from this repository's dev shell (nix develop in $REPO_ROOT)"
+    mkdir -p "$(dirname "$cache")" && printf '%s\n' "$node" >"$cache"
+  fi
+  PATH="$(dirname "$node"):$PATH"
+  export PATH
+  hash -r
+  assert_nix_store "node resolves into the dev shell's nix store, not the inherited PATH" \
+    "$(command -v node)"
+  assert_prefix "…and it is the pinned Node 24" "v24." "$(node --version 2>/dev/null)"
+}
+
+# ---------------------------------------------------------------------------
 # A SUMMARY LINE EVEN ON AN ABNORMAL EXIT — M22's machinery, MOVED HERE AT LAST.
 #
 # M22 wrote this trap and said a third milestone wanting it is when it moves into `lib.sh`. M24

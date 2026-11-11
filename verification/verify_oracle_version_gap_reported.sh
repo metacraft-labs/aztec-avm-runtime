@@ -86,7 +86,7 @@ assert_eq "and a threshold the gap is within is accepted, so the exit status dis
 
 # ---- 4. CI prints it every run, as a step ----------------------------------
 WF="$REPO_ROOT/.github/workflows/avm-wasm.yml"
-if command -v yq >/dev/null 2>&1; then YQ="yq"; else YQ="nix shell nixpkgs#yq-go --command yq"; fi
+if command -v yq >/dev/null 2>&1; then YQ="yq"; else YQ="nix shell --inputs-from $REPO_ROOT nixpkgs#yq-go --command yq"; fi
 step_names="$($YQ -r '.jobs["differential-oracle"].steps[].name' "$WF" 2>/dev/null)"
 [ -n "$step_names" ] || die "the workflow could not be parsed; a job named in a comment is not a job"
 assert_contains "the differential job prints the version gap" "THE VERSION GAP (DD-12)" "$step_names"

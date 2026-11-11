@@ -46,11 +46,35 @@ command -v python3 >/dev/null 2>&1 || die "python3 is not available"
 [ -f "$M16_DOC" ] || die "FALLBACK.md does not exist at $M16_DOC"
 [ -f "$M16_PARSER" ] || die "the trigger parser is missing at $M16_PARSER"
 
-MILESTONES="$WORKSPACE_ROOT/codetracer-specs/Planned-Work/Aztec-AVM-Runtime.milestones.org"
-[ -f "$MILESTONES" ] || die "the milestone file is not at $MILESTONES"
+# THE MILESTONE FILE MOVED, AND THIS CHECK DIED UNCOUNTED WHEN IT DID. The specs repository was
+# renamed `codetracer-pm` (with `codetracer-specs` left as a symlink to it) and the milestone files
+# moved from `Planned-Work/` to `milestones/`. The old path then failed the `-f` below, the `die`
+# printed no summary line, and the whole check left the sweep's count -- m16 225 -> 147, with no
+# failing assertion anywhere to say why. The path is the current one, and the check now prints a
+# summary however it exits.
+SCRATCH=""
+trap '_rc=$?; [ -n "$SCRATCH" ] && rm -rf "$SCRATCH"; ( exit $_rc ); _abnormal_exit_summary' EXIT
+# The specs repository is `codetracer-pm` in this workspace, but CI clones it under its former name
+# `codetracer-specs` (see the clone steps in .github/workflows/avm-wasm.yml), and a workspace may carry
+# both names as one directory. Accept either name at the current `milestones/` path; two names for
+# one directory (`-ef`) count once, and two distinct files are refused rather than picked between.
+milestone_candidates=()
+for candidate in \
+  "$WORKSPACE_ROOT/codetracer-pm/milestones/Aztec-AVM-Runtime.milestones.org" \
+  "$WORKSPACE_ROOT/codetracer-specs/milestones/Aztec-AVM-Runtime.milestones.org"
+do
+  [ -f "$candidate" ] || continue
+  same_authority=0
+  for authority in "${milestone_candidates[@]+"${milestone_candidates[@]}"}"; do
+    if [ "$candidate" -ef "$authority" ]; then same_authority=1; break; fi
+  done
+  [ "$same_authority" -eq 1 ] || milestone_candidates+=("$candidate")
+done
+[ "${#milestone_candidates[@]}" -eq 1 ] \
+  || die "expected exactly one Aztec-AVM-Runtime milestone file under codetracer-pm/ or codetracer-specs/ milestones/; found ${#milestone_candidates[@]}"
+MILESTONES="${milestone_candidates[0]}"
 
 SCRATCH="$(mktemp -d)"
-trap 'rm -rf "$SCRATCH"' EXIT
 
 # ---------------------------------------------------------------------------
 echo "== 1. the trigger block parses, and every claim in it resolves"

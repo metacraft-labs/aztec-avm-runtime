@@ -316,6 +316,22 @@ echo "== 10. THE REJECTION IS RE-MEASURED, NOT QUOTED"
 #
 # THE CONTROL IS THE ACCEPTED TRANSPORT. `comlink` through the same esbuild with the same flags must
 # produce ZERO errors, so "four errors" is a measurement by an instrument that can also report none.
+#
+# THE INSTRUMENT'S SCOPE IS THIS REPOSITORY'S DEPENDENCY TREE, and esbuild does not stop at it: an
+# unresolved bare import is looked up in `node_modules` of EVERY ancestor directory. A
+# `node_modules` that appears above the repository (one did, at the workspace root, carrying
+# `events` and `buffer`) quietly resolves three of the four builtins below, and the count then
+# describes that directory rather than the browser build. So the ancestors are asserted empty of
+# one first, and a red count beside a red precondition says which of the two it is.
+ANCESTOR_NM=""
+_d="$(cd "$REPO_ROOT/.." && pwd -P)"
+while :; do
+  [ -e "$_d/node_modules" ] && ANCESTOR_NM="$ANCESTOR_NM $_d/node_modules"
+  [ "$_d" = "/" ] && break
+  _d="$(dirname "$_d")"
+done
+assert_eq "no directory above the repository holds a node_modules esbuild would also search" "" \
+  "${ANCESTOR_NM# }"
 M32_PROBE="$M32_WORK/reuse-probe"
 rm -rf "$M32_PROBE"; mkdir -p "$M32_PROBE"
 m27_require_esbuild

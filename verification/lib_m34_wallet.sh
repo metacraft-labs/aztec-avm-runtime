@@ -76,6 +76,11 @@ m34_arms_newer_inputs() {
   find "$REPO_ROOT/tools/run_wallet_transfer_arms.mjs" -newer "$M34_ARMS" -print -quit 2>/dev/null || true
   find "$REPO_ROOT/tools/browser_cdp.mjs" -newer "$M34_ARMS" -print -quit 2>/dev/null || true
   find "$BROWSER_DIST" -type f ! -name '.*' -newer "$M34_ARMS" -print -quit 2>/dev/null || true
+  # THE WRITER MODULE THE PAGE IS SERVED IS AN INPUT, as `m40_arms_newer_inputs` already says: the
+  # runner copies the default ct-writer build into the page, so a writer rebuild -- a trace-format
+  # pin move -- must re-run the arms rather than leave the previous writer's containers in place.
+  find "$REPO_ROOT/ct-writer/target/wasm32-unknown-unknown/release/aztec_ct_writer.wasm" \
+    -newer "$M34_ARMS" -print -quit 2>/dev/null || true
 }
 
 m34_require_arms() {
@@ -189,21 +194,23 @@ m34_log_events() { # <container>
 import json, sys
 # BOTH READER SPELLINGS. The legacy combined-stream decode tags a log event
 # `{"type": "Event", "event_kind": "elkTraceLogEvent", "content": ...}`; the
-# split-stream decode tags it `{"kind": "io", "io_kind": "ioTraceLogEvent",
+# split-stream decode tags it `{"kind": "io", "io_kind": "TraceLogEvent",
 # "text": ...}`. Reading only the first over a split container yields NO rows and
 # reports success, and the non-degeneracy assertion above is the only thing that
 # would have caught it.
 doc = json.load(open(sys.argv[1]))
 for e in doc.get('events', []):
     legacy = e.get('type') == 'Event' and e.get('event_kind') == 'elkTraceLogEvent'
-    # `ioStderr` AND NOT A NAME ENDING 'TraceLogEvent', because the Nim reader
-    # COLLAPSES the fourteen `EventLogKind` values into four coarse ones and
-    # `io_event_stream.nim` documents `ioStderr` as the representative for
-    # ordinals 12 and 13 — TraceLogEvent and EvmEvent. So a trace-log event
-    # surfaces as `io_kind: "ioStderr"` there, and it is unambiguous: ordinary
-    # stdout/stderr writes are `Write`/`WriteOther` (0/2) and collapse to
-    # `ioStdout` instead.
-    split = e.get('kind') == 'io' and e.get('io_kind') == 'ioStderr'
+    # THE EXACT KIND, `TraceLogEvent`. Before the 2026-10 reader the Nim decode
+    # COLLAPSED the fourteen `EventLogKind` values into four coarse ones and a
+    # trace-log event surfaced as `io_kind: "ioStderr"` -- the representative it
+    # shared with `EvmEvent` -- so that spelling was matched here. The reader now
+    # names the kind `trace-events.md` defines, so the match is exact and an
+    # `EvmEvent` can no longer read as one of the wallet's decisions. The old
+    # spelling is not accepted beside it: a reader that answered `ioStderr` again
+    # would be a reader regressing, and this filter would then report no rows,
+    # which the non-degeneracy assertion turns red.
+    split = e.get('kind') == 'io' and e.get('io_kind') == 'TraceLogEvent'
     if not (legacy or split):
         continue
     content = e.get('content')

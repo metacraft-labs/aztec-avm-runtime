@@ -262,7 +262,13 @@ export interface BlockRecord {
    */
   readonly checkpointDepthAfter: { readonly contracts: number };
   /** Every checkpoint call the block made on the contract store, counted at the store. */
-  readonly checkpoints: { readonly created: number; readonly committed: number; readonly reverted: number };
+  readonly checkpoints: {
+    readonly created: number;
+    readonly committed: number;
+    readonly reverted: number;
+    /** The deepest the contract store's own depth went, read right after each create. */
+    readonly maxDepth: number;
+  };
   /** Upstream's `DebugLog[]`, rendered. Empty unless the arm asked for them. */
   readonly debugLogs: readonly { readonly message: string; readonly fields: readonly string[] }[];
 }
@@ -361,7 +367,9 @@ export async function runOneBlock(
   // finding and its second sweep abort. Counting the three calls turns it into a CONSERVATION LAW:
   // some checkpoints were created, and every one of them was closed exactly once, by a commit or a
   // revert. A depth of zero is then the consequence rather than the claim.
-  const checkpoints = { created: 0, committed: 0, reverted: 0 };
+  // `maxDepth` is the STORE'S answer rather than the caller's: counted calls into a store whose
+  // checkpoint is a no-op would conserve perfectly and fork nothing.
+  const checkpoints = { created: 0, committed: 0, reverted: 0, maxDepth: 0 };
   const db = world.contractsDb as unknown as Record<string, (...a: never[]) => unknown>;
   const originals = {
     addNewContracts: db.addNewContracts,
@@ -385,7 +393,9 @@ export async function runOneBlock(
   };
   db.createCheckpoint = (...a: never[]) => {
     checkpoints.created += 1;
-    return originals.createCheckpoint.apply(world.contractsDb, a);
+    const r = originals.createCheckpoint.apply(world.contractsDb, a);
+    checkpoints.maxDepth = Math.max(checkpoints.maxDepth, world.contractsDb.checkpointDepth);
+    return r;
   };
   db.commitCheckpoint = (...a: never[]) => {
     checkpoints.committed += 1;

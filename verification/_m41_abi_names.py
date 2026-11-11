@@ -7,14 +7,16 @@
 TWO DECLARATIONS, TWO READERS, AND NEITHER IS THE OTHER'S COPY. The point of reading both is that
 they can DISAGREE, so each is parsed from its own source of truth:
 
-  * TypeScript: the FOUR exported arrays -- `REQUIRED_EXPORTS`, `SOURCE_MAPPING_EXPORTS`,
-    `JOIN_EXPORTS`, `SOURCE_STEP_EXPORTS`. They are separate on purpose (each milestone counts its
-    own, so one milestone's addition cannot move another's assertion), and `ALL_REQUIRED_EXPORTS`
-    is their concatenation. This reads the four and NOT the union, so a union that stopped
-    including one of them would be caught rather than believed.
+  * TypeScript: the FIVE exported arrays -- `REQUIRED_EXPORTS`, `SOURCE_MAPPING_EXPORTS`,
+    `JOIN_EXPORTS`, `SOURCE_STEP_EXPORTS`, `COMPACT_PROFILE_EXPORTS`. They are separate on purpose
+    (each milestone counts its own, so one milestone's addition cannot move another's assertion),
+    and `ALL_REQUIRED_EXPORTS` is their concatenation. This reads the five and NOT the union, so a
+    union that stopped including one of them would be caught rather than believed. It was four
+    until CCP-6 added the container-profile list; a list this tuple does not name contributes
+    nothing to the count, so adding a list here is part of adding one there.
 
   * Rust: every `#[unsafe(no_mangle)]` attribute and the function it decorates. NOT
-    `grep 'pub extern "C" fn'` -- twelve of the thirty-eight are `pub unsafe extern "C" fn` and
+    `grep 'pub extern "C" fn'` -- twelve of the thirty-nine are `pub unsafe extern "C" fn` and
     that needle cannot see them, which is where the figure 26 came from.
 
 A duplicate name in either source is an ERROR rather than a silently deduplicated entry: two lists
@@ -30,6 +32,7 @@ TS_LISTS = (
     "SOURCE_MAPPING_EXPORTS",
     "JOIN_EXPORTS",
     "SOURCE_STEP_EXPORTS",
+    "COMPACT_PROFILE_EXPORTS",
 )
 
 

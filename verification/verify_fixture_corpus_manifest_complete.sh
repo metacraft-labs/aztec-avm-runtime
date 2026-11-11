@@ -94,7 +94,11 @@ SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 cp "$MANIFEST" "$SCRATCH/base.md"
 
-# control <description> <mode: delete|set> <FX-id> <field> [value]
+# control <description> <rule-ERE> <mode: delete|set> <FX-id> <field> [value]
+#
+# The parser must reject the mutated copy WITH A FAIL LINE MATCHING <rule-ERE>: a mutation that
+# happens to break some other rule would otherwise count as a caught control while the rule it is
+# named for has been deleted.
 #
 # The mutation is addressed by ENTRY ID AND FIELD NAME, and the helper FAILS if that entry or that
 # field is not found. That matters: an earlier revision of this script matched the first line of the
@@ -102,7 +106,7 @@ cp "$MANIFEST" "$SCRATCH/base.md"
 # block instead of an entry — four controls "passed" without touching anything the parser judges.
 # A control that mutates the wrong thing is worse than no control at all.
 control() {
-  local desc="$1" mode="$2" eid="$3" field="$4" value="${5:-}"
+  local desc="$1" rule="$2" mode="$3" eid="$4" field="$5" value="${6:-}" out
   local rc
   python3 - "$SCRATCH/base.md" "$SCRATCH/mutated.md" "$mode" "$eid" "$field" "$value" <<'PY'
 import sys
@@ -142,10 +146,12 @@ PY
     fail "negative control could not be applied to $eid/$field: $desc"
     return
   fi
-  if python3 "$PARSER" check --repo "$REPO_ROOT" --manifest "$SCRATCH/mutated.md" >/dev/null 2>&1; then
+  if out="$(python3 "$PARSER" check --repo "$REPO_ROOT" --manifest "$SCRATCH/mutated.md" 2>&1)"; then
     fail "negative control NOT caught: $desc"
-  else
+  elif str_has_line_re "$out" "^  FAIL $rule"; then
     pass "negative control caught: $desc"
+  else
+    fail "negative control: $desc — rejected, but not by the rule it is named for [$rule]: $(printf '%s\n' "$out" | grep '^  FAIL ' | head -3 | tr '\n' ' ')"
   fi
 }
 
@@ -153,10 +159,12 @@ PY
 assert_true "the unmutated scratch copy is accepted" \
   python3 "$PARSER" check --repo "$REPO_ROOT" --manifest "$SCRATCH/base.md"
 
-control "FX-01's skeptic-cannot-conclude field deleted" delete FX-01 skeptic-cannot-conclude
-control "FX-01's skeptic-cannot-conclude reduced to a stub" set FX-01 skeptic-cannot-conclude "not much."
+control "FX-01's skeptic-cannot-conclude field deleted" \
+  'FX-01: missing or empty field `skeptic-cannot-conclude`' delete FX-01 skeptic-cannot-conclude
+control "FX-01's skeptic-cannot-conclude reduced to a stub" \
+  'FX-01: `skeptic-cannot-conclude` is [0-9]+ chars; 60 required' set FX-01 skeptic-cannot-conclude "not much."
 control "FX-03's where: pointed at a path that does not exist" \
-  set FX-03 where "fixtures/no-such-file.json, tools/measure_differential.py"
+  'FX-03: `where` path does not exist: fixtures/no-such-file\.json' set FX-03 where "fixtures/no-such-file.json, tools/measure_differential.py"
 # THE ABSENT ID IS DERIVED, NOT TYPED, AND THAT IS A DEFECT THIS CONTROL ALREADY SHIPPED.
 #
 # It planted `RI-99` as "an id that does not exist" — and M36 added RI-98 and RI-99 to
@@ -170,19 +178,45 @@ control "FX-03's where: pointed at a path that does not exist" \
 ABSENT_RI="$(python3 -c 'import re,sys; ids=[int(m) for m in re.findall(r"^### RI-(\d+) ", open(sys.argv[1], encoding="utf-8").read(), re.M)]; print("RI-%02d" % (max(ids)+1) if ids else "RI-99")' "$REPO_ROOT/REUSE-INVENTORY.md")"
 assert_false "the derived absent inventory id really is absent from REUSE-INVENTORY.md" \
   str_has_sub "$(cat "$REPO_ROOT/REUSE-INVENTORY.md")" "### $ABSENT_RI "
-control "FX-23 citing an inventory id that does not exist ($ABSENT_RI)" set FX-23 inventory "$ABSENT_RI"
-control "FX-20's no-upstream-equivalent reason emptied" set FX-20 no-upstream-equivalent ""
+control "FX-23 citing an inventory id that does not exist ($ABSENT_RI)" \
+  "FX-23: cites $ABSENT_RI, which is not an entry in REUSE-INVENTORY\\.md" set FX-23 inventory "$ABSENT_RI"
+control "FX-20's no-upstream-equivalent reason emptied" \
+  'FX-20: (missing or empty field `no-upstream-equivalent`|Tier E entry has no `no-upstream-equivalent` reason)' set FX-20 no-upstream-equivalent ""
 control "FX-20's reason replaced by a tagged but content-free one" \
-  set FX-20 no-upstream-equivalent "does-not-cover: there is no upstream fixture for the timer-driven block loop, and the sequencer and the processor and the node and the txe were all considered and none of them has one, so it has to be written here instead, at sufficient length to clear the floor this checker imposes."
+  'FX-20: `no-upstream-equivalent` names 0 upstream paths; at least 2 required' set FX-20 no-upstream-equivalent "does-not-cover: there is no upstream fixture for the timer-driven block loop, and the sequencer and the processor and the node and the txe were all considered and none of them has one, so it has to be written here instead, at sufficient length to clear the floor this checker imposes."
 control "FX-20's reason padded to length but naming no upstream path" \
-  set FX-20 no-upstream-equivalent "does-not-cover: the upstream sequencer, the upstream processor, the upstream node facade and the upstream test environment were all read in full and none of them asserts a block per tick, a monotonic timestamp sequence, an empty block on idle, or a deadline that truncates a block, so all four have to be authored here under M23 with world-state roots asserted afterwards."
-control "FX-22 moved into Tier E, so Tier E is no longer the smallest" set FX-22 tier "E"
-control "FX-01's licence set to one outside the vocabulary" set FX-01 licence "WTFPL"
+  'FX-20: `no-upstream-equivalent` names 0 upstream paths; at least 2 required' set FX-20 no-upstream-equivalent "does-not-cover: the upstream sequencer, the upstream processor, the upstream node facade and the upstream test environment were all read in full and none of them asserts a block per tick, a monotonic timestamp sequence, an empty block on idle, or a deadline that truncates a block, so all four have to be authored here under M23 with world-state roots asserted afterwards."
+# Tier E stops being strictly the smallest by SHRINKING the smallest other tier to its size, not
+# by moving an entry into E: an entry moved into E also breaks every Tier-E-only field rule, and
+# the control would be caught by those with the size rule deleted. Two tier-B entries become tier
+# A (B: 4 -> 2 = E), which breaks the size rule and nothing else.
+python3 - "$SCRATCH/base.md" "$SCRATCH/mutated.md" <<'PY'
+import sys
+lines = open(sys.argv[1]).read().splitlines()
+cur, moved = None, []
+for i, l in enumerate(lines):
+    if l.startswith("### FX-"):
+        cur = l.split()[1]
+    if cur in ("FX-05", "FX-06") and l == "- tier: B":
+        lines[i] = "- tier: A"
+        moved.append(cur)
+assert moved == ["FX-05", "FX-06"], moved
+open(sys.argv[2], "w").write("\n".join(lines) + "\n")
+PY
+TIER_OUT="$(python3 "$PARSER" check --repo "$REPO_ROOT" --manifest "$SCRATCH/mutated.md" 2>&1)"
+if [ "$(printf '%s\n' "$TIER_OUT" | grep -c '^  FAIL ' || true)" = "1" ] &&
+   str_has_line_re "$TIER_OUT" '^  FAIL manifest: Tier E has 2 entries, not strictly fewer than every other tier'; then
+  pass "negative control caught: tier B shrunk to Tier E's size, so Tier E is no longer the smallest"
+else
+  fail "negative control: shrinking tier B to Tier E's size was not rejected by (only) the tier-size rule: $(printf '%s\n' "$TIER_OUT" | grep '^  FAIL ' | head -3 | tr '\n' ' ')"
+fi
+control "FX-01's licence set to one outside the vocabulary" \
+  'FX-01: licence `WTFPL` is not one of' set FX-01 licence "WTFPL"
 control "FX-01's measured field stripped of every number" \
-  set FX-01 measured "quite a lot of them, and all green"
+  'FX-01: `measured` carries no number' set FX-01 measured "quite a lot of them, and all green"
 control "FX-01 claiming no upstream source while not in Tier E" \
-  set FX-01 upstream-source "none — authored here"
+  "FX-01: a non-Tier-E entry claims no upstream source" set FX-01 upstream-source "none — authored here"
 control "FX-05's capture field reduced to prose with no command" \
-  set FX-05 capture "run the unit tests in the usual way and read the output"
+  'FX-05: `capture` names no command' set FX-05 capture "run the unit tests in the usual way and read the output"
 
 finish

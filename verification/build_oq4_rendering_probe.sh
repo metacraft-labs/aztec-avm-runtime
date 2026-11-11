@@ -48,15 +48,20 @@ EOF
 sed 's/^name = "aztec-ct-writer"$/name = "oq4probe"/' "$M24_CRATE/Cargo.lock" > "$PROBE/Cargo.lock" \
   || die "could not derive a lock file from $M24_CRATE/Cargo.lock"
 
+# The SAME pinned toolchain the shipped module is built with (pins.json `toolchain.rust`, through
+# verification/lib_toolchain.sh) — `stable` floated, and a probe built by another compiler than the
+# module it stands for is evidence about a different build.
+RUST_VER="$(tc_pinned_rust)" || die "pins.json declares no toolchain.rust.version"
+TC_PATH="$(tc_rust_ensure "$RUST_VER")" || die "the pinned rust toolchain $RUST_VER could not be made usable"
 rc=0
-nix shell nixpkgs#rustup nixpkgs#capnproto --command bash -c '
+PATH="$TC_PATH:$PATH" RUSTUP_TOOLCHAIN="$RUST_VER" bash -c '
   set -uo pipefail
   export RUSTUP_HOME="'"$RUSTUP_HOME"'" CARGO_HOME="'"$CARGO_HOME"'"
   export PATH="$CARGO_HOME/bin:$PATH"
-  rustup -q toolchain install stable --profile minimal >/dev/null 2>&1 || true
+  case "$(rustc --version)" in "rustc $RUSTUP_TOOLCHAIN "*) : ;; *) echo "rustc is not $RUSTUP_TOOLCHAIN" >&2; exit 1 ;; esac
   cd "'"$PROBE"'" || exit 1
   for arm in int low64 bigint string raw; do
-    rustup run stable cargo run --quiet -- "$arm" "'"$M25_WORK"'/oq4-$arm.ct" || exit 1
+    cargo run --quiet -- "$arm" "'"$M25_WORK"'/oq4-$arm.ct" || exit 1
   done
 ' || rc=$?
 
@@ -64,4 +69,8 @@ nix shell nixpkgs#rustup nixpkgs#capnproto --command bash -c '
 for arm in int low64 bigint string raw; do
   [ -s "$M25_WORK/oq4-$arm.ct" ] || die "the probe reported success but produced no $M25_WORK/oq4-$arm.ct"
 done
+# What these containers were written WITH, for the check that reads them: the writer revision and
+# the probe source. A check that reuses them must find both unchanged.
+printf '%s %s\n' "$WANT" "$(sha256sum "$VERIFY_DIR/oq4_rendering_probe.rs" | cut -d' ' -f1)" \
+  > "$M25_WORK/oq4-built-from" || die "could not record what the containers were built from"
 printf '%s: five rendering arms in %s\n' "$TEST_NAME" "$M25_WORK"

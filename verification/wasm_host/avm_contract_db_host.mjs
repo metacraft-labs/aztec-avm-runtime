@@ -245,6 +245,42 @@ try {
 
       R.e.avm_contract_db_destroy(registered);
       R.e.avm_contract_db_destroy(observed);
+
+      // The same two paths over the SECOND contract, whose preimage fields are all non-zero: the
+      // program's own contract carries upstream's tester defaults, where five of the fields
+      // compared above are zero on both sides and would agree under any decoder.
+      const dReg = newContractDb();
+      R.callWithArgs(R.e.avm_contract_db_register_class, 'register_class', dReg, blob(`contractDbInputs.${name}.args.deployedClassSetup`));
+      R.callWithArgs(R.e.avm_contract_db_register_instance, 'register_instance', dReg, blob(`contractDbInputs.${name}.args.deployedInstanceSetup`));
+      const dObs = newContractDb();
+      R.callWithArgs(R.e.avm_contract_db_add_contracts, 'add_contracts', dObs, blob(`contractDbInputs.${name}.args.deployment`));
+      const dAddr = `contractDbInputs.${name}.args.deployedAddress`;
+      const dCid = `contractDbInputs.${name}.args.deployedClassId`;
+      const di = [ask(dReg, 'avm_contract_db_get_contract_instance', dAddr), ask(dObs, 'avm_contract_db_get_contract_instance', dAddr)];
+      const dc = [ask(dReg, 'avm_contract_db_get_contract_class', dCid), ask(dObs, 'avm_contract_db_get_contract_class', dCid)];
+      const dFields = {
+        'instance': (i) => i.currentContractClassId,
+        'instance.salt': (i) => i.salt,
+        'instance.deployer': (i) => i.deployer,
+        'instance.initializationHash': (i) => i.initializationHash,
+        'instance.immutablesHash': (i) => i.immutablesHash,
+        'instance.npkMHash': (i) => i.publicKeys.npkMHash,
+        'instance.ovpkMHash': (i) => i.publicKeys.ovpkMHash,
+        'instance.tpkMHash': (i) => i.publicKeys.tpkMHash,
+        'instance.mspkMHash': (i) => i.publicKeys.mspkMHash,
+        'instance.fbpkMHash': (i) => i.publicKeys.fbpkMHash,
+      };
+      for (const [f, get] of Object.entries(dFields)) {
+        line(`${p}.deployed.${f}.registered`, di[0] === null ? 'nil' : hexOf(get(di[0])));
+        line(`${p}.deployed.${f}.observed`, di[1] === null ? 'nil' : hexOf(get(di[1])));
+      }
+      for (const [f, get] of Object.entries({ 'class.artifactHash': (c) => c.artifactHash,
+                                               'class.privateFunctionsRoot': (c) => c.privateFunctionsRoot })) {
+        line(`${p}.deployed.${f}.registered`, dc[0] === null ? 'nil' : hexOf(get(dc[0])));
+        line(`${p}.deployed.${f}.observed`, dc[1] === null ? 'nil' : hexOf(get(dc[1])));
+      }
+      R.e.avm_contract_db_destroy(dReg);
+      R.e.avm_contract_db_destroy(dObs);
     }
     line('populate.ownedAllocationsAtExit', R.owned.size);
     line('populate.done', '1');
@@ -463,6 +499,62 @@ try {
       line(`${p}.end`, `${endIds.depth}/${endIds.contractId}/${endIds.merkleId}`);
       destroy({ cdb, mdb, coord });
     }
+    // THE NESTED FIXTURE. The corpus programs make no call, so every transaction above has one frame
+    // and nothing in it nests. This one is three frames deep and its innermost frame reverts, and it
+    // runs through the coordinator exactly as the corpus does.
+    if (kv.get('contractDbNested.done') !== '1') {
+      line('nested.fixture.present', 0);
+    } else {
+      line('nested.fixture.present', 1);
+      const cdb = newContractDb();
+      const mdb = newMerkleDb();
+      const n = Number(kv.get('contractDbNested.contracts.count'));
+      for (let i = 0; i < n; i++) {
+        const q = `contractDbNested.setup.${i}`;
+        R.callWithArgs(R.e.avm_contract_db_register_class, 'register_class', cdb, blob(`${q}.class`));
+        R.callWithArgs(R.e.avm_contract_db_register_instance, 'register_instance', cdb, blob(`${q}.instance`));
+        R.callWithArgs(R.e.avm_merkle_db_insert_indexed_leaves_nullifier_tree, 'insert_nullifier', mdb, blob(`${q}.nullifier`));
+      }
+      R.callWithArgs(R.e.avm_merkle_db_insert_indexed_leaves_public_data_tree, 'insert_public_data', mdb, blob('contractDbNested.setup.publicdata'));
+      const coord = newCoordinator(cdb, mdb);
+      const f = 'nested.fixture';
+      line(`${f}.contracts`, n);
+      R.check(R.e.avm_coordinator_create_checkpoint(coord), 'coordinator_create_checkpoint');
+      const beforeIds = coordinatorIds(coord);
+      const beforeRoots = rootsDigest(mdb);
+      const b = blob('contractDbNested.fast');
+      const ptr = R.put(b);
+      let status;
+      try { status = R.e.avm_coordinator_simulate(coord, ptr, b.length); } finally { R.free(ptr); }
+      R.check(status, 'coordinator_simulate(nested fixture)');
+      const r = unpack(R.result());
+      const afterIds = coordinatorIds(coord);
+      line(`${f}.revertCode`, r.revertCode);
+      line(`${f}.callFrames`, r.callStackMetadata.length);
+      // The call tree, walked: how deep it goes, and at which depths a frame reverted.
+      let deepest = 0;
+      const revertedAt = [];
+      const walk = (frames, depth) => {
+        for (const fr of frames) {
+          deepest = Math.max(deepest, depth);
+          if (fr.reverted) revertedAt.push(depth);
+          walk(fr.nested ?? [], depth + 1);
+        }
+      };
+      walk(r.callStackMetadata, 1);
+      line(`${f}.callDepth`, deepest);
+      line(`${f}.revertedAtDepths`, revertedAt.join(',') || '-');
+      line(`${f}.dataWrites.count`, r.publicTxEffect.publicDataWrites.length);
+      line(`${f}.before`, `${beforeIds.depth}/${beforeIds.contractId}/${beforeIds.merkleId}`);
+      line(`${f}.after`, `${afterIds.depth}/${afterIds.contractId}/${afterIds.merkleId}`);
+      line(`${f}.assertAfterSimulate`, R.e.avm_coordinator_assert_lockstep(coord));
+      line(`${f}.rootsAfterSimulate`, rootsDigest(mdb) === beforeRoots ? 'unchanged' : 'moved');
+      R.check(R.e.avm_coordinator_revert_checkpoint(coord), 'coordinator_revert_checkpoint');
+      line(`${f}.rootsRestored`, rootsDigest(mdb) === beforeRoots ? 1 : 0);
+      const endIds = coordinatorIds(coord);
+      line(`${f}.end`, `${endIds.depth}/${endIds.contractId}/${endIds.merkleId}`);
+      destroy({ cdb, mdb, coord });
+    }
     line('nested.ownedAllocationsAtExit', R.owned.size);
     line('nested.done', '1');
   } else if (mode === 'e2e') {
@@ -501,9 +593,9 @@ try {
       line(`${p}.ids.before`, `${beforeIds.depth}/${beforeIds.contractId}/${beforeIds.merkleId}`);
       line(`${p}.ids.after`, `${afterIds.depth}/${afterIds.contractId}/${afterIds.merkleId}`);
 
-      // Was the contract that arrived through `add_contracts` retained? Looked up by ADDRESS: the
-      // deployed contract shares its bytecode, and therefore its class id, with the registered one,
-      // so only the instance discriminates.
+      // Was the contract that arrived through `add_contracts` retained? Looked up by ADDRESS, which
+      // is derived from every field of its instance: the deployed contract shares the registered
+      // one's bytecode but not its class id or any other preimage field.
       const deployedInst = R.callWithArgs(R.e.avm_contract_db_get_contract_instance, 'get_contract_instance', cdb, blob(`contractDbInputs.${name}.args.deployedAddress`));
       line(`${p}.deployedInstancePresent`, deployedInst === null ? 0 : 1);
       const inst = R.callWithArgs(R.e.avm_contract_db_get_contract_instance, 'get_contract_instance', cdb, blob(`contractDbInputs.${name}.args.address`));

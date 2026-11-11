@@ -63,11 +63,13 @@
 TEST_NAME="e2e_vfs_edit_recompile_retrace"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 . "$VERIFY_DIR/lib_m30_vfs.sh"
+. "$VERIFY_DIR/lib_m24_ct_writer.sh"
 
 m30_summary_on_abnormal_exit
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
 
 m30_require_arms
+m24_require_readers
 
 echo "== 1. the fields every comparison reads are present"
 
@@ -113,13 +115,17 @@ assert_eq "…and it names both of the program's source files" \
   '["app/src/main.nr","app/src/util.nr"]' "$(m30_arm arms.trace.a.traced.paths)"
 assert_eq "…with the recording id the page supplied, so identical inputs are comparable" \
   "01949fcc-7d92-7e9c-8000-0000000030a0" "$(m30_arm arms.trace.a.traced.recordingId)"
-# HONEST ABOUT WHAT THIS WRITER DOES NOT CARRY. `ctfs_sink.rs`'s own header says the pure-Rust
-# CTFS writer has no column-bearing step encoder, so `meta.dat` bits 4/6/7 stay unset and the
-# container is not column-aware. The module REPORTS that rather than letting it pass silently,
-# and this check reads the report rather than repeating the sentence.
-assert_eq "the container is not column-aware, and the module says so" "false" \
-  "$(m30_arm arms.trace.a.traced.columnAware)"
-assert_eq "…having been ASKED for columns and dropped them, which is the honest signal" "true" \
+# WHAT THE CONTAINER CARRIES IS READ FROM THE CONTAINER. The Noir recorder asks for column-aware
+# steps, and the pure-Rust CTFS writer honours a request made before its first record, so
+# `meta.dat` carries the column-aware flag. The module's own `column_aware` field is not read: it
+# is a constant in the tracer, not a measurement (`DRIFT.md` D34). The pinned reader decodes the
+# container the page produced.
+CONTAINER_A="$M30_WORK/container-a.ct"
+python3 -c 'import base64,json,sys; d=json.load(open(sys.argv[1])); open(sys.argv[2],"wb").write(base64.b64decode(d["arms"]["trace"]["a"]["traced"]["containerB64"]))' \
+  "$M30_ARMS" "$CONTAINER_A" || die "could not write container A out of $M30_ARMS"
+COLUMN_AWARE_A="$(m24_split_probe "$CONTAINER_A" | sed -n "s/^COLUMN_AWARE"$'\t'"//p")"
+assert_eq "the container is column-aware, as its own meta.dat says" "true" "$COLUMN_AWARE_A"
+assert_eq "…and the writer dropped none of the column awareness it was asked for" "false" \
   "$(m30_arm arms.trace.a.traced.droppedColumnAwareness)"
 
 echo "== 4. THE JOIN: the tracer traced what the resolver resolved"

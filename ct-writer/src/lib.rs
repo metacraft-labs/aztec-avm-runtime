@@ -67,7 +67,7 @@ mod backend_nim;
 mod backend_rust;
 
 // Neither feature is not a configuration: this crate is an event ABI over a writer, and with no
-// writer selected every one of the thirty-eight entry points would compile to a refusal. Failing
+// writer selected every one of the thirty-nine entry points would compile to a refusal. Failing
 // at the manifest is a sentence a developer can act on; a module that built and refused
 // everything is one nobody would read until a container came back empty.
 #[cfg(not(any(feature = "path-a", feature = "path-b")))]
@@ -262,6 +262,9 @@ struct Session {
     events: u64,
     /// Paths interned through `ct_intern_path`, in id order. Index is the id a host quotes.
     paths: Vec<PathBuf>,
+    /// The line-length table each of `paths` was interned with, as the host offered it. A later
+    /// registration of the same path is compared against it; see `ct_intern_path`.
+    tables: Vec<Vec<u32>>,
     /// The FIFO `emit()` consumes one entry of per step.
     positions: std::collections::VecDeque<Position>,
     rungs: Vec<RungDeclaration>,
@@ -487,6 +490,7 @@ pub unsafe extern "C" fn ct_writer_open(
             columns_requested: want_columns != 0,
             events: 0,
             paths: Vec::new(),
+            tables: Vec::new(),
             positions: std::collections::VecDeque::new(),
             rungs: Vec::new(),
             positioned: 0,
@@ -497,6 +501,59 @@ pub unsafe extern "C" fn ct_writer_open(
             source_steps: 0,
             none_type_id,
         });
+    }
+    set_error("");
+    CT_OK
+}
+
+/// CCP-6 — ask the writer for `ctfs-container.md` §1e's COMPACT container profile.
+///
+/// # THE OPT-IN, AND THERE IS EXACTLY ONE OF THEM
+///
+/// This export is the only act in this repository that can make a container compact. Nothing calls
+/// it with a non-zero argument: the session is constructed without touching the threshold, both
+/// writers construct themselves at `0`, and a module nobody calls this on produces byte-for-byte
+/// what it produced before the export existed. `verify_compact_profile_emission_is_opt_in` measures
+/// that equality rather than asserting it, with the compact container as the control that says the
+/// measurement can tell the two apart.
+///
+/// # THE INEQUALITY, WHICH LOOKS BACKWARDS
+///
+/// `raw_bytes` is a CEILING, not a floor. Both writers reach the same `select_profile`, which emits
+/// compact when the finished container's members total **fewer** than `raw_bytes` raw bytes — so
+/// the compact profile is for SMALL recordings, the ones a reader can hold whole before its first
+/// query, and `0` means NEVER because nothing is below zero. A host that reasons "set it low to be
+/// safe" has asked for compact on every recording it will ever write.
+///
+/// # THE ENGINE COUPLING. READ THIS BEFORE CALLING IT WITH ANYTHING BUT ZERO
+///
+/// A compact container is container **version 6** with its profile byte (offset 16) set to `1`;
+/// this runtime's full containers are version 5. BlockTracer's deployed replay engine is pinned BY
+/// CONTENT in `client/hydrate/engine-pin.txt`, and a compact container is refused outright by an
+/// engine without CCP-5's compact loader — `unsupported CTFS version`, no steps, no replay. So
+/// nothing may emit compact into a published tree until that pin names an engine that carries the
+/// loader. **That coupling is governed in `client/hydrate/engine-pin.txt`, not here**, and this
+/// module deliberately holds no copy of the engine's identity: a second place to state it is a
+/// second place for it to go stale.
+///
+/// Callable at any time between [`ct_writer_open`] and [`ct_writer_close`]; the profile is chosen at
+/// the close. Returns [`CT_OK`], [`CT_ERR_NO_SESSION`] with no writer open, or [`CT_ERR_WRITER`]
+/// when the writer itself refuses — in which case [`ct_last_error_ptr`] carries the writer's own
+/// message, because "the threshold was not set" and "the threshold was set to something the writer
+/// will not honour" are different facts and a host that cannot tell them apart will ship the wrong
+/// one.
+#[unsafe(no_mangle)]
+pub extern "C" fn ct_writer_set_compact_threshold(raw_bytes: u64) -> i32 {
+    let s = match session() {
+        Some(s) => s,
+        None => {
+            set_error("no writer is open; call ct_writer_open first");
+            return CT_ERR_NO_SESSION;
+        }
+    };
+    if let Err(e) = s.writer.set_compact_threshold(raw_bytes) {
+        set_error(&e);
+        return CT_ERR_WRITER;
     }
     set_error("");
     CT_OK
@@ -656,10 +713,11 @@ pub extern "C" fn ct_log_event_count() -> u32 {
 // everywhere else.
 //
 // **THE SEQUENCE IS THE HOST'S AND THE STRUCTURE IS THE MODULE'S.** `ct_call` and `ct_return` do
-// not synthesize anything: `AbstractTraceWriter::register_call` emits a `Step` at the callee's
-// declaration site before the `Call`, which is right for a recorder that has not already emitted
-// the caller's step and wrong for this one — `tooling/tracer_wasm/src/ctfs_sink.rs` overrides it
-// for exactly that reason and this module writes the `Call` event directly for the same one. What
+// not synthesize anything, and neither writer does: a call is a `Call` record, and the frame's
+// first step is the next step the host emits (`trace-events.md`: a recording has exactly the steps
+// its recorder emitted, plus the entry step `start` emits). Path A writes the `Call` event
+// directly rather than through `AbstractTraceWriter::register_call`, so its arguments are emitted
+// as `Value` events first, the way `tooling/tracer_wasm/src/ctfs_sink.rs` does. What
 // the module DOES own is the depth: `ct_call_depth()` is read from here rather than counted by the
 // host, because a host counting its own calls asserts that it called and not that the module
 // recorded.
@@ -796,6 +854,11 @@ pub extern "C" fn ct_rung_count() -> u32 {
 /// is accepted and ignored on a line-only recording, which is upstream's own contract for
 /// `register_path_with_line_lengths`, so a host may pass it unconditionally.
 ///
+/// Interning a path again returns its id when the table is the same or empty. A DIFFERENT table is
+/// refused with `CT_ERR_WRITER`, as is a table the writer itself refuses (the session's own source
+/// path, offered a table after `start` mentioned it, on a column-aware recording): a path's table
+/// is decided at its first mention.
+///
 /// # Safety
 /// `path_ptr` must address `path_len` readable bytes; `line_lengths_ptr` must address
 /// `line_lengths_count` readable `u32`s.
@@ -834,12 +897,39 @@ pub unsafe extern "C" fn ct_intern_path(
         }
     };
     let buf = PathBuf::from(&path);
+    // A PATH'S TABLE IS DECIDED AT ITS FIRST MENTION, AND A LATER, DIFFERENT ONE IS REFUSED.
+    //
+    // That is both writers' rule (`internal-files.md`, "paths.dat Layout A"): the table a path is
+    // first interned with is the one its steps are addressed in, and a second registration offering
+    // another would leave the file with a table that does not describe it. This module answers a
+    // repeat registration itself, from `paths`, so the writer never sees it -- and therefore this
+    // is where the rule has to be kept. The same table again, or none, is the same path and
+    // returns its id; a different one is a host interning two different files under one name, and
+    // is refused naming the path rather than resolved silently in favour of the first.
     if let Some(i) = s.paths.iter().position(|p| *p == buf) {
-        return i as i32;
+        if line_lengths.is_empty() || s.tables[i] == line_lengths {
+            set_error("");
+            return i as i32;
+        }
+        set_error(&format!(
+            "ct_intern_path: {path} is already interned with a {}-line table and this \
+             registration offers a different {}-line one; a path's table is decided at its first \
+             mention, so two different files cannot be interned under one path",
+            s.tables[i].len(),
+            line_lengths.len()
+        ));
+        return CT_ERR_WRITER;
     }
-    s.writer
-        .register_path_with_line_lengths(&buf, &line_lengths);
+    // AND THE WRITER'S OWN REFUSAL, AT THE CALL THAT CAUSED IT. The session's source path is
+    // mentioned by `start` at open, with no table; a column-aware writer gives it the conventional
+    // table there and refuses a later, different one. Ignoring the result here would leave the
+    // refusal to fail the CLOSE, long after, for a reason the host could no longer place.
+    if let Err(e) = s.writer.register_path_with_line_lengths(&buf, &line_lengths) {
+        set_error(&format!("ct_intern_path: the writer refused {path}: {e}"));
+        return CT_ERR_WRITER;
+    }
     s.paths.push(buf);
+    s.tables.push(line_lengths);
     set_error("");
     (s.paths.len() - 1) as i32
 }
@@ -1963,5 +2053,127 @@ mod tests {
             0,
             "the count belongs to the session, which is gone"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // CCP-6 — the compact container profile.
+    //
+    // THESE RUN ON PATH A, which is the only arm a host `cargo test` can build
+    // (`ct-writer/build.rs` refuses any target but wasm32 under `path-b`). Both writers reach the
+    // same `select_profile` / `selectProfile`, and the Nim arm is measured over real bytes by
+    // `verification/verify_compact_profile_emission_is_opt_in.sh` against the module the runtime
+    // actually ships. What these tests pin is this module's GLUE: that the threshold is never set
+    // unless a caller sets it, that the setter refuses with no session rather than storing into
+    // nothing, and that the inequality runs the way it does.
+    // -----------------------------------------------------------------------
+
+    /// Drive the fixed sequence once, optionally setting a compact threshold first, and return the
+    /// container. One helper so the three containers below differ in the threshold and in nothing
+    /// else — two drives written out twice would compare two pieces of code as much as two
+    /// thresholds.
+    fn container_with_threshold(threshold: Option<u64>) -> Vec<u8> {
+        unsafe { assert_eq!(open(0), CT_OK) };
+        if let Some(t) = threshold {
+            assert_eq!(
+                ct_writer_set_compact_threshold(t),
+                CT_OK,
+                "the writer refused the threshold {t}"
+            );
+        }
+        let mut buf = Vec::new();
+        for i in 0..64u32 {
+            buf.extend_from_slice(&record(i));
+        }
+        assert_eq!(unsafe { ct_ingest(buf.as_ptr(), buf.len()) }, 64);
+        let p = ct_writer_close();
+        assert!(!p.is_null());
+        unsafe { core::slice::from_raw_parts(p, ct_container_len()) }.to_vec()
+    }
+
+    /// `ctfs-container.md` §1d: a compact container's directory is `MemberCount` at offset 24 and
+    /// then `N` entries of `(name, offset, length)`. The raw member total is the sum of the
+    /// lengths, and `28 + 24*N + total` is the file size — which is asserted, so a misread
+    /// directory cannot quietly supply a number.
+    fn compact_raw_member_bytes(image: &[u8]) -> u64 {
+        let n = u32::from_le_bytes(image[24..28].try_into().unwrap()) as usize;
+        assert!(n > 0, "a compact container with no members proves nothing");
+        let total: u64 = (0..n)
+            .map(|i| {
+                let at = 28 + 24 * i + 16;
+                u64::from_le_bytes(image[at..at + 8].try_into().unwrap())
+            })
+            .sum();
+        assert_eq!(
+            28 + 24 * n as u64 + total,
+            image.len() as u64,
+            "the directory's own arithmetic does not close"
+        );
+        total
+    }
+
+    #[test]
+    fn the_compact_threshold_is_refused_without_a_session() {
+        let _g = serial();
+        // A setter that stored into nothing and answered CT_OK would let a host believe a
+        // threshold was set, get a full container back, and have nothing to look at.
+        assert_eq!(ct_writer_set_compact_threshold(1 << 20), CT_ERR_NO_SESSION);
+        // THE CONTROL: with a session open the very same call succeeds, so the refusal above is
+        // about the session and not about the value.
+        unsafe { assert_eq!(open(0), CT_OK) };
+        assert_eq!(ct_writer_set_compact_threshold(1 << 20), CT_OK);
+        assert!(!ct_writer_close().is_null());
+    }
+
+    #[test]
+    fn the_default_is_the_full_profile_and_an_explicit_zero_changes_nothing() {
+        let _g = serial();
+        let untouched = container_with_threshold(None);
+        let explicit_zero = container_with_threshold(Some(0));
+        assert_eq!(
+            untouched, explicit_zero,
+            "setting the threshold to its own default must not move a byte"
+        );
+        assert_eq!(untouched[5], 5, "the full profile is container version 5");
+        // THE CONTROL: the comparison above is not vacuous, because a real threshold DOES move the
+        // bytes. Without this, a `container_with_threshold` that ignored its argument would pass.
+        let compact = container_with_threshold(Some(1 << 24));
+        assert_ne!(untouched, compact);
+    }
+
+    #[test]
+    fn an_explicit_threshold_emits_a_compact_container() {
+        let _g = serial();
+        let full = container_with_threshold(None);
+        let compact = container_with_threshold(Some(1 << 24));
+        assert_eq!(
+            &compact[..5],
+            &full[..5],
+            "the CTFS magic is unchanged; only the version and the body differ"
+        );
+        assert_eq!(compact[5], 6, "a compact container is container version 6");
+        assert_eq!(compact[16], 1, "and its profile byte says Profile::Compact");
+        assert!(compact.len() < full.len());
+        // A SIZE REDUCTION IS NOT THE CLAIM. That the two carry the same recording is, and it is a
+        // reader that has to say so: `verify_compact_profile_emission_is_opt_in` reads both with
+        // the reference reader at `pins.json`'s anchor and compares every fact.
+    }
+
+    #[test]
+    fn the_threshold_is_a_ceiling_and_the_inequality_is_strict() {
+        let _g = serial();
+        let full = container_with_threshold(None);
+        let compact = container_with_threshold(Some(1 << 24));
+        let raw = compact_raw_member_bytes(&compact);
+
+        // EQUAL to the raw total gives the FULL profile: `select_profile` tests `raw < threshold`.
+        let at = container_with_threshold(Some(raw));
+        assert_eq!(at, full, "a threshold equal to the raw total is not below it");
+        // ONE BYTE above it gives the compact one, and the same one.
+        let above = container_with_threshold(Some(raw + 1));
+        assert_eq!(above, compact);
+        // And one byte BELOW the total stays full, so the boundary is a boundary and not a cliff
+        // somewhere else.
+        let below = container_with_threshold(Some(raw - 1));
+        assert_eq!(below, full);
     }
 }

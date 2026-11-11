@@ -158,6 +158,7 @@ async function boot() {
         containerBytes: result.ct.length,
         containerSha256Promise: sha256Hex(result.ct),
         containerHead: toHex(result.ct),
+        containerB64: btoa(Array.from(result.ct, (b) => String.fromCharCode(b)).join("")),
         columnAware: result.container.column_aware,
         droppedColumnAwareness: result.container.dropped_column_awareness,
         recordingId: result.container.recording_id,

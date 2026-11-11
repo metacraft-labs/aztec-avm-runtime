@@ -165,18 +165,29 @@ has_sym() {
   return 1
 }
 
-n_before="$(mdb_syms "$BB/bin/crypto_merkle_tree_tests")"
-n_after="$(mdb_syms "$BP/bin/crypto_merkle_tree_tests")"
-n_after_lmdb="$(mdb_syms "$BP/bin/crypto_merkle_tree_lmdb_tests")"
+# Every zero below is read through `nm ... 2>/dev/null | grep -c`, which answers 0 for a file that
+# is not there or that nm cannot read. So each binary the zeros are about must exist and must have
+# a readable symbol table (some symbol at all) before its zero means anything.
+nm_readable() { [ -f "$1" ] && [ "$(nm "$1" 2>/dev/null | grep -c . || true)" -gt 0 ]; }
+CMT_BEFORE="$BB/bin/crypto_merkle_tree_tests"
+CMT_AFTER="$BP/bin/crypto_merkle_tree_tests"
+CMT_LMDB_AFTER="$BP/bin/crypto_merkle_tree_lmdb_tests"
+for bin in "$CMT_BEFORE" "$CMT_AFTER" "$CMT_LMDB_AFTER"; do
+  assert_true "nm reads a symbol table from ${bin#$M3_WORK/}" nm_readable "$bin"
+done
+
+n_before="$(mdb_syms "$CMT_BEFORE")"
+n_after="$(mdb_syms "$CMT_AFTER")"
+n_after_lmdb="$(mdb_syms "$CMT_LMDB_AFTER")"
 
 assert_ge "before: crypto_merkle_tree_tests contains LMDB object code" 1 "$n_before"
-assert_true "before: it defines mdb_env_create" has_sym "$BB/bin/crypto_merkle_tree_tests"
+assert_true "before: it defines mdb_env_create" has_sym "$CMT_BEFORE"
 assert_eq "after: crypto_merkle_tree_tests contains NO LMDB object code" 0 "$n_after"
-assert_false "after: it does not define mdb_env_create" has_sym "$BP/bin/crypto_merkle_tree_tests"
+assert_false "after: it does not define mdb_env_create" has_sym "$CMT_AFTER"
 assert_eq "after: the LMDB object code is in crypto_merkle_tree_lmdb_tests instead" \
   "$n_before" "$n_after_lmdb"
 assert_true "after: crypto_merkle_tree_lmdb_tests defines mdb_env_create" \
-  has_sym "$BP/bin/crypto_merkle_tree_lmdb_tests"
+  has_sym "$CMT_LMDB_AFTER"
 
 # ---------------------------------------------------------------------------
 # 4. What the patch does NOT do — asserted, so the claim cannot inflate
@@ -189,11 +200,20 @@ assert_eq "the patch leaves that global include_directories() line untouched" \
   "$inc_before" "$inc_after"
 
 undef_mdb() { nm -u "$1" 2>/dev/null | grep -c 'mdb_' ; }
+# The zeros below compare two arms that are both zero, so the reader has to be shown to see an
+# undefined mdb_* reference where there is one: the patched tree's LMDB module archive calls into
+# lmdblib, and the same reader must count those references.
+assert_ge "positive control: undef_mdb sees the undefined mdb_* references of libcrypto_merkle_tree_lmdb.a" \
+  1 "$(undef_mdb "$BP/lib/libcrypto_merkle_tree_lmdb.a")"
 for lib in libvm2_sim.a libworld_state_reference.a; do
+  lib_before="$BB/lib/$lib"
+  lib_after="$BP/lib/$lib"
+  assert_true "before: nm reads a symbol table from $lib" nm_readable "$lib_before"
+  assert_true "after:  nm reads a symbol table from $lib" nm_readable "$lib_after"
   assert_eq "before: $lib has no undefined mdb_* references (the edge was never symbolic)" \
-    0 "$(undef_mdb "$BB/lib/$lib")"
+    0 "$(undef_mdb "$lib_before")"
   assert_eq "after:  $lib has no undefined mdb_* references" \
-    0 "$(undef_mdb "$BP/lib/$lib")"
+    0 "$(undef_mdb "$lib_after")"
 done
 
 finish

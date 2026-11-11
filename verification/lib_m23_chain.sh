@@ -26,6 +26,9 @@
 # PRECONDITIONS ARE PRECONDITIONS, NOT SKIPS. A check that cannot find a module dies. It never
 # reports "0 problems" against a run that did not happen.
 
+# Its data helpers run inside command substitutions; see lib_subshell_die.sh.
+. "$VERIFY_DIR/lib_subshell_die.sh"
+
 M23_WORK="${M23_WORK:-$HOME/.cache/aztec-m23-chain}"
 export M23_WORK
 
@@ -86,7 +89,7 @@ m23_require_anchor() {
 # haystack turns every `grep -c` beneath it into an assertion about nothing.
 m23_anchor_file() { # <path-in-fork>
   git -C "$FORK_ROOT" show "$M23_CPP_ANCHOR:$1" 2>/dev/null \
-    || die "the cpp anchor has no $1 (the layout moved; this check's premise is stale)"
+    || die_even_in_subshell "the cpp anchor has no $1 (the layout moved; this check's premise is stale)"
 }
 
 # The number of lines of a file at the cpp anchor, or `MISSING`.

@@ -430,9 +430,24 @@ assert_ge "even though those two sessions carry plenty of samples" 30 \
 # and it is exercised by scattering it — the same bytes, but with a per-SESSION multiplier, which
 # is what hits the estimator this comparator actually uses — at which point the whole comparison
 # must be rejected even though the patched-versus-unpatched arms are untouched.
+# This refusal-only boundary needs a known equivalent comparison. Reusing the
+# real native table can carry a genuine cost failure; the comparator must retain
+# that result rather than refuse it (the separate regression control below).
+# Synthetic alternating per-session timings isolate this control without replacing
+# either real native/WASM measurement or its unchanged acceptance thresholds.
+awk -v R="$ctl/noisy_base.tsv" 'BEGIN{
+  OFS="\t"
+  for (s = 0; s < 32; s++) for (i = 0; i < 15; i++) {
+    base = 100000 + (s * 7 + i * 13) % 200
+    patched = int(base * ((s % 2 == 0) ? 0.999 : 1.001))
+    print s, "patched", patched > R
+    print s, "unpatched", base > R
+    print s, "control", patched > R
+  }
+}'
 awk -F'\t' 'BEGIN{OFS="\t"; srand(7)}
             $2=="control" { if (!($1 in m)) m[$1] = 0.85 + rand() * 0.3; $3 = int($3 * m[$1]) }
-            { print }' "$samples" >"$ctl/noisy.tsv"
+            { print }' "$ctl/noisy_base.tsv" >"$ctl/noisy.tsv"
 python3 "$M9_TIMING" --disabled "$ctl/noisy.tsv" "$M9_DISABLED_BUDGET_PCT" "$M9_DISABLED_FASTER_BUDGET_PCT" \
   >"$ctl/noisy.report" 2>"$ctl/noisy.err"
 # A method that cannot resolve two copies of the same binary is refused with the PRECONDITION code,
@@ -448,7 +463,7 @@ assert_true "naming the control, not the patch" \
 assert_true "and saying it is a precondition rather than a regression" \
   grep -q 'MEASUREMENT PRECONDITION, not a regression' "$ctl/noisy.err"
 assert_eq "and the patched-versus-unpatched arms were left untouched in that control" \
-  "$(awk -F'\t' '$2 == "patched"' "$samples" | grep -c .)" "$(awk -F'\t' '$2 == "patched"' "$ctl/noisy.tsv" | grep -c .)"
+  "$(awk -F'\t' '$2 == "patched"' "$ctl/noisy_base.tsv" | grep -c .)" "$(awk -F'\t' '$2 == "patched"' "$ctl/noisy.tsv" | grep -c .)"
 
 # AND THE CASE THAT SHOWS THE REFUSAL CANNOT SWALLOW A RESULT: a real regression measured ON a
 # machine that had also scattered the control. This is the one the previous version of the

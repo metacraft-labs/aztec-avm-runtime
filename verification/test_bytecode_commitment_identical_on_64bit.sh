@@ -253,8 +253,11 @@ mnemonic_count() { # <before|after> <mnemonic>
 assert_eq "the extra instruction is the high-word materialisation: no 'shr' before" \
   "0" "$(mnemonic_count before shr)"
 assert_eq "exactly one 'shr' after" "1" "$(mnemonic_count after shr)"
-assert_eq "the 64-bit shift itself is unchanged: one 'shl' on both sides" \
-  "$(mnemonic_count before shl)" "$(mnemonic_count after shl)"
+# Pinned per side, not compared across them: mnemonic_count reads an absent
+# mnemonic as 0, so "before equals after" is also what two missing counts say.
+assert_eq "the 64-bit shift itself is there before the patch: one 'shl'" \
+  "1" "$(mnemonic_count before shl)"
+assert_eq "and unchanged after it: one 'shl'" "1" "$(mnemonic_count after shl)"
 
 # --------------------------------------------------------------------------
 # The measurement record the write-up's numbers are re-derived from.

@@ -118,6 +118,13 @@ assert_eq "four standalone dry runs completed" "4" "$n_dry"
 
 after_prs="$(gh pr list --repo AztecProtocol/aztec-packages --state all --author '@me' \
                --json number --limit 100 2>/dev/null | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')"
+# Both counts must be COUNTS: a failed query yields an empty string on both sides, and two empty
+# strings are equal. The listing is capped, so a count at the cap could not see one more.
+for c in "$before_prs" "$after_prs"; do
+  assert_true "the pull-request listing produced a count [$c]" bash -c '[[ "$1" =~ ^[0-9]+$ ]]' _ "$c"
+done
+assert_true "and the count is below the listing's cap, so one more would show" \
+  test "${after_prs:-100}" -lt 100
 assert_eq "the dry runs opened no pull request upstream" "$before_prs" "$after_prs"
 
 # --- the stacked one refuses ------------------------------------------------
@@ -160,8 +167,15 @@ n_url="$(python3 -c 'import json,sys
 print(sum(1 for p in json.load(open(sys.argv[1]))["patches"] if p["ledger"]["url"]))' "$SERIES")"
 n_total="$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["patches"]))' "$SERIES")"
 note "ledger today: $n_total patch(es), $n_prepared not filed, $n_url carrying an upstream URL"
-assert_eq "every patch that is not recorded as prepared carries a URL" \
-  "$n_total" "$((n_prepared + n_url))"
+# Per patch, both directions: a sum of the two counts can balance a filed patch that lacks its URL
+# against a prepared one that carries one.
+ledger_bad="$(python3 -c 'import json,sys
+for p in json.load(open(sys.argv[1]))["patches"]:
+    prepared = p["ledger"]["status"] == "prepared"
+    if prepared == bool(p["ledger"]["url"]):
+        print(p["id"])' "$SERIES")"
+assert_eq "every patch not recorded as prepared carries a URL, and every prepared one carries none" \
+  "" "$ledger_bad"
 
 n_agree=0
 while IFS='|' read -r id entry status url; do

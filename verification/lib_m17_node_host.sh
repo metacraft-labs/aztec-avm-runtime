@@ -160,7 +160,12 @@ m17_reactor_abi_declares_min_pages() {
 # is under test rather than a lint step. It comes from `pkgs.typescript` in this repo's own flake:
 # no npm install, no network, and the same compiler on every machine.
 # ---------------------------------------------------------------------------
-M17_TSC_FLAGS="--noEmit --target ES2022 --lib ES2022,DOM --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --strict --erasableSyntaxOnly --verbatimModuleSyntax --noImplicitOverride"
+# `--typeRoots` at a directory that does not exist is the command-line spelling of tsconfig's
+# `"types": []` (an empty `--types` is refused): with no type roots, tsc loads no ambient
+# `@types/*` from ANY ancestor's node_modules. Without it a node_modules that appears above this
+# repository — one did, at the workspace root — decides whether the CORRECT use of the types
+# compiles, and the compiler's verdict stops being about the types under test.
+M17_TSC_FLAGS="--noEmit --target ES2022 --lib ES2022,DOM --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --strict --erasableSyntaxOnly --verbatimModuleSyntax --noImplicitOverride --typeRoots ./no-ambient-type-roots"
 
 # The local Node declarations go on the command line too: passing files to `tsc` makes it ignore
 # tsconfig.json, so without them `import { WASI } from 'node:wasi'` is an unresolved module and the

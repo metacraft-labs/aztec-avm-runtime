@@ -52,7 +52,7 @@ export L1_FIXTURES
 # over recordings whose transactions can never be re-captured, and folding L2's files into
 # `L1_FIXTURES` would mean an L1 check silently passing over an L2 artefact. `L1_ALL_FIXTURES` is
 # the union, used for the directory-contents comparison alone.
-L2_FIXTURES=(testnet_settled_tx_refblock.json testnet_replay_tx.json)
+L2_FIXTURES=(testnet_settled_tx_refblock.json testnet_replay_tx.json testnet_replay_tx_proof.json)
 export L2_FIXTURES
 
 # L5's is a DIFFERENT KIND OF FIXTURE and it is declared separately for that reason.

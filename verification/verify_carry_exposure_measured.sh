@@ -119,13 +119,22 @@ note "measured: $per_month upstream commit(s) per month land on a carried hunk"
 
 # The four numbers the ledger quotes must be the ones in the measurement. Not
 # "the ledger mentions CMake" — the actual integers.
-for n in "$cmake_files" "$cmake_lines" "$modified" "$total"; do
-  if grep -Fq "$n" "$LEDGER"; then
-    pass "the ledger quotes the measured value $n"
-  else
-    fail "the ledger does not carry the measured value $n"
-  fi
+# Each is matched WHERE the ledger states it, as a whole line or a whole phrase: a bare
+# substring search for "11" or "37" is satisfied by a date, a milestone name or any larger
+# number, and a missing value (an empty string) is satisfied by everything.
+LEDGER_TEXT="$(cat "$LEDGER")"
+for v in "$cmake_files" "$cmake_lines" "$modified" "$total"; do
+  assert_true "the measured value [$v] is a positive integer" \
+    bash -c '[[ "$1" =~ ^[1-9][0-9]*$ ]]' _ "$v"
 done
+assert_contains "the ledger's category table quotes the measured CMake files and lines" \
+  $'\n'"| cmake | $cmake_files | $cmake_lines |"$'\n' $'\n'"$LEDGER_TEXT"$'\n'
+assert_contains "the ledger quotes the measured CMake figure against the spike's estimate" \
+  "**$cmake_files files and $cmake_lines changed lines**" "$LEDGER_TEXT"
+assert_contains "the ledger quotes the measured modified-file count as the conflict surface" \
+  "**$modified files are modified**" "$LEDGER_TEXT"
+assert_contains "the ledger quotes the measured total file count" \
+  "**Size.** $total distinct files," "$LEDGER_TEXT"
 
 # The spike's estimate is named and corrected rather than silently superseded.
 assert_contains "the ledger names the spike's estimate it replaces" \

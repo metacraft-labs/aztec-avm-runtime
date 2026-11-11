@@ -115,7 +115,10 @@ AUTOMINE_COUNT="$(printf '%s\n' "$AUTOMINE_FILES" | grep -c . || true)"
 AUTOMINE_TESTS="$(printf '%s\n' "$AUTOMINE_FILES" | grep -c '\.test\.ts$' || true)"
 assert_ge "the automining sequencer directory exists upstream" 3 "${AUTOMINE_COUNT:-0}"
 assert_eq "claim 1: it contains no test file" "0" "${AUTOMINE_TESTS:-1}"
-assert_true "claim 1 is stated in the family README" grep -q "automine-has-no-tests" "$BLOCK_LOOP"
+# A function because negative control (4) runs it over a README with a claim id removed; a control
+# that greps on its own would prove only that grep works.
+claim_stated() { grep -qF "(Claim id: \`$1\`" "$2"; } # <claim-id> <README>
+assert_true "claim 1 is stated in the family README" claim_stated automine-has-no-tests "$BLOCK_LOOP"
 assert_true "buildEmptyBlock is the untested thing the claim is about" \
   bash -c "at() { ( cd '$FORK_ROOT' && git show \"\$1:\$2\" ) 2>/dev/null; }; at '$CPP' yarn-project/sequencer-client/src/sequencer/automine/automine_sequencer.ts | grep -q 'buildEmptyBlock'"
 
@@ -129,14 +132,14 @@ for anchor_name in cpp ts; do
   assert_eq "claim 2 at $anchor_name: the deadline test is skipped" "1" "${SKIPPED:-0}"
   assert_eq "claim 2 at $anchor_name: and there is no unskipped one" "0" "${RUNNING:-1}"
 done
-assert_true "claim 2 is stated in the family README" grep -q "deadline-test-skipped" "$BLOCK_LOOP"
+assert_true "claim 2 is stated in the family README" claim_stated deadline-test-skipped "$BLOCK_LOOP"
 
 # Claim 3 — the standard block test double emits a constant timestamp.
 HEADER="$(at "$CPP" yarn-project/stdlib/src/rollup/checkpoint_header.ts)"
 assert_ge "checkpoint_header.ts read at the cpp anchor" 100 "$(printf '%s\n' "$HEADER" | grep -c . || true)"
 assert_true "claim 3: CheckpointHeader.random hardcodes Date.now() as the timestamp" \
   str_has_sub "$HEADER" 'timestamp: BigInt(Math.floor(Date.now() / 1000))'
-assert_true "claim 3 is stated in the family README" grep -q "random-header-constant-timestamp" "$BLOCK_LOOP"
+assert_true "claim 3 is stated in the family README" claim_stated random-header-constant-timestamp "$BLOCK_LOOP"
 
 # Claim 4 — TXE's advanceBlocksBy does not advance the clock.
 TXE="$(at "$CPP" yarn-project/txe/src/oracle/txe_oracle_top_level_context.ts)"
@@ -149,7 +152,7 @@ assert_true "claim 4: advanceBlocksBy is a bare loop over mineBlock" \
   str_has_sub "$TXE_FLAT" 'async advanceBlocksBy(blocks: number)'
 TS_MUTATIONS="$(printf '%s\n' "$TXE" | grep -c 'this.nextBlockTimestamp +=\|this.nextBlockTimestamp =' || true)"
 assert_eq "claim 4: nextBlockTimestamp is mutated in exactly one place" "1" "${TS_MUTATIONS:-0}"
-assert_true "claim 4 is stated in the family README" grep -q "txe-advance-blocks-shares-timestamp" "$BLOCK_LOOP"
+assert_true "claim 4 is stated in the family README" claim_stated txe-advance-blocks-shares-timestamp "$BLOCK_LOOP"
 
 # The primitives we DO reuse must exist, or the family is over-claiming in the other direction.
 assert_true "ManualDateProvider exists upstream and is what we reuse" \
@@ -166,7 +169,7 @@ echo "== trace output: the three claims, re-derived from the fork"
 # Claim 1 — no trace artefact of any kind upstream.
 CT_FILES="$( ( cd "$FORK_ROOT" && git ls-tree -r --name-only "$CPP" ) 2>/dev/null | grep -c '\.ct$' || true)"
 assert_eq "claim 1: no .ct artefact anywhere upstream" "0" "${CT_FILES:-1}"
-assert_true "claim 1 is stated in the family README" grep -q "no-ct-artifacts-upstream" "$TRACE"
+assert_true "claim 1 is stated in the family README" claim_stated no-ct-artifacts-upstream "$TRACE"
 
 # Claim 2 — the one per-instruction TypeScript hook carries a name and a gas delta and nothing else.
 SIM="$(at "$TS" yarn-project/simulator/src/public/avm/avm_simulator.ts)"
@@ -175,7 +178,7 @@ assert_true "claim 2: the hook's whole signature is (string, Gas)" \
   str_has_sub "$SIM" 'tallyInstructionFunction = (_b: string, _c: Gas) => {}'
 assert_true "claim 2: it is called once per instruction with a class name" \
   str_has_sub "$SIM" 'tallyInstructionFunction(instruction.constructor.name, gasUsed)'
-assert_true "claim 2 is stated in the family README" grep -q "tally-hook-carries-name-and-gas-only" "$TRACE"
+assert_true "claim 2 is stated in the family README" claim_stated tally-hook-carries-name-and-gas-only "$TRACE"
 
 # Claim 3 — the per-instruction C++ observer is ours, not upstream's.
 if exists_at "$CPP" barretenberg/cpp/src/barretenberg/vm2/simulation/interfaces/execution_observer.hpp; then
@@ -183,7 +186,7 @@ if exists_at "$CPP" barretenberg/cpp/src/barretenberg/vm2/simulation/interfaces/
 else
   pass "claim 3: execution_observer.hpp does not exist at the cpp anchor, so the observer is ours"
 fi
-assert_true "claim 3 is stated in the family README" grep -q "execution-observer-not-upstream" "$TRACE"
+assert_true "claim 3 is stated in the family README" claim_stated execution-observer-not-upstream "$TRACE"
 assert_true "…and M9 is named as the milestone that prepares it upstream" grep -q "M9" "$TRACE"
 
 # The seams that DO exist must exist, or the family is over-claiming.
@@ -199,8 +202,14 @@ assert_true "the family README enumerates each of them and says why it is not a 
 echo "== each family's authored fixtures carry an assertion that cannot be met by an empty artefact"
 assert_true "the trace family's step count is cross-checked against the engine's own tally" \
   grep -q "step count equals the engine" "$TRACE"
-assert_true "the block-loop family asserts world-state roots, not just call sequences" \
-  grep -q "roots" "$BLOCK_LOOP"
+# Each root-bearing fixture row must state a roots assertion, and the family must commit to it;
+# the word "roots" anywhere in the README would also be met by a sentence saying the opposite.
+assert_true "the block-loop family commits every fixture to asserting world-state roots" \
+  grep -qF "Every one of the four asserts **world-state roots**" "$BLOCK_LOOP"
+assert_true "…empty_block_on_idle asserts how the world-state roots advance" \
+  grep -qE '^\| `empty_block_on_idle` \|[^|]*world-state roots advance' "$BLOCK_LOOP"
+assert_true "…deadline_truncates_block asserts the roots equal the pre-transaction roots" \
+  grep -qE '^\| `deadline_truncates_block` \|[^|]*roots equal to the pre-transaction roots' "$BLOCK_LOOP"
 
 # ---------------------------------------------------------------------------
 echo "== negative controls"
@@ -223,19 +232,18 @@ assert_ge "negative control: the same file-suffix probe finds .ts files" 1000 "$
 assert_true "negative control: the existence probe succeeds for a file that is there" \
   exists_at "$CPP" barretenberg/cpp/src/barretenberg/vm2/avm_sim_api.hpp
 
-# (4) A Tier E entry whose claim ids are removed from its README must be caught. Run the same
-#     grep-based assertions against a mutated copy.
+# (4) A Tier E entry whose claim ids are removed from its README must be caught: claim_stated, the
+#     function every "claim N is stated" assertion above uses, over a copy with one id removed.
 cp "$BLOCK_LOOP" "$SCRATCH/block-loop.md"
 python3 - "$SCRATCH/block-loop.md" <<'PY'
 import sys
 p = sys.argv[1]
-open(p, "w").write(open(p).read().replace("automine-has-no-tests", "REMOVED"))
+t = open(p).read()
+assert "automine-has-no-tests" in t
+open(p, "w").write(t.replace("automine-has-no-tests", "REMOVED"))
 PY
-if grep -q "automine-has-no-tests" "$SCRATCH/block-loop.md"; then
-  fail "negative control NOT caught: the claim id survived removal"
-else
-  pass "negative control caught: a removed claim id is detected by the same grep"
-fi
+assert_false "negative control caught: claim_stated rejects a README whose claim id was removed" \
+  claim_stated automine-has-no-tests "$SCRATCH/block-loop.md"
 
 # (5) Tier E must not be able to grow by default, and there are two separate mechanisms for that.
 #     Both are exercised here, on real copies, through the real code paths.
@@ -298,8 +306,9 @@ PY
 
 grow_tier_e 1
 GROWN_E="$(python3 "$PARSER" entries --manifest "$SCRATCH/grown.md" | awk -F'\t' '$2=="E"' | grep -c .)"
-if [ "$GROWN_E" = "2" ]; then
-  fail "negative control NOT caught: one extra Tier E entry did not change the count"
+# Exactly three: a parser that could not read the grown copy reports zero, which is not two either.
+if [ "$GROWN_E" != "3" ]; then
+  fail "negative control NOT caught: one extra Tier E entry gave a Tier E count of [$GROWN_E], not 3"
 else
   pass "negative control caught: one extra Tier E entry breaks this check's exact-count assertion ($GROWN_E)"
 fi
@@ -308,10 +317,15 @@ SMALLEST_OTHER="$(python3 "$PARSER" entries --manifest "$MANIFEST" | awk -F'\t' 
 NEEDED=$(( SMALLEST_OTHER - 2 ))
 note "the smallest non-E tier has $SMALLEST_OTHER entries, so $NEEDED extra E entries reach it"
 grow_tier_e "$NEEDED"
-if python3 "$PARSER" check --repo "$REPO_ROOT" --manifest "$SCRATCH/grown.md" >/dev/null 2>&1; then
+# Rejected BY THE TIER-SIZE RULE: the synthesised entries are otherwise valid, so any other FAIL
+# line would mean the control is measuring something else.
+if GROWN_OUT="$(python3 "$PARSER" check --repo "$REPO_ROOT" --manifest "$SCRATCH/grown.md" 2>&1)"; then
   fail "negative control NOT caught: Tier E grew to $SMALLEST_OTHER entries and the parser accepted it"
+elif [ "$(printf '%s\n' "$GROWN_OUT" | grep -c '^  FAIL ' || true)" = "1" ] &&
+     str_has_line_re "$GROWN_OUT" "^  FAIL manifest: Tier E has $SMALLEST_OTHER entries, not strictly fewer than every other tier"; then
+  pass "negative control caught: Tier E growing to the size of the smallest other tier is rejected by the tier-size rule"
 else
-  pass "negative control caught: Tier E growing to the size of the smallest other tier is rejected"
+  fail "negative control: the grown manifest was rejected, but not (only) by the tier-size rule: $(printf '%s\n' "$GROWN_OUT" | grep '^  FAIL ' | head -3 | tr '\n' ' ')"
 fi
 
 finish

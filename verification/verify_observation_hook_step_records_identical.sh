@@ -100,8 +100,22 @@ assert_true "the observer is injected through Execution's constructor" \
   grep -qE "ExecutionObserverInterface\* execution_observer = nullptr" "$exec_hpp"
 assert_true "and stored as a member, beside the call-stack collector" \
   grep -qE "ExecutionObserverInterface\* execution_observer_ = nullptr;" "$exec_hpp"
-assert_eq "no process global is introduced anywhere by the patch" "0" \
-  "$(grep -cE '^\+.*g_execution_observer' "$M9_OBSERVER_PATCH")"
+# By SHAPE rather than by the spike's variable name: a namespace-scope variable (an added line at
+# column 0 ending in `;` that declares no type, function, alias or constant) or a `static` /
+# `thread_local` variable at any depth. Only the diff is read, not the commit message above it.
+# Shown to find both shapes when they are spliced into a copy of the patch.
+process_globals() { # <patch> -> the added lines that introduce mutable process-wide state
+  awk '/^---$/{d=1} d' "$1" | grep -E '^\+' | grep -vE '^\+\+\+' \
+    | grep -E '^\+[A-Za-z_].*;[[:space:]]*$|^\+[[:space:]]*(static|thread_local)[[:space:]].*;[[:space:]]*$' \
+    | grep -vE '^\+[[:space:]]*(class|struct|enum|union|using|typedef|namespace|template|friend|return|extern "C")[[:space:]]' \
+    | grep -vE '\b(const|constexpr|constinit)\b|\(' || true
+}
+assert_eq "no process global is introduced anywhere by the patch" "" \
+  "$(process_globals "$M9_OBSERVER_PATCH" | tr '\n' ' ' | sed 's/ *$//')"
+pg_ctl="$M9_WORK/observer-patch-with-globals.patch"
+{ cat "$M9_OBSERVER_PATCH"; printf '+ExecutionObserverInterface* current_observer = nullptr;\n+    static std::vector<ExecutionStep> steps_seen;\n'; } >"$pg_ctl"
+assert_eq "control: both shapes are found when spliced into a copy of the patch" "2" \
+  "$(process_globals "$pg_ctl" | grep -c . || true)"
 
 # ---------------------------------------------------------------------------
 # The builds. cmake's status and ninja's asserted SEPARATELY from anything parsed out of either:
@@ -120,7 +134,15 @@ assert_eq "the native build of avm_differential exited 0" "0" "${M9_NATIVE_BUILD
 # A build failure under -Wfatal-errors emits exactly one `fatal error:` per unit and nothing after
 # it, and `grep ' error: '` matches `fatal error:` as a substring — both hazards this campaign has
 # met. So the build logs are asserted on the ABSENCE of any diagnostic at all, anchored.
+# The log is read first as evidence that it is THIS build's: m6_build_log discards a missing
+# file's error, and an absent or empty log has no diagnostics in it either. m6_build ends the log
+# with ninja's status and the configure removed the build directory, so a real one ends
+# `### ninja_rc=0` and records every step of a full build.
 for label in "$M9_WASM_BUILD" "$M9_NATIVE_BUILD"; do
+  assert_eq "the $label log records ninja's own exit status" "### ninja_rc=0" \
+    "$(m6_build_log "$tree" "$label" | tail -1)"
+  assert_ge "…and a full build's worth of steps" 100 \
+    "$(m6_build_log "$tree" "$label" | grep -c '^\[[0-9]*/[0-9]*\] ' || true)"
   assert_eq "no compiler error in the $label log" "0" \
     "$(m6_build_log "$tree" "$label" | grep -cE '(^|[^-a-z])(fatal )?error:' || true)"
 done
@@ -196,10 +218,13 @@ done
 # The streams really are separate, and that is asserted in BOTH directions rather than being a
 # claim about silence: `common/log.cpp` sets bb_log_level = VERBOSE unconditionally under __wasm__
 # and INFO otherwise, so the wasm run logs on fd 2 and the native one does not.
+# Every AVM log line ends in a memory figure, but the FIGURE differs by target: `N/A` under wasm,
+# where the probe has no implementation, and a resident-set size natively (`(mem: 6.29 MiB)`).
+# So the leak is looked for as `(mem: `, which both spellings carry.
 assert_eq "no AVM log line leaked into the native transcript" "0" \
-  "$(grep -c '(mem: N/A)' "$(m9_steps_native)" || true)"
+  "$(grep -c '(mem: ' "$(m9_steps_native)" || true)"
 assert_eq "no AVM log line leaked into the V8 transcript" "0" \
-  "$(grep -c '(mem: N/A)' "$(m9_steps_v8)" || true)"
+  "$(grep -c '(mem: ' "$(m9_steps_v8)" || true)"
 assert_ge "the wasm run's own stderr carries the AVM's log lines" 20 \
   "$(grep -c '(mem: N/A)' "$(m9_steps_v8_err)" || true)"
 

@@ -81,8 +81,13 @@ assert_ge "the resident arm took measurable time" 1 "$RES"
 assert_ge "so did the chatty-batched arm" 1 "$BAT"
 assert_ge "and the interactive drive" 1 "$INT"
 # The interactive drive issued exactly the operations the hint record counted. A drive that issued
-# fewer would be pricing a cheaper transaction than the one being decided about.
+# fewer would be pricing a cheaper transaction than the one being decided about. `XCROSS` is the
+# drive's loop counter over that same record, so it agrees with it by construction; the number that
+# can disagree is how many times the module's DB exports were actually ENTERED, which the host
+# counts at the exports themselves.
+ENTERED="$(m15_key "$OUT" cost.interactive.exportsEntered)"
 assert_eq "the interactive drive issued exactly the DB operations the AVM made" "$OPS" "$XCROSS"
+assert_eq "and the module's DB exports were entered exactly that many times" "$OPS" "$ENTERED"
 assert_ge "which is more than a handful" 12 "$XCROSS"
 
 # ---------------------------------------------------------------------------

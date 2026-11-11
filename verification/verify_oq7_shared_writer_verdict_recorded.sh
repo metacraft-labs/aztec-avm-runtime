@@ -185,7 +185,7 @@ assert_true "the probe worktree carries the pure-Rust writer under a SECOND alia
   str_has_sub "$WEB_TOML" 'codetracer_trace_writer_rs = { path = "../ctf-wt-wasm/codetracer_trace_writer", package = "codetracer_trace_writer" }'
 assert_true "…and its own comment says that alias is NOT what nargo trace uses" \
   str_has_sub "$WEB_TOML" 'It is NOT used'
-assert_true "…while `codetracer_trace_writer` there is STILL the Nim one" \
+assert_true "…while \`codetracer_trace_writer\` there is STILL the Nim one" \
   str_has_sub "$WEB_TOML" 'codetracer_trace_writer = { path = "../ctf-wt-wasm/codetracer_trace_writer_nim", package = "codetracer_trace_writer_nim" }'
 assert_eq "the module the runtime ships, which the join arms drove, is the Nim writer — Path B, kind 2" \
   "2" "$(m26_arm 'd["module"]["twoInstances"]["a"]["writerKind"]')"
@@ -241,7 +241,7 @@ assert_eq "…M25's eleven are untouched" "11" "$(m26_arm 'd["module"]["exports"
 # AND M40's TWO, in a fourth list for the reason this one is in its own: a milestone that appended
 # to another's list would move that milestone's assertion count for a change that is not its.
 assert_eq "…M40's two source-step exports are beside them" "2" "$(m26_arm 'd["module"]["exports"]["sourceStep"]')"
-assert_eq "…and the union is the four lists" "38" "$(m26_arm 'd["module"]["exports"]["all"]')"
+assert_eq "…and the union is the five lists" "39" "$(m26_arm 'd["module"]["exports"]["all"]')"
 # The module REFUSES an empty metadata key, and the refusal does not count as a record.
 assert_eq "an empty metadata key is refused with CT_ERR_BAD_LENGTH" "status:-4" \
   "$(m26_arm 'd["module"]["logEventRefusals"]["emptyKey"]')"

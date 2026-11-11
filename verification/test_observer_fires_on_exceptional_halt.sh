@@ -177,9 +177,22 @@ for label in native v8; do
     "$(m9_field "$t" steps.revert.lastOpcodeIsSentinel)"
   assert_eq "[$label] revert recorded both its instructions" "$M9_STEPS_revert" \
     "$(m9_field "$t" steps.revert.count)"
-  assert_false "[$label] and the AVM did not report an exceptional halt for it" \
-    grep -q "halted via REVERT.*EXCEPTIONAL" "$e"
-  assert_true "[$label] it halted via REVERT" grep -q 'halted via REVERT' "$e"
+  # The halt is read off the AVM's own log line for THIS program's call — identified by the
+  # contract address its step records carry — because the log covers every program in the run,
+  # and a statement about the whole log is a statement about whichever program logged last.
+  # An exceptional halt logs `halted via EXCEPTIONAL_HALT`, never `halted via REVERT…`, so the
+  # absence is asserted on that spelling.
+  assert_file "[$label] the AVM's log for this run is on disk" "$e"
+  rev_addr="$(m9_field "$t" steps.revert.last | grep -oE 'addr=0x[0-9a-f]{64}' | sed 's/^addr=//')"
+  assert_true "[$label] the revert program's contract address is on its step records" test -n "$rev_addr"
+  rev_halts="$(grep -F "Enqueued call to ${rev_addr:-<none>} halted via" "$e" 2>/dev/null || true)"
+  assert_ge "[$label] the AVM logged a halt for the revert program's call" 1 \
+    "$(printf '%s\n' "$rev_halts" | grep -c . || true)"
+  assert_eq "[$label] and the AVM did not report an exceptional halt for it" "0" \
+    "$(printf '%s\n' "$rev_halts" | grep -c 'halted via EXCEPTIONAL_HALT' || true)"
+  assert_eq "[$label] every halt it logged for that call is a REVERT" \
+    "$(printf '%s\n' "$rev_halts" | grep -c . || true)" \
+    "$(printf '%s\n' "$rev_halts" | grep -c 'halted via REVERT' || true)"
 done
 
 # The two exceptional programs' last records agree native versus wasm, field for field.

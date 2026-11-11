@@ -45,6 +45,15 @@ assert_eq "base: TreeRoots has no state_reference_equals" "0" "$(m14_key "$BASE"
 assert_eq "base: MemoryMerkleDB has no update_archive" "0" "$(m14_key "$BASE" update_archive_present)"
 assert_eq "base: and no way to compute a block-0 header hash" "0" \
   "$(m14_key "$BASE" compute_initial_block_header_hash_present)"
+# Each 0 above is a `requires`-expression that did not hold, and a `requires`-expression with a
+# misspelt member or a wrong signature does not hold on ANY tree. The same probe, compiled against
+# the patched tree, must answer 1 for every one of them, or the 0 on the base tree is a statement
+# about the probe rather than about the reference.
+for k in archive_in_tree_roots state_reference_equals_present update_archive_present \
+         compute_initial_block_header_hash_present; do
+  assert_eq "patched: the same probe answers 1 for $k, so its 0 on the base tree discriminates" \
+    "1" "$(m14_key "$EXT" "$k")"
+done
 assert_eq "base: get_tree_roots therefore reports four trees" "4" \
   "$(grep -c '^genesis\..*\.root=' "$BASE")"
 assert_eq "patched: it reports five" "5" "$(grep -c '^genesis\..*\.root=' "$EXT")"

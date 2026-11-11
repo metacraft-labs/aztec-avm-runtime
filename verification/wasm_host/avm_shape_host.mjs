@@ -20,7 +20,9 @@
 // that mapping so the host and the checks cannot disagree about it.
 //
 // THE HOST STILL DOES NOT ENCODE ANYTHING. Every blob crossing into the module was produced by
-// `avm_differential`, that is by upstream's own msgpack packers in C++, and arrives as hex. The
+// `avm_differential`, that is by upstream's own msgpack packers in C++, and arrives as hex. The one
+// exception is `simsnapshot`, which replaces fixed-width payload bytes (a field element, a fixint)
+// inside such a blob and decodes every result back before using it; it writes no structure. The
 // interactive drive issues real crossings of the real interface methods with those real payloads;
 // what it cannot do is re-issue the AVM's own internal writes, because their arguments exist only
 // inside the module. That limit is stated in BOUNDARY-SHAPE.md rather than papered over: the
@@ -31,8 +33,12 @@
 //   shapes <p>        one transaction through both shapes; the fields they must agree on
 //   crossings         the per-op crossing table for every corpus program, from the hints
 //   cost <p> <n>      both shapes timed, interleaved, plus the interactive drive
-//   msgpack <p> <n>   the encode/decode half separated from execution
+//   msgpack <p> <rounds> <n> [decodeRounds]
+//                     the encode/decode half separated from execution, the module's own decode included
 //   block             the seven corpus programs as one block against one world state
+//   snapshot          the host's own setup journal exported and replayed into a fresh handle
+//   simsnapshot <nh> <nf>  the state a SIMULATION wrote, exported and replayed into a second
+//                     module instance (nh/nf: MAX_NOTE_HASHES_PER_TX / MAX_NULLIFIERS_PER_TX)
 //
 // Exit status is 0 on success and non-zero on any failure. Nothing here can turn a failing run
 // into a passing one: every unexpected status throws.
@@ -94,7 +100,7 @@ function simulateResident(name, h) {
   try { status = R.e.avm_simulate(ptr, b.length, h.cdb, h.mdb); } finally { R.free(ptr); }
   const t1 = process.hrtime.bigint();
   R.check(status, `avm_simulate(${name})`);
-  return { raw: R.result(), us: Number((t1 - t0) / 1000n), inputBytes: b.length };
+  return { raw: R.result(), us: Number((t1 - t0) / 1000n), inputBytes: b.length, entry: 'avm_simulate' };
 }
 
 function simulateChattyBatched(name) {
@@ -105,7 +111,7 @@ function simulateChattyBatched(name) {
   try { status = R.e.avm_simulate_with_hinted_dbs(ptr, b.length); } finally { R.free(ptr); }
   const t1 = process.hrtime.bigint();
   R.check(status, `avm_simulate_with_hinted_dbs(${name})`);
-  return { raw: R.result(), us: Number((t1 - t0) / 1000n), inputBytes: b.length };
+  return { raw: R.result(), us: Number((t1 - t0) / 1000n), inputBytes: b.length, entry: 'avm_simulate_with_hinted_dbs' };
 }
 
 // The INTERACTIVE form: issue, one at a time, exactly the multiset of DB operations the hint
@@ -180,6 +186,14 @@ function dump(prefix, raw) {
   line(`${prefix}.noteHashes.count`, r.publicTxEffect.noteHashes.length);
   r.publicTxEffect.noteHashes.forEach((n, i) => line(`${prefix}.noteHashes.${i}`, hexOf(n)));
   line(`${prefix}.dataWrites.count`, r.publicTxEffect.publicDataWrites.length);
+  // The CONTENTS, not only the count: a world-state read that answers wrongly changes what a
+  // program writes and leaves how many writes it makes, its gas and its fee exactly as they were.
+  r.publicTxEffect.publicDataWrites.forEach((w, i) =>
+    line(`${prefix}.dataWrites.${i}`, `${hexOf(w.leafSlot)} ${hexOf(w.value)}`));
+  line(`${prefix}.publicLogs.count`, r.publicTxEffect.publicLogs.length);
+  r.publicTxEffect.publicLogs.forEach((l, i) =>
+    line(`${prefix}.publicLogs.${i}`, `${hexOf(l.contractAddress)} ${l.fields.map((f) => hexOf(f)).join(',')}`));
+  line(`${prefix}.l2ToL1Msgs.count`, r.publicTxEffect.l2ToL1Msgs.length);
   line(`${prefix}.publicInputsPresent`, r.publicInputs ? 1 : 0);
   line(`${prefix}.resultBytes`, raw.length);
   return r;
@@ -200,21 +214,35 @@ try {
     const name = rest[0] ?? 'add';
     line('shapes.program', name);
     line('shapes.abiVersion', String(R.e.avm_abi_version()));
-    const h = seed(name);
-    const res = simulateResident(name, h);
-    dump('resident', res.raw);
-    line('resident.inputBytes', res.inputBytes);
-    line('resident.steps', R.e.avm_steps_count());
-    roots(h.mdb, 'resident.roots');
-    destroy(h);
+    // Each arm runs with every entry into a DB export counted: the resident arm must enter them
+    // (it seeds its world state through them), and the chatty arm must not, because it holds no
+    // world state in the module at all. That is the chatty shape's defining property, so it is
+    // observed on the arm that ran rather than printed as a constant. The ARITY of the entry point
+    // each arm called is read off the export itself: a DB handle is a parameter, and the chatty
+    // entry point has none to take.
+    const DB_EXPORTS = /^avm_(contract|merkle)_db_/;
+    const resRun = R.countCalls(DB_EXPORTS, () => {
+      const h = seed(name);
+      const res = simulateResident(name, h);
+      dump('resident', res.raw);
+      line('resident.inputBytes', res.inputBytes);
+      line('resident.steps', R.e.avm_steps_count());
+      roots(h.mdb, 'resident.roots');
+      destroy(h);
+      return res;
+    });
 
-    const cha = simulateChattyBatched(name);
+    const chaRun = R.countCalls(DB_EXPORTS, () => simulateChattyBatched(name));
+    const cha = chaRun.value;
     dump('chatty', cha.raw);
     line('chatty.inputBytes', cha.inputBytes);
     line('chatty.steps', R.e.avm_steps_count());
-    // The chatty arm holds no world state in the module, so there are no resident roots to read.
-    // That is the shape's defining property and it is stated as a value rather than by omission.
-    line('chatty.residentTreesPresent', 0);
+    line('shapes.residentEntry', resRun.value.entry);
+    line('shapes.residentEntryArity', R.e[resRun.value.entry].length);
+    line('shapes.residentDbExportCalls', resRun.calls);
+    line('shapes.chattyEntry', cha.entry);
+    line('shapes.chattyEntryArity', R.e[cha.entry].length);
+    line('shapes.chattyDbExportCalls', chaRun.calls);
     line('shapes.done', '1');
   } else if (mode === 'crossings') {
     const names = programs();
@@ -230,6 +258,14 @@ try {
         if (n > 0) line(`crossings.${name}.op.${op.name}`, n);
       }
       line(`crossings.${name}.unmappedHintCategories`, t.unmapped.join(',') || '-');
+      // The RESIDENT shape's own crossings for the same transaction, counted at the exports: every
+      // entry into the module from handing it the input to holding the decoded result. The hint
+      // tally above is upstream's record of the chatty shape; this is what the shape M15 ships
+      // actually costs, measured on the module this milestone built.
+      const h = seed(name);
+      const resident = R.countCalls(/^avm_/, () => simulateResident(name, h));
+      destroy(h);
+      line(`crossings.${name}.residentBoundaryCalls`, resident.calls);
     }
     line('crossings.done', '1');
   } else if (mode === 'cost') {
@@ -255,6 +291,13 @@ try {
         line('cost.interactive.replyBytes', d.replyBytes);
       }
     }
+    // `crossings` above is the drive's own loop counter over the hint table, so it equals the
+    // table's total by construction. What the module actually saw is counted on one further,
+    // untimed drive: every entry into a DB export, which is what a chatty shape pays for.
+    const hc = seed(name);
+    const enteredDrive = R.countCalls(/^avm_(contract|merkle)_db_/, () => driveInteractive(name, hc, table));
+    destroy(hc);
+    line('cost.interactive.exportsEntered', enteredDrive.calls);
     resident.forEach((v, i) => line(`cost.resident.us.${i}`, v));
     batched.forEach((v, i) => line(`cost.chattyBatched.us.${i}`, v));
     interactive.forEach((v, i) => line(`cost.chattyInteractive.us.${i}`, v));
@@ -320,6 +363,97 @@ try {
       }
       line(`msgpack.transport.${label}.bytes`, b.length);
       line(`msgpack.transport.${label}.us50`, median(ts));
+    }
+
+    // THE MODULE'S OWN DECODE of its input, separated from the simulation without a new export.
+    //
+    // Both entry points decode with upstream's `AvmFastSimulationInputs::from` /
+    // `AvmProvingInputs::from`: msgpack-c parses the whole buffer, then the structs are converted
+    // field by field in declaration order, which is also the order they were packed in. A field
+    // element's conversion REJECTS a non-canonical value (`field::msgpack_unpack`, "value >=
+    // modulus") by throwing. So the payload with its LAST field element set to 0xff..ff is parsed
+    // in full, converted up to that last field, and then refused before any simulation starts —
+    // and the entry point's wall time is the decode, plus an error path that is timed on its own
+    // with a one-byte nil payload (refused at the first conversion, nothing to parse).
+    //
+    // That the refusal came from the field that was corrupted is read back from the module's
+    // error message, not assumed; that conversion really progressed through the buffer is shown
+    // by corrupting the FIRST field element instead, which must be refused sooner; and the bytes
+    // after the last field element, which this does not convert, are reported.
+    //
+    // The field elements are found without a second reading of the wire format: the decoder
+    // returns every `bin` as a VIEW into the buffer it decoded, so a 32-byte bin's `byteOffset` is
+    // its position in the payload.
+    const ffOffsets = (b) => {
+      const offs = [];
+      const walk = (v) => {
+        if (v instanceof Uint8Array) {
+          if (v.buffer !== b.buffer) throw new Error('a decoded bin is not a view into the payload');
+          if (v.length === 32) offs.push(v.byteOffset - b.byteOffset);
+        } else if (Array.isArray(v)) v.forEach(walk);
+        else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+      };
+      walk(unpack(b));
+      return offs.sort((x, y) => x - y);
+    };
+    const corruptAt = (b, off) => { const c = b.slice(); c.fill(0xff, off, off + 32); return c; };
+    const hd = seed(name);
+    const entryFor = {
+      fast: (p, n) => R.e.avm_simulate(p, n, hd.cdb, hd.mdb),
+      proving: (p, n) => R.e.avm_simulate_with_hinted_dbs(p, n),
+    };
+    const refused = (label, bytes) => {
+      const ptr = R.put(bytes);
+      let st;
+      const t0 = process.hrtime.bigint();
+      try { st = entryFor[label](ptr, bytes.length); } finally { R.free(ptr); }
+      const t1 = process.hrtime.bigint();
+      if (st === 0) throw new Error(`${label}: a payload that must be refused was simulated`);
+      return { us: Number(t1 - t0) / 1000, message: R.errorMessage() ?? '' };
+    };
+    const decodeRounds = Number(rest[3] ?? 25);
+    const warm = Math.min(5, Math.floor(decodeRounds / 5));
+    line('msgpack.moduleDecode.rounds', decodeRounds);
+    line('msgpack.moduleDecode.warmupRounds', warm);
+    const payloads = {};
+    for (const [label, b] of [['fast', fast], ['proving', proving]]) {
+      const offs = ffOffsets(b);
+      if (offs.length < 2) throw new Error(`${label}: fewer than two field elements in the payload`);
+      payloads[label] = { b, last: corruptAt(b, offs.at(-1)), first: corruptAt(b, offs[0]) };
+      line(`msgpack.moduleDecode.${label}.fieldElements`, offs.length);
+      line(`msgpack.moduleDecode.${label}.unconvertedTailBytes`, b.length - offs.at(-1) - 32);
+    }
+    const series = {};
+    const push = (k, v) => (series[k] ??= []).push(v);
+    const messages = {};
+    for (let r = 0; r < decodeRounds; r++) {
+      // Interleaved, every arm in every round, so load that comes and goes lands on all of them.
+      for (const label of ['fast', 'proving']) {
+        const x = payloads[label];
+        const last = refused(label, x.last);
+        const first = refused(label, x.first);
+        const nil = refused(label, new Uint8Array([0xc0]));
+        const t0 = process.hrtime.bigint();
+        unpack(x.b);
+        const host = Number(process.hrtime.bigint() - t0) / 1000;
+        if (r === 0) { messages[`${label}.last`] = last.message; messages[`${label}.nil`] = nil.message; }
+        if (r >= warm) {
+          push(`${label}.last`, last.us); push(`${label}.first`, first.us);
+          push(`${label}.nil`, nil.us); push(`${label}.hostDecode`, host);
+        }
+      }
+      // The two simulations the decode is a part of, on the same payloads intact.
+      const hs = seed(name);
+      const sr = simulateResident(name, hs);
+      destroy(hs);
+      const sc = simulateChattyBatched(name);
+      if (r >= warm) { push('fast.simulate', sr.us); push('proving.simulate', sc.us); }
+    }
+    destroy(hd);
+    for (const [k, v] of Object.entries(messages)) line(`msgpack.moduleDecode.${k}.message`, JSON.stringify(v));
+    for (const [k, v] of Object.entries(series)) {
+      line(`msgpack.moduleDecode.${k}.samples`, v.length);
+      line(`msgpack.moduleDecode.${k}.medianUs`, median(v).toFixed(1));
     }
     line('msgpack.done', '1');
   } else if (mode === 'block') {
@@ -478,8 +612,199 @@ try {
       line(`snapshot.moved.${k}`, hexOf(freshBefore[k].root) === hexOf(after[k].root) ? 0 : 1);
     }
     R.e.avm_merkle_db_destroy(fresh);
+
+    // TWO CONTROLS on the replay, because a match between two DBs fed the same bytes by the same
+    // module is also what a module that ignored its payloads would produce. Replayed with the FIRST
+    // entry's payload EXCHANGED with the next same-kind entry's — the same leaves, the same ops, in a
+    // different order, so no leaf is inserted twice — and replayed with the first entry DROPPED,
+    // the roots must no longer match the export.
+    const replayMismatches = (entries) => {
+      const h = R.e.avm_merkle_db_create();
+      for (const e of entries) {
+        const entry = OPS.find((o) => o.name === e.op);
+        R.callWithArgs(R.e[entry.exp], e.op, h, e.bytes);
+      }
+      const t = R.callNoArgs(R.e.avm_merkle_db_get_tree_roots, 'get_tree_roots', h);
+      R.e.avm_merkle_db_destroy(h);
+      return Object.keys(before).filter((k) => hexOf(before[k].root) !== hexOf(t[k].root)
+        || String(before[k].nextAvailableLeafIndex) !== String(t[k].nextAvailableLeafIndex)).length;
+    };
+    const nextSame = journal.findIndex((e, i) => i > 0 && e.op === journal[0].op);
+    if (nextSame < 0) throw new Error('the journal has no second entry of its first entry\'s kind');
+    const substituted = journal.map((e, i) => (i === 0 ? { op: e.op, bytes: journal[nextSame].bytes }
+      : i === nextSame ? { op: e.op, bytes: journal[0].bytes } : e));
+    line('snapshot.control.substituted.mismatchedTrees', replayMismatches(substituted));
+    line('snapshot.control.dropped.mismatchedTrees', replayMismatches(journal.slice(1)));
     R.e.avm_merkle_db_destroy(mdb);
     line('snapshot.done', '1');
+  } else if (mode === 'simsnapshot') {
+    // THE STATE A SIMULATION WROTE, EXPORTED AND IMPORTED INTO A SECOND MODULE INSTANCE.
+    //
+    // `snapshot` above carries the host's OWN setup operations. This mode carries what the AVM
+    // wrote inside `avm_simulate`, which never crosses the boundary as DB calls: the resident DB is
+    // in the module and the AVM drives it directly. What DOES cross is the transaction's own
+    // record of those writes — `TxSimulationResult.publicTxEffect` — and upstream's `MerkleDB`
+    // (vm2/simulation/gadgets/concrete_dbs.cpp) turns each entry of it into exactly one raw-DB call:
+    //
+    //   every nullifier        -> insert_indexed_leaves_nullifier_tree(NullifierLeafValue)
+    //   every note hash        -> append_leaves(NOTE_HASH_TREE, [unique note hash])
+    //   every public data write-> insert_indexed_leaves_public_data_tree(PublicDataLeafValue)
+    //   and at the end         -> pad_tree(NOTE_HASH_TREE,  MAX_NOTE_HASHES_PER_TX - #note hashes)
+    //                             pad_tree(NULLIFIER_TREE, MAX_NULLIFIERS_PER_TX  - #nullifiers)
+    //
+    // So the export is the setup journal followed by those calls, and the import replays it into a
+    // handle in a SECOND, separately instantiated module — separate linear memory, nothing shared
+    // with the instance that simulated. The claim checked is that the imported roots equal the
+    // simulating instance's END roots, which nothing in this construction reads: the two
+    // MAX_*_PER_TX constants come from the caller (read out of upstream's aztec_constants.hpp),
+    // never from the end roots' sizes.
+    //
+    // THE HOST STILL DOES NOT ENCODE A SCHEMA. Each call's argument is an upstream-packed blob from
+    // `avm_differential` with its fixed-width payload bytes replaced: a 32-byte field element
+    // inside a `bin8(32)`, or a positive-fixint tree id / count. The template's layout is checked
+    // byte-for-byte before the splice, and every spliced blob is decoded back and compared with the
+    // values that were meant to go in, so a splice that wrote the wrong bytes is an exception here
+    // rather than a mismatch the checks would have to interpret.
+    const maxNoteHashes = Number(rest[0]);
+    const maxNullifiers = Number(rest[1]);
+    if (!Number.isInteger(maxNoteHashes) || !Number.isInteger(maxNullifiers)
+        || maxNoteHashes <= 0 || maxNullifiers <= 0 || maxNoteHashes > 127 || maxNullifiers > 127) {
+      throw new Error(`simsnapshot needs MAX_NOTE_HASHES_PER_TX and MAX_NULLIFIERS_PER_TX (got ${rest[0]} ${rest[1]})`);
+    }
+    const NULLIFIER_TREE = 0;
+    const NOTE_HASH_TREE = 1;
+    const expectBytes = (b, at, want, what) => {
+      for (let i = 0; i < want.length; i++) {
+        if (b[at + i] !== want[i]) throw new Error(`${what}: template byte ${at + i} is ${b[at + i]}, expected ${want[i]}`);
+      }
+    };
+    const ascii = (t) => [...t].map((c) => c.charCodeAt(0));
+    const ff = (v, what) => {
+      if (!(v instanceof Uint8Array) || v.length !== 32) throw new Error(`${what}: not a 32-byte field element`);
+      return v;
+    };
+    const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+    const tNull = blob('reactorInputs.args.nullifierLeaf');      // {nullifier: bin8(32)}
+    const tData = blob('reactorInputs.args.publicDataLeaf');     // {slot: bin8(32), value: bin8(32)}
+    const tAppend = blob('reactorInputs.args.appendLeaves');     // [treeId, [bin8(32)]]
+    const tPad = blob('reactorInputs.args.padTree');             // [treeId, count]
+    expectBytes(tNull, 0, [0x81, 0xa9, ...ascii('nullifier'), 0xc4, 0x20], 'nullifierLeaf');
+    if (tNull.length !== 45) throw new Error(`nullifierLeaf template is ${tNull.length} bytes, expected 45`);
+    expectBytes(tData, 0, [0x82, 0xa4, ...ascii('slot'), 0xc4, 0x20], 'publicDataLeaf');
+    expectBytes(tData, 40, [0xa5, ...ascii('value'), 0xc4, 0x20], 'publicDataLeaf');
+    if (tData.length !== 80) throw new Error(`publicDataLeaf template is ${tData.length} bytes, expected 80`);
+    expectBytes(tAppend, 0, [0x92, NOTE_HASH_TREE, 0x91, 0xc4, 0x20], 'appendLeaves');
+    if (tAppend.length !== 37) throw new Error(`appendLeaves template is ${tAppend.length} bytes, expected 37`);
+    expectBytes(tPad, 0, [0x92], 'padTree');
+    if (tPad.length !== 3 || tPad[1] > 0x7f || tPad[2] > 0x7f) throw new Error('padTree template is not [fixint, fixint]');
+
+    const nullifierArg = (v) => {
+      const b = tNull.slice(); b.set(ff(v, 'nullifier'), 13);
+      if (!same(unpack(b).nullifier, v)) throw new Error('nullifier splice did not decode back');
+      return { op: 'merkle.insert_indexed_leaves_nullifier_tree', bytes: b };
+    };
+    const dataArg = (slot, value) => {
+      const b = tData.slice(); b.set(ff(slot, 'slot'), 8); b.set(ff(value, 'value'), 48);
+      const d = unpack(b);
+      if (!same(d.slot, slot) || !same(d.value, value)) throw new Error('public data splice did not decode back');
+      return { op: 'merkle.insert_indexed_leaves_public_data_tree', bytes: b };
+    };
+    const appendArg = (v) => {
+      const b = tAppend.slice(); b.set(ff(v, 'note hash'), 5);
+      const d = unpack(b);
+      if (d[0] !== NOTE_HASH_TREE || d[1].length !== 1 || !same(d[1][0], v)) throw new Error('append splice did not decode back');
+      return { op: 'merkle.append_leaves', bytes: b };
+    };
+    const padArg = (tree, n) => {
+      if (!Number.isInteger(n) || n < 0 || n > 0x7f) throw new Error(`pad count ${n} is not a positive fixint`);
+      const b = tPad.slice(); b[1] = tree; b[2] = n;
+      const d = unpack(b);
+      if (d[0] !== tree || Number(d[1]) !== n) throw new Error('pad splice did not decode back');
+      return { op: 'merkle.pad_tree', bytes: b };
+    };
+
+    // The importing module: a second instance of the same binary. Nothing it holds was produced by
+    // the instance that simulated.
+    const R2 = await instantiateReactor(wasmPath);
+    const replayRoots = (entries) => {
+      const h = R2.e.avm_merkle_db_create();
+      if (h === 0) throw new Error('avm_merkle_db_create returned 0 in the importing instance');
+      for (const e of entries) {
+        const entry = OPS.find((o) => o.name === e.op);
+        if (!entry) throw new Error(`the journal names an op this host does not know: ${e.op}`);
+        R2.callWithArgs(R2.e[entry.exp], e.op, h, e.bytes);
+      }
+      const t = R2.callNoArgs(R2.e.avm_merkle_db_get_tree_roots, 'get_tree_roots', h);
+      R2.e.avm_merkle_db_destroy(h);
+      return t;
+    };
+    const mismatches = (want, got) => Object.keys(want).filter((k) => hexOf(want[k].root) !== hexOf(got[k].root)
+      || String(want[k].nextAvailableLeafIndex) !== String(got[k].nextAvailableLeafIndex));
+    const fmt = (v) => `${hexOf(v.root)} size=${v.nextAvailableLeafIndex}`;
+
+    const names = programs();
+    line('simsnapshot.programs.count', names.length);
+    line('simsnapshot.maxNoteHashes', maxNoteHashes);
+    line('simsnapshot.maxNullifiers', maxNullifiers);
+    for (const name of names) {
+      const P = `simsnapshot.${name}`;
+      const setup = [
+        { op: 'merkle.insert_indexed_leaves_nullifier_tree', bytes: blob(`reactorInputs.${name}.setup.nullifier`) },
+        { op: 'merkle.insert_indexed_leaves_public_data_tree', bytes: blob(`reactorInputs.${name}.setup.publicdata`) },
+      ];
+      const h = seed(name);
+      const setupRoots = R.callNoArgs(R.e.avm_merkle_db_get_tree_roots, 'get_tree_roots', h.mdb);
+      const res = simulateResident(name, h);
+      const endRoots = R.callNoArgs(R.e.avm_merkle_db_get_tree_roots, 'get_tree_roots', h.mdb);
+      destroy(h);
+      const fx = unpack(res.raw).publicTxEffect;
+      line(`${P}.revertCode`, unpack(res.raw).revertCode);
+      const sim = [];
+      for (const n of fx.nullifiers) sim.push(nullifierArg(n));
+      for (const n of fx.noteHashes) sim.push(appendArg(n));
+      for (const w of fx.publicDataWrites) sim.push(dataArg(w.leafSlot, w.value));
+      sim.push(padArg(NOTE_HASH_TREE, maxNoteHashes - fx.noteHashes.length));
+      sim.push(padArg(NULLIFIER_TREE, maxNullifiers - fx.nullifiers.length));
+      line(`${P}.effect.nullifiers`, fx.nullifiers.length);
+      line(`${P}.effect.noteHashes`, fx.noteHashes.length);
+      line(`${P}.effect.publicDataWrites`, fx.publicDataWrites.length);
+      line(`${P}.journal.setupEntries`, setup.length);
+      line(`${P}.journal.simulationEntries`, sim.length);
+      line(`${P}.journal.bytes`, [...setup, ...sim].reduce((a, e) => a + e.bytes.length, 0));
+      for (const k of Object.keys(endRoots)) {
+        line(`${P}.setup.${k}`, fmt(setupRoots[k]));
+        line(`${P}.end.${k}`, fmt(endRoots[k]));
+      }
+      line(`${P}.treesMovedBySimulation`, mismatches(setupRoots, endRoots).length);
+
+      const imported = replayRoots([...setup, ...sim]);
+      for (const k of Object.keys(imported)) line(`${P}.imported.${k}`, fmt(imported[k]));
+      line(`${P}.trees`, Object.keys(endRoots).length);
+      line(`${P}.imported.mismatchedTrees`, mismatches(endRoots, imported).length);
+
+      // Controls. Each changes the journal in one place and must leave some tree away from the
+      // END roots: the setup alone (the simulation's writes not carried at all), the simulation's
+      // LAST state-writing entry dropped, and its first state-writing entry's payload perturbed in
+      // its lowest byte.
+      line(`${P}.control.setupOnly.mismatchedTrees`, mismatches(endRoots, replayRoots(setup)).length);
+      const writes = sim.filter((e) => e.op !== 'merkle.pad_tree');
+      line(`${P}.simulationWrites`, writes.length);
+      if (writes.length > 0) {
+        const last = sim.indexOf(writes[writes.length - 1]);
+        line(`${P}.control.droppedWrite.mismatchedTrees`,
+          mismatches(endRoots, replayRoots([...setup, ...sim.filter((_, i) => i !== last)])).length);
+        const first = sim.indexOf(writes[0]);
+        const p = sim[first].bytes.slice();
+        p[p.length - 1] ^= 0x01;
+        line(`${P}.control.perturbedWrite.mismatchedTrees`,
+          mismatches(endRoots, replayRoots([...setup, ...sim.map((e, i) => (i === first ? { op: e.op, bytes: p } : e))])).length);
+      }
+      // And the padding is load-bearing too: without it the two indexed/append trees end short.
+      line(`${P}.control.unpadded.mismatchedTrees`,
+        mismatches(endRoots, replayRoots([...setup, ...sim.filter((e) => e.op !== 'merkle.pad_tree')])).length);
+    }
+    line('simsnapshot.importingInstanceOwnedAllocations', R2.owned.size);
+    line('simsnapshot.done', '1');
   } else {
     console.error(`unknown mode: ${mode}`);
     process.exit(2);

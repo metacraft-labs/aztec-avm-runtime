@@ -47,12 +47,18 @@ ADDRESS[31] = 0x2a;
 export const EXPECTED_STEPS = [
   // The start step, which Path B emits and Path A does not. Both writers place it at the SOURCE
   // path's entry line; a check comparing per-step positions must therefore compare the tail.
-  { path: SOURCE, line: 1, column: null, from: 'start' },
+  //
+  // SOURCE is never interned with a table: `ct_writer_open` hands it to `start`, which is its first
+  // mention. A column-aware writer decides a path's table at its first mention and gives an
+  // untabled one the conventional table (`internal-files.md`, "paths.dat Layout A"), so every step
+  // on SOURCE sits at a real line's start -- column 1, the same as a line-only step on a tabled
+  // path -- and not at "no column".
+  { path: SOURCE, line: 1, column: 1, from: 'start' },
   { path: INTERNED_PATH, line: 2, column: 3, from: 'ct_ingest' },
   { path: INTERNED_PATH, line: 3, column: 4, from: 'ct_ingest' },
   { path: INTERNED_PATH, line: 4, column: 5, from: 'ct_ingest' },
   { path: INTERNED_PATH, line: 5, column: 1, from: 'ct_ingest (line only)' },
-  { path: SOURCE, line: 200, column: null, from: 'ct_step, no position: the rung-3 fallback' },
+  { path: SOURCE, line: 200, column: 1, from: 'ct_step, no position: the rung-3 fallback' },
   { path: INTERNED_PATH, line: 5, column: 9, from: 'ct_source_step' },
   { path: INTERNED_PATH, line: 6, column: 1, from: 'ct_source_step (line only)' },
 ];
@@ -63,11 +69,20 @@ export const DRIVEN_STEP_COUNT = 7;
 /**
  * Drive one instantiated module. `x` is its exports object.
  *
+ * `options.compactThreshold` is CCP-6's opt-in, forwarded to `ct_writer_set_compact_threshold`. It
+ * DEFAULTS TO ZERO AND ZERO IS A CALL, not a skipped one: the export is driven on every run of
+ * every arm, so a module that stopped serving it fails here rather than in a host, and the
+ * container the default run produces is still byte-for-byte the one this driver produced before the
+ * export existed — `verify_compact_profile_emission_is_opt_in` measures exactly that. A NON-ZERO
+ * value asks for container version 6, profile 1, which the deployed replay engine named by
+ * BlockTracer's `client/hydrate/engine-pin.txt` cannot read; no check in this repository passes one
+ * except the one whose subject it is.
+ *
  * Returns `{ report, container }`. Throws on any refusal, with the module's own error text, so a
  * caller never has to decide whether an empty container means "nothing happened" or "something
  * failed".
  */
-export function driveWriter(x) {
+export function driveWriter(x, options = {}) {
   const mem = () => new Uint8Array(x.memory.buffer);
   const view = () => new DataView(x.memory.buffer);
 
@@ -111,6 +126,12 @@ export function driveWriter(x) {
     x.ct_writer_open(pProgram, nProgram, pRec, nRec, pSource, nSource, pWork, nWork, 1),
     'ct_writer_open',
   );
+
+  // CCP-6's opt-in, and the only act in this tree that can make a container compact. `0n` is the
+  // default and leaves the writer exactly as its constructor built it, so the call is a no-op the
+  // export's presence can still be measured through.
+  const compactThreshold = BigInt(options.compactThreshold ?? 0);
+  must(x.ct_writer_set_compact_threshold(compactThreshold), 'ct_writer_set_compact_threshold');
 
   // -- an interned path with line lengths ---------------------------------------------------------
   const [pPath, nPath] = push(INTERNED_PATH);
@@ -227,6 +248,16 @@ export function driveWriter(x) {
   const container = mem().slice(ptr, ptr + len);
 
   report.containerBytes = len;
+  // THE PROFILE IS READ OUT OF THE CONTAINER'S OWN BYTES, NOT OUT OF WHAT WAS ASKED FOR.
+  //
+  // `ctfs-container.md` §1: the five-byte magic `C0 DE 72 AC E2`, then the version at offset 5.
+  // Version 6 is the only one that carries a profile byte, at offset 16 (`0` full, `1` compact);
+  // an older container has no such byte, so the field is `null` rather than a `0` that would read
+  // as "full profile, stated by the container" when the container states nothing.
+  report.compactThreshold = String(compactThreshold);
+  report.containerVersion = len > 5 ? container[5] : null;
+  report.containerProfile =
+    report.containerVersion === 6 && len > 16 ? container[16] : null;
   report.stepsPositioned = String(x.ct_steps_positioned());
   report.stepsUnpositioned = String(x.ct_steps_unpositioned());
   report.columnsRequested = x.ct_columns_requested();

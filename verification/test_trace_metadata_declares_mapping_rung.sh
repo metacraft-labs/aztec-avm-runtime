@@ -96,7 +96,12 @@ assert_eq "M25 adds eleven, in their own list" "11" "$(m25_arm 'd["surface"]["so
 # would move an assertion count for a change that is not M24's. `ct_source_step` and its counter are
 # what a Noir private frame's step is written through — see `BOTH-HALVES.md` §3.
 assert_eq "M40 adds two, in their own list" "2" "$(m25_arm 'd["surface"]["sourceStepExports"]')"
-assert_eq "…and the union is exactly the four lists" "38" "$(m25_arm 'd["surface"]["allRequiredExports"]')"
+assert_eq "…and the union is exactly the five lists" "39" "$(m25_arm 'd["surface"]["allRequiredExports"]')"
+# CCP-6 ADDS ONE, IN A FIFTH LIST, for the reason the third and fourth exist.
+# `ct_writer_set_compact_threshold` is the opt-in for `ctfs-container.md` §1e's compact profile and
+# is OFF unless a caller passes a non-zero ceiling; `verify_compact_profile_emission_is_opt_in`
+# measures that the default container is byte-identical to the one this module produced before the
+# export existed, and names `client/hydrate/engine-pin.txt` as where the engine coupling is governed.
 assert_eq "every one of the thirty-six is present in the built module" "0" \
   "$(m25_arm 'len(d["surface"]["missingFromModule"])')"
 # THE RESIDUE IS PRINTED, NOT COUNTED. A module export no list names is a finding — it is either a
@@ -114,7 +119,7 @@ UNEXPECTED_EXPORTS="$(m25_arm 'd["surface"]["unlistedExports"]' | tr -c 'A-Za-z0
   | tr ' ' '\n' | grep -v '^$' | grep -v '^rust_zstd_wasm_shim_' | tr '\n' ' ' | sed 's/ *$//')"
 assert_eq "…and every export the two lists do not name is zstd-sys's wasm shim, by name" \
   "" "$UNEXPECTED_EXPORTS"
-# The ABI's own thirty-eight, plus however many of the shim's the compressor brought. Stated as a
+# The ABI's own thirty-nine, plus however many of the shim's the compressor brought. Stated as a
 # sum rather than as one number, so the two move independently: an ABI function lost still fails
 # here even if a shim symbol arrives in the same build.
 SHIM_EXPORTS="$(m25_arm 'd["surface"]["unlistedExports"]' | grep -o 'rust_zstd_wasm_shim_' | grep -c . || true)"

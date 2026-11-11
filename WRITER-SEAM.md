@@ -12,7 +12,7 @@ milestone's prose.*
 | the seam | none — no `[features]`, no `cfg`, `CtfsTraceWriter` named at the type level in two places | `ct-writer` has `path-a` and `path-b` (**the default since §11**), and nothing outside `backend_*.rs` names a concrete writer |
 | `ct_writer_kind()` | a literal `1` | `ActiveBackend::kind()` — the two builds disagree, which is what makes it a measurement |
 | the writer's source | one crate from `pins.json`'s `trace_format` anchor | that, plus Nim source from a NEW `trace_format_nim_writer` anchor, materialised and cross-compiled by `ct-writer/build.rs` |
-| the ABI | thirty-eight functions | thirty-eight functions, unchanged, served by both backends |
+| the ABI | thirty-eight functions | thirty-eight functions, unchanged, served by both backends (**thirty-nine since CCP-6**, which added `ct_writer_set_compact_threshold` to both — §16) |
 | the declared path | a label the host recorded without comparing it to anything | compared against `ct_writer_kind()` in `CtWriter`'s constructor; a disagreement is refused (§12) |
 
 **The default is Path B — the Nim writer — since §11.** It stayed Path A through three measured
@@ -31,6 +31,7 @@ sweep that accounts for it. Path A is still built, for the differential checks.
 | instantiates against a literal `{}` | yes | yes |
 | container from the shared driver | 176,128 bytes | 143,360 bytes |
 | wasm exports | **47** = 38 ABI + `memory` + 8 compressor shim | **39** = 38 ABI + `memory` |
+| wasm exports, since CCP-6 | **48** = 39 ABI + `memory` + 8 compressor shim | **40** = 39 ABI + `memory` |
 | `ct_writer_kind()` | 1 | 2 |
 
 **The size figure is stated without a comparison, deliberately.** Seven distinct module shapes have
@@ -114,21 +115,24 @@ directory and rebuilding from scratch produced a **byte-identical module**
 
 ---
 
-## 4. All thirty-eight ABI functions, served
+## 4. All thirty-nine ABI functions, served
 
-**Thirty-eight, counted three ways and compared AS SETS.** `grep -c 'pub extern "C" fn'` gives
-**26** — twelve of the thirty-eight are `pub unsafe extern "C" fn` and that needle cannot see them,
+**Thirty-nine, counted three ways and compared AS SETS.** `grep -c 'pub extern "C" fn'` gives
+**26** — twelve of the thirty-nine are `pub unsafe extern "C" fn` and that needle cannot see them,
 which is where the wrong figure came from. Measured by `verify_all_abi_functions_served`:
 
-- `#[unsafe(no_mangle)]` in `ct-writer/src/lib.rs`: **38**
-- `ct-host/src/abi.ts`'s four lists, 19 + 11 + 6 + 2: **38**
-- both modules' export tables, minus `memory`: **38**, and all three sets are EQUAL
+- `#[unsafe(no_mangle)]` in `ct-writer/src/lib.rs`: **39**
+- `ct-host/src/abi.ts`'s five lists, 19 + 11 + 6 + 2 + 1: **39**
+- both modules' export tables, minus `memory`: **39**, and all three sets are EQUAL
 
-**None is unserved.** Every one of the thirty-eight is exported by BOTH modules and CALLED by
+**It was thirty-eight through M41 and became thirty-nine at CCP-6** (§16), whose one addition sits
+in a FIFTH `abi.ts` list so that no earlier milestone's count moved for a change that is not its.
+
+**None is unserved.** Every one of the thirty-nine is exported by BOTH modules and CALLED by
 `verification/ct_writer_drive_core.mjs` on the way to a container — an export table is a promise
 and a call is the evidence.
 
-Two of the thirty-eight are served with a behavioural difference rather than an absence, and both
+Two of the thirty-nine are served with a behavioural difference rather than an absence, and both
 are named here because "served" is not the same as "identical":
 
 - **`ct_writer_open`'s `recording_id` argument.** Path A accepts an empty one and lets the writer
@@ -1047,3 +1051,248 @@ figures conformed: m24's OQ-6 benchmark re-ran because its stamp hashes `writer.
 unmoved); and the class and its message add **0.23–0.24 KB** gzipped to every entry that can
 construct a writer, re-derived in `BROWSER-PACKAGING.md`, `WORKER-NODE.md`, `DEV-WALLET.md`,
 `LOCAL-HISTORY.md` and `PRIVATE-EXECUTION.md` (m27, m32, m34, m35, m36). None of those moved a count.
+
+---
+
+## 13. BOTH TRACE-FORMAT ANCHORS ON THE `dev` TIPS — what the move surfaced, and the sweep
+
+On 2026-10-02 `trace_format` moved `da76d8493b → 051a298722` and both Nim roles moved
+`b2cc6fd885 → f22e84710f`, each the tip of its repository's `dev` (`pins.json` history). The
+owners' four behaviour changes were the reason; what THIS repository measured is below, every item.
+
+| | Path A (`--features path-a`) | Path B (the default) |
+|---|---:|---:|
+| bytes | 480,600 → **464,904** | 743,420 → **776,323** |
+| sha256 (first 8) | — | `1eba4de0` → `ad57a80e` |
+| wasm imports | 0 | **0** |
+| exports | 47 | **39** |
+
+**Two defects on this side, both the writer being right.**
+
+- **`start` opens the recording now, and two callers here opened it too.** At `f22e84710f` the Nim
+  writer's `trace_writer_start` interns `<toplevel>`, opens the root call and records the entry
+  step, as `trace-events.md` requires. `ct-writer/src/backend_nim.rs` registered `<toplevel>` and
+  its call first, because the old FFI did not: `test_ct_container_roundtrip_ct_print` read **2**
+  frames where the recording has **1**. The backend now leaves all three records to `start`. And
+  M38's probe traces one circuit per frame into ONE writer while the Noir tracer starts every
+  circuit it steps: M39's transaction read calls `<toplevel>,<toplevel>,value`. The probe passes the
+  first `start` through and records each later one as the entry step it names, and reports
+  `startsAsked`/`startsWritten`; m39 asserts one root spanning every step in both arms (**+10**:
+  the root and start-count assertions and their numeric preconditions). `DRIFT.md` D27.
+- **`memchr`.** The Nim tree's `std/strutils` now calls it; Rust's compiler_builtins does not
+  supply it on `wasm32-unknown-unknown`, so the link died. `nim_host_shim.c` defines it.
+
+**Behaviour changes that moved nothing here, checked rather than assumed:** no `ct-writer` code
+used a removed stream switch; no container this runtime writes carries a bare-name record (the
+pinned reader, which now refuses one by name, reads every container the sweep produces); no close
+failed; and Path A's step counts in m41's equivalence arms are unmoved, because `backend_rust.rs`
+writes its `Call` event directly rather than through the trait's `register_call`.
+
+**The reader control was mis-described, and the move is what exposed it.** `pins.json` said the
+control (`baea074019`) refuses a v4 container naming `meta.dat`. On Path B containers from BOTH the
+previous and the new anchors it exits **0** with empty metadata and no events — its
+`openNewTrace` discards a `meta.dat` it cannot parse. `test_ct_container_roundtrip_ct_print`
+accepts SILENT as a control outcome and pins it to the step count it misses, so no count moved; the
+field and the check's header now say what it does.
+
+**Figures re-derived:** `TRACE-ABI.md` §7 (module) and §2/§8 (OQ-6 run 16, **+1.86 % [+1.39,
++2.33]**, verdict unmoved; two runs under a host load near 30 refused by the calibration control
+and recorded, not tabulated); `JOIN-SHAPE.md` (module); `PRIVATE-TRACE.md` §5 (both private
+containers +8,192 bytes); `NESTED-CALLS.md` §4 (call records 1/0 → 2/1, the root now counted;
+`parentOnly` 901,120 → 909,312 bytes).
+
+### The sweep
+
+| milestone | before (`cff26cb`, the old anchors) | after | |
+|---|---:|---:|---|
+| m24 | 359/0 | 359/0 | |
+| m25–m29, m31, m33–m36, m41 | 462, 342, 347, 366, 127, 450, 248, 217, 239, 150, 193 — all /0 | identical | |
+| m30 | 0/4 | **218/0** | its own build defect, fixed in `44a8376` |
+| m32 | 237/3 | 237/3 | same three failing assertions, pre-existing |
+| m37 | 171/2 | 171/2 | same two, pre-existing |
+| m38 | 58/2 (cannot run) | **150/0** | |
+| m39 | 123/1 (cannot run) | **217/0** | §12's 207 + 10 |
+| m40 | 0/2 (cannot run) | **147/0** | |
+| m1 | 186/2 | 186/2 | same two, pre-existing |
+| l2, l3, l4, l5 | 324/0, 248/63, 194/1, 316/14 | identical | same failing assertions |
+
+m38–m40's BEFORE figures are "cannot run": `../noir` carries an untracked `.pre-commit-config.yaml`
+these checks refuse, and it is not this repository's to clean. Their AFTER figures were taken
+against a clean clone of `../noir` at the same commit (`fee00409b`, branch `codetracer`) through
+`M38_NOIR_ROOT`/`M40_NOIR_ROOT`, and equal §12's 150, 207 and 147 except m39's ten added
+assertions.
+
+---
+
+## 14. BOTH TRACE-FORMAT ANCHORS ON THE 2026-10 FORMAT REVISION — the `agents` tips, and the sweep
+
+On 2026-10-03 `trace_format` moved `051a298722 → 145ff42ff6` and both Nim roles moved
+`f22e84710f → 7967c179dd`, the `agents` tips, where the 2026-10 format revision landed (`pins.json`
+history; `PINS.md` rules 4a and 4b). Neither backend needed an API change to compile: `ct-writer`
+does not read `MetaDat`'s path list, sets its workdir and capabilities before the first record on
+both paths, and registers no source reload.
+
+| | Path A (`--features path-a`) | Path B (the default) |
+|---|---:|---:|
+| bytes, writer change alone | 464,904 → 494,017 | 776,323 → 802,898 |
+| bytes, with `ct_intern_path`'s refusal | **495,280** | **803,868** |
+| sha256 (first 8) | — | `ad57a80e` → `fd72c147` |
+| wasm imports / exports | 0 / 47 | 0 / 39 |
+
+**What the move surfaced** — `DRIFT.md` D28 to D31, each closed:
+
+- **`meta.dat` is fixed at the first record.** M38's probe opted in to the three column capabilities
+  once per traced circuit; the second frame's opt-ins were refused and M39's close failed. They
+  reach the writer before the first record only, counted (`capabilitiesAsked` 3 × frames,
+  `capabilitiesWritten` 3).
+- **An untabled column-aware path takes the conventional table**, so the entry step on the
+  session's source path reads column 1 where it read none: m41's driver and m40's column count.
+- **`ct-host/src/writer.ts`, audited for late path-table registration: it registers none.** It
+  interns only through `internPath`, which crosses at once rather than behind the step batch, and
+  a path id reaches a step or a frame only after `internPath` returned it. The MODULE was where the
+  rule was hidden: `ct_intern_path` answered a later, different table silently from its own list,
+  and ignored the writer's refusal of the session's own source path. Both are refused at the call
+  now; `verify_path_table_fixed_at_first_mention` measures both modules through the real host
+  (41 assertions; 12 red with the comparison removed).
+- **Exact event kinds**: `io_kind` is `TraceLogEvent` where it was `ioStderr` (m34, `_ct_frames.py`).
+- **Three caches outlived their writer** and are now invalidated by it: m25's OQ-4 containers (CTFS
+  v3, read until the reader refused v3), the browser arms (m27, m32, m34–m36, m39) and the M38 probe.
+- The reader control (`baea074019`) is now **REFUSED** (exit 1, named) where it was SILENT.
+
+### The sweep
+
+Full M0–M41 at `ee00e15`, under `direnv exec`: **TOTAL 14,162**, 42 milestones, no hole. m16 read 147
+because its milestone file had moved to `codetracer-pm/milestones/` and the check died before its
+summary; fixed in `024024b` and re-measured at **225/0**, so the tree's figure is **14,240, delta +384**
+against the reference of **13,856**:
+
+| milestone | reference | now | |
+|---|---:|---:|---|
+| m28 | 366 | 368 | +2: the one-step container baseline replaces the 100,000-byte floor |
+| m38 | 58 | **150** | `noir` clean; equal to the clean-clone 150 |
+| m39 | 123 | **221** | clean-clone 217, +4 the capability counts |
+| m40 | 0 | **149** | clean-clone 147, +2 the entry step by position and count |
+| m41 | 193 | **236** | +41 the path-table check, +2 the ruzstd filter's controls |
+| every other | | equal | |
+
+Non-zero exits: m1, m11, m20, m21, m22, m37, with the reference's failing assertions except: m11 +2
+(two new upstream commits as subjects; count unchanged at 361), m21 −2 (fixed in `2e3de3e`), m37's
+upstream distance 198 → 209. m9 ran on a quiet host and is green.
+
+## 15. BOTH TRACE-FORMAT ANCHORS ON THE FINAL PARITY REVISIONS — the `agents` tips, and the sweep
+
+On 2026-10-08 `trace_format` moved `145ff42ff6 → 3fada0b03c` and both Nim roles moved
+`7967c179dd → 051efd22b0`, the `agents` tips, where both libraries reached their final parity
+revisions (`pins.json` history; `PINS.md` rules 4a and 4b). Neither backend needed an API change:
+`ct-writer` asks `trace_writer_new` for format 2, the split-stream container, so the refusal of
+formats 0 and 1 does not reach it, and it never passed the reader's removed `legacy` argument.
+`../ctf-wt-wasm` moves with the Rust anchor: the OQ-7 probe refuses to build against a writer
+that is not the anchor.
+
+| | Path A (`--features path-a`) | Path B (the default) |
+|---|---:|---:|
+| bytes | 495,280 → **599,917** | 803,868 → **874,954** |
+| sha256 (first 8) | — | `fd72c147` → `86661c57` |
+| wasm imports / exports | 0 / 47 | 0 / 39 |
+
+**What the move surfaced** — `DRIFT.md` D32 to D34, each closed:
+
+- **A file that is not a container is refused when it is opened**, by name, where the previous
+  reader opened it and failed each stream. m24's instrument control reads the refusal at `OPEN`.
+- **The C ABI opens a container from bytes.** `ct_reader_open_bytes` is outside the filesystem
+  gate, so the freestanding C ABI reaches `openNewTraceFromBytes`; the module still exports no
+  reader entry point. m41's check matches exported names whole — a prefix match counted
+  `ct_reader_open_bytes` as the gated `ct_reader_open` — and asserts the new capability.
+- **The pure-Rust writer honours a column request made before its first record**, so the Noir
+  browser tracer's container is column-aware and nothing is dropped. m30 reads that from the
+  container through the pinned reader; the tracer's own `column_aware` field is a constant.
+- M40's digest pair moved with the writer's bytes (`843745e2…` / `f3821fc1…`, still 102,400 bytes
+  each and still two digests). OQ-6 run 18 reads +2.27 %, [+1.66, +2.88] %, verdict unmoved.
+
+### The sweep
+
+Full M0–M41 under `direnv exec`: **TOTAL 14,244**, 42 milestones, no hole, **delta +4** against the
+reference of **14,240**:
+
+| milestone | reference | now | |
+|---|---:|---:|---|
+| m11 | 361 | **364** | +3: upstream drift since 2026-10-04 — 364 with 82 failing at the OLD anchors too |
+| m41 | 236 | **237** | +1: D33's capability assertions replace one absence |
+| every other | | equal | |
+
+m0 and m1 are measured with this move's own artefacts removed: m0's
+`verify_workspace_repos_registered` is 39/0 against the workspace manifests repository, and m1's
+`verify_pinned_nightly_single_source` is 31 with the reference's two failures once the history
+entry names every declared value. m9 and m24 were re-run on a quiet host after loaded runs failed
+only their timing controls (m9 813 both times; m24's OQ-6 control refused one loaded run).
+Non-zero exits: m1, m11, m20, m21, m22, m37, with the reference's failing assertions except m11
+(+4 failing, the same upstream drift).
+
+---
+
+## 16. CCP-6 — THE COMPACT CONTAINER PROFILE IS EMITTABLE, AND IT IS OFF
+
+**The gap, measured before it was closed.** Both trace-format libraries carry
+`ctfs-container.md` §1e's profile choice at `pins.json`'s anchors —
+`codetracer_trace_writer::compact_profile::select_profile` in the Rust tree, `selectProfile` in the
+Nim one — and both are gated on a threshold initialised to **0**. `compact_threshold` had **zero
+occurrences anywhere under `ct-writer`**: the glue never set it, so neither writer was ever asked
+for compact and no container this runtime has written could be anything but the full profile. That
+was the whole of the producer-side gap.
+
+**Which lever, and the evidence.** The shipped module is **Path B, the Nim writer** —
+`ct-writer/Cargo.toml` says `default = ["path-b"]`, `build_ct_writer_wasm.sh`'s unflagged arm builds
+the crate's default into `ct-writer/target`, and that unflagged build is byte-identical to the
+`--path-b` one (`781472ae86a73ccb…`, both 881,705 bytes on aarch64-apple-darwin). So the Rust
+`with_compact_threshold` is **not** the lever that reaches a published container; the C ABI's
+`trace_writer_set_compact_threshold` is. Both are plumbed all the same, through
+`CtWriterBackend::set_compact_threshold`, because the differential checks compare the two writers
+and a lever on one arm only would make that comparison a comparison of two configurations.
+
+**The inequality runs the way that looks backwards, and it is measured at the boundary.**
+`select_profile` emits compact when the finished container's members total **FEWER** than the
+threshold's raw bytes: the threshold is a CEILING, compact is for SMALL recordings, and `0` means
+NEVER. Measured on the shared driver's recording, whose compact directory states its own raw total:
+
+| threshold | container | version | profile byte | bytes |
+|---:|---|---:|---:|---:|
+| absent | full | 5 | — | 73,728 |
+| `0` | full | 5 | — | 73,728 |
+| `1738` — exactly the raw member total | full | 5 | — | 73,728 |
+| `1739` — one byte above it | **compact** | **6** | **1** | **2,174** |
+| `67108864` | compact | 6 | 1 | 2,174 |
+
+The four full containers are byte-identical to each other and to one built from pristine
+`origin/agents` (`c8110e763ee709b037278bc07397992601de552f1da129cc671042d57e79f932`), and the two
+compact ones are byte-identical to each other. **A one-byte control is what makes the direction a
+measurement**; `raw < threshold` is strict and the `1738` row is what proves it.
+
+**The two profiles agree on the recording.** The compact container's 17 members total 1,738 raw
+bytes and `28 + 24·17 + 1738 = 2174` closes against the file size. Read back with
+`ct-split-probe` — `openNewTrace`, built from the object store at `pins.json`'s `trace_format_nim`
+anchor — **every fact about the recording is identical**: 8 steps, 2 paths, 8 value rows, 2 calls,
+2 io events, 2 functions, 5 varnames, column-aware, and every global line index. Exactly five keys
+differ and all five are about STORAGE, not about the trace: `PLEDGE_steps.dat`, `PLEDGE_values.dat`,
+`PLEDGE_calls.dat`, `PLEDGE_events.dat` and `EXEC_CHUNK_DECOMPRESSIONS`. §1e stores the members
+RAW — every zstd frame inflated — so a compact member is not a zstd frame and the probe says so.
+The size reduction is reported and is **not** the claim; the fact-for-fact equality is.
+
+**WHY IT IS OFF, AND WHERE THAT IS GOVERNED.** A compact container is container **version 6**. The
+replay engine BlockTracer deploys is pinned BY CONTENT in `client/hydrate/engine-pin.txt`, and an
+engine without CCP-5's compact loader refuses version 6 outright. That is not a caution here, it is
+a binary's answer: **`ct-print` at the same pinned revision — whose gate is `ctfsVersionError`,
+version 5 only — refuses this runtime's compact container** with `CTFS container version 6 is not
+supported`, while reading the full one. So the capability ships OFF:
+`ct_writer_set_compact_threshold` is the one explicit act that turns it on, and nothing in this
+repository performs it with a non-zero argument except
+`verify_compact_profile_emission_is_opt_in`, which asserts exactly that.
+
+**A correction to two statements in circulation.** `pins.json`'s `trace_format_nim` prose says the
+anchor "reads container v5 and v6". That is true of the **library** — `readInternalFile`,
+`hasInternalFile`, the stream readers and `NewTraceReader` gate on `ctfsReadableVersionError` — and
+NOT of the `ct-print` binary built from it, which keeps the version-5-only gate. A brief that read
+the prose as a statement about `ct-print` was wrong in the direction that matters: the reader in the
+published path is the one that refuses.
+
+**`backend.rs` said the trait had "eighteen" methods.** It had fourteen when CCP-6 counted them, so
+the sentence had been wrong since it was written and nothing measured it. It is fifteen now.

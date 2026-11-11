@@ -189,7 +189,7 @@ assert_eq "a configuration that claims to be differential but compares nothing i
 # why the default is not read out of `process.env`. A plain grep would have made this assertion
 # unsatisfiable for any file that DISCUSSED the rule — which is the same defect as an assertion
 # that can only pass, wearing the other hat.
-env_hits() { # -> count of process.env occurrences in CODE under $ORCH_SRC
+env_hits() { # -> count of environment reads, in any spelling, in CODE under $ORCH_SRC
   python3 - "$ORCH_SRC" <<'PYENV'
 import re, sys, pathlib
 n = 0
@@ -198,7 +198,12 @@ for f in sorted(pathlib.Path(sys.argv[1]).rglob("*.ts")):
     src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
     src = re.sub(r"(?m)^\s*//.*$", "", src)
     src = re.sub(r"(?<![:'\"])//[^\n]*", "", src)
-    n += len(re.findall(r"process\s*\.\s*env", src))
+    # Every spelling that reaches the environment: the property, the property by subscript,
+    # destructured off `process`, and imported from the `process` module.
+    n += len(re.findall(r"process\s*\.\s*env\b", src))
+    n += len(re.findall(r"process\s*\[\s*['\"`]env['\"`]\s*\]", src))
+    n += len(re.findall(r"\{[^{}]*\benv\b[^{}]*\}\s*=\s*(?:globalThis\s*\.\s*)?process\b", src))
+    n += len(re.findall(r"\{[^{}]*\benv\b[^{}]*\}\s*from\s*['\"](?:node:)?process['\"]", src))
 print(n)
 PYENV
 }
@@ -217,6 +222,21 @@ UNCOMMENTED="$(env_hits)"
 rm -f "$ORCH_SRC/.probe_env.ts"
 assert_eq "a commented-out read does not count" "0" "$COMMENTED"
 assert_eq "and the same line uncommented does" "1" "$UNCOMMENTED"
+# `process.env` is one spelling of an environment read, not the only one. Each other spelling the
+# counter claims to see is a probe of its own, so one it is blind to fails by name.
+env_probe() { # <source> -> env_hits with that source as a module of the package
+  printf '%s\n' "$1" > "$ORCH_SRC/.probe_env.ts"
+  env_hits
+  rm -f "$ORCH_SRC/.probe_env.ts"
+}
+assert_eq "a read by subscript, process['env'], counts" "1" \
+  "$(env_probe "export const x = process['env'].AVM_IMPLEMENTATION;")"
+assert_eq "a read destructured off process counts" "1" \
+  "$(env_probe "const { env } = process; export const x = env.AVM_IMPLEMENTATION;")"
+assert_eq "a read imported from node:process counts" "1" \
+  "$(env_probe "import { env } from 'node:process'; export const x = env.AVM_IMPLEMENTATION;")"
+assert_eq "…and process.argv, which is not the environment, does not" "0" \
+  "$(env_probe "export const x = process.argv.slice(2);")"
 assert_eq "the probe left nothing behind" "0" \
   "$(find "$ORCH_SRC" -name '.probe_*' | grep -c . || true)"
 

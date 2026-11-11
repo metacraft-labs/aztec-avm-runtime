@@ -169,6 +169,8 @@ export interface CtWriterExports {
   // -- M40's source-step surface. Listed separately below; see SOURCE_STEP_EXPORTS. --
   ct_source_step(pathId: number, line: number, column: number): number;
   ct_source_steps_written(): bigint;
+  // -- CCP-6's container-profile surface. Listed separately below; see COMPACT_PROFILE_EXPORTS. --
+  ct_writer_set_compact_threshold(rawBytes: bigint): number;
 }
 
 /** Every export name the host requires, so a missing one is one named failure and not a `TypeError`. */
@@ -253,12 +255,33 @@ export const JOIN_EXPORTS: readonly string[] = [
  */
 export const SOURCE_STEP_EXPORTS: readonly string[] = ['ct_source_step', 'ct_source_steps_written'];
 
+/**
+ * CCP-6's container-profile export, in its OWN list for {@link SOURCE_MAPPING_EXPORTS}' reason: M24
+ * goes on measuring its nineteen, M25 its eleven, M26 its six, M40 its two, and CCP-6 its ONE.
+ *
+ * `ct_writer_set_compact_threshold` is the single explicit act that makes a container COMPACT
+ * (`ctfs-container.md` §1e) — container version 6 with its profile byte set to 1, where this
+ * runtime's full containers are version 5. The threshold is a CEILING and not a floor: both writers
+ * reach the same `select_profile`, which chooses compact when the finished container's members
+ * total FEWER than the threshold's raw bytes, so `0` — the default, and what every caller in this
+ * repository passes — means never.
+ *
+ * **IT MUST STAY OFF UNTIL THE DEPLOYED ENGINE MOVES.** BlockTracer's replay engine is pinned by
+ * CONTENT in `client/hydrate/engine-pin.txt`, and an engine without CCP-5's compact loader refuses a
+ * version-6 container outright. Measured here on the way in: `ct-print` at `pins.json`'s
+ * `trace_format_nim` anchor, whose gate is the version-5-only one, refuses this runtime's compact
+ * container by name — so "a reader in the path cannot read it" is a fact with a binary behind it and
+ * not a caution. `verify_compact_profile_emission_is_opt_in` holds both halves.
+ */
+export const COMPACT_PROFILE_EXPORTS: readonly string[] = ['ct_writer_set_compact_threshold'];
+
 /** Every export the host requires. The constructor checks this, not any one list alone. */
 export const ALL_REQUIRED_EXPORTS: readonly string[] = [
   ...REQUIRED_EXPORTS,
   ...SOURCE_MAPPING_EXPORTS,
   ...JOIN_EXPORTS,
   ...SOURCE_STEP_EXPORTS,
+  ...COMPACT_PROFILE_EXPORTS,
 ];
 
 /**

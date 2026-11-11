@@ -21,6 +21,14 @@ TEST_NAME="verify_differential_containment"
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 . "$(dirname "${BASH_SOURCE[0]}")/lib_m19_differential.sh"
 
+# An import of a package, in every spelling a module can load it by: `from '…'`, a side-effect
+# `import '…'`, a dynamic `import('…')`, a `require('…')`, either quote, and any subpath. Every
+# "no source imports X" below is an absence, and an absence read through a pattern that knows one
+# spelling is blind to the rest.
+import_re() { # <package-ERE> -> ERE matching an import of that package in any spelling
+  printf '%s' "(\\bfrom|\\bimport|\\brequire[[:space:]]*\\(|\\bimport[[:space:]]*\\()[[:space:]]*[\"']($1)(/[^\"']*)?[\"']"
+}
+
 command -v node >/dev/null 2>&1 || die "node is required"
 command -v npm  >/dev/null 2>&1 || die "npm is required"
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
@@ -155,7 +163,7 @@ assert_eq "exactly five reached bb.js modules are its Node backend, which loads 
 # An IMPORT of ours, not a mention: `simulator_selection.ts` names the package in a doc comment,
 # which is the whole point of that file, and a check that counted mentions would fail on prose.
 assert_eq "no source of ours IMPORTS @aztec/bb.js, so the reach is upstream's and not ours" "0" \
-  "$(cd "$REPO_ROOT/orchestration/src" && grep -rlE "^import .*'@aztec/bb\.js'|from '@aztec/bb\.js'" . 2>/dev/null | wc -l)"
+  "$(cd "$REPO_ROOT/orchestration/src" && grep -rlE "$(import_re '@aztec/bb\.js')" . 2>/dev/null | wc -l)"
 assert_ge "and the file that MENTIONS it in prose is still there, so the grep above is a real distinction" 1 \
   "$(cd "$REPO_ROOT/orchestration/src" && grep -rl '@aztec/bb.js' . 2>/dev/null | wc -l)"
 assert_ge "while upstream's own crypto does import it, so the attribution is measured not assumed" 3 \
@@ -192,7 +200,19 @@ public/public_tx_simulator/apps_tests/cpp_exception_handling.test.ts"
 # injected import when the graph assertion above did not — and it caught it only because the
 # injection happened to use single quotes. Spelled `"@aztec/native"` the same import passed every
 # assertion in this file. Nothing in this repository enforces a quote style on a source file.
-NATIVE_IMPORT_RE="from [\"']@aztec/native[\"']"
+#
+# AND SPELLING-COMPLETE, for the same reason. A module reaches a package through `from '…'`, a bare
+# side-effect `import '…'`, a dynamic `import('…')` or a `require('…')`, and through any subpath of
+# it. A grep that knew only `from` would be blind to the other three in `node-host/`, which no
+# import graph here walks. `import_re`, defined at the top, builds that expression; each spelling is
+# exercised against a probe below.
+NATIVE_IMPORT_RE="$(import_re '@aztec/native')"
+# The shipped packages are held to both native addons: the AVM's, and `@aztec/world-state`'s
+# `native/` subpath, which is the other one.
+SHIPPED_NATIVE_RE="$(import_re '@aztec/native|@aztec/world-state/native')"
+shipped_native_hits() { # <path...> -> number of files importing either native addon
+  ( cd "$REPO_ROOT" && grep -rlE "$SHIPPED_NATIVE_RE" "$@" 2>/dev/null | wc -l | tr -d ' ' )
+}
 native_importers="$(cd "$REPO_ROOT/diffsim/src" && grep -rlE "$NATIVE_IMPORT_RE" . | sed 's|^\./||' | sort)"
 assert_ge "some file in diffsim does reach the native addon, so this enumeration is not empty" 1 \
   "$(printf '%s\n' "$native_importers" | grep -c . )"
@@ -210,8 +230,33 @@ done
 # must not be matched by it, or `grep -vxF` could be excusing everything.
 assert_eq "a file outside the exception is not excused by it" "1" \
   "$(printf '%s\n' 'public/public_tx_simulator/public_tx_simulator.ts' | grep -vxF "$UPSTREAM_CPP_ADAPTERS" | wc -l)"
+for d in orchestration/src node-host/src; do
+  assert_ge "the shipped tree $d holds sources to scan" 5 \
+    "$(find "$REPO_ROOT/$d" -name '*.ts' | grep -c . || true)"
+done
 assert_eq "nothing outside diffsim/ reaches the native addon in any package this repository ships" "0" \
-  "$(cd "$REPO_ROOT" && grep -rlE "$NATIVE_IMPORT_RE" orchestration/src node-host/src 2>/dev/null | wc -l)"
+  "$(shipped_native_hits orchestration/src node-host/src)"
+# One probe per spelling the scan claims to see, each a file on its own, so a spelling it is blind
+# to fails by name rather than hiding behind one it can read.
+NPROBE="$M19_WORK/native-spelling-probe"
+rm -rf "$NPROBE"; mkdir -p "$NPROBE"
+printf '%s\n' \
+  "from-single:import { x } from '@aztec/native';" \
+  "from-double:import { x } from \"@aztec/native\";" \
+  "side-effect:import '@aztec/native';" \
+  "dynamic:export const m = await import('@aztec/native');" \
+  "require:export const m = require('@aztec/native');" \
+  "subpath:export * from '@aztec/native/dest/index.js';" \
+  "world-state:import { NativeWorldStateService } from '@aztec/world-state/native';" \
+  | while IFS=: read -r name src; do printf '%s\n' "$src" >"$NPROBE/$name.ts"; done
+for name in from-single from-double side-effect dynamic require subpath world-state; do
+  assert_eq "control: the shipped-package scan sees a native import spelled $name" "1" \
+    "$(shipped_native_hits "$NPROBE/$name.ts")"
+done
+printf '%s\n' "// see @aztec/native's addon for why this is not imported" "export const y = 1;" >"$NPROBE/prose.ts"
+assert_eq "…and does not count a comment that merely names the package" "0" \
+  "$(shipped_native_hits "$NPROBE/prose.ts")"
+rm -rf "$NPROBE"
 # …and that grep is not failing to match by construction: the same expression, run over the tree
 # where the import genuinely exists, finds it.
 assert_ge "and the same expression does find the imports that ARE there" 1 \

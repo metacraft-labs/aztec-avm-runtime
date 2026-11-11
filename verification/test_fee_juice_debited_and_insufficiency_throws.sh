@@ -185,8 +185,17 @@ assert_eq "and names the C++'s own insufficient-balance error" "feePayerInsuffic
 assert_eq "the unfunded arm had no balance leaf at all" "null" \
   "$(m20_arm appLogicOnlyUnfunded balanceBefore)"
 
-# The pair really is the same transaction: same wire bytes, same phase split.
-assert_eq "funded and unfunded are the same serialized transaction" \
+# The pair really is the same transaction: same identity, same payload, same phase split. The HASH
+# and the PAYLOAD DIGEST are the comparison; a length alone is equal for any two mock transactions
+# of one shape, so a pair built from different seeds — a different fee payer, a different nullifier —
+# would read as the same. The digest leaves out only the mock proof, which is random per call.
+FUNDED_SHA="$(m20_arm appLogicOnlyFunded shape.payloadSha256)"
+assert_true "the funded arm's payload digest was recorded" str_has_re "$FUNDED_SHA" '^[0-9a-f]{64}$'
+assert_eq "funded and unfunded carry the same payload, byte for byte outside the mock proof" \
+  "$FUNDED_SHA" "$(m20_arm appLogicOnlyUnfunded shape.payloadSha256)"
+assert_eq "…and the same transaction hash" \
+  "$(m20_arm appLogicOnlyFunded shape.txHash)" "$(m20_arm appLogicOnlyUnfunded shape.txHash)"
+assert_eq "…and so the same length" \
   "$(m20_arm appLogicOnlyFunded shape.wireBytes)" "$(m20_arm appLogicOnlyUnfunded shape.wireBytes)"
 
 finish

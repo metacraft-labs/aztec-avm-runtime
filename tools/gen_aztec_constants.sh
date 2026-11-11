@@ -11,7 +11,12 @@
 # We reproduce the generation rather than vendoring the output, so a re-pin cannot
 # leave us holding stale constants that still compile. See REUSE-INVENTORY.md RI-04.
 #
-# Usage: tools/gen_aztec_constants.sh <output.hpp>
+# Usage: tools/gen_aztec_constants.sh <output.hpp> [<constants.nr>]
+#
+# The optional second argument replaces the Noir constants the header is generated from. It exists
+# for the verification's negative control, which must drive THIS script over a perturbed input to
+# show that the output is a function of the input; the pinned-anchor guard below still applies to
+# every other input, and the default is the fork's constants.nr at the anchor.
 #
 # Exits non-zero, with a reason, on every precondition it cannot satisfy. It never
 # skips: a constants header that was not regenerated is not a constants header.
@@ -19,8 +24,9 @@
 set -uo pipefail
 
 out="${1:-}"
+input_override="${2:-}"
 if [ -z "$out" ]; then
-  echo "usage: $0 <output.hpp>" >&2
+  echo "usage: $0 <output.hpp> [<constants.nr>]" >&2
   exit 2
 fi
 
@@ -75,8 +81,13 @@ trap 'rm -rf "$tmp"' EXIT
 
 # Drive the generator exactly as remake-constants.sh does, but into our own
 # output path so nothing in the fork's tree is written.
+input="$fork/noir-projects/fnd/noir-protocol-circuits/crates/types/src/constants.nr"
+if [ -n "$input_override" ]; then
+  [ -f "$input_override" ] || fatal "the replacement constants input does not exist: $input_override"
+  input="$input_override"
+fi
 node "$fork/protocol/constants-codegen/src/cli.ts" \
-  --input "$fork/noir-projects/fnd/noir-protocol-circuits/crates/types/src/constants.nr" \
+  --input "$input" \
   --cpp "$tmp/aztec_constants.hpp" \
   --selection "$fork/barretenberg/cpp/scripts/constants-codegen/cpp.json" \
   || fatal "constants-codegen failed"

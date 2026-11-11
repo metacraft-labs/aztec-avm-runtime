@@ -143,6 +143,10 @@ assert_true "the CMake guard that excludes the AVM from the wasm build" \
 # scan actually named, so the limitation cannot drift from the measurement.
 [ -f "$M5_WORK/scan-patched.txt" ] \
   || die "no $M5_WORK/scan-patched.txt — run test_shift_count_overflow_diagnostic first"
+# The loop's own row count is asserted, because a scan record with no
+# other_warning_file rows would run it zero times and assert nothing.
+assert_eq "the scan record names the four files the patch does NOT fix" "4" \
+  "$(grep -cE '^other_warning_file ' "$M5_WORK/scan-patched.txt" || true)"
 while read -r _ f _; do
   assert_contains "PR.md names $(basename "$f") among the four it does NOT fix" \
     "$(basename "$f")" "$pr"

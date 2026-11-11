@@ -49,6 +49,8 @@
 TEST_NAME="test_custom_bytecode_unhappy_paths"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 . "$VERIFY_DIR/lib_token_blocks.sh"
+# The arms run on the dev shell's node, asserted, not on the inherited PATH's.
+use_devshell_node
 
 tb_summary_on_abnormal_exit
 tb_require_arms
@@ -148,14 +150,30 @@ assert_eq "SET_8's wire length, derived from upstream's own operand table" "5" "
 # this campaign's own rule, arriving in this pass's own work. The stripper is the string-aware one
 # `_import_closure.py` owns, and BOTH halves are asserted: it left code behind, and it removed the
 # prose that caused the failure.
-RAW_SOURCES="$(cat "$REPO_ROOT"/orchestration/src/*.ts "$REPO_ROOT"/browser/src/*.ts "$REPO_ROOT"/tools/*.mjs 2>/dev/null)"
+#
+# THE WHOLE TREE, NOT ITS TOP LEVEL. `orchestration/src/*.ts` stops at the directory's first level,
+# and fifteen of the package's forty-five sources — the vendored processor among them — are one
+# level down; `browser/src` is almost entirely subdirectories. The file list is enumerated
+# recursively and its length asserted, and each file is stripped ON ITS OWN, so an unterminated
+# string in one cannot carry the stripper's state into the next.
+SHIPPED_FILES="$( { find "$REPO_ROOT/orchestration/src" "$REPO_ROOT/browser/src" -name '*.ts' -type f
+  find "$REPO_ROOT/tools" -maxdepth 1 -name '*.mjs' -type f; } | LC_ALL=C sort)"
+N_SHIPPED_FILES="$(printf '%s\n' "$SHIPPED_FILES" | grep -c . || true)"
+assert_ge "the scan enumerates the shipped trees recursively" \
+  "$(( $(find "$REPO_ROOT/orchestration/src" -name '*.ts' -type f | grep -c .) + 1 ))" "$N_SHIPPED_FILES"
+assert_true "…including the vendored processor one level down" \
+  str_has_line "$SHIPPED_FILES" "$REPO_ROOT/orchestration/src/vendor/public_processor/public_processor.ts"
+RAW_SOURCES="$(printf '%s\n' "$SHIPPED_FILES" | xargs -d '\n' cat)"
 assert_ge "the shipped sources were read rather than an empty set" 50000 \
   "$(printf '%s' "$RAW_SOURCES" | wc -c | tr -d ' ')"
-SHIPPED_SOURCES="$(printf '%s' "$RAW_SOURCES" | python3 -c '
-import sys, pathlib
+SHIPPED_SOURCES="$(printf '%s\n' "$SHIPPED_FILES" | python3 -c '
+import sys
 sys.path.insert(0, sys.argv[1])
 from _import_closure import strip_comments
-sys.stdout.write(strip_comments(sys.stdin.read()))' "$VERIFY_DIR")"
+for path in sys.stdin.read().splitlines():
+    if path:
+        sys.stdout.write(strip_comments(open(path, encoding="utf-8").read()))
+        sys.stdout.write("\n")' "$VERIFY_DIR")"
 assert_ge "the stripper left the CODE behind" 20000 \
   "$(printf '%s' "$SHIPPED_SOURCES" | wc -c | tr -d ' ')"
 assert_true "…and the prose really was there to remove, in this pass\'s own driver" \

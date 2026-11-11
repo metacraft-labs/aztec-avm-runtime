@@ -159,7 +159,12 @@ EOF
 
 SRC_SHA="$(sha256sum "$CRATE/src/lib.rs" "$CRATE/Cargo.toml" "$CRATE/.cargo/config.toml" 2>/dev/null | sha256sum | cut -d' ' -f1)"
 STAMP_FILE="$M40_WORK/built-from"
-STAMP_WANT="$SRC_SHA $NOIR_HEAD $CTF_REV"
+# THE RUST TOOLCHAIN IS pins.json's `toolchain.rust` (verification/lib_toolchain.sh), and it is IN
+# the stamp: a module built by another compiler is a different module, and `stable` floating
+# 1.98.1 -> 1.99.0 changed the ct-writer module's bytes with no source change.
+. "$VERIFY_DIR/lib_toolchain.sh"
+RUST_VER="$(tc_pinned_rust)" || die "pins.json declares no toolchain.rust.version"
+STAMP_WANT="$SRC_SHA $NOIR_HEAD $CTF_REV rust-$RUST_VER"
 if [ "$FORCE" -eq 0 ] && [ -s "$OUT" ] && [ "$(cat "$STAMP_FILE" 2>/dev/null)" = "$STAMP_WANT" ]; then
   printf '%s: up to date (%s bytes)\n' "$TEST_NAME" "$(wc -c <"$OUT")"
   printf '%s\n' "$OUT"
@@ -172,18 +177,18 @@ command -v nix >/dev/null 2>&1 || die "nix is required (the rust wasm toolchain 
 # absence does not say so — the build dies four crates deep with `exit status: 101`, which reads
 # like a broken branch rather than a missing tool. The same trap `build_ct_writer_wasm.sh` and
 # `build_noir_tracer_wasm.sh` both record.
+TC_PATH="$(tc_rust_ensure "$RUST_VER")" || die "the pinned rust toolchain $RUST_VER could not be made usable"
 build_script='
 set -euo pipefail
 export PATH="$CARGO_HOME/bin:$PATH"
-rustup -q toolchain install stable --profile minimal >/dev/null 2>&1 || true
-rustup -q target add wasm32-unknown-unknown >/dev/null 2>&1 || true
+case "$(rustc --version)" in "rustc $RUSTUP_TOOLCHAIN "*) : ;; *) echo "rustc is not $RUSTUP_TOOLCHAIN: $(rustc --version)" >&2; exit 1 ;; esac
 cd "$CRATE"
 cargo build --release
 '
 
 printf '%s: building %s for wasm32-unknown-unknown\n' "$TEST_NAME" "$CRATE" >&2
-CRATE="$CRATE" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" \
-  nix shell nixpkgs#rustup nixpkgs#capnproto --command bash -c "$build_script" >&2 \
+CRATE="$CRATE" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" RUSTUP_TOOLCHAIN="$RUST_VER" \
+  PATH="$TC_PATH:$PATH" bash -c "$build_script" >&2 \
   || die "the M40 private-trace wasm build failed"
 
 BUILT="$CRATE/target/wasm32-unknown-unknown/release/m40_private_trace.wasm"

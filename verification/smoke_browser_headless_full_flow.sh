@@ -61,6 +61,11 @@ command -v node >/dev/null 2>&1 || die "node is required"
 echo "== 0. one arm run, in a real browser, and it is the one this tree would produce"
 
 m24_require_readers
+# THE WRITER MODULE THE PAGE SERVES, BUILT HERE WHEN IT IS NOT ALREADY. `run_browser_arms.mjs`
+# copies `ct_writer.wasm` into the page and dies with "no ct_writer.wasm" when it is absent; on a
+# developer's tree an earlier milestone left one behind, on a fresh runner nothing did. It is
+# `m24_require_module` that knows how to build it (stale or missing -> `build_ct_writer_wasm.sh`).
+m24_require_module
 m27_require_arms
 
 CHROMIUM="$(m27_run chromium)"
@@ -176,7 +181,18 @@ assert_eq "…and the same digest, re-hashed here rather than read from the repo
   "$ON_DISK_SHA"
 assert_eq "…and the report's own record of the downloaded digest agrees" "$ON_DISK_SHA" "$DL_SHA"
 assert_eq "the digest is a real one rather than two absences compared" "64" "${#ON_DISK_SHA}"
-assert_ge "…over a container of substantial size" 100000 "$ON_DISK_BYTES"
+# "SUBSTANTIAL" IS MEASURED AGAINST THE WRITER, NOT A ROUND NUMBER. A floor of 100,000 bytes held
+# until container v5 gave small members no mapping block and this 516-step recording fell to
+# 86,016. The floor is now the same module's ONE-step recording, built here: a container no larger
+# than that recorded next to nothing, whatever its size.
+CT_WRITER_SERVED="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ctWriter"]["path"])' "$M27_ARMS" 2>/dev/null)"
+assert_file "the writer module the arms served is on disk" "$CT_WRITER_SERVED"
+BASELINE_BYTES="$(node "$VERIFY_DIR/_one_step_container_bytes.mjs" "$CT_WRITER_SERVED" 2>"$M27_WORK/baseline.err")" \
+  || die "the one-step baseline could not be recorded: $(cat "$M27_WORK/baseline.err")"
+case "$BASELINE_BYTES" in ''|*[!0-9]*) die "the one-step baseline is not a number: [$BASELINE_BYTES]" ;; esac
+assert_ge "the one-step baseline is a real container" 4096 "$BASELINE_BYTES"
+assert_ge "…and the downloaded container is larger than a one-step recording from the same module" \
+  "$(( BASELINE_BYTES + 1 ))" "$ON_DISK_BYTES"
 # The id join: the recording the page made is the file that was downloaded.
 assert_ge "the recording id is a full uuid" 36 "${#REC_ID}"
 assert_true "…and the downloaded file is named for it" str_has_sub "$DL_NAME" "$REC_ID"

@@ -59,6 +59,10 @@ require_work_dir "$M10_WORK" 2
 
 M10_PATCH_DIR="$M6_UPSTREAM_BUGS/aztec-avm-wasm-cmake"
 M10_PATCH="$M6_PATCH_4"
+# The tree `git am` of patches 1-3 and this one produces on the base, as reviewed. A tree hash
+# rather than a patch hash: it is what the patch DOES, and it survives a re-export that changes
+# only the patch's headers.
+M10_REVIEWED_TREE=ad8a55cdfaf096375159a89752983f86de6d11d8
 M10_PR_MD="$M10_PATCH_DIR/PR.md"
 M10_VERIFY_SH="$M10_PATCH_DIR/verify.sh"
 M10_SERIES_MD="$M6_UPSTREAM_BUGS/SERIES.md"

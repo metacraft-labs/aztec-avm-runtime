@@ -11,7 +11,7 @@ use std::path::Path;
 use codetracer_trace_types::{
     CallRecord, EventLogKind, Line, TraceLowLevelEvent, TypeId, TypeKind as CtTypeKind, ValueRecord,
 };
-use codetracer_trace_writer::ctfs_writer::CtfsTraceWriter;
+use codetracer_trace_writer::ctfs_writer::{CtfsTraceWriter, INVALID_PATH_ID};
 use codetracer_trace_writer::trace_writer::TraceWriter;
 
 use crate::backend::{CT_WRITER_KIND_PATH_A_PURE_RUST, CtWriterBackend, TypeKind, Value};
@@ -126,9 +126,23 @@ impl CtWriterBackend for RustBackend {
         );
     }
 
-    fn register_path_with_line_lengths(&mut self, path: &Path, line_lengths: &[u32]) {
-        let _ =
+    fn register_path_with_line_lengths(
+        &mut self,
+        path: &Path,
+        line_lengths: &[u32],
+    ) -> Result<(), String> {
+        let id =
             CtfsTraceWriter::register_path_with_line_lengths(&mut self.writer, path, line_lengths);
+        if id == INVALID_PATH_ID {
+            // The writer recorded why; its newest refusal is this call's.
+            return Err(self
+                .writer
+                .refusals()
+                .last()
+                .cloned()
+                .unwrap_or_else(|| "the writer refused the path and recorded no reason".to_string()));
+        }
+        Ok(())
     }
 
     fn register_step(&mut self, path: &Path, line: i64) {
@@ -153,9 +167,21 @@ impl CtWriterBackend for RustBackend {
         self.writer.dropped_column_awareness()
     }
 
+    fn set_compact_threshold(&mut self, raw_bytes: u64) -> Result<(), String> {
+        // `CtfsTraceWriter::set_compact_threshold` cannot fail — it stores a `u64` — so Path A can
+        // only ever report success here. The trait's method is fallible because Path B's C ABI
+        // boundary can refuse, and a trait shaped to the half that cannot fail would have nowhere
+        // to put the half that can. Path A is `codetracer_trace_writer`'s own
+        // `with_compact_threshold` lever and `select_profile` is the same function both writers
+        // reach, which is why `verify_compact_profile_emission_is_opt_in` can assert the two
+        // writers' compact containers agree.
+        self.writer.set_compact_threshold(raw_bytes);
+        Ok(())
+    }
+
     fn finish(&mut self) -> Result<(), String> {
-        if self.writer.finish_writing_trace_events().is_err() {
-            return Err("the writer refused to finish".to_string());
+        if let Err(e) = self.writer.finish_writing_trace_events() {
+            return Err(format!("the writer refused to finish: {e}"));
         }
         Ok(())
     }

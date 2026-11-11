@@ -158,9 +158,11 @@ import json
 e = json.load(open('$EXPECTED', encoding='utf-8'))
 # ONE position moved, by ONE column, on a step that has one. Not a wholesale replacement: a
 # comparison that only rejects garbage has not been shown to reject the failure this check exists
-# for, which was every column off by exactly one.
+# for, which was every column off by exactly one. A DRIVEN step: the writer's own entry step has a
+# column too (its path takes the conventional table at its first mention), but the defect was in
+# what the backend passed for the columns a host asked for, so the control moves one of those.
 for s in e:
-    if s['column'] is not None:
+    if s['column'] is not None and s.get('from') != 'start':
         s['column'] += 1
         break
 json.dump(e, open('$SYNTH', 'w', encoding='utf-8'))

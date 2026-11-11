@@ -86,10 +86,20 @@ assert_not_contains "and no longer installs 27" "wasi-sdk-27" "$SETUPC"
 # The three installers must agree with each other; a bump that moves two of three
 # is the failure mode `bootstrap.sh`'s own version gate exists to catch, and it
 # would only show up in CI.
+#
+# A version is read in every spelling these files use: `wasi-sdk-27.0-…` in a URL,
+# `expected_abs_wasi_version=27.0`, and prose such as `"Installing wasi-sdk 27..."`
+# (setup-container.sh's own log line), in either case. The count of mentions is
+# asserted alongside, so an extractor that matched nothing cannot read as "no
+# other version".
+wasi_versions_in() { # <file> -> the major version of every wasi-sdk mention, one per line
+  version_lines "$1" \
+    | grep -ioE 'wasi[-_ ]sdk[-_ ]?[0-9]+|wasi_version=[0-9]+' | grep -oE '[0-9]+$'
+}
 for f in bootstrap.sh build-images/src/Dockerfile scripts/setup-container.sh; do
+  assert_ge "$f mentions a wasi-sdk version at all" 1 "$(wasi_versions_in "$f" | grep -c .)"
   assert_eq "no wasi-sdk version other than 33 survives in $f" "" \
-    "$(version_lines "$f" | grep -oE 'wasi-sdk-[0-9]+|wasi_version=[0-9.]+' \
-       | grep -vE 'wasi-sdk-33|wasi_version=33\.0' | sort -u | tr '\n' ' ')"
+    "$(wasi_versions_in "$f" | grep -vx '33' | sort -u | tr '\n' ' ')"
 done
 
 # ---------------------------------------------------------------------------
@@ -141,35 +151,55 @@ assert_eq "and the only key that moves is WASI_SDK_PREFIX" \
 # ---------------------------------------------------------------------------
 # 3. threading.cmake: the changed lines are inside if(WASM).
 # ---------------------------------------------------------------------------
-INSIDE="$(python3 - "$PATCHED" <<'PY'
+#
+# Both sides of every hunk are placed: an ADDED line by its number in the patched
+# file, a REMOVED line by its number in the base file. A hunk that only deletes has
+# no new-side lines at all (`+N,0`), so reading the new side alone would let a
+# deletion anywhere in the file through as "no change outside if(WASM)".
+INSIDE="$(python3 - "$BASE" "$PATCHED" <<'PY'
 import re, subprocess, sys
-tree = sys.argv[1]
+base_tree, tree = sys.argv[1], sys.argv[2]
 path = "barretenberg/cpp/cmake/threading.cmake"
 diff = subprocess.run(["git", "-C", tree, "diff", "-U0", "233d8e0993", "HEAD", "--", path],
                       capture_output=True, text=True).stdout
-# The new-file line numbers of every added line in the hunk.
-changed = []
-for h in re.finditer(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", diff, re.M):
-    start, count = int(h.group(1)), int(h.group(2) or 1)
-    changed += list(range(start, start + count))
-lines = open(f"{tree}/{path}").read().splitlines()
-# Track the innermost if() condition per line.
-stack, cond = [], {}
-for i, line in enumerate(lines, 1):
-    s = line.strip()
-    m = re.match(r"if\s*\((.*)\)", s)
-    if m:
-        stack.append(m.group(1).strip())
-    cond[i] = list(stack)
-    if re.match(r"endif\s*\(", s) and stack:
-        stack.pop()
-outside = [n for n in changed if "WASM" not in cond.get(n, [])]
-print("CHANGED=%d" % len(changed))
-print("OUTSIDE=%s" % (",".join(map(str, outside)) or "none"))
+added, removed = [], []
+for h in re.finditer(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", diff, re.M):
+    ostart, ocount = int(h.group(1)), int(h.group(2) or 1)
+    nstart, ncount = int(h.group(3)), int(h.group(4) or 1)
+    removed += list(range(ostart, ostart + ocount))
+    added += list(range(nstart, nstart + ncount))
+
+def conditions(text):
+    """The stack of enclosing if() conditions per line. An else() or elseif()
+    branch is recorded as the NEGATION of the condition it follows, so a line in
+    the else-branch of if(WASM) does not count as inside it."""
+    stack, cond = [], {}
+    for i, line in enumerate(text.splitlines(), 1):
+        s = line.strip()
+        m = re.match(r"if\s*\((.*)\)", s)
+        if m:
+            stack.append(m.group(1).strip())
+        elif re.match(r"(else|elseif)\s*\(", s) and stack:
+            stack[-1] = "NOT(" + stack[-1] + ")"
+        cond[i] = list(stack)
+        if re.match(r"endif\s*\(", s) and stack:
+            stack.pop()
+    return cond
+
+new_cond = conditions(open(f"{tree}/{path}").read())
+old_cond = conditions(subprocess.run(["git", "-C", base_tree, "show", "233d8e0993:" + path],
+                                     capture_output=True, text=True).stdout)
+outside = ["+%d" % n for n in added if "WASM" not in new_cond.get(n, [])] \
+        + ["-%d" % n for n in removed if "WASM" not in old_cond.get(n, [])]
+print("CHANGED=%d" % (len(added) + len(removed)))
+print("ADDED=%d" % len(added))
+print("REMOVED=%d" % len(removed))
+print("OUTSIDE=%s" % (",".join(outside) or "none"))
 PY
 )"
 assert_contains "threading.cmake really does change lines" "CHANGED=" "$INSIDE"
 assert_not_contains "threading.cmake changes more than 0 lines (else this is vacuous)" "CHANGED=0" "$INSIDE"
+assert_not_contains "and the removed side is measured too, not only the added one" "REMOVED=0" "$INSIDE"
 assert_contains "every changed threading.cmake line is inside if(WASM)" "OUTSIDE=none" "$INSIDE"
 note "$(printf '%s' "$INSIDE" | tr '\n' ' ')"
 

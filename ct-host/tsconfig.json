@@ -12,9 +12,14 @@
     "the same property.",
     "",
     "No `@types/node`: the three Node modules this package uses are declared in types/, so `tsc`",
-    "runs against the nix-pinned toolchain with no npm dependency and no network."
+    "runs against the nix-pinned toolchain with no npm dependency and no network.",
+    "",
+    "`types: []` is what makes that true rather than hoped: without it `tsc` loads every package",
+    "under any ANCESTOR directory's node_modules/@types, so a node_modules that appears above this",
+    "repository (one did, at the workspace root) changes what this package type-checks against."
   ],
   "compilerOptions": {
+    "types": [],
     "target": "ES2022",
     "lib": ["ES2022", "DOM"],
     "module": "NodeNext",

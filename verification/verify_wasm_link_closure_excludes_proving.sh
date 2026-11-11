@@ -135,6 +135,10 @@ for a in libvm2_sim.a libworld_state_reference.a; do
   assert_eq "$a has zero undefined mdb_* references" "0" \
     "$(printf '%s\n' "$U" | grep -c 'mdb_')"
   D="$(demangled_u "$P")"
+  # The search below runs over the DEMANGLED list, which is a second pipeline; a
+  # demangler that produced nothing would make "no match" trivially true.
+  assert_eq "$a's demangled list has one line per undefined symbol" \
+    "$(printf '%s\n' "$U" | grep -c .)" "$(printf '%s\n' "$D" | grep -c .)"
   assert_eq "$a references no proving-stack symbol" "0" \
     "$(printf '%s\n' "$D" | grep -icE 'honk|sumcheck|Polynomial<|srs::|CircuitBuilder|Goblin')"
 done

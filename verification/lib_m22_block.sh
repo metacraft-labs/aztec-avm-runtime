@@ -28,6 +28,9 @@
 # PRECONDITIONS ARE PRECONDITIONS, NOT SKIPS. A check that cannot find a module dies with the
 # command that builds one. It never reports "0 problems" against a run that did not happen.
 
+# Its data helpers run inside command substitutions; see lib_subshell_die.sh.
+. "$VERIFY_DIR/lib_subshell_die.sh"
+
 M22_WORK="${M22_WORK:-$HOME/.cache/aztec-m22-block}"
 export M22_WORK
 
@@ -102,14 +105,14 @@ m22_require_anchor() {
 # `public_processor/apps_tests/timeout_race.test.ts` is one.
 m22_anchor_file() { # <path-in-fork>
   git -C "$FORK_ROOT" show "$M22_TS_ANCHOR:$1" 2>/dev/null \
-    || die "the ts anchor has no $1 (the layout moved; this check's premise is stale)"
+    || die_even_in_subshell "the ts anchor has no $1 (the layout moved; this check's premise is stale)"
 }
 
 # A file out of the fork AT THE ANCHOR THE VENDORED COPIES NAME. Every comparison of a file under
 # `orchestration/src/vendor/` against upstream must go through this one.
 m22_vendor_anchor_file() { # <path-in-fork>
   git -C "$FORK_ROOT" show "$M22_CPP_ANCHOR:$1" 2>/dev/null \
-    || die "the vendoring anchor has no $1 (the layout moved; this check's premise is stale)"
+    || die_even_in_subshell "the vendoring anchor has no $1 (the layout moved; this check's premise is stale)"
 }
 
 m22_require_packages() {
@@ -302,6 +305,9 @@ STRIP
 
 m22_vendor_diff() { # <local-path-under-orchestration/src/vendor> <upstream-path-in-fork>
   local local_file="$M22_VENDOR/$1" upstream="$2"
-  [ -f "$local_file" ] || die "no vendored file at $local_file"
+  # The refusal is also PRINTED, so the assertion reading this diff fails at its own line rather
+  # than only in the run's total.
+  [ -f "$local_file" ] || { printf 'MISSING-VENDORED-FILE %s\n' "$local_file"
+                            die_even_in_subshell "no vendored file at $local_file"; }
   diff <(m22_vendor_anchor_file "$upstream") <(m22_strip_header "$local_file") || true
 }

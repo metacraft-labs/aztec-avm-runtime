@@ -75,6 +75,11 @@ m32_arms_newer_inputs() {
   find "$AVM_WASM_PATH" "$REPO_ROOT/tools/run_worker_arms.mjs" "$REPO_ROOT/tools/browser_cdp.mjs" \
     -newer "$M32_ARMS" -print -quit 2>/dev/null || true
   find "$BROWSER_DIST" -type f ! -name '.*' -newer "$M32_ARMS" -print -quit 2>/dev/null || true
+  # THE WRITER MODULE THE PAGE IS SERVED IS AN INPUT, as `m40_arms_newer_inputs` already says: the
+  # runner copies the default ct-writer build into the page, so a writer rebuild -- a trace-format
+  # pin move -- must re-run the arms rather than leave the previous writer's containers in place.
+  find "$REPO_ROOT/ct-writer/target/wasm32-unknown-unknown/release/aztec_ct_writer.wasm" \
+    -newer "$M32_ARMS" -print -quit 2>/dev/null || true
 }
 
 M32_ARMS_TIMEOUT="${M32_ARMS_TIMEOUT:-900}"

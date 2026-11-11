@@ -121,15 +121,27 @@ m41_require_path_b() {
   [ -f "$M41_PATH_B" ] || die "the Path B build reported success but $M41_PATH_B is not there"
 }
 
-# m41_drive <module> <label> — drive a module and leave `container.ct` and `report.json` in
-# `$M41_WORK/<label>`. Sets `M41_DRIVE_DIR`.
+# m41_drive <module> <label> [compact-threshold] — drive a module and leave `container.ct` and
+# `report.json` in `$M41_WORK/<label>`. Sets `M41_DRIVE_DIR`.
+#
+# THE THIRD ARGUMENT IS OMITTED BY EVERY CALLER BUT ONE, AND OMITTING IT IS NOT THE SAME AS
+# PASSING ZERO BY ACCIDENT. `ct_writer_drive.mjs` treats an absent threshold as `0`, which is what
+# both writers construct themselves with and what makes the container the full profile — so every
+# call written before CCP-6 drives exactly the container it drove before. The one caller that passes
+# a value is `verify_compact_profile_emission_is_opt_in`, whose subject it is: a non-zero threshold
+# asks for container version 6 / profile 1, which the replay engine pinned by content in
+# BlockTracer's `client/hydrate/engine-pin.txt` cannot read.
 M41_DRIVE_DIR=""
 export M41_DRIVE_DIR
 m41_drive() {
-  local module="$1" label="$2" dir
+  local module="$1" label="$2" threshold="${3:-}" dir
   dir="$M41_WORK/$label"
   rm -rf "$dir"
-  m41_bounded "$M41_DRIVE_TIMEOUT" "driving $label" node "$M41_DRIVER" "$module" "$dir" \
+  # `$threshold` is deliberately UNQUOTED: empty must expand to NO argument at all, where `""`
+  # would pass an empty string the driver would then have to interpret. Absent and `0` mean the
+  # same thing to the driver, but they are different calls, and this is the one that is absent.
+  # shellcheck disable=SC2086
+  m41_bounded "$M41_DRIVE_TIMEOUT" "driving $label" node "$M41_DRIVER" "$module" "$dir" $threshold \
     || die "driving $label failed; its output is in $M41_LAST_LOG:
 $(tail -20 "$M41_LAST_LOG" 2>/dev/null)"
   [ -f "$dir/container.ct" ] || die "driving $label produced no container in $dir"
@@ -160,6 +172,42 @@ export M41_READERS M41_PROBE_NEW M41_PROBE_OLD M41_PRINT_NEW M41_PRINT_OLD
 m41_require_readers() {
   local work
   work="${M24_CTPRINT_WORK:-$HOME/.cache/aztec-m24-ctprint}"
+  # ---------------------------------------------------------------------------
+  # `M41_READERS_DIR` — readers built elsewhere, admitted ONLY against their own revision stamp.
+  #
+  # `build_ct_print.sh` cannot run on a host that is not Linux: it reaches `lib_toolchain.sh`,
+  # whose health check asks `ldd` whether a binary still loads, and `ldd` does not exist on
+  # macOS — so the readers are built and then declared unusable, by an instrument that cannot
+  # measure them rather than by anything about them. `CT_WRITER_WASM` and `CT_WRITER_WASM_PATH_B`
+  # already let a caller hand in a module built another way; this is the same door for the
+  # readers, and it is the narrower one: the caller's directory must carry the SAME `.rev` stamps
+  # `build_ct_print.sh` writes, and they must name `pins.json`'s anchor. "A prebuilt binary in a
+  # sibling worktree" is what that script refuses, and a stamp this check reads out of
+  # `pins.json` is what keeps this from being that.
+  # ---------------------------------------------------------------------------
+  if [ -n "${M41_READERS_DIR:-}" ]; then
+    work="$M41_READERS_DIR"
+    local want_rev b
+    want_rev="$(python3 - "$REPO_ROOT/pins.json" <<'PY'
+import json, sys
+p = json.load(open(sys.argv[1], encoding="utf-8"))
+print(p["anchors"]["trace_format_nim"]["commit"])
+PY
+)" || die "pins.json could not be read for the reader anchor"
+    for b in ct-print ct-split-probe; do
+      [ -x "$work/$b" ] || die "M41_READERS_DIR=$work has no executable $b"
+      [ "$(cat "$work/$b.rev" 2>/dev/null)" = "$want_rev" ] \
+        || die "$work/$b.rev does not name pins.json's trace_format_nim anchor $want_rev
+     (it says [$(cat "$work/$b.rev" 2>/dev/null)]) — a reader at another revision is a different
+     reader, and a check that used it would attribute its answer to this anchor."
+    done
+    M41_READERS="$work"
+    M41_PROBE_OLD="$work/ct-split-probe"
+    M41_PRINT_OLD="$work/ct-print"
+    M41_PROBE_NEW="$work/ct-split-probe"
+    M41_PRINT_NEW="$work/ct-print"
+    return 0
+  fi
   m41_bounded 3600 "building the ct-print readers" "$REPO_ROOT/verification/build_ct_print.sh" \
     || die "the ct-print readers could not be built; its output is in $M41_LAST_LOG"
   local b

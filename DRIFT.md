@@ -1406,6 +1406,245 @@ were absorbed silently.
   `git show 233d8e0993:barretenberg/cpp/src/barretenberg/wsdb/wsdb_schema.jsonc`;
   `git show 233d8e0993:barretenberg/cpp/src/barretenberg/avm/avm_schema.json`.
 
+## D27 — the Nim writer's `start` began opening the root frame, and two consumers here opened it as well
+
+- id: D27
+- status: closed
+- opened: 2026-10-02
+- milestone: the trace-format re-pin of 2026-10-02 (`pins.json` history), measured by m24's
+  `test_ct_container_roundtrip_ct_print` and m39's `e2e_transaction_steps_into_one_container`
+- design-question: —
+- sides: `trace_writer_start` at `anchors.trace_format_nim_writer` (`f22e84710f`, which carries
+  `aa3b284 fix(writer): start() opens the call tree's root`) versus two callers in this repository
+  written against the previous anchor (`b2cc6fd885`), whose `start` recorded the entry step and
+  nothing else
+- what: At the new anchor `start` interns `<toplevel>`, opens its call — the root of the call tree,
+  `call_key` 0 at depth 0 — and records the entry step, the three records
+  `codetracer-trace-format-spec`'s `trace-events.md` ("Recorder Integration — Starting a
+  Recording") requires. Two callers here did part of that themselves, and each now opened a second
+  root. (1) `ct-writer/src/backend_nim.rs` registered `<toplevel>` and its call before `start`,
+  because the raw FFI used not to: the shipped module's container carried **2** call frames where
+  the recording has **1**, both `<toplevel>`, the second at depth 1 holding every step. (2) M38's
+  probe traces one circuit per frame into ONE writer, and the Noir tracer starts the trace for every
+  circuit it steps: M39's two-frame transaction carried `Call` records `<toplevel>,<toplevel>,value`
+  and its one-frame control `<toplevel>`, where the checks expected `value` and none.
+- why it matters: a second root is not a cosmetic duplicate. Readers root the call tree at
+  `call_key` 0, so every step lands one frame deeper than the program was, and a frame count that
+  includes the duplicate reads as a call the program never made. Nothing refused it: both
+  containers read cleanly through the pinned reader.
+- decision: **Closed on this side; the writer is right and the spec says so.** (1) The backend
+  registers neither record and lets `start` open the recording; the roundtrip check is back to
+  exactly one frame through both readers. (2) The probe passes the FIRST `start` to the writer and
+  records each later one as the step it names — the frame's entry step, which is all `start` used
+  to write — and reports `startsAsked` / `startsWritten` so the substitution is measured. The step
+  identity `container = probe + frames` is therefore unmoved, and the check now also asserts exactly
+  one root, `<toplevel>` spanning every step, in both arms. `NESTED-CALLS.md` §4's table is
+  re-derived (call records 1/0 → 2/1, the root now counted by the reader). Without the
+  substitution the second frame's start opened a second root: calls `<toplevel>,<toplevel>,value`.
+- evidence: `aztec-avm-runtime/verification/test_ct_container_roundtrip_ct_print.sh` ("the
+  recording opens with exactly one Call frame", "the recording's one frame is there");
+  `aztec-avm-runtime/verification/e2e_transaction_steps_into_one_container.sh` §2 and §4;
+  `git -C codetracer-trace-format-nim show aa3b284`.
+
+## D28 — the writer fixes `meta.dat` at the first record, and M38's probe opted in to column capabilities once per traced circuit
+
+- id: D28
+- status: closed
+- opened: 2026-10-03
+- milestone: the trace-format re-pin of 2026-10-03 onto the 2026-10 format revision (`pins.json`
+  history), measured by m39's `e2e_transaction_steps_into_one_container`
+- design-question: —
+- sides: `codetracer-trace-format-nim` at `anchors.trace_format_nim_writer` (`7967c179dd`), whose
+  multi-stream writer writes `meta.dat` once, at the trace's first record, and refuses every later
+  call that would change a field or a capability (`ctfs-container.md` §6, "Durability", rule 1);
+  versus M38's probe, which traces one circuit per frame into ONE writer while the Noir tracer
+  opts the writer in to the three column capabilities before every circuit's `start`
+- what: At the previous anchor a repeated opt-in was accepted. At this one the second frame's
+  three opt-ins arrive after the first frame's records and are refused, and the refusal fails the
+  close: M39's two-frame transaction reported `trace_writer_close: the container was finalized,
+  but it is incomplete because an earlier call failed: enableColumnAwareSteps: meta.dat was written
+  at this trace's first record`. The one-frame arms were unaffected, because their only opt-ins
+  precede their only `start`.
+- why it matters: a recording that fails at its close is a recording the browser cannot hand over,
+  and the opt-ins asked for nothing the trace did not already carry.
+- decision: **Closed on this side, by D27's mechanism.** The probe passes an opt-in to the writer
+  only while nothing has been recorded, and answers a later one for a capability the recording
+  already carries by counting it; a later one for a capability it does NOT carry is passed on, so
+  the writer refuses it, and recorded as a trace error. It reports `capabilitiesAsked` /
+  `capabilitiesWritten`, and m39 asserts `3 × frames` and `3` in both arms (+4 assertions).
+- evidence: `aztec-avm-runtime/verification/m38_private_trace_probe.rs` (`CountingSink::capability`);
+  `aztec-avm-runtime/verification/e2e_transaction_steps_into_one_container.sh` §2.
+
+## D29 — a column-aware path first mentioned with no table now takes the conventional table, so a line-start step reads column 1
+
+- id: D29
+- status: closed
+- opened: 2026-10-03
+- milestone: the trace-format re-pin of 2026-10-03 (`pins.json` history), measured by m41's
+  `e2e_runtime_traces_through_nim_writer` and m40's `e2e_joined_private_public_trace`
+- design-question: —
+- sides: both writers at the 2026-10 format revision (`codetracer-trace-format-nim` `3b84a15`,
+  `codetracer-trace-format` `d6c4ef2`), which decide a column-aware path's line-length table at its
+  first mention and record an untabled one with the conventional table (100,000 lines of 1,024
+  positions, `internal-files.md` "paths.dat Layout A"); versus two expectations here written when an
+  untabled path carried no column table at all
+- what: The session's own source path is mentioned first by `start`, at open, with no table. Every
+  step on it — the writer's entry step, and an AVM step that falls back to `Line(pc)` — used to
+  read back with NO column; it now reads column 1, its line's start, like a line-only step on a
+  tabled path. m41's driver expected `null` for its two such steps and got `1`; m40's private
+  container surfaced 67 columns where 66 were expected (the tracer's 64, one per frame entry, and
+  now the entry step's).
+- why it matters: the expectations encode what a column means. Column 1 at a line's start is the
+  spec's position for a step with no column of its own, so the old `null` was the writer's
+  omission, not a fact about the step. A conventional table also BOUNDS the file: a step above line
+  100,000 on it is refused and fails the recording, which an AVM program counter past 100,000 on
+  the `Line(pc)` fallback of a column-aware recording would hit (measured on a probe, not on any
+  recording this runtime makes today).
+- decision: **Conformed, not loosened.** m41's driver expects column 1 for both steps on the source
+  path, and its synthesised control moves a DRIVEN step's column, as the defect it exists for did.
+  m40 asserts the entry step by position (`/aztec/private.nr:1:1`), the step count as source steps
+  plus that one, and the surfaced columns as the tracer's, one per frame entry and the entry step's.
+- evidence: `aztec-avm-runtime/verification/ct_writer_drive_core.mjs` (`EXPECTED_STEPS`);
+  `aztec-avm-runtime/verification/e2e_joined_private_public_trace.sh` §4.
+
+## D30 — a later, different path table: the writers refuse it, and this module answered it silently
+
+- id: D30
+- status: closed
+- opened: 2026-10-03
+- milestone: the trace-format re-pin of 2026-10-03 (`pins.json` history), the `ct-host/src/writer.ts`
+  audit for late path-table registration; measured by m41's `verify_path_table_fixed_at_first_mention`
+- design-question: —
+- sides: both writers at the 2026-10 format revision, which refuse a non-empty line-length table
+  offered for an already-interned path unless it is the table recorded (`da1ef2c`, `edf6c39`);
+  versus `ct-writer`'s `ct_intern_path`, which answered a repeat registration from its own path list
+  and ignored the writer's answer to a first one
+- what: Two ways the rule was hidden. (1) A second, DIFFERENT table for an interned path returned the
+  first file's id with no error and never reached the writer, so every step of the second file was
+  addressed in the first file's table — two files under one name, which a transaction whose
+  contracts were compiled against different library versions can produce. Measured before the fix:
+  id 0, no message, a container that closed. (2) Interning the session's own source path with a
+  table on a column-aware recording is refused by the writer (that path took the conventional
+  table at `start`), and the module returned an id and let the CLOSE fail long after — on Path A
+  with `the writer refused to finish` and no reason at all.
+- why it matters: the first is the silent-wrong-answer shape exactly: every position real, every
+  one in the wrong table. The second is a refusal reported where nobody can act on it.
+- decision: **Fixed in the module.** `ct_intern_path` keeps each path's table and refuses a different
+  one with `CT_ERR_WRITER`, naming the path; the same table again, or none, returns the id. The
+  backends return the writer's own refusal of a registration, and `ct_intern_path` reports it at the
+  call. Path A's close now carries the writer's reason. The AUDIT: `ct-host/src/writer.ts` registers
+  a path only through `internPath`, which crosses at once rather than behind the step batch, and a
+  path id reaches a step or a frame only after `internPath` returned it, so the host registers no
+  table late of its own; it now receives the refusal as a `CtWriterError`. The new check measures
+  both modules through the real host, with the same and empty tables as controls; with the
+  comparison removed it reads 41 assertions and 12 failures.
+- evidence: `aztec-avm-runtime/ct-writer/src/lib.rs` (`ct_intern_path`);
+  `aztec-avm-runtime/verification/verify_path_table_fixed_at_first_mention.sh`.
+
+## D31 — the reader names an I/O event's exact kind; a trace-log event used to read as `ioStderr`
+
+- id: D31
+- status: closed
+- opened: 2026-10-03
+- milestone: the trace-format re-pin of 2026-10-03 (`pins.json` history), read by m34's wallet
+  checks and by `verification/_ct_frames.py`
+- design-question: —
+- sides: `ct-print --full` at `anchors.trace_format_nim` (`7967c179dd`), whose split-stream decode
+  reports `io_kind` as the `EventLogKind` name `trace-events.md` defines (`Write`, `TraceLogEvent`,
+  `EvmEvent`, ...); versus the previous anchor, which collapsed the fourteen kinds into four and
+  reported a trace-log event as `ioStderr`, the same answer as an `EvmEvent`
+- what: `lib_m34_wallet.sh` selected the wallet's decisions by `io_kind == "ioStderr"`, which the
+  new reader never emits, so it would have read NO rows; `_ct_frames.py` read every `io` record as a
+  trace-log EVENT row, which held only because this runtime writes no other kind.
+- why it matters: a filter that matches nothing reports an empty, successful answer — the campaign's
+  most repeated defect. With the kind exact, an `EvmEvent` can no longer pass as a wallet decision.
+- decision: **Conformed to the exact kind.** Both read `io_kind == "TraceLogEvent"`; the old spelling
+  is not accepted beside it, because a reader answering `ioStderr` again would be a reader
+  regressing, and m34's non-degeneracy assertion would then fail. `_ct_frames.py` reads any other
+  `io` kind as a non-EVENT record.
+- evidence: `aztec-avm-runtime/verification/lib_m34_wallet.sh` (`m34_log_events`);
+  `aztec-avm-runtime/verification/_ct_frames.py` (`ev_type`).
+
+## D32 — the reader refuses a file that is not a container when it opens it, not stream by stream
+
+- id: D32
+- status: closed
+- opened: 2026-10-08
+- milestone: the trace-format re-pin of 2026-10-08 (`pins.json` history), read by m24's
+  `test_ct_container_roundtrip_ct_print`
+- design-question: —
+- sides: `openNewTrace` at `anchors.trace_format_nim` (`051efd22b0`), which reads the container
+  header when it opens a file, to choose the full or the compact profile, and refuses a file
+  without the CTFS magic there (`not a CTFS container: the first five bytes are not the magic`);
+  versus the previous anchor (`7967c179dd`), which opened such a file and failed each stream as it
+  was read
+- what: the instrument control in `test_ct_container_roundtrip_ct_print` fed `ct_split_probe` 4,096
+  random bytes and required `ERR:steps.dat:`, `ERR:values.dat:` and `ERR:calls.dat:`. The probe now
+  stops at `OPEN` with the reader's refusal and reports no stream, so all three were red.
+- why it matters: the control exists so that "steps.dat decodes" cannot be a statement about the
+  probe. It still has to see the probe report a non-container as unreadable, never as an empty one;
+  only the place the refusal is reported moved.
+- decision: **Conformed to the open-time refusal.** The control requires `OPEN` to be an `ERR:`
+  naming a non-CTFS file, not `ok`, and no `STEP_COUNT` line carrying a number. Four assertions as
+  before, so the check stays at 94.
+- evidence: `aztec-avm-runtime/verification/test_ct_container_roundtrip_ct_print.sh` (the
+  instrument's own control); `codetracer-trace-format-nim` `a8fa27f`.
+
+## D33 — the C ABI opens a container from bytes, so its freestanding build is no longer write-only
+
+- id: D33
+- status: closed
+- opened: 2026-10-08
+- milestone: the trace-format re-pin of 2026-10-08 (`pins.json` history), read by m41's
+  `verify_in_memory_reader_reachable_from_browser`
+- design-question: —
+- sides: `codetracer_trace_writer_ffi.nim` at `anchors.trace_format_nim_writer` (`051efd22b0`),
+  which exports `ct_reader_open_bytes` outside the filesystem gate, so a freestanding wasm32 build
+  of the C ABI reaches `openNewTraceFromBytes`; versus the previous anchor (`7967c179dd`), whose C
+  ABI had only the gated, path-taking `ct_reader_open`, so Nim stripped the byte-taking constructor
+- what: the check asserted that the freestanding C ABI carried no reader constructor, and its
+  prefix match counted `ct_reader_open_bytes` as `ct_reader_open`, so the path-taking constructor
+  read as present on a target that has only the byte-taking one. Both assertions were red.
+- why it matters: the gate the check exists for still holds (`ct_reader_open` is absent from the
+  freestanding build), and the prefix match would have hidden it failing. This runtime's module
+  still exports no reader entry point: its export list is the writer ABI, counted by
+  `verify_ct_writer_wasm_zero_imports`.
+- decision: **Conformed.** An exported C name is matched as a whole word (`exportc` names are not
+  mangled); the absence of a reader constructor is replaced by two assertions of the capability —
+  the freestanding C ABI carries `ct_reader_open_bytes`, and reaches `openNewTraceFromBytes` — so
+  the check grows by one assertion.
+- evidence: `aztec-avm-runtime/verification/verify_in_memory_reader_reachable_from_browser.sh`;
+  `codetracer-trace-format-nim` `1b0b3bd`.
+
+## D34 — the pure-Rust writer honours a column request made before its first record, so the browser tracer's container is column-aware
+
+- id: D34
+- status: closed
+- opened: 2026-10-08
+- milestone: the trace-format re-pin of 2026-10-08 (`pins.json` history), read by m30's
+  `e2e_vfs_edit_recompile_retrace`
+- design-question: —
+- sides: `CtfsTraceWriter::enable_column_aware_steps` at `anchors.trace_format` (`3fada0b03c`),
+  which accepts the opt-in until the first record or path, as the Nim writer does (D28); versus the
+  previous anchor (`145ff42ff6`), which refused any opt-in once the container was open and set
+  `dropped_column_awareness()`
+- what: the Noir browser tracer (`../noir-wt4-webpage`, linking the writer at `../ctf-wt-wasm`)
+  asks for columns after opening the container and before its first record. The container now
+  carries `meta.dat`'s column-aware flag and its steps carry columns, and nothing is dropped. m30
+  asserted the opposite pair — "not column-aware" from the tracer's `ContainerInfo.column_aware`,
+  and "asked and dropped" — and the second went red. The first stayed green only because
+  `column_aware` is a constant `false` in the tracer, not a reading of the container.
+- why it matters: a field that cannot change is not evidence; it would have kept saying "not
+  column-aware" about a container that is.
+- decision: **Conformed, and measured from the container.** The page hands the container's bytes
+  back with the arms, and the check reads the column-aware flag through the pinned reader
+  (`ct_split_probe`'s `COLUMN_AWARE`) and requires `droppedColumnAwareness` false. The tracer's
+  constant is no longer read here; correcting it belongs to the Noir worktree, which this
+  repository does not edit.
+- evidence: `aztec-avm-runtime/verification/e2e_vfs_edit_recompile_retrace.sh` (§3);
+  `aztec-avm-runtime/verification/m30/page/vfs_page.mjs` (`containerB64`);
+  `noir-wt4-webpage/tooling/tracer_wasm/src/lib.rs` (`ContainerInfo`).
+
 <!-- END:drift -->
 
 ---

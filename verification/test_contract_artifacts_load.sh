@@ -41,7 +41,9 @@ else
 fi
 
 assert_true "it produced JSON" python3 -c "import json;json.load(open('$SCRATCH/fresh.json'))"
-if cmp -s "$SCRATCH/fresh.json" "$RECORDED"; then
+# One comparison, used here and by the trimmed-record control below.
+reproduces_record() { cmp -s "$SCRATCH/fresh.json" "$1"; }
+if reproduces_record "$RECORDED"; then
   pass "the derived result reproduces fixtures/contracts/artifacts.json byte for byte"
 else
   fail "the derived result differs from the checked-in record"
@@ -88,12 +90,21 @@ t = open(p).read().replace(
 )
 open(p, "w").write(t)
 PY
-if ( cd "$DIFFSIM" && node .check_contract_artifacts_control.mjs ) >/dev/null 2>&1; then
-  fail "negative control NOT caught: a wrong declared pin still exited 0"
-else
-  pass "negative control caught: an artifact off the declared pin makes the checker exit non-zero"
-fi
-rm -f "$DIFFSIM/.check_contract_artifacts_control.mjs"
+# A control passes only when the checker fails FOR THE REASON IT IS NAMED FOR: a mutated copy
+# that fails to load, or fails on some other artifact rule, also exits non-zero.
+checker_control() { # <description> <ERE the checker's stderr must match>  (runs .check_contract_artifacts_control.mjs)
+  local desc="$1" rule="$2" err
+  if err="$( cd "$DIFFSIM" && node .check_contract_artifacts_control.mjs 2>&1 >/dev/null )"; then
+    fail "negative control NOT caught: $desc — the checker exited 0"
+  elif str_has_line_re "$err" "$rule"; then
+    pass "negative control caught: $desc"
+  else
+    fail "negative control: $desc — the checker failed, but not for the reason named [$rule]: $(printf '%s\n' "$err" | head -3 | tr '\n' ' ')"
+  fi
+  rm -f "$DIFFSIM/.check_contract_artifacts_control.mjs"
+}
+checker_control "an artifact off the declared pin makes the checker exit non-zero" \
+  '^FAIL Token: aztecVersion [^ ]+ does not equal the declared pin for diffsim$'
 
 echo "== the same six also resolve on the current nightly, so the corpus is not pinned to a dead line"
 # drift/ is the tree on `npm.current`. Loading the artifacts there proves the Tier C corpus is not
@@ -129,11 +140,16 @@ echo "== negative controls"
 python3 - "$RECORDED" "$SCRATCH/trimmed.json" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
-d["artifacts"]["Token"]["calledPublicFunctions"].pop()
+d["artifacts"]["Token"]["calledPublicFunctions"].pop(0)
 json.dump(d, open(sys.argv[2], "w"), indent=2)
+open(sys.argv[2], "a").write("\n")
 PY
+# Serialised exactly as the checker serialises its output (indent 2, trailing newline), so the
+# trimmed copy differs from the derivation by the trimmed name and nothing else.
+assert_eq "the trimmed copy differs from the record by exactly one removed line and nothing else" "1 0" \
+  "$(diff "$RECORDED" "$SCRATCH/trimmed.json" | grep -c '^<' || true) $(diff "$RECORDED" "$SCRATCH/trimmed.json" | grep -c '^>' || true)"
 assert_false "negative control: a trimmed called-function list no longer reproduces the derivation" \
-  cmp -s "$SCRATCH/trimmed.json" "$SCRATCH/fresh.json"
+  reproduces_record "$SCRATCH/trimmed.json"
 
 # (2) The checker must FAIL, not warn, when an artifact cannot be imported.
 cp "$CHECKER" "$SCRATCH/broken.mjs"
@@ -144,12 +160,9 @@ t = open(p).read().replace("'@aztec/noir-contracts.js/Token'", "'@aztec/noir-con
 open(p, "w").write(t)
 PY
 cp "$SCRATCH/broken.mjs" "$DIFFSIM/.check_contract_artifacts_control.mjs"
-if ( cd "$DIFFSIM" && node .check_contract_artifacts_control.mjs ) >/dev/null 2>&1; then
-  fail "negative control NOT caught: an unimportable artifact still exited 0"
-else
-  pass "negative control caught: an unimportable artifact makes the checker exit non-zero"
-fi
-rm -f "$DIFFSIM/.check_contract_artifacts_control.mjs"
+checker_control "an unimportable artifact makes the checker exit non-zero" \
+  'noir-contracts\.js/NoSuchContract'
+
 
 # (3) The checker must FAIL when an artifact's public surface is untouched by the corpus, so
 #     "the corpus calls none of them" is an error rather than an empty list.
@@ -161,12 +174,9 @@ t = open(p).read().replace("const referenced = quotedIdentifiers('src');", "cons
 open(p, "w").write(t)
 PY
 cp "$SCRATCH/nocalls.mjs" "$DIFFSIM/.check_contract_artifacts_control.mjs"
-if ( cd "$DIFFSIM" && node .check_contract_artifacts_control.mjs ) >/dev/null 2>&1; then
-  fail "negative control NOT caught: an artifact whose surface is never called still exited 0"
-else
-  pass "negative control caught: an artifact whose surface is never called makes the checker fail"
-fi
-rm -f "$DIFFSIM/.check_contract_artifacts_control.mjs"
+checker_control "an artifact whose surface is never called makes the checker fail" \
+  '^FAIL Token: the corpus calls none of its [0-9]+ public functions$'
+
 
 # (4) The derived set really is derived from the sources: removing a source reference removes it
 #     from the result. `set_minter` is referenced in exactly ONE file (`fixtures/amm_test.ts`),

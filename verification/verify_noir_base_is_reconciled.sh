@@ -158,7 +158,7 @@ assert_ge "the remote ref listing is not empty" 5 "$(printf '%s\n' "$REFS" | gre
 assert_eq "wasm/webpage appears in ZERO published refs" "0" \
   "$(printf '%s\n' "$REFS" | grep -c 'wasm/webpage' || true)"
 assert_ge "…and the same predicate finds the branches that ARE published" 1 \
-  "$(printf '%s\n' "$REFS" | grep -c 'wasm/reconcile-then-extract' || true)"
+  "$(printf '%s\n' "$REFS" | grep -Ec '(refs/heads/codetracer|refs/remotes/origin/codetracer)$' || true)"
 assert_ge "…and finds the working branch itself" 1 \
   "$(printf '%s\n' "$REFS" | grep -c "$BRANCH" || true)"
 

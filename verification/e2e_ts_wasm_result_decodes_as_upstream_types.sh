@@ -204,7 +204,7 @@ YAML_JOBS=""
 if command -v yq >/dev/null 2>&1; then
   YAML_JOBS="$(yq -r '.jobs | keys | join(" ")' "$WF" 2>/dev/null)"
 elif command -v nix >/dev/null 2>&1; then
-  YAML_JOBS="$(nix shell nixpkgs#yq-go --command yq -r '.jobs | keys | join(" ")' "$WF" 2>/dev/null)"
+  YAML_JOBS="$(nix shell --inputs-from "$REPO_ROOT" nixpkgs#yq-go --command yq -r '.jobs | keys | join(" ")' "$WF" 2>/dev/null)"
 fi
 if [ -n "$YAML_JOBS" ]; then
   assert_contains "the workflow parses as YAML and declares the M18 job as a job"     "orchestration" "$YAML_JOBS"

@@ -16,6 +16,10 @@
 #      fails, because a hygiene check over an empty tree proves nothing. At
 #      least one real build artefact must be present and ignored.
 #
+# A flake also has to be constructible for every system it advertises, or its `systems` list is
+# an untested claim. That rule is its own check, verify_advertised_systems_construct (it is also
+# `just verify-advertised-systems`), and is run from here as a child so that hygiene covers it.
+#
 # The lock asserted here is `flake.lock` — the file that actually pins these
 # repos' dependencies. See the M0 notes in the milestone file for why neither
 # repo carries a reprobuild `repro.lock`.
@@ -146,5 +150,12 @@ EOF
 
 check_repo "aztec-avm-runtime" "$REPO_ROOT" "$GENERATED_CANDIDATES_aztec_avm_runtime"
 check_repo "aztec-packages"    "$FORK_ROOT" "$GENERATED_CANDIDATES_aztec_packages"
+
+note "--- advertised systems (verify_advertised_systems_construct)"
+if "$VERIFY_DIR/verify_advertised_systems_construct.sh"; then
+  pass "both flakes construct every output of every system they advertise"
+else
+  fail "a flake advertises a system it cannot construct (see verify_advertised_systems_construct above)"
+fi
 
 finish

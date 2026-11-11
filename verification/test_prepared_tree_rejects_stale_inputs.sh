@@ -67,7 +67,7 @@ git -C "$ANCHOR" config user.name  "M15 freshness probe"
 mkdir -p "$ANCHOR/barretenberg/cpp"
 printf 'anchor\n' >"$ANCHOR/barretenberg/cpp/CMakeLists.txt"
 git -C "$ANCHOR" add -A >/dev/null
-git -C "$ANCHOR" commit -qm "anchor"
+git -C "$ANCHOR" -c commit.gpgsign=false commit -qm "anchor"
 BASE_SHA="$(git -C "$ANCHOR" rev-parse HEAD)"
 assert_eq "the scratch anchor is one commit" "1" \
   "$(git -C "$ANCHOR" rev-list --count HEAD)"
@@ -81,7 +81,7 @@ git -C "$ANCHOR" checkout -q -b stack
 for i in 1 2 3; do
   printf 'patch %s content\n' "$i" >"$ANCHOR/barretenberg/cpp/file$i.txt"
   git -C "$ANCHOR" add -A >/dev/null
-  git -C "$ANCHOR" commit -qm "feat: change number $i"
+  git -C "$ANCHOR" -c commit.gpgsign=false commit -qm "feat: change number $i"
 done
 PATCHDIR="$SCRATCH/patches"
 mkdir -p "$PATCHDIR"

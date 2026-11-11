@@ -344,7 +344,7 @@ assert_true "…and the second" str_has_line "$RECOVERERS" "external_call_to_div
 # NEITHER NESTED TARGET MAKES A SIDE EFFECT. `nested_call_to_nothing_recovers` calls a garbage
 # address with no code; the other calls `divide_by_zero`, whose whole body is one division.
 DIVIDE_BODY="$(printf '%s\n' "$AVMTEST_SRC" | sed -n '/^[[:space:]]*fn divide_by_zero(/,/^[[:space:]]*}/p')"
-assert_ge "…and `divide_by_zero`'s body is readable" 2 "$(printf '%s\n' "$DIVIDE_BODY" | grep -c . || true)"
+assert_ge "…and \`divide_by_zero\`'s body is readable" 2 "$(printf '%s\n' "$DIVIDE_BODY" | grep -c . || true)"
 for effect in 'storage_write' 'emit_nullifier' 'emit_note_hash' 'emit_public_log' 'send_l2_to_l1'; do
   assert_false "…and it contains no $effect, so the nested target makes no side effect" \
     str_has_sub "$DIVIDE_BODY" "$effect"

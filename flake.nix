@@ -13,10 +13,13 @@
   outputs =
     inputs@{ flake-parts, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } {
+      # No x86_64-darwin: the locked nixpkgs (26.11) refuses it, the 26.05 branch that still has it
+      # lacks the Nim pins.json requires, and no CI runner this repository uses is Intel Darwin.
+      # A system is listed only if every output evaluates for it, which
+      # verification/verify_advertised_systems_construct.sh checks.
       systems = [
         "x86_64-linux"
         "aarch64-linux"
-        "x86_64-darwin"
         "aarch64-darwin"
       ];
 
@@ -24,6 +27,16 @@
         { pkgs, ... }:
         let
           wasi-sdk = pkgs.callPackage ./nix/wasi-sdk.nix { };
+          # Original RI25 golden bytes, not the newer fork's different fixture.
+          minimalTxTestData = pkgs.fetchurl {
+            url = "https://raw.githubusercontent.com/AztecProtocol/aztec-packages/3a68d68ac29aaf04fc6251c80a8eb874043cb260/barretenberg/cpp/src/barretenberg/vm2/testing/minimal_tx.testdata.bin";
+            sha256 = "e030497fba43eda15395a1ac3f7974edb687ba78c39614667ef6b012704acdb2";
+          };
+          bbNativeRuntime =
+            if pkgs.stdenv.hostPlatform.isLinux then
+              pkgs.callPackage ./nix/bb-native-runtime.nix { }
+            else
+              null;
         in
         {
           packages.wasi-sdk = wasi-sdk;
@@ -94,11 +107,21 @@
               pkgs.python3
               pkgs.gnused
               pkgs.parallel
+
+              # `verification/prepare_native_srs.py` downloads the original G2 SRS with the
+              # shell's own curl and refuses any curl outside /nix/store ("Immutable declared
+              # curl required"). Without this entry the shell had no curl at all: a workstation
+              # found its profile's store curl through the ambient PATH, and a CI runner found
+              # /usr/bin/curl, so the SRS prerequisite failed there and every native test that
+              # needs the SRS (verify-m14's vm2_tests) failed with it.
+              pkgs.curl
             ];
 
             # barretenberg's wasm toolchain file and its bootstrap scripts both
             # read WASI_SDK_PREFIX; CMAKE_TOOLCHAIN_FILE consumers read
             # WASI_SDK_PATH. Export both so neither spelling has to be guessed.
+            AZTEC_AVM_MINIMAL_TX_TEST_DATA = "${minimalTxTestData}";
+
             WASI_SDK_PATH = "${wasi-sdk}";
             WASI_SDK_PREFIX = "${wasi-sdk}";
 
@@ -110,7 +133,12 @@
               pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ]
             );
 
-            shellHook = ''
+            shellHook = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+              # The locked native CLI needs the owning libc loader as well
+              # as the NAPI module's existing library path. Explicit caller
+              # overrides remain authoritative in bb.js's supported API.
+              export BB_BINARY_PATH="''${BB_BINARY_PATH:-${bbNativeRuntime}/bin/bb}"
+            '' + ''
               # ---- compiler cache -------------------------------------------------
               # The same six exports the fork's shell makes, with the same defaults and
               # the same `:-` overridability, so a build that moves from one shell to

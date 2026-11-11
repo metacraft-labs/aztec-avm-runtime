@@ -88,7 +88,7 @@ assert_eq "the private half's record is the private half's" \
 assert_eq "the public half's record is the public half's" \
   "join=$JOIN_ID half=public halves=2 arm=split reason=recorded-by-the-producer-not-inferred-by-a-reader" \
   "$PUB_REC"
-assert_false "…and the two records are not identical, so `half` really distinguishes them" \
+assert_false "…and the two records are not identical, so \`half\` really distinguishes them" \
   test "$PRIV_REC" = "$PUB_REC"
 # THE PUBLIC HALF'S RECORD WAS WRITTEN BY THE SHIPPED MODULE, counted by the module itself.
 assert_eq "the public half's record came from the shipped module's ct_log_event" "1" \

@@ -73,7 +73,9 @@ assert_eq "and it declares $M7_EXPECTED_SIM_TESTS tests" \
 # 1,803, so the wasm target is a subset of upstream's suite and not a rewrite of
 # it under the same name.
 stray="$(LC_ALL=C comm -13 <(LC_ALL=C sort -u "$M7_WORK/A_list.txt") <(LC_ALL=C sort -u "$M7_WORK/N_list.txt"))"
-assert_eq "every wasm-side test name is also in upstream's own vm2_tests" "" \
+# The 391 are read from the NATIVE build of the vm2_sim_tests target; that the wasm
+# binary runs exactly the same names is asserted further down (declared vs started).
+assert_eq "every test the vm2_sim_tests target declares is also in upstream's own vm2_tests" "" \
   "$(printf '%s' "$stray" | tr '\n' ' ' | sed 's/ *$//')"
 
 # --- native: run ------------------------------------------------------------

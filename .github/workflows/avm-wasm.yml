@@ -221,7 +221,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -430,7 +430,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -608,7 +608,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -775,7 +775,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -970,7 +970,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -1174,7 +1174,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -1396,7 +1396,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -1519,7 +1519,7 @@ jobs:
             aztec-avm-runtime/verification/lib_m16_fallback.sh \
             aztec-avm-runtime/probe-mt/m16_hazard.mjs \
             aztec-avm-runtime/probe-mt/m16_adapter_probe.mjs \
-            codetracer-specs/Planned-Work/Aztec-AVM-Runtime.milestones.org ; do
+            codetracer-specs/milestones/Aztec-AVM-Runtime.milestones.org ; do
             test -f "$p" || { echo "::error::missing M16 input: $p" >&2; exit 1; }
           done
 
@@ -1575,7 +1575,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -2113,7 +2113,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -2270,7 +2270,18 @@ jobs:
           # second tree and no second build: verify-m18 re-runs verify-halves-compose, and its
           # m17_measured record short-circuits once the tree is materialised.
           dev-exec just verify-halves-compose 2>&1 | tee verify-m18-build.log | tail -5
-          export AVM_WASM_PATH="${M18_WORK}/m12/barretenberg/cpp/build-wasm-avm/bin/avm.wasm"
+          #
+          # BUT NOT M12's MODULE FOR THE TOKEN/BLOCK ARMS. The paragraph above was wrong about that,
+          # and run 42994775110 measured it: M12's module has the seven exports the arms require and
+          # still cannot run them, because it lacks M13's contract-DB overlay. The arm registers
+          # the Token class, calls it, and the reactor dies inside `avm_simulate` with
+          # `Assertion failed: (maybe_instance.has_value())` / "Contract instance should be found
+          # if nullifier exists", so all five token/block checks report "the token/block arm run
+          # failed (rc 1)". `tb_find_module`'s own fallbacks name an M13/M15 module for exactly this
+          # reason, and with M13's module the same arm run exits 0. So the module is built here by
+          # M13's own building check, in a directory of its own under $M18_WORK, and named below.
+          M13_WORK="${M18_WORK}/m13" dev-exec just verify-contract-db-decision 2>&1 | tee verify-m18-build-m13.log | tail -5
+          export AVM_WASM_PATH="${M18_WORK}/m13/m13/barretenberg/cpp/build-wasm-avm/bin/avm.wasm"
           test -s "$AVM_WASM_PATH" || { echo "::error::no module at $AVM_WASM_PATH" >&2; exit 1; }
           dev-exec just verify-m18 2>&1 | tee verify-m18.log
 
@@ -2330,7 +2341,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -2568,7 +2579,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          echo "runner: ${RUNNER_NAME:-unknown}   host: $(hostname)"
+          echo "runner: ${RUNNER_NAME:-unknown}   host: ${HOSTNAME:-unknown}"   # bash builtin: no `hostname` binary on the NixOS runners
           echo "cpu:    $(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
           for feat in adx bmi1 bmi2 avx avx2 fma; do
             if grep -q -w "$feat" /proc/cpuinfo; then
@@ -2753,7 +2764,7 @@ jobs:
 
   noir-call-frames:
     name: Noir call frames — the tree the recorder writes, and the subtrees a view folds
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, linux, x64, ephemeral, incus]
     # THE CHEAPEST JOB IN THIS FILE, ON PURPOSE. It builds no wasm, launches no browser and reaches
     # no network at run time. `test_noir_frames_open_at_function_boundaries` drives
     # `ContractSourceMap.framesFor` and `NoirFrameTracker` — the same code `replay/src/recording.ts`
@@ -2876,7 +2887,7 @@ jobs:
 
   browser-gate:
     name: the browser gate — no Node.js dependencies
-    runs-on: eph-linux-x64
+    runs-on: [self-hosted, linux, x64, ephemeral, incus]
     # M28, and it is the campaign's LAST milestone. Every other job in this file gates a
     # capability; this one gates an ABSENCE, which is a different thing to get right. It runs on
     # every push and every pull request to `dev` and `main` (see the `on:` block at the top of this
@@ -2964,6 +2975,34 @@ jobs:
           repo: metacraft-labs/codetracer-specs
           ref: latest
           path: codetracer-specs
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      # THE READER THE FULL-FLOW SMOKE DECODES ITS TRACE WITH. `smoke_browser_headless_full_flow`
+      # calls `m24_require_readers`, which runs `verification/build_ct_print.sh`, which does
+      # `git archive` out of `$WORKSPACE_ROOT/codetracer-trace-format-nim` at the three revisions
+      # `pins.json` names (the reader, its control and the writer) and refuses with "no
+      # codetracer-trace-format-nim checkout" when the sibling is absent. This job cloned only the
+      # fork and codetracer-specs, so the smoke died on "cannot run: verification/build_ct_print.sh
+      # failed" (run 42994775110). The pins sit on `agents` (`branch_at_pin`), not on `dev`, and the
+      # clone is full-depth, so the control commits (ancestors of the pin) resolve too.
+      - name: Clone codetracer-trace-format-nim (the trace reader's source)
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-trace-format-nim
+          ref: agents
+          path: codetracer-trace-format-nim
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      # THE WRITER THE SAME SMOKE BUILDS AND SERVES. After the reader was provided the smoke went on
+      # to `m24_require_module`, which runs `verification/build_ct_writer_wasm.sh`, which
+      # `git archive`s `$WORKSPACE_ROOT/codetracer-trace-format` at `pins.json`'s `trace_format`
+      # anchor. Same branch (`agents`, `branch_at_pin`), same full-depth clone.
+      - name: Clone codetracer-trace-format (the trace writer's source)
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-trace-format
+          ref: agents
+          path: codetracer-trace-format
           gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup Dev Environment

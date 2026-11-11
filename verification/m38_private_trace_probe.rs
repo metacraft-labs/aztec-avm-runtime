@@ -397,11 +397,48 @@ impl<D: TraceForeignCallExecutor> TraceForeignCallExecutor for TapeExecutor<D> {
 
 struct CountingSink<'a> {
     inner: NimWriterSink<'a>,
+    /// How many times a tracer asked to start the recording, and how many of those reached the
+    /// writer. One container is ONE recording, so exactly one `start` may reach it; see `start`.
+    starts_asked: usize,
+    starts_written: usize,
+    /// The three column capabilities (aware steps, breakpoints, motions): which have reached the
+    /// writer, how many opt-ins a tracer asked for, and how many were passed through. See
+    /// `capability`.
+    capabilities: [bool; 3],
+    capabilities_asked: usize,
+    capabilities_written: usize,
     steps: Vec<(String, i64, Option<i64>)>,
     paths: Vec<String>,
     calls: usize,
     returns: usize,
     errors: Vec<String>,
+}
+
+impl<'a> CountingSink<'a> {
+    // A CAPABILITY IS DECLARED ONCE, BEFORE THE RECORDING'S FIRST RECORD, HOWEVER MANY CIRCUITS ASK.
+    //
+    // `trace_circuit_with_executor` opts the writer into the three column capabilities for every
+    // circuit it steps, just before that circuit's `start`. The writer fixes `meta.dat` -- every
+    // field and capability -- at the trace's first record (`ctfs-container.md` section 6,
+    // "Durability", rule 1) and refuses a later opt-in, which then fails the close. So an opt-in
+    // reaches the writer only while nothing has been recorded; a later one for a capability the
+    // recording already carries asks for nothing new and is counted, not passed on. A later one
+    // for a capability the recording does NOT carry would be a real change to a fixed `meta.dat`:
+    // it is passed through so the writer refuses it, and recorded here, rather than dropped.
+    fn capability(&mut self, which: usize) -> bool {
+        self.capabilities_asked += 1;
+        if self.starts_written == 0 || !self.capabilities[which] {
+            if self.starts_written != 0 {
+                self.errors.push(format!(
+                    "column capability {which} was asked for after the recording started"
+                ));
+            }
+            self.capabilities[which] = true;
+            self.capabilities_written += 1;
+            return true;
+        }
+        false
+    }
 }
 
 impl<'a> TraceSink for CountingSink<'a> {
@@ -417,17 +454,40 @@ impl<'a> TraceSink for CountingSink<'a> {
     fn set_workdir(&mut self, workdir: &std::path::Path) {
         self.inner.set_workdir(workdir);
     }
+    // THE RECORDING IS STARTED ONCE, HOWEVER MANY CIRCUITS ARE TRACED INTO IT.
+    //
+    // `trace_circuit_with_executor` starts the trace for every circuit it steps, and this program
+    // steps one circuit per FRAME into ONE writer. The writer's `start` opens the recording: it
+    // interns `<toplevel>`, opens its call — the root of the call tree — and records the entry step
+    // (`trace-events.md`, "Recorder Integration — Starting a Recording"). A second `start` into the
+    // same writer would therefore open a SECOND `<toplevel>` frame. So only the first reaches the
+    // writer as a `start`; every later one is recorded as what it asks for inside an open recording,
+    // a step at the position it names — the frame's entry step, inside the `Call` this program
+    // registered for the frame. The container keeps one entry step per traced circuit and one root.
     fn start(&mut self, path: &std::path::Path, line: codetracer_trace_types::Line) {
-        self.inner.start(path, line);
+        self.starts_asked += 1;
+        if self.starts_written == 0 {
+            self.starts_written += 1;
+            self.inner.start(path, line);
+        } else {
+            // No column: `start` has none to give, and the entry step it used to record had none.
+            self.inner.register_step_with_column(path, line, None);
+        }
     }
     fn enable_column_aware_steps(&mut self) {
-        self.inner.enable_column_aware_steps();
+        if self.capability(0) {
+            self.inner.enable_column_aware_steps();
+        }
     }
     fn enable_column_breakpoints_support(&mut self) {
-        self.inner.enable_column_breakpoints_support();
+        if self.capability(1) {
+            self.inner.enable_column_breakpoints_support();
+        }
     }
     fn enable_column_motions_support(&mut self) {
-        self.inner.enable_column_motions_support();
+        if self.capability(2) {
+            self.inner.enable_column_motions_support();
+        }
     }
     fn register_path_with_line_lengths(
         &mut self,
@@ -761,6 +821,11 @@ fn main() {
     let mut writer = create_trace_writer(&program_name, &[], TraceEventsFileFormat::Ctfs);
     let mut sink = CountingSink {
         inner: NimWriterSink::new(&mut *writer),
+        starts_asked: 0,
+        starts_written: 0,
+        capabilities: [false; 3],
+        capabilities_asked: 0,
+        capabilities_written: 0,
         steps: vec![],
         paths: vec![],
         calls: 0,
@@ -1116,6 +1181,10 @@ fn main() {
         "registeredPaths": sink.paths.len(),
         "calls": sink.calls,
         "returns": sink.returns,
+        "startsAsked": sink.starts_asked,
+        "startsWritten": sink.starts_written,
+        "capabilitiesAsked": sink.capabilities_asked,
+        "capabilitiesWritten": sink.capabilities_written,
         "traceErrors": sink.errors,
         "oracleLedger": *ledger.borrow(),
         "refusedOracles": *refused.borrow(),

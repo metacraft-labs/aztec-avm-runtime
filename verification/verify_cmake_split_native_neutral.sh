@@ -261,6 +261,19 @@ for tgt in world_state_tests vm2_tests; do
     assert_file "$tgt exists $label the split" "$tree/barretenberg/cpp/$M10_NATIVE_BUILD/bin/$tgt"
   done
 
+  if [ "$tgt" = vm2_tests ]; then
+    # Nonempty kernel ENOTDIR path prevents HOME fallback even if the helper
+    # refuses before it can create or publish its exclusive context.
+    export CRS_PATH=/dev/null/native-srs-prerequisite-refused
+    srs_path="$(m6_in_devshell 'python3 "$1" "$2" "$3"' \
+      "$VERIFY_DIR/prepare_native_srs.py" \
+      "$BEFORE/barretenberg/cpp/$M10_NATIVE_BUILD" "$M10_WORK")"; srs_rc=$?
+    assert_eq "verified original 4M SRS prerequisite succeeds" "0" "$srs_rc"
+    if [[ "$srs_path" = /* ]] && [ -d "$srs_path" ] && [ ! -L "$srs_path" ]; then
+      export CRS_PATH="$srs_path"
+    fi
+  fi
+
   bb="$BEFORE/barretenberg/cpp/$M10_NATIVE_BUILD/bin/$tgt"
   ba="$AFTER/barretenberg/cpp/$M10_NATIVE_BUILD/bin/$tgt"
   nb="$(m10_gtest_names "$bb")"

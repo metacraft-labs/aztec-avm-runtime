@@ -168,6 +168,10 @@ m6_prepare_trees
 assert_eq "and the tree it produces is bit-for-bit M6's, from the same four files" \
   "$(git -C "$M6_TREE_AVM" rev-parse HEAD^{tree})" "$(git -C "$APPLY" rev-parse HEAD^{tree})"
 TREE_HASH="$(git -C "$APPLY" rev-parse HEAD^{tree})"
+# The comparison above is between two `git am` runs of the SAME four files, so it holds for any
+# content those files have. What pins the REVIEWED change is a literal: the tree the reviewed
+# patch produces, written down here, so an edit to the patch that still applies moves it.
+assert_eq "and it is the reviewed tree, pinned by hash" "$M10_REVIEWED_TREE" "$TREE_HASH"
 note "the reviewed tree is $TREE_HASH"
 
 echo

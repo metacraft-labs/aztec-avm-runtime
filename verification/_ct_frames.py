@@ -56,16 +56,25 @@ def main(path):
     # finds no matching events and reports ZERO, successfully. That is this
     # campaign's most repeated defect and it has already been paid for twice, so
     # the normalisation is here rather than at each call site.
+    #
+    # AN `io` RECORD IS A `TraceLogEvent` ONLY WHEN ITS KIND SAYS SO. The split decode names the
+    # exact `EventLogKind` in `io_kind` (`Write`, `ReadFile`, `TraceLogEvent`, `EvmEvent`, ...).
+    # Before the 2026-10 reader it collapsed the fourteen kinds into four and reported a trace-log
+    # event as `ioStderr`, the same answer as an `EvmEvent`, so every `io` record was read as an
+    # EVENT row. With the kind exact, an `io` record of any other kind is not one of this report's
+    # EVENT rows and is not counted as one.
     def ev_type(e):
         t = e.get("type")
         if t is not None:
             return t
+        k = e.get("kind")
+        if k == "io":
+            return "Event" if e.get("io_kind") == "TraceLogEvent" else "IoOther"
         return {
             "step": "Step",
             "call_entry": "Call",
             "call_exit": "Return",
-            "io": "Event",
-        }.get(e.get("kind"), e.get("kind"))
+        }.get(k, k)
 
     out = []
     functions = {}

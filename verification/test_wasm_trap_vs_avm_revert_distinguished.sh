@@ -114,6 +114,13 @@ assert_eq "…and it carries no revert code at all, so nothing can read success 
 assert_eq "…while the SAME test finds one on the revert outcome, so the reading discriminates" \
   "1" "$(f traprevert.revert.hasRevertCodeProperty)"
 assert_eq "the trapped instance is poisoned" "1" "$(f traprevert.trap.instancePoisoned)"
+# What a trap does to the host's allocations. The probe traps while holding exactly one, so the
+# accounting is exercised rather than read as zero off an instance that owned nothing: the
+# allocation is ABANDONED — counted in `leakedAtTrap`, since freeing into a dead allocator would
+# trap again — and the host no longer claims to own it.
+assert_eq "the probe held one allocation when the trap happened" "1" "$(f traprevert.trap.ownedWhenTrapped)"
+assert_eq "…which the trap abandoned and the host counted" "1" "$(f traprevert.trap.leakedAtTrap)"
+assert_eq "…and no longer claims to own" "0" "$(f traprevert.trap.ownedAfterTrap)"
 assert_eq "a call on a poisoned instance is refused rather than answered from a dead memory" \
   "poisoned" "$(f traprevert.afterTrap.classified)"
 # The four classifications are four DIFFERENT tokens. A classifier that collapsed two of them would

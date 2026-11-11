@@ -139,6 +139,12 @@ export async function launchChromium(binary, options = {}) {
   const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   const stderrChunks = [];
 
+  // A LAUNCH THAT TIMES OUT REPORTS WHAT THE BROWSER SAID. The bare timeout names the bound and
+  // nothing else, and on a runner whose browser cannot start (a sandbox it is not allowed to
+  // create, a missing user namespace) the only explanation is on the browser's own stderr. The
+  // `exit` path below already attaches it; the hang path did not, which made the two causes look
+  // alike and the second one undiagnosable from the job log. The child is killed too: a launch
+  // that never announced an endpoint is not a browser anything can use.
   const endpoint = await withTimeout(
     new Promise((resolve, reject) => {
       let buffered = '';
@@ -155,7 +161,11 @@ export async function launchChromium(binary, options = {}) {
     }),
     options.launchTimeoutMs ?? 30_000,
     'chromium launch',
-  );
+  ).catch((err) => {
+    if (!(err instanceof CdpTimeout)) throw err;
+    child.kill('SIGKILL');
+    throw new CdpError('chromium', `${err.message}\nIts stderr so far:\n${stderrChunks.join('')}`);
+  });
 
   return { child, endpoint, stderrChunks, userDataDir };
 }

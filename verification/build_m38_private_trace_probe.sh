@@ -129,7 +129,15 @@ EOF
 
 SPEC_SHA="$(sha256sum "$PROBE/src/main.rs" "$PROBE/Cargo.toml" 2>/dev/null | sha256sum | cut -d' ' -f1)"
 STAMP_FILE="$PROBE/built-from"
-STAMP_WANT="$SPEC_SHA $NOIR_HEAD $CTF_REV"
+# THE NIM WRITER THE PROBE LINKS IS PART OF WHAT WAS BUILT, so its revision is in the stamp. Without
+# it a `trace_format_nim_writer` move left the cached probe in place, linked against the previous
+# writer, and every check reading the probe measured the old writer under the new pin.
+NIM_WRITER_REV="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["anchors"]["trace_format_nim_writer"]["commit"])' "$REPO_ROOT/pins.json" 2>/dev/null)"
+case "$NIM_WRITER_REV" in
+  [0-9a-f][0-9a-f]*) : ;;
+  *) die "pins.json declares no anchors.trace_format_nim_writer.commit, and this probe links the Nim writer" ;;
+esac
+STAMP_WANT="$SPEC_SHA $NOIR_HEAD $CTF_REV nim-$NIM_WRITER_REV"
 if [ "$FORCE" -eq 0 ] && [ -x "$PROBE/bin/m38probe" ] \
    && [ "$(cat "$STAMP_FILE" 2>/dev/null)" = "$STAMP_WANT" ]; then
   printf '%s: up to date (%s)\n' "$TEST_NAME" "$PROBE/bin/m38probe"
@@ -144,6 +152,13 @@ NOIR_TOOLCHAIN="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' "$NOIR_ROOT/rust-toolcha
 M38_RUSTUP_HOME="${M38_RUSTUP_HOME:-$HOME/.rustup}"
 [ -d "$M38_RUSTUP_HOME/toolchains/$NOIR_TOOLCHAIN-x86_64-unknown-linux-gnu" ] || \
   die "the Noir checkout pins rust $NOIR_TOOLCHAIN and $M38_RUSTUP_HOME does not carry it"
+# Held to that channel, repaired if a garbage collection took a store path it loads from, and
+# rooted (verification/lib_toolchain.sh); rustup and capnp come from this repository's flake.lock.
+# shellcheck source=verification/lib_toolchain.sh
+. "$VERIFY_DIR/lib_toolchain.sh"
+TC_PATH="$(RUSTUP_HOME="$M38_RUSTUP_HOME" CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}" \
+  tc_rust_ensure "$NOIR_TOOLCHAIN" "$NOIR_ROOT")" \
+  || die "the Noir toolchain $NOIR_TOOLCHAIN in $M38_RUSTUP_HOME could not be made usable"
 
 # THE NIM COMPILER COMES FROM THE SIBLING'S OWN DEV SHELL, AND THAT IS THE WHOLE DIAGNOSIS.
 #
@@ -176,7 +191,7 @@ for f in .envrc flake.nix flake.lock; do
   fi
 done
 [ -d "$TRACE_FORMAT_REPO/.direnv" ] || [ -f "$TRACE_FORMAT_REPO/.envrc" ] || \
-  die "$TRACE_FORMAT_REPO has no .envrc, so there is no dev shell to take `nim` from"
+  die "$TRACE_FORMAT_REPO has no .envrc, so there is no dev shell to take \`nim\` from"
 
 # THE NIM SOURCES THE WRITER'S `build.rs` COMPILES, SUPPLIED EXPLICITLY.
 #
@@ -189,11 +204,7 @@ done
 # The revision supplied is THIS repository's declared writer anchor, materialised out of the object
 # store like everything else, so the probe's Nim half is pinned by `pins.json` rather than by
 # whichever commit a sibling working tree is sitting on.
-NIM_WRITER_REV="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["anchors"]["trace_format_nim_writer"]["commit"])' "$REPO_ROOT/pins.json" 2>/dev/null)"
-case "$NIM_WRITER_REV" in
-  [0-9a-f][0-9a-f]*) : ;;
-  *) die "pins.json declares no anchors.trace_format_nim_writer.commit, and this probe links the Nim writer" ;;
-esac
+# `NIM_WRITER_REV` was read from pins.json above, for the stamp.
 NIM_REPO="${TRACE_FORMAT_NIM_REPO:-$WORKSPACE_ROOT/codetracer-trace-format-nim}"
 [ -e "$NIM_REPO/.git" ] || die "no codetracer-trace-format-nim checkout at $NIM_REPO"
 git -C "$NIM_REPO" cat-file -e "$NIM_WRITER_REV^{commit}" 2>/dev/null \
@@ -207,8 +218,9 @@ fi
 [ -f "$NIM_DIR/src/codetracer_trace_writer_ffi.nim" ] || \
   die "${NIM_WRITER_REV:0:10} has no src/codetracer_trace_writer_ffi.nim"
 rc=0
-repro exec "$TRACE_FORMAT_REPO" -- nix shell nixpkgs#rustup nixpkgs#capnproto --command bash -c '
+repro exec "$TRACE_FORMAT_REPO" -- bash -c '
   set -uo pipefail
+  export PATH="'"$TC_PATH"':$PATH"
   command -v nim >/dev/null || { echo "no nim on PATH inside the writer'"'"'s dev shell" >&2; exit 1; }
   export RUSTUP_HOME="'"$M38_RUSTUP_HOME"'"
   export CARGO_TARGET_DIR="'"$NOIR_ROOT"'/target"

@@ -272,4 +272,8 @@ assert_eq "…and the control did not" "yes" "$(f both.controlIsNot)"
 assert_false "…so the two verdicts are not one value read twice" \
   test "$(f real.mismatched)" = "$(f control.mismatched)"
 
+echo "== 5. a fresh CLI process decodes a real compressed proof offline"
+node "$VERIFY_DIR/test_offline_compressed_proof_replay.mjs"
+assert_eq "the real CLI replays a compressed-proof fixture and refuses a missing witness" "0" "$?"
+
 finish
