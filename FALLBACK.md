@@ -113,12 +113,11 @@ cause", i.e. it required an impossible observation as its passing condition, and
 with one run per arm and the base arm always launched first, so arm was confounded with launch
 order — on this host the order effect at 10,000 leaves is thousands of microseconds. What replaces
 it is an ABBA design that makes a claim about M14's fifth tree only where the instrument can
-resolve one: **+6 us at population 0 and +5 us at 100**, positive in both independent halves of the
-pair. **At 1,000 and 10,000 leaves no claim is made and none is asserted.** The resolution limit
-sits between 100 and 1,000: at 1,000 leaves the FIVE-tree arm reads **faster** than the four-tree
-arm — `BOUNDARY-SHAPE.md` §6 records the pair as 383 us against 352 us at 1,000 — which is a
-between-arm difference in a direction a fifth tree cannot cause, and several times larger than the
-fifth tree costs where it is resolvable.
+resolve one: **+1.2 to +2.0 us at population 0 and +3.3 to +5.2 us at 100**, positive in both independent halves of the
+run. **At 1,000 and 10,000 leaves no claim is made and none is asserted.** The resolution limit
+sits between 100 and 1,000: there the two databases keep one heap placement for the whole run,
+and `BOUNDARY-SHAPE.md` §6 records paired differences of -4 us at 1,000 and -180 us at 10,000 in the recorded run,
+which are in a direction a fifth tree cannot cause and larger than the fifth tree costs where it is resolvable.
 
 ---
 
