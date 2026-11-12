@@ -331,17 +331,19 @@ map, and a pop is a node-by-node destruction of them.
 
 ### What it costs
 
-Measured by `verification/m15/world_state_checkpoint_bench.cpp`, one source compiled and run
-against BOTH trees — the pinned anchor's four trees and the anchor plus M14's archive patch,
-five — detecting which it has with a `requires`-expression rather than an `#ifdef`, so neither
-arm is told which one it is. Medians over 9 repetitions; microseconds.
-
-Each arm is run TWICE, in the order base / ext / ext / base, and the two runs are combined by
-taking the minimum of each value. That is an ABBA design and it replaces one in which each arm ran
-once with base always first — the arms are separate processes with separate heaps, and on this host
-the launch-order effect at 10,000 leaves is larger than anything the tree count could do. The two
-runs of an arm also give the measurement's own run-to-run spread, which is what decides where a
-cross-arm claim is made at all.
+Measured by `verification/m15/world_state_checkpoint_bench.cpp`, one source compiled twice into
+ONE program: once against the pinned anchor's four trees and once against the anchor plus M14's
+archive patch, five, each arm detecting which it has with a `requires`-expression rather than an
+`#ifdef`, so neither arm is told which one it is. The two arms are linked into a single process, with
+every symbol but their entry points made local so the two `MemoryMerkleDB` classes cannot collide,
+and a driver times them against each other on one core, from one heap, in alternating batches of at
+least 20 ms (the order of the arms is swapped each round, and two rounds form an ABBA block).
+Figures are nanosecond batch means; the effect of the fifth tree is the median over blocks of the
+paired difference, so a shift of the whole process cancels. This replaces a design that ran the two
+arms as separate processes (base / ext / ext / base) and compared them: on a shared runner one
+process runs 15-30 us faster or slower than its partner (core, frequency, heap placement), which is
+larger than the fifth tree and which no batching inside a process removes. The table below was
+recorded under that earlier design, in microseconds, and is kept for its growth ratios.
 
 The population is built the way execution builds it: nullifiers through
 `insert_indexed_leaves_nullifier_tree`, public-data writes through
@@ -384,27 +386,33 @@ Linear in depth, which is what O(state)-per-checkpoint predicts: 4.1x and 4.1x f
 four-fold steps. The check bounds both steps at 2x and 8x — an earlier revision asserted only
 `>= 2x`, which passes on sqrt growth and on quadratic alike and so said nothing about linearity.
 
-**M14's fifth tree costs a small constant, and it is measured at the two populations where it can
-be.** The archive tree holds ONE leaf at genesis, so the prediction is a fixed handful of
-microseconds that does not grow with the state — and that is what the two smallest populations
-show: **+6 us at population 0** (19 us to 25 us) and **+5 us at 100** (52 us to 57 us). Five
-independent ABBA measurements of these two binaries put it at 5 to 7 us at both populations, always
-positive, and never growing between them while the four-tree copy itself nearly triples. The
-check asserts the sign a fifth tree requires, that the addition is smaller than the four trees'
-own cost, that it is a handful of microseconds rather than hundreds, and that it does NOT grow
-while the four-tree copy does.
+**M14's fifth tree costs a small amount, and it is measured at the two populations where it can
+be.** The archive tree holds ONE leaf at genesis, so the prediction is a handful of microseconds
+that does not grow much with the state — and that is what the two smallest populations show,
+measured in one process with the two arms paired: **+1.2 to +2.0 us at population 0** and **+3.3 to
++5.2 us at 100**, over eight consecutive runs of the check on a loaded 32-thread host (the cores
+differ: a 5.5 GHz core copies four trees in 25 us at population 0 and shows +1.2 us, a 4.3 GHz one
+in 40 us and shows +1.9 us). The effect is about 5% of the four-tree copy on every core, always
+positive, and its median absolute deviation over blocks is 60-400 ns at population 0 and 150-700 ns
+at 100. It is NOT strictly constant: it grows by 2.3x to 2.8x between population 0 and 100 while the
+four-tree copy itself doubles, which sits inside the 3x band the check holds it to. The earlier
+figure of 5 to 7 us at both populations was a between-process one and carried the process-level shift
+this design removes. The check asserts the sign a fifth tree requires (at least 1 us, in the
+whole run and in each half of it), that the addition is smaller than the four trees' own cost, that
+it is between 1 us and 40 us, and that it does not grow by more than 3x while the four-tree copy
+does.
 
-At 1,000 and 10,000 leaves **no claim is made**, and none is asserted. The two arms are separate
-processes with separate heaps, and at those populations they differ by more — and in the direction
-a fifth tree cannot cause — than the fifth tree costs: 383 us against 352 us at 1,000, 4904 against
-4133 at 10,000. What licenses the claim at 0 and 100 is asserted instead, and it is the ABBA design
-that makes it available: the difference is positive in **both independent halves** of the pair —
-+6 and +6 us at population 0, +5 and +5 us at 100 — so the sign replicates inside the run rather
-than being one draw. (An earlier form of that licence compared the difference against the arms'
-raw run-to-run spread, which is the wrong comparison: the estimate is of the two runs' MINIMUM and
-a single slow outlier moves the spread without moving it. It went red once, at 7 us against 7 us,
-on a measurement that was perfectly good.) For scale, at 10,000 leaves one binary's own two runs
-differ by **3,935 us**, against the 6 us being looked for.
+At 1,000 and 10,000 leaves **no claim is made**, and none is asserted. The two databases are built
+once and each keeps its own heap placement for the whole run, which at those populations moves the
+copy by more — and in a direction a fifth tree cannot cause — than the fifth tree costs (paired
+differences of -4 us at 1,000 and -180 us at 10,000 in the recorded run). What licenses the claim at
+0 and 100 is asserted instead: the run is split into a first and a second half of its rounds and the
+difference is positive in BOTH, so the sign replicates inside the run rather than being one draw. (An
+earlier form of that licence compared the difference against the arms' raw run-to-run spread, which is
+the wrong comparison: the estimate is of the two runs' MINIMUM and a single slow outlier moves the
+spread without moving it. It went red once, at 7 us against 7 us, on a measurement that was
+perfectly good.) For scale, the same binary's own two runs differed by 3,935 us at 10,000 leaves under
+the old design, against the few microseconds being looked for.
 
 **How this was previously stated, and why it was wrong.** Two earlier revisions reported "the sign
 is not stable" — 1.2x at 100, 0.9x at 1,000, 0.6x at 10,000 — and read the instability as the

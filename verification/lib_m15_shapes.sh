@@ -307,30 +307,39 @@ m15_stderr_lines() { grep -c . "$1" 2>/dev/null || true; }
 m15_lines() { grep -c . "$1" 2>/dev/null || true; }
 
 # ---------------------------------------------------------------------------
-# THE CHECKPOINT BENCHMARK, built against a tree it does not own.
+# THE CHECKPOINT BENCHMARK: TWO TREES, ONE PROCESS.
 #
-# m15_build_bench <tree> — compiles verification/m15/world_state_checkpoint_bench.cpp with the
-# compile flags CMake used for THAT TREE's own world_state_reference/memory_merkle_db.cpp, read out
-# of the build's compile database, so the benchmark is built the way the library it links was
-# built. This is M14's `m14_build_probe`, generalised over the source file; the flag extraction is
-# the same because a second copy of a flag list is a second description of a build.
+# The benchmark measures what the fifth tree adds to a checkpoint, a difference of a few
+# microseconds between two builds of the same class. Run as two processes it was smaller than the
+# process-to-process noise of a shared runner (a whole process 15-30 us faster or slower than its
+# partner: core, frequency, heap placement), and neither batching nor ABBA process order can remove
+# a shift that every batch of one process shares. So both trees are linked into ONE executable:
 #
-# The binary is named after the SOURCE, not after the tree, and is written into the tree's build
-# directory beside M14's probe. It cannot collide with anything M14 builds.
+#   m15_build_bench_arm <tree> <arm>     compiles the benchmark source as that tree's ARM, links it with
+#                                        that tree's static libraries into one relocatable object and
+#                                        makes every symbol but the arm's C entry points local, so the
+#                                        two trees' `bb::world_state::MemoryMerkleDB` cannot collide
+#   m15_link_bench <base-tree> <ext-tree> compiles the DRIVER (no barretenberg header at all) and
+#                                        links it with both arms into $M15_WORK/<bench-name>
+#
+# The compile flags are CMake's own for THAT TREE's `world_state_reference/memory_merkle_db.cpp`,
+# read out of the build's compile database, so the arm is built the way the library it links was
+# built. This is M14's `m14_build_probe` generalised; the extraction is the same because a second
+# copy of a flag list is a second description of a build.
+#
+# WHY `ld -r --force-group-allocation` AND `objcopy --keep-global-symbol`. Making the arm's symbols
+# local is what lets two definitions of one class live in one program. Inline and template members
+# are COMDAT groups, and the linker merges groups of the same signature name EVEN WHEN the symbols
+# are local, so without dissolving them first the five-tree arm could run the four-tree arm's inline
+# `State` copy constructor, and the benchmark would measure one tree against itself. The check
+# `m15_arm_leaked_globals` below counts the global symbols an arm exports beyond its own entry points.
 # ---------------------------------------------------------------------------
 M15_BENCH_BIN_NAME=world_state_checkpoint_bench
+M15_BENCH_ARM_SYMBOLS="archive_present checkpoint_id_at_rest constants db_new db_free run_cycle run_nested final_sizes"
 
-m15_build_bench() { # <tree> <build-dir-name>
-  local tree="$1" bdir="${2:-$M14_NATIVE_BUILD}"
-  local log="$tree/m15-bench.log"
-  m6_in_devshell '
-    tree="$1"; src="$2"; bdir="$3"; outname="$4"
-    # 94, NOT 90. Three separate things spelled 90 and the assertion could not tell them apart:
-    # this cd, the cd to FORK_ROOT inside m6_in_devshell, and the binary-not-executable return
-    # in m15_run_bench. Run 34160613484 reported 90 here and it was read as the third, which
-    # does not even run in this path.
-    cd "$tree/barretenberg/cpp" || { echo "### cannot cd to $tree/barretenberg/cpp"; exit 94; }
-    flags="$(python3 - "$bdir/compile_commands.json" <<PY
+# The compile flags of the tree's reference library, one per line of shell-quoted words. A python
+# program in a heredoc, kept in one variable so both build functions read the same extraction.
+M15_FLAGS_PY='
 import json, shlex, sys
 db = json.load(open(sys.argv[1]))
 want = [e for e in db if e["file"].endswith("world_state_reference/memory_merkle_db.cpp")]
@@ -350,8 +359,21 @@ for a in argv[1:]:
         continue
     keep.append(a)
 print(" ".join(shlex.quote(a) for a in keep))
-PY
-)" || exit 91
+'
+
+m15_arm_object() { printf '%s\n' "$1/barretenberg/cpp/${3:-$M14_NATIVE_BUILD}/m15-arm-$2.o"; }
+
+m15_build_bench_arm() { # <tree> <arm> [build-dir-name]
+  local tree="$1" arm="$2" bdir="${3:-$M14_NATIVE_BUILD}"
+  local log="$tree/m15-bench.log"
+  m6_in_devshell '
+    tree="$1"; src="$2"; bdir="$3"; arm="$4"; pysrc="$5"; syms="$6"
+    # 94, NOT 90. Three separate things spelled 90 and the assertion could not tell them apart:
+    # this cd, the cd to FORK_ROOT inside m6_in_devshell, and the binary-not-executable return
+    # in m15_run_bench. Run 34160613484 reported 90 here and it was read as the third, which
+    # does not even run in this path.
+    cd "$tree/barretenberg/cpp" || { echo "### cannot cd to $tree/barretenberg/cpp"; exit 94; }
+    flags="$(python3 -c "$pysrc" "$bdir/compile_commands.json")" || exit 91
     libs=""
     for a in "$bdir"/lib/*.a; do libs="$libs $a"; done
     [ -n "$libs" ] || { echo "### no static libraries in $bdir/lib"; exit 92; }
@@ -360,73 +382,61 @@ PY
     # neither $bdir/lib nor the dev shell. See lib_m14_world_state.sh.
     lmdbdir="$bdir/_deps/lmdb/src/lmdb_repo/libraries/liblmdb"
     [ -f "$lmdbdir/liblmdb.a" ] || { echo "### no liblmdb.a under $lmdbdir"; exit 93; }
+    obj="$bdir/m15-arm-$arm"
+    rm -f "$obj.o" "$obj.full.o" "$obj.local.o"
     # shellcheck disable=SC2086
-    clang++ $flags "$src" -o "$bdir/$outname" \
-      -Wl,--start-group $libs -Wl,--end-group -L"$lmdbdir" -llmdb -lpthread 2>&1
-    rc=$?
-    echo "### bench_cc_rc=$rc"
-    exit $rc
-  ' "$tree" "$M15_BENCH_SRC" "$tree/barretenberg/cpp/$bdir" "$M15_BENCH_BIN_NAME" >"$log" 2>&1
+    clang++ $flags -DM15_ARM="$arm" -c "$src" -o "$obj.o" 2>&1 || { echo "### bench_cc_rc=$?"; exit 95; }
+    # -r: a relocatable link. The group keeps the library archives resolvable in any order.
+    ld -r --force-group-allocation -o "$obj.full.o" "$obj.o" \
+      --start-group $libs --end-group -L"$lmdbdir" -llmdb 2>&1 || { echo "### arm_link_rc=$?"; exit 96; }
+    keep=""
+    for s in $syms; do keep="$keep --keep-global-symbol=m15_${arm}_$s"; done
+    # shellcheck disable=SC2086
+    objcopy $keep "$obj.full.o" "$obj.local.o" 2>&1 || { echo "### arm_localise_rc=$?"; exit 97; }
+    mv -f "$obj.local.o" "$obj.o"
+    rm -f "$obj.full.o"
+    echo "### bench_cc_rc=0"
+  ' "$tree" "$M15_BENCH_SRC" "$bdir" "$arm" "$M15_FLAGS_PY" "$M15_BENCH_ARM_SYMBOLS" >"$log" 2>&1
 }
 
-m15_bench_bin() { printf '%s\n' "$1/barretenberg/cpp/${2:-$M14_NATIVE_BUILD}/$M15_BENCH_BIN_NAME"; }
+# m15_link_bench <base-tree> <ext-tree> — the driver, linked with both arms. Flags from the EXTENDED
+# tree: the driver includes no tree header, so only the language and warning flags matter and both
+# trees carry the same ones.
+m15_link_bench() { # <base-tree> <ext-tree> [build-dir-name]
+  local base="$1" ext="$2" bdir="${3:-$M14_NATIVE_BUILD}"
+  local log="$ext/m15-bench-link.log"
+  m6_in_devshell '
+    ext="$1"; src="$2"; bdir="$3"; out="$4"; pysrc="$5"; baseobj="$6"; extobj="$7"
+    cd "$ext/barretenberg/cpp" || { echo "### cannot cd to $ext/barretenberg/cpp"; exit 94; }
+    flags="$(python3 -c "$pysrc" "$bdir/compile_commands.json")" || exit 91
+    drv="$(dirname "$out")/m15-driver.o"
+    # shellcheck disable=SC2086
+    clang++ $flags -DM15_DRIVER -c "$src" -o "$drv" 2>&1 || { echo "### driver_cc_rc=$?"; exit 95; }
+    clang++ "$drv" "$baseobj" "$extobj" -o "$out" -lpthread 2>&1 || { echo "### link_rc=$?"; exit 98; }
+    echo "### bench_cc_rc=0"
+  ' "$ext" "$M15_BENCH_SRC" "$bdir" "$(m15_bench_bin)" "$M15_FLAGS_PY" \
+    "$(m15_arm_object "$base" base "$bdir")" "$(m15_arm_object "$ext" ext "$bdir")" >"$log" 2>&1
+}
 
-m15_run_bench() { # <tree> <out-file> [reps] [build-dir]
-  local tree="$1" out="$2" reps="${3:-9}" bdir="${4:-$M14_NATIVE_BUILD}"
-  local bin; bin="$(m15_bench_bin "$tree" "$bdir")"
+m15_bench_bin() { printf '%s\n' "$M15_WORK/$M15_BENCH_BIN_NAME"; }
+
+# m15_assert_arms_disjoint <base-obj> <ext-obj> — the two arm objects export exactly their own entry
+# points and nothing else, which is what makes it safe to link them into one program. Prints the
+# number of global DEFINED symbols outside the arm's own `m15_<arm>_*` set (expected 0 for each).
+m15_arm_leaked_globals() { # <obj> <arm>
+  nm --defined-only "$1" 2>/dev/null | awk -v p="m15_$2_" '
+    $2 ~ /^[A-Z]$/ && $2 != "N" { if (index($3, p) != 1) n++ }
+    END { print n + 0 }'
+}
+
+m15_run_bench() { # <out-file> [rounds]
+  local out="$1" rounds="${2:-96}"
+  local bin; bin="$(m15_bench_bin)"
   [ -x "$bin" ] || return 90
   m6_in_devshell '
     export LD_LIBRARY_PATH="/usr/lib:${LD_LIBRARY_PATH:-}"
     "$1" "$2"
-  ' "$bin" "$reps" >"$out" 2>"$out.err"
-}
-
-# ---------------------------------------------------------------------------
-# m15_bench_min <out> <fileA> <fileB> — combine two runs of ONE arm into one key=value file,
-# taking the MINIMUM of every numeric value.
-#
-# WHY THERE ARE TWO RUNS PER ARM AT ALL. The checkpoint characterisation used to run each arm
-# ONCE, base first, ext second, and compare the two files. Arm was therefore perfectly confounded
-# with launch order, and the arms are separate processes with separate heaps: whatever the first
-# process pays for a cold page cache and a fresh allocator, the second does not. Measured on this
-# host, the first run of a session reads 6,630 us at 10,000 leaves where the same binary's second
-# reads 9,384 — the ORDER effect is larger than the quantity the comparison was for.
-#
-# So the caller runs the four benches in the order base, ext, ext, base. Each arm occupies one
-# early slot and one late slot, so the mean launch position is 2.5 for both and the order effect
-# is balanced out rather than assigned to one arm. That is an ABBA design and it is the cheapest
-# thing that removes the confound; it costs one extra run per arm.
-#
-# THE MINIMUM, not the mean or the median of two. Each value is already the benchmark's own median
-# over `reps` repetitions inside one process, so what is left between the two runs is
-# between-PROCESS nuisance — page cache, allocator state, whichever core the scheduler picked — and
-# all of it is additive. The minimum of two draws of "true cost plus non-negative noise" is the
-# better estimate of the true cost; an average would carry half of whichever run was unlucky.
-#
-# Non-numeric values (`bench.name`) and values that happen to be equal pass through. The caller
-# asserts separately that the two runs produced the SAME KEYS, so a run that died early cannot be
-# silently minimised away into the other one.
-# ---------------------------------------------------------------------------
-m15_bench_min() { # <out> <fileA> <fileB>
-  local out="$1" a="$2" b="$3"
-  awk -F= -v OFS== '
-    FNR == NR { v[$1] = $2; order[++n] = $1; next }
-    ($1 in v) {
-      x = v[$1]; y = $2
-      if (x ~ /^[0-9]+$/ && y ~ /^[0-9]+$/) { v[$1] = (x + 0 < y + 0) ? x : y }
-    }
-    END { for (i = 1; i <= n; i++) print order[i], v[order[i]] }
-  ' "$a" "$b" >"$out"
-}
-
-# m15_bench_spread <fileA> <fileB> <key> — |A - B| for one numeric key: the run-to-run spread of
-# ONE binary, which is this measurement's own resolution at that key. Reported and asserted: it is
-# what says whether a cross-arm difference at that population is readable at all.
-m15_bench_spread() { # <fileA> <fileB> <key>
-  local x y
-  x="$(m15_bkey "$1" "$3")"; y="$(m15_bkey "$2" "$3")"
-  case "$x$y" in ''|*[!0-9]*) printf '\n'; return ;; esac
-  if [ "$x" -ge "$y" ]; then printf '%s\n' "$((x - y))"; else printf '%s\n' "$((y - x))"; fi
+  ' "$bin" "$rounds" >"$out" 2>"$out.err"
 }
 
 # m15_bkey <file> <key> — the benchmark prints `key=value`, not `key value`, because it is a C++
