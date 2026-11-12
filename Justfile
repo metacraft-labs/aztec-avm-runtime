@@ -172,7 +172,8 @@
 #   just verify-reactor-alloc      test_avm_reactor_alloc_free_roundtrip
 #   just verify-reactor-steps      test_avm_reactor_step_stream_batching   (times; needs an idle box)
 #   just verify-reactor-transcripts test_avm_reactor_transcripts_match_driver
-#   just verify-m12                all six, in order
+#   just verify-idle-gate          test_m9_idle_gate_measures_own_contention  (the gate steps above consult)
+#   just verify-m12                all seven, in order
 #
 # COVERAGE, because this milestone's numbers must never be quoted as another's: the
 # transcript half is the SAME SEVEN corpus programs M8 compares, driven this time
@@ -1085,6 +1086,13 @@ verify-reactor-steps:
 verify-reactor-transcripts:
     @verification/test_avm_reactor_transcripts_match_driver.sh
 
+# The gate that the step-stream check (and test_observer_disabled_is_free) consult before timing:
+# it must pass where this job is not starved of CPU and refuse (exit 3) where it is, judged by PSI
+# or schedstat rather than by the host's load average. Needs no build and no work directory; the
+# real-contention half takes ~1.5 minutes (PSI avg10 has to ramp).
+verify-idle-gate:
+    @verification/test_m9_idle_gate_measures_own_contention.sh
+
 # It lives in M12's set because a stale ~/.cache/aztec-m12-reactor is what made it necessary,
 # but m6_prepare_tree — the function it guards — is where every milestone from M6 on gets its
 # trees, and SEVEN of the campaign's default work trees were stale when this was written.
@@ -1106,7 +1114,8 @@ verify-m12:
       test_avm_reactor_alloc_free_roundtrip \
       test_avm_reactor_step_stream_batching \
       test_avm_reactor_transcripts_match_driver \
-      test_prepared_tree_rejects_stale_inputs
+      test_prepared_tree_rejects_stale_inputs \
+      test_m9_idle_gate_measures_own_contention
     do
       echo "=== $check"
       verification/"$check".sh
