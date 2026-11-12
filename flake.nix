@@ -115,6 +115,13 @@
               # /usr/bin/curl, so the SRS prerequisite failed there and every native test that
               # needs the SRS (verify-m14's vm2_tests) failed with it.
               pkgs.curl
+            ]
+            # `taskset` (util-linux) and `pgrep` (procps): the M9 idle gate and its test use them,
+            # and they are Linux-only, while this flake also lists aarch64-darwin. The gate refuses
+            # to pass unmeasured, so a shell without them would turn the job red, not green.
+            ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+              pkgs.util-linux
+              pkgs.procps
             ];
 
             # barretenberg's wasm toolchain file and its bootstrap scripts both
