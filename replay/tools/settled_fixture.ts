@@ -73,7 +73,7 @@
 // the very same client accepts the very same node — so the caveat is a property of the PROXY and
 // not of this repository's version check.
 
-import type { defaultFetch } from '@aztec/foundation/json-rpc/client';
+import type { defaultFetch } from '@aztec-labs/foundation/json-rpc/client';
 
 /** The format tag. A fixture that does not carry this exact string is refused rather than guessed at. */
 export const SETTLED_FIXTURE_FORMAT = 'replay-settled-transaction-fixture/1' as const;

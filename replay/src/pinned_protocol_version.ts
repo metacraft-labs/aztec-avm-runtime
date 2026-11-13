@@ -39,7 +39,7 @@
 // that decides whether replayed bytecode means anything. When an endpoint is pinned, the three
 // network fields go into `pins.json` beside these two and this comment changes.
 
-import type { ComponentsVersions } from '@aztec/stdlib/versioning';
+import type { ComponentsVersions } from '@aztec-labs/stdlib/versioning';
 
 /** The five fields `ComponentsVersions` has, in upstream's own order. Used to read headers back. */
 export const COMPONENTS_VERSION_FIELDS = [

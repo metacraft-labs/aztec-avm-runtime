@@ -79,12 +79,12 @@
 // refresh cadence of well under an hour, or a demo that silently degrades from debuggable to
 // merely visible.
 
-import type { BlockNumber } from '@aztec/foundation/branded-types';
-import type { AztecAddress } from '@aztec/stdlib/aztec-address';
-import type { BlockData } from '@aztec/stdlib/block';
-import type { ContractClassPublic, ContractInstanceWithAddress } from '@aztec/stdlib/contract';
-import type { IndexedTxEffect, Tx } from '@aztec/stdlib/tx';
-import type { TxHash } from '@aztec/stdlib/tx/tx-hash';
+import type { BlockNumber } from '@aztec-labs/foundation/branded-types';
+import type { AztecAddress } from '@aztec-labs/stdlib/aztec-address';
+import type { BlockData } from '@aztec-labs/stdlib/block';
+import type { ContractClassPublic, ContractInstanceWithAddress } from '@aztec-labs/stdlib/contract';
+import type { IndexedTxEffect, Tx } from '@aztec-labs/stdlib/tx';
+import type { TxHash } from '@aztec-labs/stdlib/tx/tx-hash';
 
 import type { ReplayNodeClient } from './node_client.ts';
 import { declarePrivateHalf, type PrivateHalfDeclaration } from './private_half.ts';

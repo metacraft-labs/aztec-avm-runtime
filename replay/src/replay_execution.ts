@@ -40,8 +40,8 @@
 // outcome is reported, would be the only one that had ever had the whole seed. Instantiating a new
 // module each round makes the reported run a run against exactly the reported seed.
 
-import type { Fr } from '@aztec/foundation/curves/bn254';
-import { BlockNumber } from '@aztec/foundation/branded-types';
+import type { Fr } from '@aztec-labs/foundation/curves/bn254';
+import { BlockNumber } from '@aztec-labs/foundation/branded-types';
 
 import type { ExecutionStep } from '../../node-host/src/steps.ts';
 
@@ -629,10 +629,10 @@ async function seedOpeningPosition(
 
 // The two upstream helpers this module needs, imported at the bottom so the header above reads as
 // documentation. Both are upstream's own; nothing here derives a hash.
-import { computePublicBytecodeCommitment } from '@aztec/stdlib/contract';
-import { siloNullifier } from '@aztec/stdlib/hash';
-import { ProtocolContractAddress } from '@aztec/protocol-contracts';
-import { Fr as FrValue } from '@aztec/foundation/curves/bn254';
+import { computePublicBytecodeCommitment } from '@aztec-labs/stdlib/contract';
+import { siloNullifier } from '@aztec-labs/stdlib/hash';
+import { ProtocolContractAddress } from '@aztec-labs/protocol-contracts';
+import { Fr as FrValue } from '@aztec-labs/foundation/curves/bn254';
 
 function bytecodeCommitment(packedBytecode: Buffer): Promise<Fr> {
   return computePublicBytecodeCommitment(packedBytecode);

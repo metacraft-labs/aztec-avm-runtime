@@ -44,11 +44,11 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 
-import { Barretenberg, BarretenbergSync } from '@aztec/bb.js';
-import { jsonStringify } from '@aztec/foundation/json-rpc';
-import { defaultFetch } from '@aztec/foundation/json-rpc/client';
-import { Tx } from '@aztec/stdlib/tx';
-import { TxHash } from '@aztec/stdlib/tx/tx-hash';
+import { Barretenberg, BarretenbergSync } from '@aztec-foundation/bb.js';
+import { jsonStringify } from '@aztec-labs/foundation/json-rpc';
+import { defaultFetch } from '@aztec-labs/foundation/json-rpc/client';
+import { Tx } from '@aztec-labs/stdlib/tx';
+import { TxHash } from '@aztec-labs/stdlib/tx/tx-hash';
 
 import {
   RUNG_BYTECODE_VALUE,

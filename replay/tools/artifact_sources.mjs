@@ -27,14 +27,14 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { loadContractArtifact, parseDebugSymbols } from '@aztec/stdlib/abi';
+import { loadContractArtifact, parseDebugSymbols } from '@aztec-labs/stdlib/abi';
 import {
   computeArtifactHash,
   computeContractClassId,
   computePublicBytecodeCommitment,
-} from '@aztec/stdlib/contract';
-import { Fr } from '@aztec/foundation/curves/bn254';
-import { sha256 } from '@aztec/foundation/crypto/sha256';
+} from '@aztec-labs/stdlib/contract';
+import { Fr } from '@aztec-labs/foundation/curves/bn254';
+import { sha256 } from '@aztec-labs/foundation/crypto/sha256';
 
 import {
   AZTECSCAN_BASE_URLS,
@@ -95,7 +95,7 @@ export function readPackageArtifacts(packageRoot, packageName) {
 export function installedProtocolContracts() {
   return readPackageArtifacts(
     join(HERE, '..', 'node_modules', '@aztec', 'protocol-contracts'),
-    '@aztec/protocol-contracts',
+    '@aztec-labs/protocol-contracts',
   );
 }
 

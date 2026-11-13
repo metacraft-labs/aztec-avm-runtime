@@ -103,7 +103,7 @@ const SHIMS = {
   // `@aztec/foundation`, `@aztec/stdlib` and `@aztec/protocol-contracts` reaches it as the package
   // subpath, so one alias covers them all; aliasing the resolved FILE would need a plugin and would
   // miss anyone who spelled it differently.
-  '@aztec/foundation/crypto/poseidon': path.join(REPO, 'browser/src/foundation_poseidon.ts'),
+  '@aztec-labs/foundation/crypto/poseidon': path.join(REPO, 'browser/src/foundation_poseidon.ts'),
   // AND THE SUBSTITUTE'S OWN IMPORTS HAVE TO RESOLVE. It lives in `browser/src/`, which has no
   // `node_modules`, so its `@aztec/foundation/...` imports walk up and find nothing.
   //
@@ -115,9 +115,9 @@ const SHIMS = {
   // subpaths the substitute actually imports, at their resolved files, touches nothing else — and
   // both point at REPLAY's install, so there is still exactly one `Fr` class in the graph, which
   // `verify_browser_replay_dd9_clean` asserts.
-  '@aztec/foundation/curves/bn254':
+  '@aztec-labs/foundation/curves/bn254':
     path.join(REPLAY, 'node_modules/@aztec/foundation/dest/curves/bn254/index.js'),
-  '@aztec/foundation/serialize':
+  '@aztec-labs/foundation/serialize':
     path.join(REPLAY, 'node_modules/@aztec/foundation/dest/serialize/index.js'),
 };
 for (const [name, file] of Object.entries(SHIMS)) {
