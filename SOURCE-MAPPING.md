@@ -510,8 +510,50 @@ fails loudly (`JSON.parse` on the decoded bytes) while the near-miss does not: g
 all *refuse* these bytes, so only `inflateRaw` was left, and it returns 13,744 bytes of JSON whose
 first `brillig_locations` key is 130 — the pc §7.3 already names.
 
-**WHAT THIS DOES AND DOES NOT SETTLE.** It settles that the pipeline reaches rung 1 at v6 with every
-mapped pc positioned, whenever an artifact carrying `file_map` source text is in hand. It says
+**CORRECTION, SAME DAY — "EVERY MAPPED PC" IS NOT "EVERY EXECUTED STEP", AND §3's RULE ASKS FOR THE
+SECOND.** The table above drives the artifact's OWN mapped pcs and finds all of them resolvable. I
+then used it to say that an artifact in hand means a source-level trace. §3's rung rule says
+otherwise — *"rung 1 when every executed step of that contract resolved, rung 2 otherwise"* — and an
+execution visits pcs the artifact does not map at all.
+
+The committed corpus settles it, and it disagrees with the reading I gave. Across **962** captured
+Aztec transactions in `client/fixtures/chain/*/snapshot.json` (`aztec` 88, `aztec-testnet` 866,
+`aztec-testnet-frames` 8), the recorded rungs are:
+
+| rung | count |
+|---|---|
+| 3 — bytecode | 31 |
+| 2 — attribution | 2 |
+| **1 — source** | **0** |
+
+Zero. And the two at rung 2 are the interesting ones: they are a PROTOCOL contract, with
+`resolved: true` — the artifact was found, exactly as §7.3 and §7.5 say it can be — and their
+recorded reason is
+
+> 86 of 108 executed step(s) of this contract resolve to a source position; the remaining 22 are in
+> regions the artifact's `brillig_locations` does not key — compiled procedures are appended after
+> the main body (avm-transpiler `transpile.rs:489,505`)
+
+So **there are two independent reasons an Aztec transaction is not traced at source level, and only
+the first is about artifact availability**:
+
+1. a third-party contract has no published artifact at all — measured on testnet 2026-11-13: of 23
+   classes the explorer lists, 3 carry an `artifactContractName` (exactly the protocol contracts,
+   served from npm) and **0** carry a `sourceCodeUrl`;
+2. and even WITH the artifact resolved, a real execution runs through compiled procedures the
+   transpiler appends after the main body, which `brillig_locations` does not key — so steps go
+   unpositioned and §3's rule declares rung 2.
+
+The second is upstream and is not fixed by publishing artifacts. It is why "all transactions that
+can support source-level debugging in theory" is, for Aztec today, a set this corpus shows to be
+empty — not a set this pipeline is failing to serve.
+
+**WHAT THE TABLE ABOVE DOES STILL SETTLE**, narrowed to what it measured: every pc the artifact MAPS
+resolves to a real `(path, line, column)` at v6, and `file_map` still carries source text, so §7.4's
+durability risk has not landed. That is the input half working. The execution half is item 2.
+
+**WHAT THIS DOES AND DOES NOT SETTLE.** It settles that the pipeline resolves every mapped pc at v6,
+whenever an artifact carrying `file_map` source text is in hand. It says
 nothing about the live chain, where the opposite holds for a reason that is not ours: measured on
 Aztec testnet 2026-11-13, the explorer lists 23 contract classes, **3** carry an
 `artifactContractName` — exactly these three protocol contracts, served from npm and not from the
