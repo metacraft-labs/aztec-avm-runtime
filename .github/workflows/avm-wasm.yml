@@ -206,11 +206,6 @@ env:
 
 jobs:
   vm2-suite-under-wasm:
-    # MEASUREMENT BRANCH: a workflow_dispatch here runs ONLY node-host,
-    # which is the job that emits the `avm-wasm` artefact. Every other job
-    # would rebuild a 299-commit-newer C++ tree on a gpu runner to answer a
-    # question this branch is not asking. Push and schedule are unchanged.
-    if: ${{ github.event_name != 'workflow_dispatch' }}
     name: vm2 suite under wasm32-wasip1
     runs-on: [self-hosted, x86-64-v3, gpu]
     # A cold run is ~35 min (two full barretenberg configures, the native
@@ -294,7 +289,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
-          ref: aztec-avm-runtime-v6
+          ref: aztec-avm-runtime
           path: aztec-packages
           gh-token: ${{ steps.app-token.outputs.token }}
 
@@ -327,7 +322,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --unshallow 2>/dev/null || true
-          git rev-parse --verify 0219f11d81^{commit}
+          git rev-parse --verify 233d8e0993^{commit}
 
       - name: Assert the prepared patches are present
         run: |
@@ -381,11 +376,6 @@ jobs:
           retention-days: 30
 
   native-vs-wasm-differential:
-    # MEASUREMENT BRANCH: a workflow_dispatch here runs ONLY node-host,
-    # which is the job that emits the `avm-wasm` artefact. Every other job
-    # would rebuild a 299-commit-newer C++ tree on a gpu runner to answer a
-    # question this branch is not asking. Push and schedule are unchanged.
-    if: ${{ github.event_name != 'workflow_dispatch' }}
     name: native-versus-wasm differential, including tree roots
     runs-on: [self-hosted, x86-64-v3, gpu]
     # M8. Two builds of ONE differential driver -- x86-64 and wasm32-wasip1 from the same
@@ -503,7 +493,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
-          ref: aztec-avm-runtime-v6
+          ref: aztec-avm-runtime
           path: aztec-packages
           gh-token: ${{ steps.app-token.outputs.token }}
 
@@ -530,7 +520,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --unshallow 2>/dev/null || true
-          git rev-parse --verify 0219f11d81^{commit}
+          git rev-parse --verify 233d8e0993^{commit}
 
       - name: Assert the prepared patches are present
         run: |
@@ -586,11 +576,6 @@ jobs:
           retention-days: 30
 
   avm-reactor:
-    # MEASUREMENT BRANCH: a workflow_dispatch here runs ONLY node-host,
-    # which is the job that emits the `avm-wasm` artefact. Every other job
-    # would rebuild a 299-commit-newer C++ tree on a gpu runner to answer a
-    # question this branch is not asking. Push and schedule are unchanged.
-    if: ${{ github.event_name != 'workflow_dispatch' }}
     name: avm.wasm reactor, host ABI and size budget
     runs-on: [self-hosted, x86-64-v3, gpu]
     # M12. ONE worktree carrying NINE patches, and two builds inside it: the wasm-avm one, which
@@ -686,7 +671,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
-          ref: aztec-avm-runtime-v6
+          ref: aztec-avm-runtime
           path: aztec-packages
           gh-token: ${{ steps.app-token.outputs.token }}
 
@@ -709,7 +694,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --unshallow 2>/dev/null || true
-          git rev-parse --verify 0219f11d81^{commit}
+          git rev-parse --verify 233d8e0993^{commit}
 
       - name: Assert the nine patches are present
         run: |
@@ -763,11 +748,6 @@ jobs:
           retention-days: 30
 
   avm-contract-db:
-    # MEASUREMENT BRANCH: a workflow_dispatch here runs ONLY node-host,
-    # which is the job that emits the `avm-wasm` artefact. Every other job
-    # would rebuild a 299-commit-newer C++ tree on a gpu runner to answer a
-    # question this branch is not asking. Push and schedule are unchanged.
-    if: ${{ github.event_name != 'workflow_dispatch' }}
     name: shippable contract DB and checkpoint coordination
     runs-on: [self-hosted, x86-64-v3, gpu]
     # M13. ONE worktree carrying TEN patches — the reactor job's nine plus M13's own overlay — and
@@ -858,7 +838,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
-          ref: aztec-avm-runtime-v6
+          ref: aztec-avm-runtime
           path: aztec-packages
           gh-token: ${{ steps.app-token.outputs.token }}
 
@@ -881,7 +861,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --unshallow 2>/dev/null || true
-          git rev-parse --verify 0219f11d81^{commit}
+          git rev-parse --verify 233d8e0993^{commit}
 
       - name: Assert the ten patches are present
         run: |
@@ -958,11 +938,6 @@ jobs:
           retention-days: 30
 
   world-state-block-coverage:
-    # MEASUREMENT BRANCH: a workflow_dispatch here runs ONLY node-host,
-    # which is the job that emits the `avm-wasm` artefact. Every other job
-    # would rebuild a 299-commit-newer C++ tree on a gpu runner to answer a
-    # question this branch is not asking. Push and schedule are unchanged.
-    if: ${{ github.event_name != 'workflow_dispatch' }}
     name: block-level world-state coverage and the compiler cache
     runs-on: [self-hosted, x86-64-v3, gpu]
     # M14. TWO worktrees of the pinned anchor, and the only difference between them is M14's ONE
@@ -1058,7 +1033,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
-          ref: aztec-avm-runtime-v6
+          ref: aztec-avm-runtime
           path: aztec-packages
           gh-token: ${{ steps.app-token.outputs.token }}
 
@@ -1097,7 +1072,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --unshallow 2>/dev/null || true
-          git rev-parse --verify 0219f11d81^{commit}
+          git rev-parse --verify 233d8e0993^{commit}
 
       - name: Assert M14's own patch and its prepared contribution are present
         run: |
@@ -1170,11 +1145,6 @@ jobs:
           retention-days: 30
 
   boundary-shape:
-    # MEASUREMENT BRANCH: a workflow_dispatch here runs ONLY node-host,
-    # which is the job that emits the `avm-wasm` artefact. Every other job
-    # would rebuild a 299-commit-newer C++ tree on a gpu runner to answer a
-    # question this branch is not asking. Push and schedule are unchanged.
-    if: ${{ github.event_name != 'workflow_dispatch' }}
     name: the integration shape across the wasm boundary, and the checkpoint cost
     runs-on: [self-hosted, x86-64-v3, gpu]
     # M15. ONE worktree of the pinned anchor carrying M13's TEN patches — M15 adds no eleventh,
@@ -1267,7 +1237,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
-          ref: aztec-avm-runtime-v6
+          ref: aztec-avm-runtime
           path: aztec-packages
           gh-token: ${{ steps.app-token.outputs.token }}
 
@@ -1302,7 +1272,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --unshallow 2>/dev/null || true
-          git rev-parse --verify 0219f11d81^{commit}
+          git rev-parse --verify 233d8e0993^{commit}
 
       - name: Assert M15's own inputs are present
         run: |
@@ -1397,11 +1367,6 @@ jobs:
           path: artifacts-m15
 
   fallback-triggers:
-    # MEASUREMENT BRANCH: a workflow_dispatch here runs ONLY node-host,
-    # which is the job that emits the `avm-wasm` artefact. Every other job
-    # would rebuild a 299-commit-newer C++ tree on a gpu runner to answer a
-    # question this branch is not asking. Push and schedule are unchanged.
-    if: ${{ github.event_name != 'workflow_dispatch' }}
     name: the TypeScript-trees fallback — triggers evaluated, cost priced, not taken
     runs-on: [self-hosted, x86-64-v3, gpu]
     # M16. THIS JOB BUILDS NOTHING AND TAKES NO WORK DIRECTORY, which is what makes it the cheapest
@@ -1494,7 +1459,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
-          ref: aztec-avm-runtime-v6
+          ref: aztec-avm-runtime
           path: aztec-packages
           gh-token: ${{ steps.app-token.outputs.token }}
 
@@ -1535,7 +1500,7 @@ jobs:
           git fetch --unshallow 2>/dev/null || true
           # The two checks read this commit with `git show`; a shallow clone would make them fail
           # for a reason that has nothing to do with the fallback.
-          git rev-parse --verify 0219f11d81^{commit}
+          git rev-parse --verify 233d8e0993^{commit}
 
       - name: Assert M16's own inputs are present
         run: |
@@ -1673,7 +1638,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
-          ref: aztec-avm-runtime-v6
+          ref: aztec-avm-runtime
           path: aztec-packages
           gh-token: ${{ steps.app-token.outputs.token }}
 
@@ -1699,7 +1664,7 @@ jobs:
           # `git show` at this commit; a shallow clone would make it fail for a reason that has
           # nothing to do with the reuse question.
           git fetch --unshallow 2>/dev/null || true
-          git rev-parse --verify 0219f11d81^{commit}
+          git rev-parse --verify 233d8e0993^{commit}
 
       - name: Assert M17's own inputs are present
         run: |
@@ -2114,11 +2079,6 @@ jobs:
           retention-days: 30
 
   orchestration:
-    # MEASUREMENT BRANCH: a workflow_dispatch here runs ONLY node-host,
-    # which is the job that emits the `avm-wasm` artefact. Every other job
-    # would rebuild a 299-commit-newer C++ tree on a gpu runner to answer a
-    # question this branch is not asking. Push and schedule are unchanged.
-    if: ${{ github.event_name != 'workflow_dispatch' }}
     name: TypeScript orchestration over the wasm interpreter
     runs-on: [self-hosted, x86-64-v3, gpu]
     # M18. Four of the five checks build nothing: they read the fork at the TypeScript anchor
@@ -2216,7 +2176,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
-          ref: aztec-avm-runtime-v6
+          ref: aztec-avm-runtime
           path: aztec-packages
           gh-token: ${{ steps.app-token.outputs.token }}
 
@@ -2241,7 +2201,7 @@ jobs:
           git fetch --unshallow 2>/dev/null || true
           # The C++ anchor, which the build needs, and the TypeScript anchor, which every
           # enumeration reads. Named separately so a failure says which one is missing.
-          git rev-parse --verify 0219f11d81^{commit}
+          git rev-parse --verify 233d8e0993^{commit}
           git rev-parse --verify 3a68d68ac2^{commit}
 
       - name: Assert M18's own inputs are present
@@ -2347,11 +2307,6 @@ jobs:
           retention-days: 30
 
   differential-oracle:
-    # MEASUREMENT BRANCH: a workflow_dispatch here runs ONLY node-host,
-    # which is the job that emits the `avm-wasm` artefact. Every other job
-    # would rebuild a 299-commit-newer C++ tree on a gpu runner to answer a
-    # question this branch is not asking. Push and schedule are unchanged.
-    if: ${{ github.event_name != 'workflow_dispatch' }}
     name: three-way differential — wasm AVM vs native C++ AVM vs TypeScript interpreter
     runs-on: [self-hosted, x86-64-v3, gpu]
     # M19. A SEPARATE FAILURE DOMAIN, and that is a requirement rather than a convenience.
@@ -2449,7 +2404,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
-          ref: aztec-avm-runtime-v6
+          ref: aztec-avm-runtime
           path: aztec-packages
           gh-token: ${{ steps.app-token.outputs.token }}
 
@@ -2590,11 +2545,6 @@ jobs:
           retention-days: 30
 
   form-a-external-transactions:
-    # MEASUREMENT BRANCH: a workflow_dispatch here runs ONLY node-host,
-    # which is the job that emits the `avm-wasm` artefact. Every other job
-    # would rebuild a 299-commit-newer C++ tree on a gpu runner to answer a
-    # question this branch is not asking. Push and schedule are unchanged.
-    if: ${{ github.event_name != 'workflow_dispatch' }}
     name: Form A — a transaction whose private half ran elsewhere
     runs-on: [self-hosted, x86-64-v3, gpu]
     # M20. Accept a serialized `Tx` and execute only its public half.
@@ -2677,7 +2627,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
-          ref: aztec-avm-runtime-v6
+          ref: aztec-avm-runtime
           path: aztec-packages
           gh-token: ${{ steps.app-token.outputs.token }}
 
@@ -2700,7 +2650,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --unshallow 2>/dev/null || true
-          git rev-parse --verify 0219f11d81^{commit}
+          git rev-parse --verify 233d8e0993^{commit}
 
       - name: Install the orchestration's published @aztec packages
         working-directory: aztec-avm-runtime/orchestration
@@ -2813,11 +2763,6 @@ jobs:
           retention-days: 30
 
   noir-call-frames:
-    # MEASUREMENT BRANCH: a workflow_dispatch here runs ONLY node-host,
-    # which is the job that emits the `avm-wasm` artefact. Every other job
-    # would rebuild a 299-commit-newer C++ tree on a gpu runner to answer a
-    # question this branch is not asking. Push and schedule are unchanged.
-    if: ${{ github.event_name != 'workflow_dispatch' }}
     name: Noir call frames — the tree the recorder writes, and the subtrees a view folds
     runs-on: [self-hosted, linux, x64, ephemeral, incus]
     # THE CHEAPEST JOB IN THIS FILE, ON PURPOSE. It builds no wasm, launches no browser and reaches
@@ -2941,11 +2886,6 @@ jobs:
           retention-days: 30
 
   browser-gate:
-    # MEASUREMENT BRANCH: a workflow_dispatch here runs ONLY node-host,
-    # which is the job that emits the `avm-wasm` artefact. Every other job
-    # would rebuild a 299-commit-newer C++ tree on a gpu runner to answer a
-    # question this branch is not asking. Push and schedule are unchanged.
-    if: ${{ github.event_name != 'workflow_dispatch' }}
     name: the browser gate — no Node.js dependencies
     runs-on: [self-hosted, linux, x64, ephemeral, incus]
     # M28, and it is the campaign's LAST milestone. Every other job in this file gates a
@@ -3025,7 +2965,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/aztec-packages
-          ref: aztec-avm-runtime-v6
+          ref: aztec-avm-runtime
           path: aztec-packages
           gh-token: ${{ steps.app-token.outputs.token }}
 
@@ -3076,7 +3016,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --unshallow 2>/dev/null || true
-          git rev-parse --verify 0219f11d81^{commit}
+          git rev-parse --verify 233d8e0993^{commit}
 
       - name: Install the orchestration's published @aztec packages
         working-directory: aztec-avm-runtime/orchestration

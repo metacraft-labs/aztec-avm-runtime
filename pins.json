@@ -12,12 +12,11 @@
   "anchors": {
     "cpp": {
       "repo": "AztecProtocol/aztec-packages",
-      "commit": "0219f11d8133970df3974fe5ae65e006bf8c193a",
-      "short": "0219f11d81",
-      "date": "2026-10-20",
-      "branch_at_pin": "tag v6.0.0",
-      "what": "The C++ anchor. Base for every prepared upstream patch (M3, M4, M5, M9, M10), for the AVM_WASM build (M6), and for all reference material under reference/ except historical-protocol-specs/. MOVED ON THIS BRANCH ONLY, AS A MEASUREMENT: see DRIFT.md D35. The live chains run protocol v6 and derive contract addresses with DOM_SEP__CONTRACT_ADDRESS_V3, while 233d8e0993 is a V2 tree, so the published avm.wasm cannot resolve a single live contract. This branch exists to find out whether a v6 tree BUILDS and TRACES before anyone pays for the re-vendoring PINS.md step 5 requires. IT IS NOT A RE-PIN: no history entry, no reference/ re-vendor, no prose sweep, so verify_pinned_nightly_single_source and the vendor-drift checks are EXPECTED to fail here. Do not land this branch.",
-      "previous_commit": "233d8e099336c1773b89e939100af047ed9c4f71"
+      "commit": "233d8e099336c1773b89e939100af047ed9c4f71",
+      "short": "233d8e0993",
+      "date": "2026-08-19",
+      "branch_at_pin": "next",
+      "what": "The C++ anchor. Base for every prepared upstream patch (M3, M4, M5, M9, M10), for the AVM_WASM build (M6), and for all reference material under reference/ except historical-protocol-specs/."
     },
     "ts": {
       "repo": "AztecProtocol/aztec-packages",
