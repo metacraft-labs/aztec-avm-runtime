@@ -176,6 +176,35 @@ REPO_ROOT="$(cd "$VERIFY_DIR/.." && pwd)"
 WORKSPACE_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 FORK_ROOT="$WORKSPACE_ROOT/aztec-packages"
 
+# ---- the declared pins -----------------------------------------------------
+#
+# pins.json is the SINGLE SOURCE OF TRUTH: its own header says "Nothing else in
+# the tree may DECLARE a pin value." Four milestone libraries declared the `cpp`
+# anchor as a shell literal anyway — M3, M4, M5 and M6 each carried
+# `M<n>_BASE_REV=233d8e0993` — and `tools/repin.py --check` does not reach shell
+# files, so nothing held them to the declaration. A re-pin that moved pins.json
+# alone would have left every prepared tree on the old base, and the discrepancy
+# would have surfaced as a build result rather than as a refusal. See DRIFT.md
+# D35, which sizes that bump and names this as its prerequisite.
+#
+# `build_ct_writer_wasm.sh` already read its anchor this way; this is that
+# reading, shared, so there is one spelling of it.
+pins_anchor_commit() {
+  local name="$1" rev
+  rev="$(python3 - "$REPO_ROOT/pins.json" "$name" <<'PY'
+import json, sys
+p = json.load(open(sys.argv[1], encoding="utf-8"))
+a = p.get("anchors", {}).get(sys.argv[2])
+print(a.get("commit", "") if a else "")
+PY
+  )" || die "pins.json could not be read for anchor '$name'"
+  case "$rev" in
+    [0-9a-f][0-9a-f]*) ;;
+    *) die "pins.json declares no '$name' anchor commit" ;;
+  esac
+  printf '%s\n' "$rev"
+}
+
 export VERIFY_DIR REPO_ROOT WORKSPACE_ROOT FORK_ROOT
 
 pass() {

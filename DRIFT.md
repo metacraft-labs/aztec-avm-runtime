@@ -1645,6 +1645,183 @@ were absorbed silently.
   `aztec-avm-runtime/verification/m30/page/vfs_page.mjs` (`containerB64`);
   `noir-wt4-webpage/tooling/tracer_wasm/src/lib.rs` (`ContainerInfo`).
 
+## D35 — the pinned `avm.wasm` derives contract addresses with V2; both live Aztec networks are v6 and derive with V3, so every public call fails bytecode retrieval
+
+- id: D35
+- status: open
+- opened: 2026-11-13
+- milestone: — (not opened by a milestone: opened by the live chain moving under a pin)
+- design-question: which anchor the REPLAY runtime tracks, given that `anchors.cpp` is also the
+  differential oracle's pin and PINS.md ties the two together
+- sides: the published `avm.wasm` (release `avm-wasm-41af520a`, built from `anchors.cpp`
+  `233d8e0993` plus the carry set), whose address derivation uses
+  `DOM_SEP__CONTRACT_ADDRESS_V2 = 4099338721` — `reference/constants/constants.nr:769` and
+  `reference/pil-vm2/bytecode/address_derivation.pil:161` — versus **both** live Aztec networks,
+  which run protocol **v6** and derive with `DOM_SEP__CONTRACT_ADDRESS_V3 = 993442748`.
+- what: both endpoints were read directly on 2026-11-13, single-POST so the `x-aztec-*` headers
+  survive (a batch POST strips them through these proxies; `pins.json` `live_chain` records why):
+
+  | | `https://aztec.drpc.org` | `https://aztec-testnet.drpc.org` |
+  |---|---|---|
+  | `x-aztec-packageversion` | `6.0.0` | `6.0.0` |
+  | `l1ChainId` | 1 | 11155111 |
+  | `x-aztec-l1rollupaddress` | `0xe37a2663cc9c119ba41572c40fab0bbb23a5402f` | `0x1f435a7f2da358caf887a470faeee7d5d5f4efba` |
+  | `x-aztec-l2circuitsvktreeroot` | `0x22fff5de6ce590153df4468f7f0b152188a803d91b3c9c648b91d93d5913f219` | **identical** |
+  | `x-aztec-l2protocolcontractshash` | `0x0f54271c52865841a77aaa66036eed901aff22fdce9f08e123ec8b205c9854d7` | **identical** |
+
+  **The two networks are the same protocol build and differ only in network identity.** That is
+  the useful half of this entry: one v6 runtime serves both, so "support both networks" is two
+  follower instances, not two AVMs. Neither rollup address is the one `pins.json` `live_chain`
+  recorded on 2026-08-29 (`0x91ff8bbd8ebb07893010d50a48a1609e5ebd8e34`), so both chains have been
+  replaced since that probe.
+
+  Upstream `a36ddcc1c4` (2026-10-07, *feat!: bump the contract address domain separator to v3*,
+  #25521) introduces V3 **and removes V2**. Its own message states the rule: "v5 shipped
+  `DOM_SEP__CONTRACT_ADDRESS_V2`… `next`, which becomes v6, still carried V2, so v6 would have
+  allowed address collisions with v5." The separator is rotated once per protocol version by
+  design, so this is not a bug upstream will revert — it is what a version bump IS.
+
+  It is not confined to the proving circuit. At the `v6.0.0` tag the constant is named by
+  `barretenberg/cpp/src/barretenberg/vm2/simulation/gadgets/address_derivation.cpp` and
+  `.../vm2/simulation/lib/contract_crypto.cpp` — the **simulation** path, which is what
+  `avm.wasm` executes. Address derivation is part of bytecode retrieval: the AVM derives the
+  address from the contract instance and requires `address == address_point.x`
+  (`reference/pil-vm2/bytecode/address_derivation.pil:309`). A V2 derivation against a
+  V3-deployed instance cannot match, so bytecode retrieval fails for every public call.
+- why it matters: this is the whole reason the ingestion follower produces nothing. On
+  high-mem-server the follower observed 1,785 transactions, wrote 0 captures and 0 publish
+  markers, and every replay it attempted was refused (254 of 254). A capture backlog that large
+  is exactly what the BlockTracer alert rules exist to fire on, and they could not, for reasons
+  of their own (metacraft-labs/infra#2309). **No pin bump available today produces a trace**:
+  `avm-wasm-41af520a` is the only published release, and it is a V2 build.
+- decision: **NOT TAKEN HERE — but it is no longer a question. A v6 build was made and MEASURED,
+  and it clears this entry's divergence.** Same transaction, same replay tree, only the module
+  swapped:
+
+  | | published V2 `41af520a…` | v6 build `0f2fb11e…` |
+  |---|---|---|
+  | `Address derivation mismatch` | 4 occurrences | **absent** |
+  | hydration rounds | 2 | 6 |
+  | nullifiers / public-data seeded | 1 / 2 | 4 / 3 |
+  | the app-logic call | never resolved its bytecode | **executed**, reached `EXCEPTIONAL_HALT` |
+
+  The v6 module is 1,563,946 bytes against the V2 module's 1,565,773, and CI's own
+  *"the staged avm.wasm is a reactor that imports its memory and defines none"* assertion passed
+  on it. So the V2/V3 separator was the whole of THIS divergence, and a v6-anchored module is the
+  remedy rather than a hypothesis. (The CI job is red: its build and its node-host CHECKS share
+  one step, and those checks encode expectations from the old anchor. Staging runs under
+  `if: always()`, which is why the artefact exists and why "red job" and "no module" are not the
+  same statement here.)
+
+  **AND IT REVEALED THE NEXT WALL, WHICH IS OURS AND NOT UPSTREAM'S.** With derivation fixed the
+  AVM gets further and then refuses differently:
+
+  ```
+  Assertion failed: (maybe_instance.has_value())
+  Reason   : Contract instance should be found if nullifier exists
+  ```
+
+  Measured cause: `settled_transaction.ts` resolves contracts from `publicCallTargets(tx)` — the
+  transaction's DECLARED enqueued calls — and `applySeed` registers exactly that fixed set. This
+  transaction declares ONE (`publicFunctionCalldata` has one entry, the entry point
+  `0x132c119f…`), but execution reaches a second contract, `0x2025c3eb…` (class
+  `0x2b61046d…`). Both are served by the node today; the second is simply never fetched. Hydration
+  meanwhile seeds that contract's deployment nullifier, so the module sees "deployed" with no
+  instance behind it — which is precisely what the assertion says. Under V2 the AVM never executed
+  far enough to ask. **This is a gap in this repository's resolution, not a divergence between two
+  things that both exist, so it is NOT a drift entry** (see "What is deliberately not here"): the
+  fix is to resolve instances DYNAMICALLY during the hydration loop, as nullifiers and public data
+  already are, rather than statically up front.
+
+  The sizing below stands and is what the bump still costs.
+  The obvious move — advance `anchors.cpp` to `v6.0.0` (`0219f11d81`, 2026-10-20, 299 commits
+  ahead) — is sized rather than assumed:
+
+  * **The carry set survives the move.** `tools/rebase_upstream_patches.py --onto 0219f11d81`
+    replays all five patches onto the v6 tag: `5 applies, 0 failures`. The previously recorded
+    replay (`carry/rebase.json`) was against `7471a61f1a`, 19 commits past the base, so this is
+    the first evidence the series holds across a protocol bump.
+  * **The anchor is NOT declared in one place, contrary to `pins.json`'s own rule.** Its comment
+    says "Nothing else in the tree may DECLARE a pin value", and four verification libraries
+    declare it as a shell literal anyway: `lib_merkle_lmdb.sh:25` (M3), `lib_wasi33.sh:36` (M4),
+    `lib_bytecode_shift.sh:38` (M5) and `lib_avm_wasm.sh:54` (M6), each
+    `M<n>_BASE_REV=233d8e0993`. `tools/repin.py --check` does not reach them. **A bump that moves
+    `pins.json` alone would leave every prepared tree on the old base and the discrepancy would
+    show up as a build result, not as a refusal.** Fixing that is a prerequisite for the bump,
+    not part of it.
+  * **The blast radius is campaign-wide**: 226 non-markdown files outside `reference/` name the
+    literal (mostly vendored-provenance headers under `browser/src/vendor/`), 103 markdown files,
+    and 184 files under `reference/`, which PINS.md step 5 requires re-vendoring along with
+    `reference/PROVENANCE.md`'s dates.
+  * **PINS.md does not have a provision for this.** Its re-pin policy admits exactly two
+    exceptions to the once-a-month milestone-boundary cadence: a security fix, and a pin that no
+    longer resolves. This is neither. The pin resolves perfectly and builds — it simply describes
+    a protocol nobody runs any more. That the policy has no name for "the chain moved out from
+    under the anchor" is itself a finding, and the policy should grow one rather than have this
+    bump smuggled in under an exception it does not fit.
+- evidence: the two endpoint reads above, reproducible with a single-object JSON-RPC POST of
+  `node_getNodeInfo`; `git show a36ddcc1c4` and `git grep DOM_SEP__CONTRACT_ADDRESS_V 0219f11d81`
+  in `AztecProtocol/aztec-packages`; `tools/rebase_upstream_patches.py --onto 0219f11d81`;
+  `services/blocktracer-ingest/avm-wasm.json` in `metacraft-labs/infra` for the pinned release and
+  its provenance.
+
+  **THE TYPESCRIPT HALF IS A SECOND WALL, AND IT IS NOW MEASURED ON THIS CHAIN RATHER THAN THE
+  RETIRED ONE.** `feat/aztec-labs-stdlib-6` measured the rename against a transaction of the
+  previous rollup; both chains have since been replaced, so that evidence was re-taken on
+  2026-11-13 against a live one. Transaction
+  `0x1dd4fd2d3b4bc5f9893d89343c634c7f1938c6121280c514e652669788020081`, testnet block 30303,
+  fetched with `node_getBlock [n, { includeTransactions: true }]` and `node_getTxByHash`, 51,649
+  bytes.
+
+  **CORRECTION, SAME DAY.** This entry first said that transaction "carries
+  `publicFunctionCalldata`, so it is a transaction with public calls". That was a presence test
+  read as a content test: the field is there and it is an EMPTY list, so `0x1dd4fd2d…` is a
+  PRIVATE-ONLY transaction, and the replay of it stops in
+  `AvmTxHint.fromTx` with `Cannot read properties of undefined (reading
+  'nonRevertibleAccumulatedData')` because `tx.data.forPublic` is absent — never reaching the AVM
+  at all. It still proves the deserialization wall, which is what the table below is about, and
+  it proves nothing about the AVM one. A transaction that does reach the AVM is used for that,
+  below.
+
+  | package | `Tx.schema.parseAsync` on those bytes |
+  |---|---|
+  | `@aztec-labs/stdlib@6.0.0` | **parses**, and the recomputed txHash EQUALS the chain's |
+  | `@aztec/stdlib@5.3.0-nightly.20260819` (`npm.current`) | **refuses**: `Value 0xec73054300000000000b6cc0150e5fae121cdff36d9c4ba1334634d46cbcc8a7 is greater or equal to field modulus` |
+
+  The recomputed hash matching is what makes the first row evidence rather than an absence of
+  complaint: the decode is self-verifying. The second row's shape is a FIELD LAYOUT change, not a
+  rejected value — a decoder reading at the wrong offsets lands a value that is not a field
+  element, which is why the error names the modulus rather than a schema mismatch.
+
+  **AND THE AVM WALL IS NOW REPRODUCED DIRECTLY, NOT PREDICTED.** With the TypeScript wall
+  removed (the `@aztec-labs/*` 6.0.0 replay tree) and the PUBLISHED V2 module
+  (`avm-wasm-41af520a`, sha256 `41af520a…b905a7`, 1,565,773 bytes, downloaded from the release and
+  hash-checked), `replay_settled_transaction.mjs` was driven against testnet transaction
+  `0x1e984eaa18d5b74c934c6290d14758bc27a3180ea23b7f5a7c0bf0d2d6b75c36` (block 30331, ONE entry in
+  `publicFunctionCalldata`, found by scanning bodies rather than by trusting the field's
+  presence). Everything upstream of the AVM worked — the body deserialized, two hydration rounds
+  ran, one nullifier and two public-data leaves were seeded, the query set stopped growing, and
+  the app-logic call was dispatched:
+
+  ```
+  [APP_LOGIC] Executing enqueued call to 0x132c119fa9d2cadfb128225b6718f4b2b56a179d8de69bbd739098ee6ffe6f07
+  Assertion failed: (address == address_point.x())
+    Actual  : 0x132c119fa9d2cadfb128225b6718f4b2b56a179d8de69bbd739098ee6ffe6f07
+    Expected: 0x26d2c4f53c449accd4856f589827486ad3b2eee5c8b17ad5d6aacd0aa5b4978b
+    Reason  : Address derivation mismatch
+  ```
+
+  That is `address_derivation.pil:309`'s constraint failing in the simulation path, on a live
+  contract, with the V2 separator deriving `0x26d2c4f5…` for a contract the chain calls
+  `0x132c119f…`. The driver's own sentence is the right one to quote: "This is NOT a loop that
+  failed to converge — it converged, and the answer is still no."
+
+  So the two walls are independent and both are real: the pinned TypeScript cannot read a v6
+  transaction at all, and a V2 `avm.wasm` cannot execute its public calls once it can — the
+  second half now MEASURED rather than inferred.
+  `@aztec-labs/stdlib@6.0.0`'s `constants.gen.js` carries `CONTRACT_ADDRESS_V3 = 993442748`,
+  so the published TypeScript already agrees with the chain; only the wasm does not.
+
 <!-- END:drift -->
 
 ---

@@ -41,8 +41,8 @@
 // what happened; it never reports two rows and a shorter range, which is the shape this campaign
 // calls "a count that drops".
 
-import type { BlockNumber } from '@aztec/foundation/branded-types';
-import { TxHash } from '@aztec/stdlib/tx/tx-hash';
+import type { BlockNumber } from '@aztec-labs/foundation/branded-types';
+import { TxHash } from '@aztec-labs/stdlib/tx/tx-hash';
 
 import type { ReplayNodeClient } from './node_client.ts';
 import { fetchSettledTransaction, type SettledTransaction } from './settled_transaction.ts';

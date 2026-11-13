@@ -44,11 +44,11 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 
-import { Barretenberg, BarretenbergSync } from '@aztec/bb.js';
-import { jsonStringify } from '@aztec/foundation/json-rpc';
-import { defaultFetch } from '@aztec/foundation/json-rpc/client';
-import { Tx } from '@aztec/stdlib/tx';
-import { TxHash } from '@aztec/stdlib/tx/tx-hash';
+import { Barretenberg, BarretenbergSync } from '@aztec-foundation/bb.js';
+import { jsonStringify } from '@aztec-labs/foundation/json-rpc';
+import { defaultFetch } from '@aztec-labs/foundation/json-rpc/client';
+import { Tx } from '@aztec-labs/stdlib/tx';
+import { TxHash } from '@aztec-labs/stdlib/tx/tx-hash';
 
 import {
   RUNG_BYTECODE_VALUE,
@@ -471,11 +471,38 @@ const settled = await fetchSettledTransaction(client, TxHash.fromString(txHash),
 });
 const host = await createNodeAvmHost(modulePath);
 
-const outcome = await replaySettledTransaction(host, client, settled, encodeReplayInputs, {
-  onRound: (r) => console.error(
-    `replay: round ${r.round} — ${r.queries} quer(y|ies) reported, ${r.added} leaf/leaves seeded, `
-    + `${r.skipped.length} skipped`),
-});
+// THE REFUSAL PATH WRITES THE FIXTURE TOO. See `writeCapture`: the subject is perishable, and the
+// run that refuses is the run whose evidence is worth the most. The error is re-thrown unchanged —
+// salvaging the capture must not turn a refusal into a success, and the exit status and the stack
+// a reader sees are the ones they would have seen without this block.
+let outcome;
+try {
+  outcome = await replaySettledTransaction(host, client, settled, encodeReplayInputs, {
+    // THE SAME CLIENT, THROUGH A SECOND NARROW VIEW. See `ContractDiscoverySource`: a transaction
+    // that calls a contract it did not declare needs that contract resolved, and the alternative
+    // to resolving it is the module aborting on `maybe_instance.has_value()`.
+    discovery: client,
+    onRound: (r) => console.error(
+      `replay: round ${r.round} — ${r.queries} quer(y|ies) reported, ${r.added} leaf/leaves seeded, `
+      + `${r.skipped.length} skipped`
+      + (r.discoveredContracts === undefined
+        ? ''
+        : `, DISCOVERED ${r.discoveredContracts.length} undeclared callee(s): `
+          + r.discoveredContracts.join(', '))),
+  });
+} catch (err) {
+  if (capturePath) {
+    const refusal = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    try {
+      await writeCapture(null, refusal);
+    } catch (writeErr) {
+      // A SALVAGE THAT FAILS MUST NOT REPLACE THE DIAGNOSIS. The refusal below is the finding; a
+      // failure to write the fixture about it is a second, smaller fact and it is reported as one.
+      console.error(`replay: could not salvage the capture: ${writeErr?.message ?? writeErr}`);
+    }
+  }
+  throw err;
+}
 
 // ---- L3: THE RECORDING --------------------------------------------------------------------------
 // Written BEFORE the wrong-block control pass, deliberately: the control re-runs the loop and would
@@ -499,7 +526,13 @@ if (ctOut) {
     // reports "no artifact proved" for a third-party one.
     chain: fixturePath ? undefined : chainNameFor(await client.getNodeInfo()),
   });
-  for (const contract of settled.contracts) {
+  // THE DISCOVERED CALLEES GET AN ARTIFACT LOOKUP TOO, AND THIS WAS THE SAME DEFECT ONE LAYER UP.
+  // `discoverContractsFromSeed` fixed the AVM's view — a contract the transaction calls without
+  // declaring is now registered, so it executes. Its STEPS still could not be positioned, because
+  // this loop asked for artifacts over the declared set alone, so a discovered contract was
+  // unresolvable by construction however well published its source was. The replay has already
+  // run by this point, so `outcome.seed.contracts` is exactly the set discovery found.
+  for (const contract of [...settled.contracts, ...outcome.seed.contracts.values()]) {
     if (!contract.resolved || contract.contractClass === undefined) continue;
     const resolution = await resolveContractArtifact(
       contract.address,
@@ -658,6 +691,10 @@ if (capturePath) {
     + 'block, which is what the control replays against)');
   try {
     await replaySettledTransaction(host, client, settled, encodeReplayInputs, {
+      // DISCOVERY IS ON FOR THE CONTROL TOO, SO THE CONTROL VARIES ONE THING. Without it the
+      // control fails for two reasons at once — the wrong block AND an unregistered callee — and
+      // "the control failed" would stop being evidence about the block.
+      discovery: client,
       preStateBlockForControls: 'settling-block',
       onRound: (r) => console.error(
         `replay: [control] round ${r.round} — ${r.queries} reported, ${r.added} seeded`),
@@ -760,7 +797,23 @@ if (json) {
   }
 }
 
-if (capturePath) {
+/**
+ * WRITE THE FIXTURE. CALLED FROM THE SUCCESS PATH *AND* FROM A REFUSED REPLAY.
+ *
+ * THE SUBJECT IS PERISHABLE AND THAT IS THE WHOLE REASON THIS IS A FUNCTION. `getTxByHash` serves
+ * a transaction for a matter of hours; `0x1e984eaa…` was captured, refused, and by the next run the
+ * node answered `not found` for it. The first version of this tool wrote the fixture only after a
+ * converged replay, so the one outcome that NEEDS a fixture to iterate on — the module refusing —
+ * was exactly the outcome that destroyed the evidence. A refusal is a finding, and a finding you
+ * cannot re-open is a finding you have to re-discover from a different subject every time.
+ *
+ * A SALVAGE FIXTURE SAYS SO IN ITS OWN PROVENANCE. `replayReport` is null and `replayRefused`
+ * carries the module's sentence, so nothing can read a salvage as a converged capture. It also
+ * carries NO wrong-block control calls, because the control pass runs after the subject and a
+ * refused subject never reaches it — `controlPassRecorded` states that rather than leaving a reader
+ * to infer it from a shorter call list.
+ */
+async function writeCapture(report, refusal) {
   const nodeInfo = await client.getNodeInfo();
   const fixture = {
     format: SETTLED_FIXTURE_FORMAT,
@@ -780,6 +833,8 @@ if (capturePath) {
       contractReferenceBlock: settled.contracts[0]?.resolvedAsOf ?? 'latest',
       contractReferenceBlockRequested: 'settling-block',
       replayReport: report,
+      replayRefused: refusal,
+      controlPassRecorded: refusal === null,
       nodeReported: {
         revertCode: settled.revertCode,
         l2BlockHash: settled.l2BlockHash,
@@ -833,7 +888,12 @@ if (capturePath) {
     calls: sink.calls,
   };
   await writeFile(capturePath, `${JSON.stringify(fixture, null, 2)}\n`);
-  console.error(`replay: wrote ${capturePath} — ${sink.calls.length} recorded call(s)`);
+  console.error(`replay: wrote ${capturePath} — ${sink.calls.length} recorded call(s)`
+    + (refusal === null ? '' : ' (SALVAGE: the replay was refused; see provenance.replayRefused)'));
+}
+
+if (capturePath) {
+  await writeCapture(report, null);
 }
 
 process.exit(outcome.verdict.reproduced ? 0 : 1);

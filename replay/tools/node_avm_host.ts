@@ -17,8 +17,8 @@
 // that file's shapes, re-expressed against this package's `@aztec/stdlib` install because the two
 // installs' `Fr` classes are not interchangeable (see `replay_inputs.ts`).
 
-import type { Fr } from '@aztec/foundation/curves/bn254';
-import { serializeWithMessagePack } from '@aztec/stdlib/avm';
+import type { Fr } from '@aztec-labs/foundation/curves/bn254';
+import { serializeWithMessagePack } from '@aztec-labs/stdlib/avm';
 
 import { compileAvm, instantiateAvm } from '../../node-host/src/loader.ts';
 import { stepsFromOutcome, type ExecutionStep } from '../../node-host/src/steps.ts';
