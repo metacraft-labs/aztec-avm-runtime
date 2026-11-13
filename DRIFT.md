@@ -1645,6 +1645,89 @@ were absorbed silently.
   `aztec-avm-runtime/verification/m30/page/vfs_page.mjs` (`containerB64`);
   `noir-wt4-webpage/tooling/tracer_wasm/src/lib.rs` (`ContainerInfo`).
 
+## D35 — the pinned `avm.wasm` derives contract addresses with V2; both live Aztec networks are v6 and derive with V3, so every public call fails bytecode retrieval
+
+- id: D35
+- status: open
+- opened: 2026-11-13
+- milestone: — (not opened by a milestone: opened by the live chain moving under a pin)
+- design-question: which anchor the REPLAY runtime tracks, given that `anchors.cpp` is also the
+  differential oracle's pin and PINS.md ties the two together
+- sides: the published `avm.wasm` (release `avm-wasm-41af520a`, built from `anchors.cpp`
+  `233d8e0993` plus the carry set), whose address derivation uses
+  `DOM_SEP__CONTRACT_ADDRESS_V2 = 4099338721` — `reference/constants/constants.nr:769` and
+  `reference/pil-vm2/bytecode/address_derivation.pil:161` — versus **both** live Aztec networks,
+  which run protocol **v6** and derive with `DOM_SEP__CONTRACT_ADDRESS_V3 = 993442748`.
+- what: both endpoints were read directly on 2026-11-13, single-POST so the `x-aztec-*` headers
+  survive (a batch POST strips them through these proxies; `pins.json` `live_chain` records why):
+
+  | | `https://aztec.drpc.org` | `https://aztec-testnet.drpc.org` |
+  |---|---|---|
+  | `x-aztec-packageversion` | `6.0.0` | `6.0.0` |
+  | `l1ChainId` | 1 | 11155111 |
+  | `x-aztec-l1rollupaddress` | `0xe37a2663cc9c119ba41572c40fab0bbb23a5402f` | `0x1f435a7f2da358caf887a470faeee7d5d5f4efba` |
+  | `x-aztec-l2circuitsvktreeroot` | `0x22fff5de6ce590153df4468f7f0b152188a803d91b3c9c648b91d93d5913f219` | **identical** |
+  | `x-aztec-l2protocolcontractshash` | `0x0f54271c52865841a77aaa66036eed901aff22fdce9f08e123ec8b205c9854d7` | **identical** |
+
+  **The two networks are the same protocol build and differ only in network identity.** That is
+  the useful half of this entry: one v6 runtime serves both, so "support both networks" is two
+  follower instances, not two AVMs. Neither rollup address is the one `pins.json` `live_chain`
+  recorded on 2026-08-29 (`0x91ff8bbd8ebb07893010d50a48a1609e5ebd8e34`), so both chains have been
+  replaced since that probe.
+
+  Upstream `a36ddcc1c4` (2026-10-07, *feat!: bump the contract address domain separator to v3*,
+  #25521) introduces V3 **and removes V2**. Its own message states the rule: "v5 shipped
+  `DOM_SEP__CONTRACT_ADDRESS_V2`… `next`, which becomes v6, still carried V2, so v6 would have
+  allowed address collisions with v5." The separator is rotated once per protocol version by
+  design, so this is not a bug upstream will revert — it is what a version bump IS.
+
+  It is not confined to the proving circuit. At the `v6.0.0` tag the constant is named by
+  `barretenberg/cpp/src/barretenberg/vm2/simulation/gadgets/address_derivation.cpp` and
+  `.../vm2/simulation/lib/contract_crypto.cpp` — the **simulation** path, which is what
+  `avm.wasm` executes. Address derivation is part of bytecode retrieval: the AVM derives the
+  address from the contract instance and requires `address == address_point.x`
+  (`reference/pil-vm2/bytecode/address_derivation.pil:309`). A V2 derivation against a
+  V3-deployed instance cannot match, so bytecode retrieval fails for every public call.
+- why it matters: this is the whole reason the ingestion follower produces nothing. On
+  high-mem-server the follower observed 1,785 transactions, wrote 0 captures and 0 publish
+  markers, and every replay it attempted was refused (254 of 254). A capture backlog that large
+  is exactly what the BlockTracer alert rules exist to fire on, and they could not, for reasons
+  of their own (metacraft-labs/infra#2309). **No pin bump available today produces a trace**:
+  `avm-wasm-41af520a` is the only published release, and it is a V2 build.
+- decision: **NOT TAKEN HERE, and the sizing is recorded so that it can be taken on evidence.**
+  The obvious move — advance `anchors.cpp` to `v6.0.0` (`0219f11d81`, 2026-10-20, 299 commits
+  ahead) — is sized rather than assumed:
+
+  * **The carry set survives the move.** `tools/rebase_upstream_patches.py --onto 0219f11d81`
+    replays all five patches onto the v6 tag: `5 applies, 0 failures`. The previously recorded
+    replay (`carry/rebase.json`) was against `7471a61f1a`, 19 commits past the base, so this is
+    the first evidence the series holds across a protocol bump.
+  * **The anchor is NOT declared in one place, contrary to `pins.json`'s own rule.** Its comment
+    says "Nothing else in the tree may DECLARE a pin value", and four verification libraries
+    declare it as a shell literal anyway: `lib_merkle_lmdb.sh:25` (M3), `lib_wasi33.sh:36` (M4),
+    `lib_bytecode_shift.sh:38` (M5) and `lib_avm_wasm.sh:54` (M6), each
+    `M<n>_BASE_REV=233d8e0993`. `tools/repin.py --check` does not reach them. **A bump that moves
+    `pins.json` alone would leave every prepared tree on the old base and the discrepancy would
+    show up as a build result, not as a refusal.** Fixing that is a prerequisite for the bump,
+    not part of it.
+  * **The blast radius is campaign-wide**: 226 non-markdown files outside `reference/` name the
+    literal (mostly vendored-provenance headers under `browser/src/vendor/`), 103 markdown files,
+    and 184 files under `reference/`, which PINS.md step 5 requires re-vendoring along with
+    `reference/PROVENANCE.md`'s dates.
+  * **PINS.md does not have a provision for this.** Its re-pin policy admits exactly two
+    exceptions to the once-a-month milestone-boundary cadence: a security fix, and a pin that no
+    longer resolves. This is neither. The pin resolves perfectly and builds — it simply describes
+    a protocol nobody runs any more. That the policy has no name for "the chain moved out from
+    under the anchor" is itself a finding, and the policy should grow one rather than have this
+    bump smuggled in under an exception it does not fit.
+- evidence: the two endpoint reads above, reproducible with a single-object JSON-RPC POST of
+  `node_getNodeInfo`; `git show a36ddcc1c4` and `git grep DOM_SEP__CONTRACT_ADDRESS_V 0219f11d81`
+  in `AztecProtocol/aztec-packages`; `tools/rebase_upstream_patches.py --onto 0219f11d81`;
+  `services/blocktracer-ingest/avm-wasm.json` in `metacraft-labs/infra` for the pinned release and
+  its provenance. The TypeScript half of the same move is measured separately on
+  `feat/aztec-labs-stdlib-6` (`@aztec-labs/stdlib@6.0.0` is published and its
+  `constants.gen.js` carries `CONTRACT_ADDRESS_V3 = 993442748`).
+
 <!-- END:drift -->
 
 ---
