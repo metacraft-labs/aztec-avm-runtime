@@ -488,7 +488,14 @@ try {
       + (r.discoveredContracts === undefined
         ? ''
         : `, DISCOVERED ${r.discoveredContracts.length} undeclared callee(s): `
-          + r.discoveredContracts.join(', '))),
+          + r.discoveredContracts.join(', '))
+      // SAID OUT LOUD. A fixture captured before discovery existed cannot answer it, so the
+      // round degrades to "nothing discovered" — and a replay that then aborts on
+      // `maybe_instance.has_value()` would otherwise look like a module refusing rather than
+      // like a recording that could not be asked.
+      + (r.discoveryUnreachable === undefined
+        ? ''
+        : `, discovery could not ask (${r.discoveryUnreachable})`)),
   });
 } catch (err) {
   if (capturePath) {

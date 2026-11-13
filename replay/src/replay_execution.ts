@@ -424,13 +424,14 @@ export async function replaySettledTransaction(
     // public-data value carrying the callee's address has to be in the seed before it can be a
     // candidate.
     const discovered = options.discovery === undefined
-      ? { added: 0, addresses: [] as string[] }
+      ? { added: 0, addresses: [] as string[], unreachable: undefined as string | undefined }
       : await discoverContractsFromSeed(options.discovery, settled, seed, queries);
 
     const record: HydrationRound = {
       round, queries: queries.length, added: answered.added,
       seeded: answered.seeded, skipped: answered.skipped,
       ...(discovered.added === 0 ? {} : { discoveredContracts: discovered.addresses }),
+      ...(discovered.unreachable === undefined ? {} : { discoveryUnreachable: discovered.unreachable }),
       ...(refusal === undefined ? {} : { refusal }),
       ...(round === 1 ? { openingSeed: seedSize(seed) } : {}),
     };
@@ -690,7 +691,7 @@ export async function discoverContractsFromSeed(
   settled: SettledTransaction,
   seed: ResidentSeed,
   queries: readonly WorldStateQuery[],
-): Promise<{ added: number; addresses: string[] }> {
+): Promise<{ added: number; addresses: string[]; unreachable?: string }> {
   // The nullifiers the AVM asked about this round, plus the ones already standing in the tree. The
   // second half matters: the round that SEEDS a deployment nullifier is the round before the one
   // that aborts on it, so a discovery keyed only on this round's queries would always be one round
@@ -735,18 +736,48 @@ export async function discoverContractsFromSeed(
   // ONE RESOLUTION PATH. These go through the same `resolvePublicContracts` the declared targets
   // do, at the same reference block, so a discovered contract and a declared one are registered
   // from identical evidence.
-  const resolutions = await resolvePublicContracts(
-    discovery,
-    // `fromStringUnsafe` skips the "is this a valid address" check, which this call site has
-    // ALREADY made in two stronger forms: `isAddress` on the way into `candidates`, and — the one
-    // that matters — the AVM itself asking about this exact address's deployment nullifier.
-    matched.map((address) => AztecAddress.fromStringUnsafe(address)),
-    {
-      refuseUnknown: false,
-      txHash: settled.txHash,
-      referenceBlock: settled.contracts[0]?.resolvedAsOf,
-    },
-  );
+  //
+  // A SOURCE THAT CANNOT ANSWER IS "NOTHING DISCOVERED", NOT A FAILED REPLAY, and the case is
+  // concrete rather than defensive. A FIXTURE captured BEFORE discovery existed holds no
+  // `getContract` call for an undeclared callee — it could not, the run that recorded it never
+  // asked — so `settled_fixture.ts` throws `FixtureMiss`, which the client re-throws as
+  // `NodeUnreachable`. Measured on `cap-sub2.json`, captured minutes before this function was
+  // written: the merged code fails that fixture outright.
+  //
+  // That is the same invalidation hazard `settled_transaction.ts` already records for
+  // `pinToSettlingBlock` — "adding it to an existing recording INVALIDATES the recording … every
+  // committed L1 fixture would become a `FixtureMiss`" — arriving by a different door, and the
+  // answer is the same one that file chose: do not make an old recording unplayable.
+  //
+  // IT IS NOT A BLANKET SWALLOW. `refuseUnknown` is already FALSE here, so this call site has
+  // ALREADY declared that a candidate the source cannot serve is a field that was not an address
+  // rather than a fault. Catching the source's own refusal is that same statement one layer down.
+  // A DECLARED target is unaffected: it resolves in `fetchSettledTransaction` with
+  // `refuseUnknown: true` and still stops the replay by name.
+  let resolutions;
+  try {
+    resolutions = await resolvePublicContracts(
+      discovery,
+      // `fromStringUnsafe` skips the "is this a valid address" check, which this call site has
+      // ALREADY made in two stronger forms: `isAddress` on the way into `candidates`, and — the one
+      // that matters — the AVM itself asking about this exact address's deployment nullifier.
+      matched.map((address) => AztecAddress.fromStringUnsafe(address)),
+      {
+        refuseUnknown: false,
+        txHash: settled.txHash,
+        referenceBlock: settled.contracts[0]?.resolvedAsOf,
+      },
+    );
+  } catch (err) {
+    // The reason travels, for the same reason a refused hydration round keeps the module's
+    // sentence: "discovered nothing" and "could not ask" are different facts, and a reader of a
+    // replay that then aborts on `maybe_instance.has_value()` needs to know which this was.
+    return {
+      added: 0,
+      addresses: [],
+      unreachable: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+    };
+  }
 
   const addresses: string[] = [];
   for (const resolution of resolutions) {

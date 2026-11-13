@@ -355,6 +355,12 @@ export type HydrationRound = {
    * reader does not have to tell an empty array from a round where discovery was off.
    */
   readonly discoveredContracts?: readonly string[];
+  /**
+   * Present when discovery could not ASK — a fixture that predates it, or a source that refused.
+   * "Discovered nothing" and "could not ask" are different facts, and a reader of a replay that
+   * then aborts on `maybe_instance.has_value()` needs to know which of the two this round was.
+   */
+  readonly discoveryUnreachable?: string;
   /** Round 1 only: what the opening position seeded before any query had been reported. */
   readonly openingSeed?: { nullifiers: number; publicData: number; contracts: number };
 };
