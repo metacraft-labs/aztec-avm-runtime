@@ -57,7 +57,23 @@ import {
   type ResidentSeed,
   type WorldStateQuery,
 } from './historical_state.ts';
-import type { SettledTransaction } from './settled_transaction.ts';
+import { resolvePublicContracts, type SettledTransaction } from './settled_transaction.ts';
+import { MerkleTreeId } from '@aztec-labs/stdlib/trees';
+import { AztecAddress } from '@aztec-labs/stdlib/aztec-address';
+
+/**
+ * THE SEAM CONTRACT DISCOVERY REACHES, DECLARED RATHER THAN WIDENED INTO AN EXISTING ONE.
+ *
+ * `HistoricalStateSource` is deliberately two methods — the trees, and nothing else — and
+ * discovery needs the two CONTRACT methods instead. Both of those are already
+ * `CONTRACT_RESOLUTION_METHODS` and already on L0's permitted surface, so this adds no node method
+ * to the campaign; it names a second narrow view rather than quietly making the first one wider.
+ *
+ * It is OPTIONAL on `ReplayOptions` for one reason: a loop run WITHOUT it is the control. Without
+ * discovery the module aborts on `maybe_instance.has_value()`, and "discovery is what fixes that"
+ * is worth nothing unless something demonstrates the abort it fixes.
+ */
+export type ContractDiscoverySource = Parameters<typeof resolvePublicContracts>[0];
 
 // ---------------------------------------------------------------------------------------------
 // The module, structurally
@@ -295,6 +311,11 @@ export type ReplayOptions = {
    * A control that ran different code would constrain the control's code and not the replay's.
    */
   readonly preStateBlockForControls?: 'parent' | 'settling-block';
+  /**
+   * WHERE UNDECLARED CALLEES ARE RESOLVED FROM. Omitted means no discovery, which is the control —
+   * see `ContractDiscoverySource` and `discoverContractsFromSeed`.
+   */
+  readonly discovery?: ContractDiscoverySource;
 };
 
 export type ReplayOutcome = {
@@ -396,9 +417,20 @@ export async function replaySettledTransaction(
     }
 
     const answered = await answerQueries(source, parent, queries, seed, excluded);
+
+    // UNDECLARED CALLEES, FOUND FROM WHAT THE ROUND ALREADY HAS. See
+    // `discoverContractsFromSeed`: this is the difference between a replay that executes and one
+    // that aborts on `maybe_instance.has_value()`, and it runs AFTER `answerQueries` because the
+    // public-data value carrying the callee's address has to be in the seed before it can be a
+    // candidate.
+    const discovered = options.discovery === undefined
+      ? { added: 0, addresses: [] as string[] }
+      : await discoverContractsFromSeed(options.discovery, settled, seed, queries);
+
     const record: HydrationRound = {
       round, queries: queries.length, added: answered.added,
       seeded: answered.seeded, skipped: answered.skipped,
+      ...(discovered.added === 0 ? {} : { discoveredContracts: discovered.addresses }),
       ...(refusal === undefined ? {} : { refusal }),
       ...(round === 1 ? { openingSeed: seedSize(seed) } : {}),
     };
@@ -408,7 +440,10 @@ export async function replaySettledTransaction(
     // THE OPENING SEED COUNTS TOWARDS PROGRESS. Round 1's `answered.added` is over the queries the
     // module reported, and a module that refused before reporting any has none — so without this a
     // seeded opening position reads as no progress at all.
-    const progress = answered.added + (round === 1 ? seedSize(seed).nullifiers + seedSize(seed).publicData : 0);
+    // A DISCOVERED CONTRACT IS PROGRESS. It changes what the next round executes just as surely as
+    // a seeded leaf does, and without this the loop can stop on the round that found one.
+    const progress = answered.added + discovered.added
+      + (round === 1 ? seedSize(seed).nullifiers + seedSize(seed).publicData : 0);
 
     if (round > 1 && progress === 0 && outcome !== undefined) {
       return finish(instance, outcome, settled, rounds, seed, parent);
@@ -468,7 +503,10 @@ export async function applySeed(
   settled: SettledTransaction,
   seed: ResidentSeed,
 ): Promise<void> {
-  for (const contract of settled.contracts) {
+  // THE DECLARED TARGETS AND THE DISCOVERED ONES GO THROUGH ONE REGISTRATION PATH. A discovered
+  // contract is resolved by the SAME `resolvePublicContracts` the declared ones are, at the same
+  // reference block, so what is registered here cannot depend on how the address was found.
+  for (const contract of [...settled.contracts, ...seed.contracts.values()]) {
     const cc = contract.contractClass!;
     instance.registerContractClass({
       id: cc.id, artifactHash: cc.artifactHash, privateFunctionsRoot: cc.privateFunctionsRoot,
@@ -602,6 +640,123 @@ export async function recordingPass(
   };
 }
 
+/**
+ * THE CONTRACTS A TRANSACTION CALLS WITHOUT DECLARING, AND HOW THEY ARE FOUND.
+ *
+ * MEASURED, NOT ASSUMED. `fetchSettledTransaction` resolves contracts from `publicCallTargets(tx)`
+ * — the transaction's DECLARED enqueued calls — and before this function existed `applySeed`
+ * registered exactly that fixed set. On a live testnet transaction the declared set has ONE entry
+ * and the execution reaches a SECOND contract, whose address the entry point reads out of its own
+ * public storage. The capture shows it verbatim: `aztec_getPublicDataWitness(30540, 0x2e176738…)`
+ * answers with `value: 0x2820c620…`, and `0x2820c620…` is the address the module then reports as
+ * "is not deployed". Both contracts are served by the node; the second was simply never fetched.
+ *
+ * WHY THIS IS FATAL RATHER THAN MERELY INCOMPLETE. The hydration loop seeds that contract's
+ * DEPLOYMENT NULLIFIER one round later, because the AVM asked about it and the node has it. So the
+ * next round the module sees a contract that IS deployed — the nullifier is right there — with
+ * nothing behind it, and stops being polite about it:
+ *
+ *     Assertion failed: (maybe_instance.has_value())
+ *     Reason   : Contract instance should be found if nullifier exists
+ *
+ * That is a hard abort, not a revert. Under the old V2-derived `avm.wasm` this was invisible,
+ * because execution never got far enough to resolve any bytecode at all.
+ *
+ * THE DISCOVERY IS BY HASH MATCH, WHICH IS WHY A WRONG CANDIDATE CANNOT GET IN.
+ * `siloNullifier` is one-way, so a nullifier the AVM asked about cannot be turned back into an
+ * address. It does not have to be: the candidate addresses are already in hand — every public-data
+ * VALUE the loop has seeded, and every field of the transaction's public calldata — and a candidate
+ * is accepted only when `deploymentNullifier(candidate)` equals a nullifier the AVM actually asked
+ * about. Matching a Poseidon image is the proof; a field that merely looks like an address and is
+ * not the one the module is checking produces a different nullifier and is dropped.
+ *
+ * SO THIS IS NOT A GUESS ABOUT WHAT THE TRANSACTION CALLS, in the same sense `seedOpeningPosition`
+ * is not a guess about what it reads. The AVM names the question; this answers the one it asked.
+ *
+ * THE OBVIOUS ALTERNATIVE WAS MEASURED AND DOES NOT WORK. The module reports a `contractInstances`
+ * hint family, which looks like it should name the instances the execution consulted and make all
+ * of the above unnecessary. It does not: across the five rounds of the subject above it stays
+ * `array[1]` — the one contract that WAS registered — while the module is simultaneously printing
+ * `Contract 0x2820c620… is not deployed`. The hints record what the AVM found, not what it looked
+ * for, so the instance that is missing is precisely the one the hints cannot name.
+ *
+ * `refuseUnknown` is FALSE here, and that is deliberate. A declared target the node cannot serve is
+ * a replay that must not proceed — that is what `MissingContractArtifact` is for. A *discovered*
+ * candidate the node cannot serve is simply a field that was not a contract address after all, and
+ * refusing on it would turn every coincidence into a dead replay.
+ */
+export async function discoverContractsFromSeed(
+  discovery: ContractDiscoverySource,
+  settled: SettledTransaction,
+  seed: ResidentSeed,
+  queries: readonly WorldStateQuery[],
+): Promise<{ added: number; addresses: string[] }> {
+  // The nullifiers the AVM asked about this round, plus the ones already standing in the tree. The
+  // second half matters: the round that SEEDS a deployment nullifier is the round before the one
+  // that aborts on it, so a discovery keyed only on this round's queries would always be one round
+  // too late on a re-entry.
+  const asked = new Set<string>();
+  for (const query of queries) {
+    if (query.treeId === MerkleTreeId.NULLIFIER_TREE) asked.add(query.value.toLowerCase());
+  }
+  for (const key of seed.nullifiers.keys()) asked.add(key);
+  if (asked.size === 0) return { added: 0, addresses: [] };
+
+  const candidates = new Set<string>();
+  const offer = (field: { toString(): string } | undefined | null) => {
+    if (field === undefined || field === null) return;
+    const text = field.toString().toLowerCase();
+    // Zero is the module's own "no contract" sentinel — it reports `Contract 0x0 is not deployed`
+    // on a failed call — and it is never an address worth a round trip.
+    if (/^0x0*$/.test(text)) return;
+    // Well-formed as an address, which is a cheap filter and NOT the test that admits a candidate.
+    // The test is the nullifier match below; this only keeps a malformed field out of it.
+    if (!AztecAddress.isAddress(text)) return;
+    candidates.add(text);
+  };
+  for (const entry of seed.publicData.values()) if (entry !== null) offer(entry.value);
+  for (const request of settled.tx.getPublicCallRequestsWithCalldata()) {
+    for (const field of request.calldata) offer(field);
+  }
+  const teardown = settled.tx.getTeardownPublicCallRequestWithCalldata();
+  if (teardown !== undefined) for (const field of teardown.calldata) offer(field);
+
+  const already = new Set<string>(settled.contracts.map((c) => c.address.toLowerCase()));
+  for (const key of seed.contracts.keys()) already.add(key);
+
+  const matched: string[] = [];
+  for (const candidate of candidates) {
+    if (already.has(candidate)) continue;
+    const nullifier = (await deploymentNullifier(candidate)).toString().toLowerCase();
+    if (asked.has(nullifier)) matched.push(candidate);
+  }
+  if (matched.length === 0) return { added: 0, addresses: [] };
+
+  // ONE RESOLUTION PATH. These go through the same `resolvePublicContracts` the declared targets
+  // do, at the same reference block, so a discovered contract and a declared one are registered
+  // from identical evidence.
+  const resolutions = await resolvePublicContracts(
+    discovery,
+    // `fromStringUnsafe` skips the "is this a valid address" check, which this call site has
+    // ALREADY made in two stronger forms: `isAddress` on the way into `candidates`, and — the one
+    // that matters — the AVM itself asking about this exact address's deployment nullifier.
+    matched.map((address) => AztecAddress.fromStringUnsafe(address)),
+    {
+      refuseUnknown: false,
+      txHash: settled.txHash,
+      referenceBlock: settled.contracts[0]?.resolvedAsOf,
+    },
+  );
+
+  const addresses: string[] = [];
+  for (const resolution of resolutions) {
+    if (!resolution.resolved) continue;
+    seed.contracts.set(resolution.address.toLowerCase(), resolution);
+    addresses.push(resolution.address);
+  }
+  return { added: addresses.length, addresses };
+}
+
 /** The opening seed. Kept separate so a check can assert it is not where the answers came from. */
 async function seedOpeningPosition(
   source: HistoricalStateSource,
@@ -639,6 +794,6 @@ function bytecodeCommitment(packedBytecode: Buffer): Promise<Fr> {
 }
 
 /** How the AVM decides a contract exists: its address, siloed by the instance registry. */
-function deploymentNullifier(address: string): Promise<Fr> {
+export function deploymentNullifier(address: string): Promise<Fr> {
   return siloNullifier(ProtocolContractAddress.ContractInstanceRegistry, FrValue.fromHexString(address));
 }

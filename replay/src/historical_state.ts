@@ -78,6 +78,7 @@ import { Fr } from '@aztec-labs/foundation/curves/bn254';
 import { MerkleTreeId } from '@aztec-labs/stdlib/trees';
 
 import type { MembershipWitnessSource } from './membership_witness_source.ts';
+import type { ContractResolution } from './settled_transaction.ts';
 
 // ---------------------------------------------------------------------------------------------
 // What route 3 measured, recorded here so it is a citation and not a memory
@@ -286,21 +287,38 @@ export type SkippedQuery = {
 export type ResidentSeed = {
   readonly nullifiers: Map<string, Fr | null>;
   readonly publicData: Map<string, { slot: Fr; value: Fr } | null>;
+  /**
+   * CONTRACTS DISCOVERED DURING HYDRATION, keyed by lowercase address.
+   *
+   * These are NOT the transaction's declared call targets — those come from `publicCallTargets`
+   * and live on `SettledTransaction`. These are contracts the transaction turned out to CALL
+   * without declaring, and they are part of the seed for the same reason a nullifier is: they are
+   * resident state the next round's execution runs against, discovered by the round before it.
+   *
+   * See `discoverContractsFromSeed` for why this exists and how an address gets in here. The short
+   * version: an enqueued call declares one entry point, the entry point reads a callee's address
+   * out of its OWN public storage, and nothing in the declared set names that callee.
+   */
+  readonly contracts: Map<string, ContractResolution>;
   readonly seeded: SeededLeaf[];
   readonly skipped: SkippedQuery[];
 };
 
 export function emptySeed(): ResidentSeed {
-  return { nullifiers: new Map(), publicData: new Map(), seeded: [], skipped: [] };
+  return {
+    nullifiers: new Map(), publicData: new Map(), contracts: new Map(), seeded: [], skipped: [],
+  };
 }
 
 /** How many leaves are actually IN the tree, as opposed to how many questions have been answered. */
-export function seedSize(seed: ResidentSeed): { nullifiers: number; publicData: number } {
+export function seedSize(
+  seed: ResidentSeed,
+): { nullifiers: number; publicData: number; contracts: number } {
   let nullifiers = 0;
   let publicData = 0;
   for (const v of seed.nullifiers.values()) if (v !== null) nullifiers += 1;
   for (const v of seed.publicData.values()) if (v !== null) publicData += 1;
-  return { nullifiers, publicData };
+  return { nullifiers, publicData, contracts: seed.contracts.size };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -332,8 +350,13 @@ export type HydrationRound = {
    * every time.
    */
   readonly refusal?: string;
+  /**
+   * The undeclared callees this round found, if any. Present only when the round found one, so a
+   * reader does not have to tell an empty array from a round where discovery was off.
+   */
+  readonly discoveredContracts?: readonly string[];
   /** Round 1 only: what the opening position seeded before any query had been reported. */
-  readonly openingSeed?: { nullifiers: number; publicData: number };
+  readonly openingSeed?: { nullifiers: number; publicData: number; contracts: number };
 };
 
 /**
