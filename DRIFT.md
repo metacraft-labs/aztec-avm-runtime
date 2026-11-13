@@ -1724,9 +1724,31 @@ were absorbed silently.
   `node_getNodeInfo`; `git show a36ddcc1c4` and `git grep DOM_SEP__CONTRACT_ADDRESS_V 0219f11d81`
   in `AztecProtocol/aztec-packages`; `tools/rebase_upstream_patches.py --onto 0219f11d81`;
   `services/blocktracer-ingest/avm-wasm.json` in `metacraft-labs/infra` for the pinned release and
-  its provenance. The TypeScript half of the same move is measured separately on
-  `feat/aztec-labs-stdlib-6` (`@aztec-labs/stdlib@6.0.0` is published and its
-  `constants.gen.js` carries `CONTRACT_ADDRESS_V3 = 993442748`).
+  its provenance.
+
+  **THE TYPESCRIPT HALF IS A SECOND WALL, AND IT IS NOW MEASURED ON THIS CHAIN RATHER THAN THE
+  RETIRED ONE.** `feat/aztec-labs-stdlib-6` measured the rename against a transaction of the
+  previous rollup; both chains have since been replaced, so that evidence was re-taken on
+  2026-11-13 against a live one. Transaction
+  `0x1dd4fd2d3b4bc5f9893d89343c634c7f1938c6121280c514e652669788020081`, testnet block 30303,
+  fetched with `node_getBlock [n, { includeTransactions: true }]` and `node_getTxByHash` — 51,649
+  bytes, carrying `publicFunctionCalldata`, so it is a transaction with public calls and
+  therefore one this runtime must drive the AVM for:
+
+  | package | `Tx.schema.parseAsync` on those bytes |
+  |---|---|
+  | `@aztec-labs/stdlib@6.0.0` | **parses**, and the recomputed txHash EQUALS the chain's |
+  | `@aztec/stdlib@5.3.0-nightly.20260819` (`npm.current`) | **refuses**: `Value 0xec73054300000000000b6cc0150e5fae121cdff36d9c4ba1334634d46cbcc8a7 is greater or equal to field modulus` |
+
+  The recomputed hash matching is what makes the first row evidence rather than an absence of
+  complaint: the decode is self-verifying. The second row's shape is a FIELD LAYOUT change, not a
+  rejected value — a decoder reading at the wrong offsets lands a value that is not a field
+  element, which is why the error names the modulus rather than a schema mismatch.
+
+  So the two walls are independent and both are real: the pinned TypeScript cannot read a v6
+  transaction at all, and a V2 `avm.wasm` could not execute its public calls even if it could.
+  `@aztec-labs/stdlib@6.0.0`'s `constants.gen.js` carries `CONTRACT_ADDRESS_V3 = 993442748`,
+  so the published TypeScript already agrees with the chain; only the wasm does not.
 
 <!-- END:drift -->
 
