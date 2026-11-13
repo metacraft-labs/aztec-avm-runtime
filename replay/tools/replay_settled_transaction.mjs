@@ -526,7 +526,13 @@ if (ctOut) {
     // reports "no artifact proved" for a third-party one.
     chain: fixturePath ? undefined : chainNameFor(await client.getNodeInfo()),
   });
-  for (const contract of settled.contracts) {
+  // THE DISCOVERED CALLEES GET AN ARTIFACT LOOKUP TOO, AND THIS WAS THE SAME DEFECT ONE LAYER UP.
+  // `discoverContractsFromSeed` fixed the AVM's view — a contract the transaction calls without
+  // declaring is now registered, so it executes. Its STEPS still could not be positioned, because
+  // this loop asked for artifacts over the declared set alone, so a discovered contract was
+  // unresolvable by construction however well published its source was. The replay has already
+  // run by this point, so `outcome.seed.contracts` is exactly the set discovery found.
+  for (const contract of [...settled.contracts, ...outcome.seed.contracts.values()]) {
     if (!contract.resolved || contract.contractClass === undefined) continue;
     const resolution = await resolveContractArtifact(
       contract.address,
