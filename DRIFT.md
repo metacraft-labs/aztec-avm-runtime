@@ -1731,9 +1731,18 @@ were absorbed silently.
   previous rollup; both chains have since been replaced, so that evidence was re-taken on
   2026-11-13 against a live one. Transaction
   `0x1dd4fd2d3b4bc5f9893d89343c634c7f1938c6121280c514e652669788020081`, testnet block 30303,
-  fetched with `node_getBlock [n, { includeTransactions: true }]` and `node_getTxByHash` — 51,649
-  bytes, carrying `publicFunctionCalldata`, so it is a transaction with public calls and
-  therefore one this runtime must drive the AVM for:
+  fetched with `node_getBlock [n, { includeTransactions: true }]` and `node_getTxByHash`, 51,649
+  bytes.
+
+  **CORRECTION, SAME DAY.** This entry first said that transaction "carries
+  `publicFunctionCalldata`, so it is a transaction with public calls". That was a presence test
+  read as a content test: the field is there and it is an EMPTY list, so `0x1dd4fd2d…` is a
+  PRIVATE-ONLY transaction, and the replay of it stops in
+  `AvmTxHint.fromTx` with `Cannot read properties of undefined (reading
+  'nonRevertibleAccumulatedData')` because `tx.data.forPublic` is absent — never reaching the AVM
+  at all. It still proves the deserialization wall, which is what the table below is about, and
+  it proves nothing about the AVM one. A transaction that does reach the AVM is used for that,
+  below.
 
   | package | `Tx.schema.parseAsync` on those bytes |
   |---|---|
@@ -1745,8 +1754,32 @@ were absorbed silently.
   rejected value — a decoder reading at the wrong offsets lands a value that is not a field
   element, which is why the error names the modulus rather than a schema mismatch.
 
+  **AND THE AVM WALL IS NOW REPRODUCED DIRECTLY, NOT PREDICTED.** With the TypeScript wall
+  removed (the `@aztec-labs/*` 6.0.0 replay tree) and the PUBLISHED V2 module
+  (`avm-wasm-41af520a`, sha256 `41af520a…b905a7`, 1,565,773 bytes, downloaded from the release and
+  hash-checked), `replay_settled_transaction.mjs` was driven against testnet transaction
+  `0x1e984eaa18d5b74c934c6290d14758bc27a3180ea23b7f5a7c0bf0d2d6b75c36` (block 30331, ONE entry in
+  `publicFunctionCalldata`, found by scanning bodies rather than by trusting the field's
+  presence). Everything upstream of the AVM worked — the body deserialized, two hydration rounds
+  ran, one nullifier and two public-data leaves were seeded, the query set stopped growing, and
+  the app-logic call was dispatched:
+
+  ```
+  [APP_LOGIC] Executing enqueued call to 0x132c119fa9d2cadfb128225b6718f4b2b56a179d8de69bbd739098ee6ffe6f07
+  Assertion failed: (address == address_point.x())
+    Actual  : 0x132c119fa9d2cadfb128225b6718f4b2b56a179d8de69bbd739098ee6ffe6f07
+    Expected: 0x26d2c4f53c449accd4856f589827486ad3b2eee5c8b17ad5d6aacd0aa5b4978b
+    Reason  : Address derivation mismatch
+  ```
+
+  That is `address_derivation.pil:309`'s constraint failing in the simulation path, on a live
+  contract, with the V2 separator deriving `0x26d2c4f5…` for a contract the chain calls
+  `0x132c119f…`. The driver's own sentence is the right one to quote: "This is NOT a loop that
+  failed to converge — it converged, and the answer is still no."
+
   So the two walls are independent and both are real: the pinned TypeScript cannot read a v6
-  transaction at all, and a V2 `avm.wasm` could not execute its public calls even if it could.
+  transaction at all, and a V2 `avm.wasm` cannot execute its public calls once it can — the
+  second half now MEASURED rather than inferred.
   `@aztec-labs/stdlib@6.0.0`'s `constants.gen.js` carries `CONTRACT_ADDRESS_V3 = 993442748`,
   so the published TypeScript already agrees with the chain; only the wasm does not.
 
