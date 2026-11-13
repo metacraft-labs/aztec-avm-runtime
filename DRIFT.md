@@ -1694,7 +1694,46 @@ were absorbed silently.
   is exactly what the BlockTracer alert rules exist to fire on, and they could not, for reasons
   of their own (metacraft-labs/infra#2309). **No pin bump available today produces a trace**:
   `avm-wasm-41af520a` is the only published release, and it is a V2 build.
-- decision: **NOT TAKEN HERE, and the sizing is recorded so that it can be taken on evidence.**
+- decision: **NOT TAKEN HERE — but it is no longer a question. A v6 build was made and MEASURED,
+  and it clears this entry's divergence.** Same transaction, same replay tree, only the module
+  swapped:
+
+  | | published V2 `41af520a…` | v6 build `0f2fb11e…` |
+  |---|---|---|
+  | `Address derivation mismatch` | 4 occurrences | **absent** |
+  | hydration rounds | 2 | 6 |
+  | nullifiers / public-data seeded | 1 / 2 | 4 / 3 |
+  | the app-logic call | never resolved its bytecode | **executed**, reached `EXCEPTIONAL_HALT` |
+
+  The v6 module is 1,563,946 bytes against the V2 module's 1,565,773, and CI's own
+  *"the staged avm.wasm is a reactor that imports its memory and defines none"* assertion passed
+  on it. So the V2/V3 separator was the whole of THIS divergence, and a v6-anchored module is the
+  remedy rather than a hypothesis. (The CI job is red: its build and its node-host CHECKS share
+  one step, and those checks encode expectations from the old anchor. Staging runs under
+  `if: always()`, which is why the artefact exists and why "red job" and "no module" are not the
+  same statement here.)
+
+  **AND IT REVEALED THE NEXT WALL, WHICH IS OURS AND NOT UPSTREAM'S.** With derivation fixed the
+  AVM gets further and then refuses differently:
+
+  ```
+  Assertion failed: (maybe_instance.has_value())
+  Reason   : Contract instance should be found if nullifier exists
+  ```
+
+  Measured cause: `settled_transaction.ts` resolves contracts from `publicCallTargets(tx)` — the
+  transaction's DECLARED enqueued calls — and `applySeed` registers exactly that fixed set. This
+  transaction declares ONE (`publicFunctionCalldata` has one entry, the entry point
+  `0x132c119f…`), but execution reaches a second contract, `0x2025c3eb…` (class
+  `0x2b61046d…`). Both are served by the node today; the second is simply never fetched. Hydration
+  meanwhile seeds that contract's deployment nullifier, so the module sees "deployed" with no
+  instance behind it — which is precisely what the assertion says. Under V2 the AVM never executed
+  far enough to ask. **This is a gap in this repository's resolution, not a divergence between two
+  things that both exist, so it is NOT a drift entry** (see "What is deliberately not here"): the
+  fix is to resolve instances DYNAMICALLY during the hydration loop, as nullifiers and public data
+  already are, rather than statically up front.
+
+  The sizing below stands and is what the bump still costs.
   The obvious move — advance `anchors.cpp` to `v6.0.0` (`0219f11d81`, 2026-10-20, 299 commits
   ahead) — is sized rather than assumed:
 
