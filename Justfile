@@ -1086,6 +1086,14 @@ verify-reactor-steps:
 verify-reactor-transcripts:
     @verification/test_avm_reactor_transcripts_match_driver.sh
 
+# Every heavy ninja call takes a RunQuota lease: four real call sites run at once against a private
+# daemon of 3 slots and the peak concurrent job count is sampled from /proc (<= 3 and > 1), then the
+# bridge is deleted from a copy of the real files and the same measurement must exceed the budget.
+# Light: sleeps, no build. Needs ninja >= 1.13 (taken from `nix build nixpkgs#ninja` if absent).
+test-runquota-bridge:
+    @verification/test_runquota_bridge.sh
+    @verification/test_runquota_bridge.sh --mutate
+
 # The gate that the step-stream check (and test_observer_disabled_is_free) consult before timing:
 # it must pass where this job is not starved of CPU and refuse (exit 3) where it is, judged by PSI
 # or schedstat rather than by the host's load average. Needs no build and no work directory; the

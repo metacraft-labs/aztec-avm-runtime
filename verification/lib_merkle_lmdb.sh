@@ -137,7 +137,7 @@ m3_build() {
         -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
     fi
-    ninja -C build-native "$@"
+    "$RQ_BRIDGE" jobserver -- ninja -C build-native "$@"
   ' "$tree" "$@" >"$log" 2>&1
 }
 

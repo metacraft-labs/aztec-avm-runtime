@@ -249,7 +249,7 @@ m5_native_configure() {
 
 m5_native_build() {
   local tree="$1"; shift
-  m5_in_devshell 'cd "$1/barretenberg/cpp/build" && shift && ninja "$@"' "$tree" "$@" \
+  m5_in_devshell 'cd "$1/barretenberg/cpp/build" && shift && "$RQ_BRIDGE" jobserver -- ninja "$@"' "$tree" "$@" \
     >"$tree/m5-native-build.log" 2>&1
 }
 

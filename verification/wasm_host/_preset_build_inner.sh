@@ -27,7 +27,7 @@ rc=$?
 echo "### configure_rc=$rc"
 [ $rc -eq 0 ] || exit $rc
 
-ninja -C "build-$preset" "$@"
+"${RQ_BRIDGE:-$(dirname "$0")/../runquota_bridge.sh}" jobserver -- ninja -C "build-$preset" "$@"
 rc=$?
 echo "### ninja_rc=$rc"
 exit $rc

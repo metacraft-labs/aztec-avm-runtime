@@ -581,7 +581,7 @@ m6_build() {
   m6_in_devshell '
     tree="$1"; bdir="$2"; shift 2
     cd "$tree/barretenberg/cpp" || exit 90
-    ninja -k 0 -C "$bdir" "$@"
+    "$RQ_BRIDGE" jobserver -- ninja -k 0 -C "$bdir" "$@"
     rc=$?
     echo "### ninja_rc=$rc"
     exit $rc

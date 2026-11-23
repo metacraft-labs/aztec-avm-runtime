@@ -170,6 +170,9 @@ _FAILURES=0
 # Absolute path of the repository this check lives in.
 VERIFY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$VERIFY_DIR/.." && pwd)"
+# The RunQuota bridge every heavy ninja call goes through (see runquota_bridge.sh). Exported so it
+# is still visible inside `nix develop --command bash -c '...'` scripts, which are separate shells.
+export RQ_BRIDGE="$VERIFY_DIR/runquota_bridge.sh"
 # The upstream fork is a WORKSPACE-ROOT SIBLING of this repo (the M0 layout
 # decision). It is deliberately not searched for anywhere else: if the fork is
 # not here, the layout is wrong and the checks must say so.
