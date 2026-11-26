@@ -352,12 +352,27 @@ jobs:
             test -f "$p" || { echo "::error::missing prepared patch: $p" >&2; exit 1; }
           done
 
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          # The same cache, path and key as the M14 and M15 jobs. This job builds barretenberg for
+          # wasm32 and natively from an empty work tree, and on a 6-vCPU ephemeral runner with an
+          # empty ccache that build alone ran into the 180-minute timeout (run 45111948416, job
+          # 137486073682). ccache keys on the compiler, flags and preprocessed source, so a restored
+          # entry cannot stand in for a changed translation unit. Both dev shells read CCACHE_DIR
+          # from outside and put ccache on CMAKE_<LANG>_COMPILER_LAUNCHER.
+          path: ${{ github.workspace }}/ccache
+          key: avm-wasm-ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            avm-wasm-ccache-${{ runner.os }}-
+
       - name: Build AVM_WASM and run upstream's vm2 suite
         working-directory: aztec-avm-runtime
         env:
           # Not $TMPDIR: the builds are several gigabytes and a tmpfs /tmp is the
           # wrong place for them.
           M7_WORK: ${{ github.workspace }}/m7-work
+          CCACHE_DIR: ${{ github.workspace }}/ccache
         # `shell: bash` rather than the default, which is `bash -e {0}` WITHOUT
         # pipefail: piping into `tee` would otherwise hand the step `tee`'s exit
         # status and a failing `just verify-m7` would report a green job. Found
@@ -2301,7 +2316,7 @@ jobs:
           # lib_m22_block.sh:153 already lists this exact path as an acceptable candidate. No
           # second tree and no second build: verify-m18 re-runs verify-halves-compose, and its
           # m17_measured record short-circuits once the tree is materialised.
-          dev-exec just verify-halves-compose 2>&1 | tee verify-m18-build.log | tail -5
+          dev-exec just verify-halves-compose 2>&1 | tee verify-m18-build.log
           #
           # BUT NOT M12's MODULE FOR THE TOKEN/BLOCK ARMS. The paragraph above was wrong about that,
           # and run 42994775110 measured it: M12's module has the seven exports the arms require and
@@ -2312,7 +2327,7 @@ jobs:
           # failed (rc 1)". `tb_find_module`'s own fallbacks name an M13/M15 module for exactly this
           # reason, and with M13's module the same arm run exits 0. So the module is built here by
           # M13's own building check, in a directory of its own under $M18_WORK, and named below.
-          M13_WORK="${M18_WORK}/m13" dev-exec just verify-contract-db-decision 2>&1 | tee verify-m18-build-m13.log | tail -5
+          M13_WORK="${M18_WORK}/m13" dev-exec just verify-contract-db-decision 2>&1 | tee verify-m18-build-m13.log
           export AVM_WASM_PATH="${M18_WORK}/m13/m13/barretenberg/cpp/build-wasm-avm/bin/avm.wasm"
           test -s "$AVM_WASM_PATH" || { echo "::error::no module at $AVM_WASM_PATH" >&2; exit 1; }
           dev-exec just verify-m18 2>&1 | tee verify-m18.log
@@ -2511,12 +2526,27 @@ jobs:
         # is the worst kind of decay available, and this is the thing that makes the decay visible.
         run: dev-exec just version-gap
 
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          # The same cache, path and key as the M14 and M15 jobs. This job builds barretenberg for
+          # wasm32 and natively from an empty work tree, and on a 6-vCPU ephemeral runner with an
+          # empty ccache that build alone ran into the 180-minute timeout (run 45111948416, job
+          # 137486073675). ccache keys on the compiler, flags and preprocessed source, so a restored
+          # entry cannot stand in for a changed translation unit. Both dev shells read CCACHE_DIR
+          # from outside and put ccache on CMAKE_<LANG>_COMPILER_LAUNCHER.
+          path: ${{ github.workspace }}/ccache
+          key: avm-wasm-ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            avm-wasm-ccache-${{ runner.os }}-
+
       - name: Build avm.wasm and run the three-way differential
         working-directory: aztec-avm-runtime
         env:
           # Not $TMPDIR: the build is several gigabytes and a tmpfs /tmp is the wrong place.
           M12_WORK: ${{ github.workspace }}/m12-work
           M19_WORK: ${{ github.workspace }}/m19-work
+          CCACHE_DIR: ${{ github.workspace }}/ccache
         shell: bash
         run: |
           set -euo pipefail
@@ -2538,7 +2568,12 @@ jobs:
           #
           # verify_avm_wasm_import_surface is M12's check that BUILDS, and M12's module carries all
           # fifteen exports lib_m19_differential.sh requires (its own list is thirty-nine).
-          dev-exec just verify-reactor-imports 2>&1 | tee verify-reactor-imports.log | tail -20
+          #
+          # STREAMED, NOT `| tail -20`. The build takes most of this job's time, and a `tail` prints
+          # only after its input ends. When run 45111948416 (job 137486073675) hit the 180-minute
+          # timeout, this step had printed nothing in 2 h 51 min, so the log could not show where
+          # the time went. The same applies to every long build step in this file.
+          dev-exec just verify-reactor-imports 2>&1 | tee verify-reactor-imports.log
           export AVM_WASM_PATH="${M12_WORK}/m12/barretenberg/cpp/build-wasm-avm/bin/avm.wasm"
           test -s "$AVM_WASM_PATH" || { echo "::error::no module at $AVM_WASM_PATH" >&2; exit 1; }
           dev-exec just verify-m19 2>&1 | tee verify-m19.log
@@ -2718,12 +2753,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # `tee` BEFORE `tail`, because the collect step below copies `verify-m13.log` and until
-          # now NOTHING IN THIS JOB EVER WROTE IT — that `cp` has always hit its `|| true`. The
-          # M13 job tees (see `just verify-m13` there); this job was given the same `cp` without
-          # the same `tee`, so the one milestone whose failure blocks every M20 check was also the
-          # one whose transcript was thrown away five lines from the end.
-          dev-exec just verify-m13 2>&1 | tee verify-m13.log | tail -5
+          # `tee`, because the collect step below copies `verify-m13.log` and until then NOTHING
+          # IN THIS JOB EVER WROTE IT — that `cp` had always hit its `|| true`. The M13 job tees
+          # (see `just verify-m13` there); this job was given the same `cp` without the same `tee`,
+          # so the one milestone whose failure blocks every M20 check was also the one whose
+          # transcript was thrown away five lines from the end. It is streamed to the job log as
+          # well, not cut to `| tail -5`, so a step that times out shows where it was.
+          dev-exec just verify-m13 2>&1 | tee verify-m13.log
           export AVM_WASM_PATH="${M13_WORK}/m13/barretenberg/cpp/build-wasm-avm/bin/avm.wasm"
           test -s "$AVM_WASM_PATH" || { echo "::error::no module at $AVM_WASM_PATH" >&2; exit 1; }
           dev-exec just verify-m20 2>&1 | tee verify-m20.log
@@ -3122,7 +3158,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          dev-exec just avm-wasm-build-m27 2>&1 | tail -20
+          dev-exec just avm-wasm-build-m27 2>&1
           test -s "${M27_WORK}/m27/barretenberg/cpp/build-wasm-avm/bin/avm.wasm" \
             || { echo "::error::no module at ${M27_WORK}/m27/.../avm.wasm" >&2; exit 1; }
 
