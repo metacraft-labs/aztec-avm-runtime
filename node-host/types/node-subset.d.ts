@@ -36,6 +36,11 @@ declare module 'node:wasi' {
   }
 }
 
+declare module 'node:v8' {
+  /** Sets V8 flags at runtime. Used once, by `loader.ts`, before any module is compiled. */
+  export function setFlagsFromString(flags: string): void;
+}
+
 declare module 'node:fs/promises' {
   export function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   export function readFile(path: string, encoding: 'utf8'): Promise<string>;
