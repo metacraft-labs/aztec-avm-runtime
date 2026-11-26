@@ -42,6 +42,11 @@
 // widening of the surface, no adapter, and no second wire path — and a recording made through the
 // client is a recording upstream's own zod validates on every playback.
 
+// FIRST, BEFORE ANYTHING ELSE IS EVALUATED: run this driver as a supervised child, so that a death
+// by a signal is still reported by name (`RuntimeCrashed`, kind 'runtime-crashed'). Why it must
+// be outside the process that dies, and why it is synchronous: runtime_crash_guard.mjs.
+import './runtime_crash_guard.mjs';
+
 import { readFile, writeFile } from 'node:fs/promises';
 
 import { Barretenberg, BarretenbergSync } from '@aztec-foundation/bb.js';
