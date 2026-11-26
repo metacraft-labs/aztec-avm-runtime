@@ -660,7 +660,10 @@ assert_true "…and names upstream's own decay as the specific thing prevented" 
   str_has_sub "$DOC" "browser story decayed"
 assert_true "…and gives the four-step mechanism rather than an exhortation" \
   str_has_sub "$DOC" "nobody decided anything"
-assert_true "…and states plainly that it has never run in CI" str_has_sub "$DOC" "never run in CI"
+# The write-up states the gate's CI history plainly. Until 2026-11-26 the needle was "never run in
+# CI", which stopped being true when the job first passed (run 43020850685, 2026-11-11). Whether
+# the claim matches GitHub's history is verify-m8's comparison, not this needle's.
+assert_true "…and states plainly that it has run in CI" str_has_sub "$DOC" "The gate has run in CI"
 assert_true "…and says what it does NOT establish" str_has_sub "$DOC" "does NOT establish"
 
 # `verify_named_checks_exist` scans `verification/`, `tools/`, `browser/` and three `src` roots —

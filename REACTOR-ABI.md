@@ -552,8 +552,8 @@ per-record step agreement is M9's 39,086 across eight programs, of which this mi
 
 `.github/workflows/avm-wasm.yml` carries a third job, `avm-reactor`, running `just verify-m12`.
 
-**It has never run.** Neither of that workflow's two existing jobs has ever run to completion
-either: both abort at `Generate CI token` on "Input required and not supplied: app-id", and M11
-recorded that as undiagnosed. So "the size budget is enforced in CI" means *the job exists, is
-wired, and names this check* — not that a run has ever gated anything. The check asserts the former
-and this paragraph states the latter.
+**It has run in CI.** The `avm-reactor` job first passed in run 34152022353 (2026-09-07, job
+101836102306), once the CI token blocker recorded in `avm-wasm.yml` was resolved, and every job in
+that workflow passed together in run 43170349830 (2026-11-12). Measured from the GitHub API on
+2026-11-26. The check asserts that the job exists, is wired and names this check; the newest result
+is GitHub's to report.
