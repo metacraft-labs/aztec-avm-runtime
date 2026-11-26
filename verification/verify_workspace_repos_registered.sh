@@ -89,10 +89,24 @@ while IFS='|' read -r name path remote url revision sentinel; do
     "remote = \"$remote\"" "$COMMITTED_FRAG"
   # Compare parsed manifest fields: branches select mainlines, revisions pin
   # snapshots, and project membership names repositories rather than fragments.
+  #
+  # The fragment schema moved from v1 to `reprobuild.workspace.repo.v2` (workspace commit a447ebf).
+  # A v2 fragment names its mainline in `mainline`, or names a branch-role `profile` whose
+  # `mainline` is declared in the workspace's committed `repro-workspace.toml`. It has no `branch`
+  # key, so reading only `branch` (default "dev") reported "dev" for the fork, whose fragment says
+  # `mainline = "aztec-avm-runtime"`. v1's `branch` is still read for a v1 fragment.
+  COMMITTED_SETTINGS="$(git -C "$WORKSPACE_ROOT" show "HEAD:repro-workspace.toml" 2>/dev/null || true)"
   COMMITTED_BRANCH="$(printf '%s' "$COMMITTED_FRAG" | python3 -c '
 import sys, tomllib
-print(tomllib.loads(sys.stdin.read())["repo"].get("branch", "dev"))
-')"
+repo = tomllib.loads(sys.stdin.read())["repo"]
+settings = tomllib.loads(sys.argv[1]) if sys.argv[1] else {}
+if "mainline" in repo:
+    print(repo["mainline"])
+elif "profile" in repo:
+    print(settings.get("profiles", {}).get(repo["profile"], {}).get("mainline", ""))
+else:
+    print(repo.get("branch", "dev"))
+' "$COMMITTED_SETTINGS")"
   assert_eq "$name: the committed fragment selects the expected branch" \
     "$revision" "$COMMITTED_BRANCH"
 
