@@ -197,6 +197,8 @@ It does **not** carry `@aztec/noir-contracts.js`, so the M35 arms cannot find
 `token_contract-Token.json` without `diffsim/`. `browser/build.mjs` also takes its
 esbuild binary from `spike/` or `diffsim/` rather than installing one.
 
+`replay/` needs its own `(cd replay && npm ci)` as well: without it `just typecheck-replay` fails with ~72 TS errors (`@aztec-labs/*` and `Buffer` unresolved).
+
 `drift/` is a third line (`5.3.0-nightly.20260819`, matching the `cpp` anchor) and
 is only needed for the ABI control in `PRIVATE-EXECUTION.md` §3b.
 
