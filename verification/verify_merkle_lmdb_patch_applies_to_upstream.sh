@@ -42,8 +42,8 @@ assert_contains "it carries a Subject line for the upstream audience" \
 # against one commit and advertised against another is the failure this catches.
 pr_md="$M3_PATCH_DIR/PR.md"
 assert_file "PR.md is present next to the patch" "$pr_md"
-assert_contains "PR.md names the base commit the patch is tested against" \
-  "$M3_BASE_REV" "$(cat "$pr_md")"
+assert_same_commit "PR.md names the base commit the patch is tested against" \
+  "$(pr_md_base_commit "$(cat "$pr_md")")" "$M3_BASE_REV"
 
 # ---------------------------------------------------------------------------
 # It applies to 233d8e0993 — measured now, in the pristine base worktree
