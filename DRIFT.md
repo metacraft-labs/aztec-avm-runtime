@@ -328,7 +328,7 @@ were absorbed silently.
   version"; that statement was wrong and is corrected in the contribution's `PR.md`.
 - decision: Open, with the fix prepared rather than only described:
   `codetracer-specs/upstream-bugs/aztec-wasi-sdk-33/` is a `git format-patch` against `233d8e0993`
-  that moves the pin, demonstrated native-neutral (1,009 native translation units, byte-identical
+  that moves the pin, demonstrated native-neutral (1,013 native translation units, byte-identical
   compile commands) and artefact-neutral (identical imports and C-ABI exports, 1.02% smaller). It is
   **not filed**; M11 prepared the branch and the submission script and left the filing to a person.
   This entry closes when upstream's pin moves, and not before — the downstream carry (our own preset

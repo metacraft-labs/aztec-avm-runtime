@@ -467,7 +467,7 @@ verify-wasi33-catches:
 verify-wasi33-targets:
     @verification/verify_wasi_33_existing_wasm_targets_unchanged.sh
 
-# No native compile command moves: 1009 translation units, byte-identical before and after.
+# No native compile command moves: 1013 translation units, byte-identical before and after.
 verify-wasi33-native-neutral:
     @verification/verify_wasi_33_native_builds_unaffected.sh
 
