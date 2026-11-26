@@ -56,6 +56,44 @@
 
 import { WASI } from 'node:wasi';
 import { readFile } from 'node:fs/promises';
+import { setFlagsFromString } from 'node:v8';
+
+// ===========================================================================================
+// NO V8 FAST API CALLS IN A PROCESS THAT HOSTS avm.wasm, AND WHY (aztec-avm-runtime#24)
+// ===========================================================================================
+//
+// On node 22.23.2 (V8 12.4.254.21-node.56, nixpkgs `nodejs_22`, the engine blocktracer's
+// follower runs) `node:wasi`'s `fd_write` is entered as a V8 FAST API CALL. uvwasi allocates
+// its iovec array through node's `NgLibMemoryManager`, which reports the bytes to V8 with
+// `Isolate::AdjustAmountOfExternalAllocatedMemory`. Once external memory is past V8's pressure
+// limit, that report runs a full mark-compact synchronously, INSIDE the fast callback, and the
+// GC's stack walk segfaults on the fast-call frame. The core dump:
+//
+//   #0  InnerPointerToCodeCache::GetCacheEntry
+//   #1  CommonFrame::IterateTurbofanOptimizedFrame
+//   …   Isolate::Iterate / MarkCompactCollector::MarkRoots / Heap::CollectGarbage
+//   #13 Heap::ReportExternalMemoryPressure
+//   #14 Isolate::AdjustAmountOfExternalAllocatedMemory
+//   #15 NgLibMemoryManager<WASI, uvwasi_mem_s>::MallocImpl
+//   #16 uvwasi_fd_write
+//   #18 WASI::WasiFunction<…FdWrite…>::FastCallback
+//
+// avm.wasm writes its log lines (`Simulating…`, `[APP_LOGIC] …`) through `fd_write`. So a heavy
+// transaction's step pass killed the replay driver with exit 139, 0 bytes on stdout and no error
+// class. That was 104 of 105 refusals in a 300-block testnet window, and it was the whole of
+// "the process dies entering round 6".
+//
+// Turning off TurboFan's fast API calls puts every WASI call on the regular API path, where a
+// GC is legal. Measured on that engine, over the same transaction: exit 139 3/3 without it,
+// and a complete run 3/3 with it. `verification/test_wasi_fast_call_gc_is_not_a_sigsegv.mjs`
+// holds this in place with a 151-byte module and a control arm that must crash.
+//
+// IT IS SET HERE, AT MODULE EVALUATION, because the flag is read when TurboFan compiles a call
+// site. Every avm.wasm instance in this repository is created through this file, and this file
+// is evaluated before any of them is compiled. It is process-wide by necessity: V8 has no
+// per-function switch. The cost is that the other fast API calls in the process, which are none
+// that the replay path is bound by, take the regular path too.
+setFlagsFromString('--no-turbo-fast-api-calls');
 
 import { PAGE_BYTES, readMemoryImport, type MemoryImport } from './memory.ts';
 import {
