@@ -143,11 +143,16 @@ jobs:
           git fetch upstream next
           git rev-parse --verify 233d8e0993^{commit}
 
+      # `app-id` and `app-private-key` start setup-dev-env's job credential broker, which
+      # re-mints the Nix GitHub credential before the one-hour App token expires. See "THE
+      # CREDENTIAL BROKER" at the top of avm-wasm.yml.
       - name: Setup Dev Environment
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       # `shell: bash` rather than the default `bash -e {0}`, which has no
       # pipefail: piping into `tee` would otherwise hand the step tee's exit

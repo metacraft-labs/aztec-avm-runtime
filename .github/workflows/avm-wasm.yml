@@ -91,6 +91,17 @@ name: AVM_WASM
 # `clone-repo` at refs they name, which is why `clone-siblings` prints
 # "no cross-repo siblings to clone" and succeeds today.
 
+# THE CREDENTIAL BROKER — 2026-11-26
+#
+# Every `Setup Dev Environment` step passes `app-id` and `app-private-key` as well as
+# `gh-token`. The App installation token `Generate CI token` mints expires one hour later, and
+# most jobs here run longer than that (`timeout-minutes: 180`). With both App inputs,
+# `setup-dev-env` starts its job credential broker, which re-mints the Nix GitHub credential
+# before it expires (metacraft-github-actions `setup-dev-env/README.md`, "How long the job's
+# Nix credential lives"). Without them the broker step is skipped, and run 45111948416 (job
+# 137486073639) failed a Nix tarball fetch with `401 Bad credentials` 69 minutes after the mint.
+# The same App values are already passed to `create-github-app-token` in each job.
+
 # THE x86_64 BASELINE, AND WHY MOST OF THIS FILE NO LONGER RUNS ON `eph-linux-x64` — 2026-09-07
 #
 # `barretenberg/cpp/cmake/arch.cmake` in the fork reads, in full:
@@ -313,6 +324,8 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       # The base commit the whole series applies to. A shallow clone does not
       # have it, and `git am` onto a missing base is the failure mode that reads
@@ -512,6 +525,8 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       # The pinned commit. The fidelity gate is only a gate if it runs against the tree the rest of
       # the campaign measures, so this is asserted before anything is built rather than after.
@@ -688,6 +703,8 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Assert the series base commit is present
         working-directory: aztec-packages
@@ -855,6 +872,8 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Assert the series base commit is present
         working-directory: aztec-packages
@@ -1066,6 +1085,8 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Assert the series base commit is present
         working-directory: aztec-packages
@@ -1266,6 +1287,8 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Assert the series base commit is present
         working-directory: aztec-packages
@@ -1492,6 +1515,8 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Assert the anchor is present
         working-directory: aztec-packages
@@ -1655,6 +1680,8 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Assert the series base commit is present
         working-directory: aztec-packages
@@ -2193,6 +2220,8 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Assert both anchors are present
         working-directory: aztec-packages
@@ -2421,6 +2450,8 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       # WITHOUT THIS, `just version-gap` CANNOT RESOLVE ITS OWN TIP, AND THAT IS THE WHOLE OF DD-12's RED.
       # `tools/version_gap.py:85` does `git rev-parse upstream/next` in the fork. The clone above adds
@@ -2644,6 +2675,8 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Assert the series base commit is present
         working-directory: aztec-packages
@@ -2831,6 +2864,8 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Assert the gate's inputs are present
         shell: bash
@@ -3010,6 +3045,8 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Assert the series base commit is present
         working-directory: aztec-packages
