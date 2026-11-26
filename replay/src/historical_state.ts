@@ -191,6 +191,51 @@ export class ModuleRefusedReplay extends Error {
   }
 }
 
+/**
+ * The execution READ THE L1->L2 MESSAGE TREE, which route 3 cannot seed. Refused by name.
+ *
+ * `UNANSWERABLE_TREES` below says why the tree cannot be answered (append-only: a leaf at index i
+ * needs the i leaves before it) and that such a transaction "is refused by name rather than
+ * replayed against an absent leaf". This is that refusal. Before it existed the promise could not
+ * be kept: the AVM reports `L1TOL2MSGEXISTS` reads in the `getLeafValueHints` hint family, the
+ * loop read only `getPreviousValueIndexHints`, and nothing looked at the read at all. The resident
+ * tree is empty, so the read answered 0, a bridge claim's `assert` failed, and the loop REPORTED a
+ * replay that reverted where the chain had not. Measured on aztec-testnet on 2026-11-26: 43 of 276
+ * attempted transactions, published revertCode 0, replayed 1, 1 of 21 effects matching.
+ *
+ * ANY READ OF THE TREE REFUSES, NOT ONLY ONE BELOW THE CHAIN'S TREE SIZE. An index at or past the
+ * chain's `nextAvailableLeafIndex` would be a correct "absent", but the size that matters is the
+ * tree as the transaction saw it inside its block, after the block's messages were inserted, and
+ * route 3 does not have that view. A refusal here loses a replay; a wrong guess publishes a wrong
+ * one, which is the failure this campaign exists to prevent.
+ *
+ * WHAT WOULD LIFT IT: the message HASH at the index. The hint carries only `(index, value read)`,
+ * and every permitted node method looks a message up BY VALUE. With the hash, `pad_tree` to the
+ * index and an append would make the existence check hold.
+ */
+export class L1ToL2MessageReadUnanswerable extends Error {
+  readonly kind = 'replay-l1-to-l2-message-read-unanswerable' as const;
+  readonly txHash: string;
+  readonly l2BlockNumber: number;
+  /** The leaf indexes the AVM read, ascending, without repeats. */
+  readonly indexes: readonly number[];
+
+  constructor(txHash: string, l2BlockNumber: number, indexes: readonly number[]) {
+    super(
+      `transaction ${txHash} (block ${l2BlockNumber}) read the L1->L2 message tree at leaf `
+        + `index ${indexes.join(', ')} (L1TOL2MSGEXISTS). Route 3 cannot seed that tree: it is `
+        + `append-only, a leaf at index i needs the i leaves before it, and no permitted node method `
+        + `serves a message by index. The resident tree is empty, so the read would answer "absent" `
+        + `whatever the chain held, and a message the transaction consumed would make the replay `
+        + `revert where the chain did not. REFUSING rather than reporting that replay.`,
+    );
+    this.name = 'L1ToL2MessageReadUnanswerable';
+    this.txHash = txHash;
+    this.l2BlockNumber = l2BlockNumber;
+    this.indexes = [...indexes];
+  }
+}
+
 /** The discovery loop did not settle. Named so it cannot be mistaken for a replay that ran. */
 export class HydrationDidNotConverge extends Error {
   readonly kind = 'replay-hydration-did-not-converge' as const;
@@ -246,7 +291,9 @@ export const UNANSWERABLE_TREES: Readonly<Record<number, string>> = Object.freez
     + 'route and is refused by name rather than replayed against an absent leaf.',
   [MerkleTreeId.L1_TO_L2_MESSAGE_TREE]:
     'append-only, for the same reason as the note hash tree. L1TOL2MSGEXISTS is a real opcode, so '
-    + 'this is a real limit and not a theoretical one.',
+    + 'this is a real limit and not a theoretical one. The AVM reports these reads in '
+    + '`getLeafValueHints`, and a converged run that made one is refused as '
+    + '`L1ToL2MessageReadUnanswerable`.',
   [MerkleTreeId.ARCHIVE]:
     'the AVM never reads the archive — L0 established this from the opcode set at anchors.cpp and '
     + 'verify_node_client_surface_narrow asserts it by name. A query here would mean that '

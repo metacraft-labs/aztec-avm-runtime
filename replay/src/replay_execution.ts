@@ -48,6 +48,7 @@ import type { ExecutionStep } from '../../node-host/src/steps.ts';
 import {
   HydrationDidNotConverge,
   IntraBlockPredecessorsUnavailable,
+  L1ToL2MessageReadUnanswerable,
   ModuleRefusedReplay,
   answerQueries,
   emptySeed,
@@ -291,6 +292,23 @@ export function queriesFrom(result: Record<string, unknown>): WorldStateQuery[] 
   }));
 }
 
+/**
+ * The L1->L2 message-tree leaf indexes the AVM read, ascending and without repeats.
+ *
+ * `getLeafValueHints` is the hint family for the two APPEND-ONLY trees, `NOTEHASHEXISTS` and
+ * `L1TOL2MSGEXISTS`; `queriesFrom` reads the indexed trees' family and never saw these. Only the
+ * L1->L2 tree is read here, because that is the read measured to produce wrong replays.
+ */
+export function l1ToL2MessageReadsFrom(result: Record<string, unknown>): number[] {
+  const hints = (result['hints'] ?? {}) as Record<string, unknown>;
+  const raw = (hints['getLeafValueHints'] ?? []) as { treeId?: unknown; index?: unknown }[];
+  const indexes = new Set<number>();
+  for (const h of raw) {
+    if (Number(h.treeId) === MerkleTreeId.L1_TO_L2_MESSAGE_TREE) indexes.add(Number(h.index));
+  }
+  return [...indexes].sort((a, b) => a - b);
+}
+
 export type ReplayOptions = {
   /** How many rounds the loop may take before refusing. A bound, not a target. */
   readonly maxRounds?: number;
@@ -346,10 +364,11 @@ export const DEFAULT_MAX_ROUNDS = 12;
 /**
  * Re-execute a settled transaction against the state it saw.
  *
- * Refuses rather than approximates in two places, and both are the campaign's own rule that a
+ * Refuses rather than approximates in three places, and all are the campaign's own rule that a
  * refusal is a throw and never a plausible value:
  *
  *   * a transaction that is NOT first in its block — `IntraBlockPredecessorsUnavailable`;
+ *   * a converged run that read the L1->L2 message tree — `L1ToL2MessageReadUnanswerable`;
  *   * a loop that did not settle — `HydrationDidNotConverge`. The last round's outcome IS an
  *     execution and it IS well-formed, which is precisely why it must not be returned.
  */
@@ -447,6 +466,14 @@ export async function replaySettledTransaction(
       + (round === 1 ? seedSize(seed).nullifiers + seedSize(seed).publicData : 0);
 
     if (round > 1 && progress === 0 && outcome !== undefined) {
+      // THE CONVERGED RUN READ A TREE ROUTE 3 CANNOT SEED. `UNANSWERABLE_TREES` promises a refusal
+      // by name for this, and this is where it is kept: the outcome below would be an execution
+      // whose L1TOL2MSGEXISTS read answered "absent" off an empty tree, whatever the chain held.
+      // Checked on the converged run only, because that is the run that would be reported.
+      const l1ToL2Reads = l1ToL2MessageReadsFrom(outcome.result);
+      if (l1ToL2Reads.length > 0) {
+        throw new L1ToL2MessageReadUnanswerable(settled.txHash, settled.l2BlockNumber, l1ToL2Reads);
+      }
       return finish(instance, outcome, settled, rounds, seed, parent);
     }
     if (round > 1 && progress === 0 && outcome === undefined) {
