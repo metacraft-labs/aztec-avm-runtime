@@ -197,7 +197,7 @@ It does **not** carry `@aztec/noir-contracts.js`, so the M35 arms cannot find
 `token_contract-Token.json` without `diffsim/`. `browser/build.mjs` also takes its
 esbuild binary from `spike/` or `diffsim/` rather than installing one.
 
-`replay/` needs its own `(cd replay && npm ci)` as well: without it `just typecheck-replay` fails with ~72 TS errors (`@aztec-labs/*` and `Buffer` unresolved).
+`replay/` needs its own `(cd replay && npm ci)` as well: without it `just typecheck-replay` fails with ~72 TS errors (`@aztec-labs/*` and `Buffer` unresolved). The Live-Chain-Replay floors (`verify-l0` … `verify-l5`, `verify-noir-frames`) do NOT run that install: they execute the pinned historical runtime (`pins.json` `historical_runtimes.replay_v5`, `DRIFT.md` D36), which their recipes materialise on first use through `just materialize-historical-replay` (`git archive` of the commit plus `npm ci` from its own lockfile, under `~/.cache/aztec-historical-replay/`).
 
 `drift/` is a third line (`5.3.0-nightly.20260819`, matching the `cpp` anchor) and
 is only needed for the ABI control in `PRIVATE-EXECUTION.md` §3b.
