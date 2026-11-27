@@ -33,7 +33,9 @@
 #   AZTEC      aztec-packages checkout WITH the patch applied   (required)
 #   AZTEC_REF  a second checkout at the base commit, WITHOUT it (required for part B)
 #   BUILD      build directory name under barretenberg/cpp, default build-native
-#   JOBS       ninja parallelism, default nproc
+#   JOBS       ninja parallelism. Unset: the width RunQuota grants through its jobserver when one is
+#              available (see ../runquota_bridge.sh), else nproc. Set: that width, as before.
+#   RQ         RunQuota bridge control, see ../runquota_bridge.sh (empty value turns it off)
 #
 # Exit status: 0 everything expected holds; 1 an expectation failed; 2 it could not run.
 set -u
@@ -41,7 +43,15 @@ set -u
 AZTEC="${AZTEC:-}"
 AZTEC_REF="${AZTEC_REF:-}"
 BUILD="${BUILD:-build-native}"
-JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
+RQ_BRIDGE="${RQ_BRIDGE:-$(cd "$(dirname "$0")/.." && pwd)/runquota_bridge.sh}"
+# Under a lease the jobserver is the width, so no -j is passed; without one, nproc as before. An
+# explicit JOBS always wins (ninja then ignores the jobserver, which is what the caller asked for).
+JOBS_FLAG=()
+if [ -n "${JOBS:-}" ]; then
+  JOBS_FLAG=(-j "$JOBS")
+elif ! "$RQ_BRIDGE" active jobserver; then
+  JOBS_FLAG=(-j "$(nproc 2>/dev/null || echo 4)")
+fi
 SUITE="MemoryMerkleDBEquivalenceTest"
 
 fail=0
@@ -64,7 +74,7 @@ build_and_list() { # <checkout> <label>
         -DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER >"$WORK/$label-configure.log" 2>&1 \
         || exit 91
     fi
-    ninja -j "$JOBS" -C "$BUILD" world_state_tests vm2_tests >"$WORK/$label-build.log" 2>&1
+    "$RQ_BRIDGE" jobserver -- ninja ${JOBS_FLAG[@]+"${JOBS_FLAG[@]}"} -C "$BUILD" world_state_tests vm2_tests >"$WORK/$label-build.log" 2>&1
   )
   local rc=$?
   [ "$rc" -eq 0 ] || { bad "$label: build failed (see $WORK/$label-build.log)"; return 1; }

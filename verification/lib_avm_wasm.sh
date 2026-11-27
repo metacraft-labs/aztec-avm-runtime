@@ -51,7 +51,11 @@
 # verification/*wasm_exceptions*.sh, AFTER lib.sh (it uses FORK_ROOT, REPO_ROOT,
 # WORKSPACE_ROOT, VERIFY_DIR, die, note).
 
-M6_BASE_REV=233d8e0993
+# The `cpp` anchor, READ from pins.json rather than declared here. It was the
+# literal 233d8e0993 until 2026-11-13; pins.json's own rule is that nothing
+# else may declare a pin value, and `tools/repin.py --check` does not reach
+# shell files, so this one silently outranked the declaration. DRIFT.md D35.
+M6_BASE_REV="$(pins_anchor_commit cpp)"
 
 M6_UPSTREAM_BUGS="$WORKSPACE_ROOT/codetracer-specs/upstream-bugs"
 
@@ -577,7 +581,7 @@ m6_build() {
   m6_in_devshell '
     tree="$1"; bdir="$2"; shift 2
     cd "$tree/barretenberg/cpp" || exit 90
-    ninja -k 0 -C "$bdir" "$@"
+    "$RQ_BRIDGE" jobserver -- ninja -k 0 -C "$bdir" "$@"
     rc=$?
     echo "### ninja_rc=$rc"
     exit $rc

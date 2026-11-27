@@ -67,19 +67,30 @@
   },
   "npm": {
     "_comment": [
-      "Two @aztec/* nightly lines are in the tree at once, deliberately, and they are not",
-      "interchangeable. `current` is THE pin: new work uses it. `deletion_era` is frozen",
+      "Three npm lines are in the tree at once, deliberately, and they are not interchangeable.",
+      "`current` and `deletion_era` are @aztec/* nightlies. `current` is the v5 pin the committed",
+      "Live-Chain-Replay corpus was captured and is replayed against (since 2026-11-27 through",
+      "historical_runtimes.replay_v5, not the working tree's replay/). `deletion_era` is frozen",
       "evidence — the published line whose src/public tree is byte-comparable with the `ts`",
       "anchor, which is what lets the deleted TS AVM run at all, and which still ships the",
       "in-process NAPI AVM the differential oracle needs. Bumping `deletion_era` would destroy",
-      "the artefact rather than update it."
+      "the artefact rather than update it.",
+      "",
+      "`aztec_labs_v6` is a DIFFERENT SCOPE, not a newer nightly: upstream's v6 release moved the",
+      "protocol packages to @aztec-labs/* and the cryptography and Noir bindings to",
+      "@aztec-foundation/*, and no @aztec/* 6.x exists to pin. It is what the working tree's replay/",
+      "installs — the runtime the BlockTracer follower ships — adopted by the operator on 2026-11-26",
+      "(DRIFT.md D36). Each line names the scopes it governs (`scopes`, default [\"@aztec\"]);",
+      "tools/repin.py holds a tree to its own line in those scopes and refuses any package from",
+      "another line's scopes, because one tree carrying two generations is a class-identity hazard."
     ],
     "current": {
       "version": "5.3.0-nightly.20260819",
       "corresponds_to_anchor": "cpp",
       "role": "The pinned @aztec/* nightly. All new work uses this.",
       "consumers": [
-        "drift"
+        "drift",
+        "historical_runtimes.replay_v5"
       ]
     },
     "deletion_era": {
@@ -90,6 +101,18 @@
         "spike",
         "diffsim",
         "orchestration"
+      ]
+    },
+    "aztec_labs_v6": {
+      "version": "6.0.0",
+      "scopes": [
+        "@aztec-labs",
+        "@aztec-foundation"
+      ],
+      "corresponds_to": "the 6.0.0 release both live Aztec networks run (x-aztec-packageversion 6.0.0 on aztec.drpc.org and aztec-testnet.drpc.org, DRIFT.md D35); no repository anchor in `anchors` describes it",
+      "role": "The live-chain follower's runtime: the working tree's replay/. Adopted, not bumped on the PINS.md cadence: see DRIFT.md D36 for what moved and what did not.",
+      "consumers": [
+        "replay"
       ]
     }
   },
@@ -398,7 +421,39 @@
     "probe-mt": "deletion_era",
     "orchestration": "deletion_era",
     "pxe-ref": "deletion_era",
-    "replay": "current"
+    "replay": "aztec_labs_v6"
+  },
+  "historical_runtimes": {
+    "_comment": [
+      "COMMITS OF THIS REPOSITORY THAT A CHECK RUNS INSTEAD OF THE WORKING TREE, declared here because",
+      "pins.json is the only place a pin value may be declared. There is one, and why it exists is a",
+      "measurement, not a preference.",
+      "",
+      "`replay/` moved onto `@aztec-labs/*` 6.0.0 (d50bb03, a8b8efc; adopted by the operator on",
+      "2026-11-26, DRIFT.md D36). The Live-Chain-Replay floors replay fixtures captured from node-5.2.0",
+      "testnet nodes, and v6's schemas cannot read them: v6's `BlockHeader` consumes four bytes fewer",
+      "than v5's, so the first prestate header in a fixture dies with \"greater or equal to field",
+      "modulus\" (measured 2026-11-27 by running L1's fetch probe on the v6 tree). The operator's",
+      "decision: the offline floors keep guarding that committed v5 corpus, on the runtime that wrote",
+      "it, and only the follower's runtime moves. blocktracer pins the same commit for its own 42",
+      "Aztec fixtures (`aztec-avm-runtime-historical` in its flake.nix).",
+      "",
+      "`tools/historical_replay.py` is the only thing that turns this declaration into a directory",
+      "(`just materialize-historical-replay`) and the only thing that says whether a directory is it.",
+      "`tools/repin.py` holds the commit's own package.json and lockfile to `npm_pin`, so the v5 line",
+      "keeps a consumer whose every @aztec/* entry is checked, read out of the object store."
+    ],
+    "replay_v5": {
+      "repo": "metacraft-labs/aztec-avm-runtime",
+      "commit": "238a3a5b9fe9346868cc7fab84a8aa54513287dd",
+      "short": "238a3a5b9f",
+      "date": "2026-10-28",
+      "subject_tree": "replay",
+      "npm_pin": "current",
+      "what": "The last replay/ before the @aztec-labs rename, with ct-host/, node-host/ and browser/ at the same commit because replay/src imports them by relative path. The Live-Chain-Replay floors (verify-l0 .. verify-l5) and verify-noir-frames execute THIS tree against the fixtures committed in the working tree's replay/fixtures/.",
+      "why_this_commit": "238a3a5b9f is the newest commit touching replay/ that is an ancestor of a8b8efc (the merge that brought the rename onto the mainline) without containing d50bb03. d50bb03's own parent, 4c727bf067, is on the proposal branch and lacks replay/fixtures/testnet_replay_tx_proof.json and the offline compressed-proof path in replay/tools/replay_settled_transaction.mjs that L2's floor exercises. Its replay/fixtures/ is byte-identical to the working tree's (checked 2026-11-27 at 9c92c6c6f9), and it is the same commit blocktracer pins as aztec-avm-runtime-historical.",
+      "does_not_move": "This pin follows the committed v5 corpus, not the live chain. Moving it is not a cadence bump: it changes which runtime the offline floors certify, and needs the operator."
+    }
   },
   "toolchain": {
     "_comment": "Not upstream-Aztec pins, but pinned all the same; recorded here so there is one place to look. The authoritative declaration for each is the file named.",
@@ -524,6 +579,15 @@
         "D32",
         "D33",
         "D34"
+      ]
+    },
+    {
+      "date": "2026-11-27",
+      "milestone": "agents-to-dev-2026-11-26 stabilisation: the adopted @aztec-labs 6 rename of replay/ (operator decision 2026-11-26)",
+      "change": "NEW npm line npm.aztec_labs_v6 = 6.0.0 over scopes @aztec-labs and @aztec-foundation; npm_consumers.replay moves from current to aztec_labs_v6. NEW section historical_runtimes with replay_v5 = this repository at 238a3a5b9f (npm_pin current), which the Live-Chain-Replay floors and verify-noir-frames now execute instead of the working tree's replay/. npm.current stays 5.3.0-nightly.20260819 and npm.deletion_era stays 5.0.0-nightly.20260626; cpp, ts and every other anchor are unchanged; live_chain.protocol_version is DELIBERATELY UNCHANGED (still the v5 values; see DRIFT.md D36).",
+      "reason": "replay/ moved onto @aztec-labs/* 6.0.0 in d50bb03 and a8b8efc, which reached agents through PR #21 with this file untouched, so verify_pinned_nightly_single_source reported replay/ as a vacuous consumer. The operator adopted the rename on 2026-11-26 (blocktracer's production follower depends on it: without it the runtime cannot decode a v6 node) and directed the fix to the checks. The v6 schemas cannot read the v5 corpus in replay/fixtures/ (BlockHeader is four bytes shorter before state.l1ToL2MessageTree; measured 2026-11-27), so the corpus is replayed on the pinned historical runtime and the v5 line keeps a checked consumer in it.",
+      "drift_entries_opened": [
+        "D36"
       ]
     }
   ]

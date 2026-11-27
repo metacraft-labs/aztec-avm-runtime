@@ -37,9 +37,9 @@ import {
   AvmTxHint,
   PublicSimulatorConfig,
   serializeWithMessagePack,
-} from '@aztec/stdlib/avm';
-import { ProtocolContractsList } from '@aztec/protocol-contracts';
-import { WorldStateRevision } from '@aztec/stdlib/world-state';
+} from '@aztec-labs/stdlib/avm';
+import { ProtocolContractsList } from '@aztec-labs/protocol-contracts';
+import { WorldStateRevision } from '@aztec-labs/stdlib/world-state';
 
 import type { SettledTransaction } from './settled_transaction.ts';
 

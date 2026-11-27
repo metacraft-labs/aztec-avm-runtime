@@ -389,7 +389,7 @@ m7_wsr_build() {
     objdir="${10}"; prebuild="${11}"
     cd "$tree/barretenberg/cpp/$bdir" || exit 90
     if [ -n "$prebuild" ]; then
-      ninja "$prebuild" 2>&1 || { echo "### prebuild_rc=1"; exit 3; }
+      "$RQ_BRIDGE" jobserver -- ninja "$prebuild" 2>&1 || { echo "### prebuild_rc=1"; exit 3; }
     fi
     python3 "$wsr/_build_cmds.py" compile . "$csrc" $objdir >"$out.cc" || exit 91
     python3 "$wsr/_build_cmds.py" link . "$lt" >"$out.ln" || exit 92

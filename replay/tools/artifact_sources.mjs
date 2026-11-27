@@ -10,7 +10,7 @@
 // ────────────────────────────────────────────────────────────────────────────────────────────────
 // THE INSTALLED PACKAGE IS A SOURCE AND IT IS THE DEFAULT, WHICH MAKES THE COMMON CASE OFFLINE.
 //
-// `replay/package.json` already depends on `@aztec/protocol-contracts` — declared for
+// `replay/package.json` already depends on `@aztec-labs/protocol-contracts` — declared for
 // `protocolContractsHash` re-derivation, and its note says "L1 will need it for real". L5 is where
 // that comes true. Reading the installed release means the recording path reaches no network for a
 // protocol contract, which matters twice: `just verify-l3` is an OFFLINE floor, and a check that
@@ -27,14 +27,14 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { loadContractArtifact, parseDebugSymbols } from '@aztec/stdlib/abi';
+import { loadContractArtifact, parseDebugSymbols } from '@aztec-labs/stdlib/abi';
 import {
   computeArtifactHash,
   computeContractClassId,
   computePublicBytecodeCommitment,
-} from '@aztec/stdlib/contract';
-import { Fr } from '@aztec/foundation/curves/bn254';
-import { sha256 } from '@aztec/foundation/crypto/sha256';
+} from '@aztec-labs/stdlib/contract';
+import { Fr } from '@aztec-labs/foundation/curves/bn254';
+import { sha256 } from '@aztec-labs/foundation/crypto/sha256';
 
 import {
   AZTECSCAN_BASE_URLS,
@@ -91,11 +91,23 @@ export function readPackageArtifacts(packageRoot, packageName) {
   return { packageName, version, artifacts };
 }
 
-/** The installed `@aztec/protocol-contracts`, resolved from this file rather than from `cwd`. */
+/**
+ * The package the protocol-contract artifacts come from, as ONE string.
+ *
+ * THE NAME AND THE PATH ARE THE SAME DATUM AND THEY DESYNCHRONISED ONCE. The v6 rename moved this
+ * package from `@aztec/protocol-contracts` to `@aztec-labs/protocol-contracts`, the name argument
+ * below was updated and the `join(…, '@aztec', 'protocol-contracts')` beside it was not — so the
+ * resolver looked in a directory that no longer exists and reported it as a fact about npm:
+ * "this package release does not ship compiled contracts". It ships six. Splitting one constant
+ * is what stops the two halves being renamed independently a second time.
+ */
+export const PROTOCOL_CONTRACTS_PACKAGE = '@aztec-labs/protocol-contracts';
+
+/** The installed `@aztec-labs/protocol-contracts`, resolved from this file rather than from `cwd`. */
 export function installedProtocolContracts() {
   return readPackageArtifacts(
-    join(HERE, '..', 'node_modules', '@aztec', 'protocol-contracts'),
-    '@aztec/protocol-contracts',
+    join(HERE, '..', 'node_modules', ...PROTOCOL_CONTRACTS_PACKAGE.split('/')),
+    PROTOCOL_CONTRACTS_PACKAGE,
   );
 }
 
@@ -119,7 +131,7 @@ export function contractClassPublicLike(contractClass) {
 /**
  * The provider list a live-chain recording uses, and why it is exactly these two.
  *
- * 1. **The installed `@aztec/protocol-contracts`.** Offline, and it is the only source that serves
+ * 1. **The installed `@aztec-labs/protocol-contracts`.** Offline, and the only source that serves
  *    the FeeJuice class deployed at `0x…03` — Aztecscan's `/l2/artifacts/0x1a57ff2a…` answered 404
  *    on both of its deployments on 2026-09-01, because a protocol contract is deployed at genesis
  *    and never registered through `ContractClassRegistry`, so the explorer has no class row for it.

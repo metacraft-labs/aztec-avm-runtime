@@ -59,7 +59,10 @@ l3_prepare
 # heredoc is quoted, so a `$VAR` inside it stays literal.
 SUBJECT_CT="$L2_WORK/probes/l3-prov-subject.ct"
 CONTROL_CT="$L2_WORK/probes/l3-prov-control.ct"
-export SUBJECT_CT CONTROL_CT
+# The header-only container §1's "a real one" is measured against; the steppable check's §1 says
+# why that replaced a byte constant (`DRIFT.md` D37).
+HEADER_CT="$L2_WORK/probes/l3-prov-header-only.ct"
+export SUBJECT_CT CONTROL_CT HEADER_CT
 
 PROBE="$(l2_imports)
 $(cat <<'EOS'
@@ -115,6 +118,12 @@ line('control.steps', control.steps);
 line('control.bytes', control.bytes);
 line('control.declaredKeys', control.metadataKeys.join(','));
 
+// ---- the header-only container: the same writer, closed with nothing recorded -----
+const header = (await l3Writer(settled)).close();
+writeFileSync(process.env.HEADER_CT, header.container);
+line('header.bytes', header.container.length);
+line('header.events', header.events);
+
 line('l2.done', 1);
 EOS
 )"
@@ -128,25 +137,18 @@ SUBJ_DECODE="$L2_WORK/probes/l3-prov-subject.json"
 CTRL_DECODE="$L2_WORK/probes/l3-prov-control.json"
 l3_read_container "$SUBJECT_CT" "$SUBJ_DECODE"
 l3_read_container "$CONTROL_CT" "$CTRL_DECODE"
+l3_assert_entry_step "$SUBJ_DECODE" 345
+l3_assert_entry_step "$CTRL_DECODE" 254
 
-# One TraceLogEvent's content, out of the DECODED CONTAINER. Everything below is read this way.
+# One TraceLogEvent's text, out of the DECODED CONTAINER. Everything below is read this way. The
+# pinned reader spells a trace-log event `kind: "io", io_kind: "TraceLogEvent"` with its text in
+# `text`, where the legacy decode said `event_kind: "elkTraceLogEvent"` and `content`
+# (`DRIFT.md` D37); `l3_decode` reads the first and refuses the second.
 rec() { # <decoded-json> <metadata-key>
-  python3 -c '
-import json, sys
-d = json.load(open(sys.argv[1]))
-for e in d["events"]:
-    if e.get("metadata") == sys.argv[2]:
-        print(e.get("content", ""))
-        break
-' "$1" "$2"
+  l3_decode log "$1" "$2"
 }
 keys_in() { # <decoded-json>
-  python3 -c '
-import json, sys
-d = json.load(open(sys.argv[1]))
-print(",".join(sorted({e["metadata"] for e in d["events"]
-                       if e.get("event_kind") == "elkTraceLogEvent" and "metadata" in e})))
-' "$1"
+  l3_decode log-keys "$1"
 }
 # One `k=v` out of a provenance record, so a field is read by NAME and not by position.
 field() { # <record> <key>
@@ -159,7 +161,26 @@ CTRL_PROV="$(rec "$CTRL_DECODE" ct.chain-provenance)"
 # ---------------------------------------------------------------------------
 echo "== 1. the container carries EXACTLY the declared metadata keys, both directions"
 # ---------------------------------------------------------------------------
-assert_ge "the subject container is a real one" 100000 "$(wc -c <"$SUBJECT_CT" | tr -d ' ')"
+# MEASURED AGAINST A HEADER, NOT A CONSTANT. This was `>= 100000` bytes over the legacy container.
+# The split container is allocated in 4096-byte blocks and this one is 77,824 bytes — as is L5's
+# 64-step control — so no constant near that size separates a recording from a header any more.
+# The claim is made against the header-only container the same writer closes in the same run, and
+# the decoded steps say what bytes alone never did (`DRIFT.md` D37).
+assert_file "the header-only container was written" "$HEADER_CT"
+assert_eq "…by a writer that accepted no recorder event" "0" "$(f header.events)"
+assert_eq "…and it is the size the writer reported" "$(f header.bytes)" \
+  "$(wc -c <"$HEADER_CT" | tr -d ' ')"
+assert_ge "the subject container is a real one: strictly larger than the header-only container" \
+  "$(( $(wc -c <"$HEADER_CT" | tr -d ' ') + 1 ))" "$(wc -c <"$SUBJECT_CT" | tr -d ' ')"
+assert_eq "…and the reader decodes the recorder's 345 steps in it" \
+  "345" "$(l3_decode check "$SUBJ_DECODE" | sed -n 's/^RECORDER_STEPS\t//p')"
+# …where the header-only one carries none: read by the same reader, not assumed. Not through
+# `l3_read_container`, whose ">= 1000 lines" stub guard a header-only decode rightly fails.
+HEADER_DECODE="$L2_WORK/probes/l3-prov-header-only.json"
+timeout "${L3_READER_TIMEOUT:-300}" "$L3_READER" --full "$HEADER_CT" >"$HEADER_DECODE" 2>&1
+assert_eq "the reference reader reads the header-only container too" "0" "$?"
+assert_false "…and printed no refusal over it" grep -qE '^Error:' "$HEADER_DECODE"
+l3_assert_entry_step "$HEADER_DECODE" 0
 # SIX SINCE L5, AND THE SIXTH IS `ct.source-provenance`. The count is written here rather than
 # read off the module for 4c's reason — a check whose expectation is derived from its subject
 # cannot notice the subject changing — so adding a key is a red line until somebody writes the new
@@ -349,8 +370,15 @@ assert_false "…which is the opposite of the subject's" \
      = "$(field "$CTRL_PROV" publishedEffectsReproduced)"
 
 # The two containers really are two recordings and not one file read twice.
-assert_false "the two containers differ in size, so these are two recordings" \
-  test "$(wc -c <"$SUBJECT_CT" | tr -d ' ')" = "$(wc -c <"$CONTROL_CT" | tr -d ' ')"
+# BYTE CONTENT AND DECODED STEPS, NOT BYTE COUNT. Both containers are 77,824 bytes: 345 and 254
+# steps land in the same number of 4096-byte blocks (`DRIFT.md` D37). So "two recordings and not
+# one file read twice" is asserted on what does differ: the bytes themselves, and the step count
+# the READER finds in each, which is stronger than the producer's own `control.steps` below.
+assert_false "the two containers differ in bytes, so these are two recordings" \
+  cmp -s "$SUBJECT_CT" "$CONTROL_CT"
+assert_false "…and the reader finds a different number of steps in each" \
+  test "$(l3_decode check "$SUBJ_DECODE" | sed -n 's/^RECORDER_STEPS\t//p')" \
+     = "$(l3_decode check "$CTRL_DECODE" | sed -n 's/^RECORDER_STEPS\t//p')"
 assert_false "…and in step count, because the control's execution halted earlier" \
   test "345" = "$(f control.steps)"
 assert_eq "…at 254 instructions" "254" "$(f control.steps)"

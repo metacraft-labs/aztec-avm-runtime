@@ -47,7 +47,7 @@
 // applies here and is why the argument is in the signature: the day a resident source can answer
 // "as of block N", no call site moves.
 
-import type { AztecNode } from '@aztec/stdlib/interfaces/client';
+import type { AztecNode } from '@aztec-labs/stdlib/interfaces/client';
 
 /** The five queries, in the order the AVM's opcode list produces them. */
 export const MEMBERSHIP_WITNESS_QUERIES = [

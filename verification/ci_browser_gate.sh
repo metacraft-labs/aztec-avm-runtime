@@ -291,10 +291,12 @@ STEP_TOKENS="$(python3 - "$M28_WORKFLOW" <<'PY'
 import re
 import sys
 
-# One line per `setup-dev-env` step: "<job> <line> <env-flavor> <yes|no>".
+# One line per `setup-dev-env` step: "<job> <line> <env-flavor> <yes|no> <yes|no>".
 # A step is a `- ` block at the six-space indent Actions uses inside `steps:`; it ends at the
 # next `      - ` or at the next job header. `gh-token` counts only when it has a VALUE, so a
-# key present and empty is reported as missing — which is exactly what the runner saw.
+# key present and empty is reported as missing — which is exactly what the runner saw. The
+# fifth field is the same test over BOTH `app-id` and `app-private-key`, the pair that starts
+# setup-dev-env's credential broker.
 lines = open(sys.argv[1], encoding="utf-8").read().split("\n")
 job, out, i = "<none>", [], 0
 while i < len(lines):
@@ -311,8 +313,11 @@ while i < len(lines):
         if "setup-dev-env@" in text:
             fm = re.search(r"^\s+env-flavor:\s*(\S+)\s*$", text, re.M)
             tm = re.search(r"^\s+gh-token:\s*(\S.*?)\s*$", text, re.M)
-            out.append("%s %d %s %s" % (job, start + 1, fm.group(1) if fm else "none",
-                                        "yes" if tm and tm.group(1) else "no"))
+            am = re.search(r"^\s+app-id:\s*(\S.*?)\s*$", text, re.M)
+            km = re.search(r"^\s+app-private-key:\s*(\S.*?)\s*$", text, re.M)
+            out.append("%s %d %s %s %s" % (job, start + 1, fm.group(1) if fm else "none",
+                                           "yes" if tm and tm.group(1) else "no",
+                                           "yes" if am and am.group(1) and km and km.group(1) else "no"))
         i = j
         continue
     i += 1
@@ -367,6 +372,13 @@ assert_eq "…every one of them asks for the nix dev shell" "$JOB_COUNT" \
 # THE RESIDUE, NOT THE COUNT: the failing rows are printed, so a failure names the job.
 assert_eq "…and every one of them is handed the CI token, which env-flavor: nix requires" "" \
   "$(printf '%s\n' "$STEP_TOKENS" | awk '$4 != "yes" { print $1 " (line " $2 ")" }' | tr '\n' ' ' | sed 's/ *$//')"
+# THE BROKER, asserted the same way and for the same reason. The App installation token behind
+# `gh-token` expires an hour after it is minted. Without `app-id` and `app-private-key`,
+# setup-dev-env skips its credential broker, and a Nix fetch more than an hour into the job gets
+# `401 Bad credentials`. That happened to this gate's own job in run 45111948416 (job
+# 137486073639), 69 minutes after the mint, when all 13 steps lacked both inputs.
+assert_eq "…and every one of them starts the credential broker (app-id and app-private-key)" "" \
+  "$(printf '%s\n' "$STEP_TOKENS" | awk '$5 != "yes" { print $1 " (line " $2 ")" }' | tr '\n' ' ' | sed 's/ *$//')"
 assert_true "the browser-gate job's own dev-shell step is among them" \
   str_has_sub "$STEP_TOKENS" "$M28_GATE_JOB "
 assert_eq "…and it is one of the rows that carries a token" "1" \
@@ -648,7 +660,10 @@ assert_true "…and names upstream's own decay as the specific thing prevented" 
   str_has_sub "$DOC" "browser story decayed"
 assert_true "…and gives the four-step mechanism rather than an exhortation" \
   str_has_sub "$DOC" "nobody decided anything"
-assert_true "…and states plainly that it has never run in CI" str_has_sub "$DOC" "never run in CI"
+# The write-up states the gate's CI history plainly. Until 2026-11-26 the needle was "never run in
+# CI", which stopped being true when the job first passed (run 43020850685, 2026-11-11). Whether
+# the claim matches GitHub's history is verify-m8's comparison, not this needle's.
+assert_true "…and states plainly that it has run in CI" str_has_sub "$DOC" "The gate has run in CI"
 assert_true "…and says what it does NOT establish" str_has_sub "$DOC" "does NOT establish"
 
 # `verify_named_checks_exist` scans `verification/`, `tools/`, `browser/` and three `src` roots —

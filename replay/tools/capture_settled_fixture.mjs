@@ -40,10 +40,10 @@
 
 import { writeFileSync } from 'node:fs';
 
-import { defaultFetch } from '@aztec/foundation/json-rpc/client';
-import { TxHash } from '@aztec/stdlib/tx/tx-hash';
-import { AztecAddress } from '@aztec/stdlib/aztec-address';
-import { Fr } from '@aztec/foundation/curves/bn254';
+import { defaultFetch } from '@aztec-labs/foundation/json-rpc/client';
+import { TxHash } from '@aztec-labs/stdlib/tx/tx-hash';
+import { AztecAddress } from '@aztec-labs/stdlib/aztec-address';
+import { Fr } from '@aztec-labs/foundation/curves/bn254';
 
 import { createReplayNodeClient, fetchSettledTransaction } from '../src/index.ts';
 import { SETTLED_FIXTURE_FORMAT, recordingFetch } from './settled_fixture.ts';

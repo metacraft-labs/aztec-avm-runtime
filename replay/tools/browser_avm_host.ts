@@ -40,8 +40,8 @@
 // replay page is built in `replay/`'s own esbuild pass, so `BROWSER-PACKAGING.md`'s figures do not
 // move either.
 
-import type { Fr } from '@aztec/foundation/curves/bn254';
-import { serializeWithMessagePack } from '@aztec/stdlib/avm';
+import type { Fr } from '@aztec-labs/foundation/curves/bn254';
+import { serializeWithMessagePack } from '@aztec-labs/stdlib/avm';
 
 import { compileAvmFromUrl, instantiateAvm } from '../../browser/src/loader.ts';
 import { createAvmPoseidon2, installPoseidon2 } from '../../browser/src/poseidon.ts';

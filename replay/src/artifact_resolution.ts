@@ -98,7 +98,7 @@
 // policy is executable code rather than a paragraph. **The dishonest option — claiming source level
 // and not saying where the text came from — is the one that is not available.**
 
-import type { ContractClassPublic } from '@aztec/stdlib/contract';
+import type { ContractClassPublic } from '@aztec-labs/stdlib/contract';
 
 import type { DebugInfoLike, SourceFile } from '../../ct-host/src/source_map.ts';
 

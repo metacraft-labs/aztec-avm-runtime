@@ -97,8 +97,8 @@ assert_contains "PR.md records the prior-art search and its date" \
 # --------------------------------------------------------------------------
 # 2. PR.md's numbers, re-derived rather than read.
 # --------------------------------------------------------------------------
-assert_contains "PR.md states the base commit the patch was generated against" \
-  "$(m5_measured M5_BASE_REV)" "$pr"
+assert_same_commit "PR.md states the base commit the patch was generated against" \
+  "$(pr_md_base_commit "$pr")" "$(m5_measured M5_BASE_REV)"
 diffstat="$(grep -oE '[0-9]+ insertions?\(\+\), [0-9]+ deletions?\(-\)' "$M5_PATCH_FILE" | head -1)"
 assert_eq "the patch's own diffstat" "3 insertions(+), 1 deletion(-)" "$diffstat"
 assert_contains "and PR.md quotes it" '+3 / −1' "$pr"

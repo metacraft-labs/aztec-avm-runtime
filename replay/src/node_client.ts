@@ -48,11 +48,11 @@
 // comparison, not a string. `test_node_client_refusals_distinguishable` asserts the unwrapping
 // works AND that a successful fetch returns, so the mechanism is measured in both directions.
 
-import { defaultFetch } from '@aztec/foundation/json-rpc/client';
-import type { TxHash } from '@aztec/stdlib/tx/tx-hash';
-import { createAztecNodeClient } from '@aztec/stdlib/interfaces/client';
-import type { AztecNode } from '@aztec/stdlib/interfaces/client';
-import type { ComponentsVersions } from '@aztec/stdlib/versioning';
+import { defaultFetch } from '@aztec-labs/foundation/json-rpc/client';
+import type { TxHash } from '@aztec-labs/stdlib/tx/tx-hash';
+import { createAztecNodeClient } from '@aztec-labs/stdlib/interfaces/client';
+import type { AztecNode } from '@aztec-labs/stdlib/interfaces/client';
+import type { ComponentsVersions } from '@aztec-labs/stdlib/versioning';
 
 import {
   COMPONENTS_VERSION_FIELDS,
@@ -301,7 +301,11 @@ export function createReplayNodeClient(options: ReplayNodeClientOptions): Replay
   // calls `createSafeJsonRpcClient(url, AztecNodeApiSchema, { namespaceMethods: 'aztec', …,
   // onResponse: getVersioningResponseHandler(versions) })`. Passing `expected` here is what makes
   // the version check happen on every call rather than only when someone remembers to ask.
-  const raw: AztecNode = createAztecNodeClient(url, expected, wrappedFetch);
+  // 6.x TOOK AN OPTIONS OBJECT WHERE 5.3 TOOK POSITIONAL ARGUMENTS, and `versions` keeps
+  // its meaning exactly: upstream documents the field as "expected component versions
+  // checked against response headers", which is the same `getVersioningResponseHandler`
+  // wiring the comment above describes. The check did not go away in the rename.
+  const raw: AztecNode = createAztecNodeClient(url, { versions: expected, fetch: wrappedFetch });
 
   const classify = (err: unknown): never => {
     const unreachable = unwrapTransportFailure(err);
@@ -411,7 +415,8 @@ export function createUnguardedNodeClientForControls(
   url: string,
   fetchImpl?: typeof defaultFetch,
 ): AztecNode {
-  return createAztecNodeClient(url, {}, fetchImpl);
+  return createAztecNodeClient(url,
+    { versions: {}, ...(fetchImpl ? { fetch: fetchImpl } : {}) });
 }
 
 /**

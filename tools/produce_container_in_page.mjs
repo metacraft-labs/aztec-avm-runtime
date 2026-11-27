@@ -37,7 +37,11 @@ const ctWriter = arg('ct-writer',
 const fixture = arg('fixture', path.join(REPO, 'replay/fixtures/testnet_replay_tx.json'));
 const outFile = arg('out');
 const reportFile = arg('report');
-const DIST = path.join(REPO, 'replay/dist-browser');
+// `--dist` names the bundle to serve. The Live-Chain-Replay floor builds it from the pinned
+// historical runtime (verification/lib_historical_replay.sh, DRIFT.md D36) and passes its
+// dist-browser/ here; without the flag it is the working tree's, as `just produce-container-in-page`
+// has always used.
+const DIST = arg('dist', path.join(REPO, 'replay/dist-browser'));
 
 for (const [what, p] of [['avm.wasm', avm], ['ct_writer.wasm', ctWriter], ['the fixture', fixture]]) {
   if (!p || !existsSync(p)) {

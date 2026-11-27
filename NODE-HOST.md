@@ -293,10 +293,11 @@ installs the published `@aztec/*` packages first, because the reuse enumeration 
 asserts M17's own inputs — the package, its four type-level negatives, the write-up — before running
 anything.
 
-**It has never run.** Neither has any other job in that workflow: they all abort at
-`Generate CI token` on "Input required and not supplied: app-id", which M11 recorded as undiagnosed.
-So "the checks are wired into CI" means the job exists, is wired and names them — not that a run has
-ever gated anything. The check asserts the former and this paragraph states the latter.
+**It has run in CI.** The `node-host` job first passed in run 34089689342 (2026-09-07, job
+101640487889), once the CI token blocker recorded in `avm-wasm.yml` was resolved, and every job in
+that workflow passed together in run 43170349830 (2026-11-12). Measured from the GitHub API on
+2026-11-26. The newest result is GitHub's to report: the check asserts the job is wired and names
+the checks, and verify-m8 compares the workflow's stated history with the API.
 
 ## What this milestone does not measure
 

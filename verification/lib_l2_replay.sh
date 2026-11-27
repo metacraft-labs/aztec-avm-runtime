@@ -41,8 +41,9 @@ export L1_WORK
 L2_WORK="$L0_WORK"
 export L2_WORK
 
-L2_SRC="$REPO_ROOT/replay/src"
-L2_TOOLS="$REPO_ROOT/replay/tools"
+# The executed tree's (lib_historical_replay.sh); the fixture is the working tree's.
+L2_SRC="$REPLAY_DIR/src"
+L2_TOOLS="$REPLAY_DIR/tools"
 L2_FIXTURE="$REPO_ROOT/replay/fixtures/testnet_replay_tx.json"
 export L2_SRC L2_TOOLS L2_FIXTURE
 
@@ -104,13 +105,13 @@ l2_prepare() {
   local f
   for f in "${L2_SOURCES[@]}"; do
     assert_file "L2's source $f" "$L2_SRC/$f"
-    assert_true "…and $f is TRACKED" \
-      git -C "$REPO_ROOT" ls-files --error-unmatch "replay/src/$f"
+    assert_true "…and $f is COMMITTED in the executed runtime" \
+      hist_committed "replay/src/$f"
   done
   for f in "${L2_TOOL_SOURCES[@]}"; do
     assert_file "L2's tool $f" "$L2_TOOLS/$f"
-    assert_true "…and $f is TRACKED" \
-      git -C "$REPO_ROOT" ls-files --error-unmatch "replay/tools/$f"
+    assert_true "…and $f is COMMITTED in the executed runtime" \
+      hist_committed "replay/tools/$f"
   done
   # THE HOST IS IN `tools/` AND NOT IN `src/`, for L0's reason: it declares the msgpack SHAPES the
   # resident databases take, which are C++ struct field names, and
@@ -175,8 +176,8 @@ l3_find_reader() {
 l3_prepare() {
   l2_prepare
   assert_file "L3's recording module" "$L2_SRC/recording.ts"
-  assert_true "…and it is TRACKED" \
-    git -C "$REPO_ROOT" ls-files --error-unmatch "replay/src/recording.ts"
+  assert_true "…and it is COMMITTED in the executed runtime" \
+    hist_committed "replay/src/recording.ts"
   L3_CT_WRITER="$(l3_find_ct_writer)"
   L3_READER="$(l3_find_reader)"
   export L3_CT_WRITER L3_READER
@@ -205,6 +206,34 @@ l3_read_container() { # <container> <outfile>
     grep -qE '^Error:' "$out"
   assert_ge "…and produced a substantial decode rather than a stub" 1000 \
     "$(wc -l <"$out" | tr -d ' ')"
+}
+
+# l3_decode <command> <decode.json> [<arg>] — the ONE reader of a `ct-print --full` decode that L3
+# and L5 assert through. It reads the SPLIT decode the pinned reader emits and nothing else, and it
+# excludes the writer's entry step only after finding it where the spec puts it. Its header says
+# why; `DRIFT.md` D37 says what changed. A decode it refuses is a non-zero exit with the reason on
+# stderr and NOTHING on stdout, so every assertion over its answer fails rather than reading zero.
+l3_decode() { # <command> <decode.json> [<arg>]
+  python3 "$VERIFY_DIR/_l3_decode.py" "$@"
+}
+
+# l3_assert_entry_step <decode.json> <recorder-steps> — the decode is the split one, its first step
+# is the writer's entry step, and it carries EXACTLY that one step more than the recorder wrote.
+#
+# `codetracer-trace-format-spec` `trace-events.md`, "Recorder Integration — Starting a Recording":
+# *a recording contains one more step than the recorder emitted — the entry step, which `start`
+# emits.* The exclusion every per-step listing makes is asserted here, as a count, so it is a
+# measurement and not an assumption: a container that lost a recorder step, or grew a second
+# entry step, is red at this line rather than being quietly re-indexed.
+l3_assert_entry_step() { # <decode.json> <recorder-steps>
+  local decode="$1" want="$2" rows rc
+  rows="$(l3_decode check "$decode" 2>&1)"
+  rc=$?
+  assert_eq "the decode of $(basename "$decode") is the split one, and opens on the writer's entry step" \
+    "0" "$rc"
+  [ "$rc" -eq 0 ] || note "$rows"
+  assert_eq "…which carries the recorder's $want step(s) plus that one entry step" \
+    "$(( want + 1 ))" "$(printf '%s\n' "$rows" | sed -n 's/^TOTAL_STEPS\t//p')"
 }
 
 # The import prologue every L2 probe shares.
@@ -250,7 +279,7 @@ import { fixtureFetch, loadSettledFixture } from '$L2_TOOLS/settled_fixture.ts';
 import { createNodeAvmHost } from '$L2_TOOLS/node_avm_host.ts';
 import { TxHash } from '@aztec/stdlib/tx/tx-hash';
 import { CtWriter, instantiateCtWriter, resolveTracingConfig, WRITER_PATH_B_NIM }
-  from '$REPO_ROOT/ct-host/src/index.ts';
+  from '$REPLAY_RUNTIME_ROOT/ct-host/src/index.ts';
 import { readFileSync as readBytes } from 'node:fs';
 
 const L3_CT_WRITER_PATH = '${L3_CT_WRITER:-}';

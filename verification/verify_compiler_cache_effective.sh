@@ -137,7 +137,7 @@ m6_in_devshell '
       -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER >/dev/null 2>&1
     echo "${pass}_configure_rc=$?" >>"$out"
     s=$(date +%s)
-    ninja -C build-cachecheck world_state_reference_objects crypto_merkle_tree_objects >/dev/null 2>&1
+    "$RQ_BRIDGE" jobserver -- ninja -C build-cachecheck world_state_reference_objects crypto_merkle_tree_objects >/dev/null 2>&1
     echo "${pass}_build_rc=$?" >>"$out"
     echo "${pass}_seconds=$(( $(date +%s) - s ))" >>"$out"
     ccache -s | awk -v p="$pass" "
@@ -213,7 +213,7 @@ m6_in_devshell '
     -DCMAKE_C_COMPILER="$(command -v clang)" -DCMAKE_CXX_COMPILER="$(command -v clang++)" \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER >/dev/null 2>&1
   echo "ext_configure_rc=$?" >>"$out"
-  ninja -C build-cachecheck world_state_reference_objects crypto_merkle_tree_objects >/dev/null 2>&1
+  "$RQ_BRIDGE" jobserver -- ninja -C build-cachecheck world_state_reference_objects crypto_merkle_tree_objects >/dev/null 2>&1
   echo "ext_build_rc=$?" >>"$out"
   ccache -s | awk "
     /^Cacheable calls:/ { print \"ext_cacheable=\" \$3 }

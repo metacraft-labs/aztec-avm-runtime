@@ -33,7 +33,11 @@
 
 # The commit the patch is generated against, and the local branch that carries the
 # same change. Both are asserted rather than assumed.
-M4_BASE_REV=233d8e0993
+# The `cpp` anchor, READ from pins.json rather than declared here. It was the
+# literal 233d8e0993 until 2026-11-13; pins.json's own rule is that nothing
+# else may declare a pin value, and `tools/repin.py --check` does not reach
+# shell files, so this one silently outranked the declaration. DRIFT.md D35.
+M4_BASE_REV="$(pins_anchor_commit cpp)"
 
 # The prepared upstream contribution. Named `aztec-wasi-sdk-33`, not
 # `aztec-wasi-sdk-33-exceptions`: see the M4 notes in the milestone file for the

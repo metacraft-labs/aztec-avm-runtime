@@ -480,3 +480,43 @@ name — *"no file_map source text was supplied, so a span cannot become a line 
 is the honest failure, and the capability would be gone. `build:keep-debug-symbols` exists in the
 same `package.json` and omits the cleanup; it is what a consumer would have to ask upstream to
 publish from.
+
+### 7.5 The same measurement at `@aztec-labs/protocol-contracts@6.0.0` — **the risk did not land**
+
+§7.4 names a risk that would be silent if it landed: a release built through `yarn build` empties
+`file_map` and every protocol contract drops from rung 1 to rung 2. The v6 rename moved this package
+to a new scope and a new major, which is exactly the moment such a change ships. So it was
+re-measured rather than assumed, through the SHIPPED path — `ct-host/src/source_map.ts`'s `rungFor`
+and `ContractSourceMap.positionFor`, over the installed release:
+
+| `public_dispatch` @ 6.0.0 | verdict | mapped pcs | pc range | positioned | `file_map` |
+|---|---|---|---|---|---|
+| `FeeJuice` | **rung 1** | 314 | [130, 1785] | **314 / 314** | 32 files, 32 with source |
+| `ContractInstanceRegistry` | **rung 1** | 765 | [199, 4478] | **765 / 765** | 34 files, 34 with source |
+| `ContractClassRegistry` | rung 3 | 0 | — | 0 / 0 | 24 files, 24 with source |
+
+`ContractClassRegistry` is **not** a regression and is recorded here so it is not read as one: its
+`public_dispatch` bytecode is **22 bytes**. There is nothing to map, so zero mapped pcs is the right
+answer and §3's ladder gives the right rung for it.
+
+`FeeJuice` pc 130 now resolves to `fee_juice_contract/src/main.nr` **188:12**, where §7.3 recorded
+**203:12** at `5.3.0-nightly.20260819`. THE LINE MOVED AND THAT IS THE POINT: the source changed
+between releases and the map followed it, which is what a per-release measurement looks like and
+what a cached constant would not.
+
+**`debug_symbols` IS base64 OF RAW DEFLATE, NOT OF JSON**, and the payload is
+`{ debug_infos: [ … ] }` — one entry per function body. Written down because the obvious reading
+fails loudly (`JSON.parse` on the decoded bytes) while the near-miss does not: gzip, zlib and brotli
+all *refuse* these bytes, so only `inflateRaw` was left, and it returns 13,744 bytes of JSON whose
+first `brillig_locations` key is 130 — the pc §7.3 already names.
+
+**WHAT THIS DOES AND DOES NOT SETTLE.** It settles that the pipeline reaches rung 1 at v6 with every
+mapped pc positioned, whenever an artifact carrying `file_map` source text is in hand. It says
+nothing about the live chain, where the opposite holds for a reason that is not ours: measured on
+Aztec testnet 2026-11-13, the explorer lists 23 contract classes, **3** carry an
+`artifactContractName` — exactly these three protocol contracts, served from npm and not from the
+chain — and **0** carry a `sourceCodeUrl`. `/l2/artifacts/<artifactHash>` answers HTTP 404 with an
+EMPTY body for both contracts in the entire retained window. So a live third-party transaction
+cannot support source-level debugging *in theory* today, because nobody publishes the artifact that
+would make it possible — and `recording.ts`'s ceiling already states the reason: the chain holds a
+COMMITMENT to the artifact, not the artifact.

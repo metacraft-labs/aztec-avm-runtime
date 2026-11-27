@@ -170,11 +170,43 @@ _FAILURES=0
 # Absolute path of the repository this check lives in.
 VERIFY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$VERIFY_DIR/.." && pwd)"
+# The RunQuota bridge every heavy ninja call goes through (see runquota_bridge.sh). Exported so it
+# is still visible inside `nix develop --command bash -c '...'` scripts, which are separate shells.
+export RQ_BRIDGE="$VERIFY_DIR/runquota_bridge.sh"
 # The upstream fork is a WORKSPACE-ROOT SIBLING of this repo (the M0 layout
 # decision). It is deliberately not searched for anywhere else: if the fork is
 # not here, the layout is wrong and the checks must say so.
 WORKSPACE_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 FORK_ROOT="$WORKSPACE_ROOT/aztec-packages"
+
+# ---- the declared pins -----------------------------------------------------
+#
+# pins.json is the SINGLE SOURCE OF TRUTH: its own header says "Nothing else in
+# the tree may DECLARE a pin value." Four milestone libraries declared the `cpp`
+# anchor as a shell literal anyway — M3, M4, M5 and M6 each carried
+# `M<n>_BASE_REV=233d8e0993` — and `tools/repin.py --check` does not reach shell
+# files, so nothing held them to the declaration. A re-pin that moved pins.json
+# alone would have left every prepared tree on the old base, and the discrepancy
+# would have surfaced as a build result rather than as a refusal. See DRIFT.md
+# D35, which sizes that bump and names this as its prerequisite.
+#
+# `build_ct_writer_wasm.sh` already read its anchor this way; this is that
+# reading, shared, so there is one spelling of it.
+pins_anchor_commit() {
+  local name="$1" rev
+  rev="$(python3 - "$REPO_ROOT/pins.json" "$name" <<'PY'
+import json, sys
+p = json.load(open(sys.argv[1], encoding="utf-8"))
+a = p.get("anchors", {}).get(sys.argv[2])
+print(a.get("commit", "") if a else "")
+PY
+  )" || die "pins.json could not be read for anchor '$name'"
+  case "$rev" in
+    [0-9a-f][0-9a-f]*) ;;
+    *) die "pins.json declares no '$name' anchor commit" ;;
+  esac
+  printf '%s\n' "$rev"
+}
 
 export VERIFY_DIR REPO_ROOT WORKSPACE_ROOT FORK_ROOT
 
@@ -241,6 +273,40 @@ assert_contains() { # <description> <needle> <haystack>
     *"$needle"*) pass "$desc" ;;
     *)           fail "$desc  [$needle] not found in: $(printf '%s' "$haystack" | head -c 400)" ;;
   esac
+}
+
+# ---- naming a commit the way a document spells it ---------------------------
+#
+# Documents abbreviate the anchor (`233d8e0993`, as every PR.md under codetracer-specs/upstream-bugs/
+# and every workflow guard writes it) while the libraries now carry the full 40-digit SHA read from
+# pins.json (`pins_anchor_commit`). Comparing the two as strings fails on a correct document, and
+# comparing them by prefix would accept any string that happens to start the same way. So the
+# comparison is made the way the rest of this tree makes it: resolve both in the fork's object
+# store and compare the commits. An abbreviation that is ambiguous, absent or not a commit fails.
+#
+# assert_same_commit <description> <named> <base>
+#   <named> is the spelling a document uses and must be at least 10 hex digits (the width of the
+#   pins.json `short` field), so a stray short hex word cannot pass; <base> is any revision.
+assert_same_commit() {
+  local desc="$1" named="$2" base="$3" want got
+  case "$named" in
+    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;;
+    *) fail "$desc  [$named] is not a commit spelled with at least 10 hex digits"; return ;;
+  esac
+  case "$named" in *[!0-9a-f]*) fail "$desc  [$named] is not a hex commit name"; return ;; esac
+  want="$(git -C "$FORK_ROOT" rev-parse --verify --quiet "$base^{commit}" 2>/dev/null)"
+  got="$(git -C "$FORK_ROOT" rev-parse --verify --quiet "$named^{commit}" 2>/dev/null)"
+  if [ -n "$want" ] && [ "$got" = "$want" ]; then
+    pass "$desc  [$named = $want]"
+  else
+    fail "$desc  [$named] resolves to [${got:-nothing}] in $FORK_ROOT, expected [${want:-unresolvable $base}]"
+  fi
+}
+
+# pr_md_base_commit <PR.md text>  ->  the commit on its `**Base commit:** \`<sha>\`` line, or nothing.
+# Only that header line is read: a base mentioned in passing elsewhere in the body does not count.
+pr_md_base_commit() {
+  printf '%s\n' "$1" | sed -n 's/^\*\*Base commit:\*\* *`\([0-9a-f][0-9a-f]*\)`.*/\1/p' | head -1
 }
 
 assert_not_contains() { # <description> <needle> <haystack>

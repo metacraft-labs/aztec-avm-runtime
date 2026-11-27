@@ -22,7 +22,11 @@
 
 # The commit the patch is generated against, and the local commit that carries
 # the same change. Both are asserted, not assumed.
-M3_BASE_REV=233d8e0993
+# The `cpp` anchor, READ from pins.json rather than declared here. It was the
+# literal 233d8e0993 until 2026-11-13; pins.json's own rule is that nothing
+# else may declare a pin value, and `tools/repin.py --check` does not reach
+# shell files, so this one silently outranked the declaration. DRIFT.md D35.
+M3_BASE_REV="$(pins_anchor_commit cpp)"
 M3_SPLIT_REV=d15ada03646a7af28ab4a275901909d41877f381
 
 # The prepared upstream contribution. Named `-split`, not `-coupling`: see the
@@ -133,7 +137,7 @@ m3_build() {
         -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
     fi
-    ninja -C build-native "$@"
+    "$RQ_BRIDGE" jobserver -- ninja -C build-native "$@"
   ' "$tree" "$@" >"$log" 2>&1
 }
 

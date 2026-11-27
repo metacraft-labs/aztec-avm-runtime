@@ -68,7 +68,7 @@ export function stdlibArtifactCrypto(bindings: StdlibBindings): ArtifactCrypto {
 
 /** One package release's artifacts, as `{ <contract name>: <parsed JSON> }`. */
 export interface PackageArtifacts {
-  /** `@aztec/protocol-contracts` */
+  /** `@aztec-labs/protocol-contracts` */
   readonly packageName: string;
   /** `5.3.0-nightly.20260819` — RECORDED, NEVER TRUSTED. See `artifact_resolution.ts`'s header. */
   readonly version: string;

@@ -43,8 +43,8 @@ import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
-import { defaultFetch } from '@aztec/foundation/json-rpc/client';
-import { TxHash } from '@aztec/stdlib/tx/tx-hash';
+import { defaultFetch } from '@aztec-labs/foundation/json-rpc/client';
+import { TxHash } from '@aztec-labs/stdlib/tx/tx-hash';
 
 import { createReplayNodeClient, fetchSettledTransaction, resolveContractArtifact }
   from '../src/index.ts';

@@ -144,6 +144,28 @@ Both are registered in the workspace manifests under the `codetracer` project.
 The fork is a workspace-root **sibling**, not nested under this repo; the
 verification checks assert that, so moving it will fail them.
 
+## Sharing the host's CPU: ninja goes through the RunQuota bridge
+
+Several checkouts and sessions share one machine, and a bare `ninja` (or `-j "$(nproc)"`)
+assumes every core is its own. Every heavy ninja call in `verification/` therefore runs as
+
+    "$RQ_BRIDGE" jobserver -- ninja ...
+
+where `RQ_BRIDGE` is `verification/runquota_bridge.sh` (exported by `verification/lib.sh`). It
+takes a RunQuota lease and runs ninja at the granted width through a make jobserver, and it runs
+the command unchanged when RunQuota is not installed or no daemon answers. Controls:
+`RQ` unset is automatic, `RQ=` (empty) turns the bridge off, and `RQ="runquota jobserver --width 2 --"`
+pins a width. `JOBS=N` for `verification/m14/verify.sh` still wins. Ninja must be 1.13 or later
+to follow a jobserver.
+
+When you add a ninja call to a verification script, put the bridge in front of it and bridge
+once at the command that does the work, not around the whole script. The bridge is probed by
+verb, not by binary; the idiom is in `reprobuild/docs/user-guide/runquota-in-justfiles.md`.
+`just test-runquota-bridge` fails if a ninja line loses its bridge (static) or if four real
+call sites at once exceed a private daemon's budget (measured from `/proc`).
+`verification/lib_m9_idle_gate.sh` is deliberately not bridged: it is a precondition that waits
+for an idle host before a timed measurement and starts no build.
+
 ## Setting up a FRESH worktree
 
 None of this is in the flake, and a fresh clone will fail in ways that read like
@@ -174,6 +196,8 @@ nothing creates it for you.
 It does **not** carry `@aztec/noir-contracts.js`, so the M35 arms cannot find
 `token_contract-Token.json` without `diffsim/`. `browser/build.mjs` also takes its
 esbuild binary from `spike/` or `diffsim/` rather than installing one.
+
+`replay/` needs its own `(cd replay && npm ci)` as well: without it `just typecheck-replay` fails with ~72 TS errors (`@aztec-labs/*` and `Buffer` unresolved). The Live-Chain-Replay floors (`verify-l0` … `verify-l5`, `verify-noir-frames`) do NOT run that install: they execute the pinned historical runtime (`pins.json` `historical_runtimes.replay_v5`, `DRIFT.md` D36), which their recipes materialise on first use through `just materialize-historical-replay` (`git archive` of the commit plus `npm ci` from its own lockfile, under `~/.cache/aztec-historical-replay/`).
 
 `drift/` is a third line (`5.3.0-nightly.20260819`, matching the `cpp` anchor) and
 is only needed for the ABI control in `PRIVATE-EXECUTION.md` §3b.

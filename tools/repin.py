@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""The @aztec/* pin: hold every consumer to pins.json, or rewrite them from it.
+"""The npm pins: hold every consumer to pins.json, or rewrite them from it.
+
+Each npm pin line in pins.json names the package SCOPES it governs (`scopes`, default
+`["@aztec"]`). Two lines are @aztec/* nightlies; since the operator adopted the v6 rename on
+2026-11-26 (DRIFT.md D36) a third governs `@aztec-labs/*` and `@aztec-foundation/*`, which is
+what the working tree's `replay/` installs. A consumer tree is held to its own line for every
+package in that line's scopes, AND refused any package from another line's scopes: one tree
+carrying two generations is the class-identity hazard `replay/package.json` documents, not a
+version detail. `historical_runtimes` are commits of this repository that a check executes
+instead of the working tree; their package files are read out of the object store and held to
+their declared line the same way (they cannot be rewritten, so `--apply` leaves them alone).
 
 pins.json is the single authority. `package.json` and `package-lock.json` files
 CONTAIN pin values because npm requires them to; this tool is what makes those
@@ -27,9 +37,15 @@ import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NIGHTLY_RE = re.compile(r"\b\d+\.\d+\.\d+-nightly\.\d{8}\b")
-# `"@aztec/foundation": "5.3.0-nightly.20260819"` inside a dependency block.
-DEP_RE = re.compile(r'("@aztec/[a-z0-9._-]+"\s*:\s*")([^"]+)(")')
-ALIAS_RE = re.compile(r'"(npm:(@aztec/[a-z0-9._-]+)@([^"]+))"')
+# `"@aztec/foundation": "5.3.0-nightly.20260819"` inside a dependency block, for ANY scope; the
+# checker keeps only the scopes some pin line declares.
+DEP_RE = re.compile(r'("(@[a-z0-9-]+)/[a-z0-9._-]+"\s*:\s*")([^"]+)(")')
+ALIAS_RE = re.compile(r'"(npm:((@[a-z0-9-]+)/[a-z0-9._-]+)@([^"]+))"')
+DEFAULT_SCOPES = ["@aztec"]
+
+
+def scope_of(name: str) -> str:
+    return name.split("/", 1)[0]
 
 
 class Fatal(Exception):
@@ -55,6 +71,14 @@ def read(path: str) -> str:
         return fh.read()
 
 
+def read_at(commit: str, path: str) -> str | None:
+    """A file at a commit, out of the object store; None if the commit or path is absent."""
+    res = subprocess.run(
+        ["git", "-C", REPO, "show", "%s:%s" % (commit, path)], capture_output=True
+    )
+    return res.stdout.decode() if res.returncode == 0 else None
+
+
 class Checker:
     def __init__(self, pins: dict):
         self.pins = pins
@@ -67,6 +91,17 @@ class Checker:
         if len(self.declared) < 2:
             raise Fatal("pins.json declares fewer than two npm pins")
         self.declared_values = set(self.declared.values())
+        self.scopes = {
+            role: list(spec.get("scopes", DEFAULT_SCOPES))
+            for role, spec in npm.items()
+            if not role.startswith("_")
+        }
+        self.all_scopes = {s for ss in self.scopes.values() for s in ss}
+        self.historical = {
+            k: v
+            for k, v in pins.get("historical_runtimes", {}).items()
+            if not k.startswith("_")
+        }
         self.exceptions = {
             k: v["version"]
             for k, v in pins.get("npm_exceptions", {}).items()
@@ -100,20 +135,38 @@ class Checker:
         self.checks += 1
 
     # -- package.json ------------------------------------------------------
-    def check_package_json(self, tree: str, pin: str) -> None:
-        path = "%s/package.json" % tree
-        text = read(path)
+    def check_package_json(self, tree: str, role: str, text: str | None = None,
+                           label: str | None = None) -> None:
+        path = label or "%s/package.json" % tree
+        if text is None:
+            text = read("%s/package.json" % tree)
+        pin = self.declared[role]
+        own = set(self.scopes[role])
         found = 0
         for m in DEP_RE.finditer(text):
             name = m.group(1).split('"')[1]
-            got = m.group(2)
-            want = self.exceptions.get(name, pin)
-            found += 1
+            scope = m.group(2)
+            if scope not in self.all_scopes:
+                continue
+            got = m.group(3)
             self.ok()
-            if got != want:
-                self.bad("%s: %s is %s, pins.json says %s" % (path, name, got, want))
+            if name in self.exceptions:
+                found += 1
+                if got != self.exceptions[name]:
+                    self.bad("%s: %s is %s, pins.json says %s"
+                             % (path, name, got, self.exceptions[name]))
+                continue
+            if scope not in own:
+                self.bad("%s: %s is in %s, a scope of another declared pin line, not npm.%s's"
+                         % (path, name, scope, role))
+                continue
+            found += 1
+            if got != pin:
+                self.bad("%s: %s is %s, pins.json says %s" % (path, name, got, pin))
         for m in ALIAS_RE.finditer(text):
-            name, got = m.group(2), m.group(3)
+            name, scope, got = m.group(2), m.group(3), m.group(4)
+            if scope not in self.all_scopes:
+                continue
             self.ok()
             if name not in self.exceptions:
                 self.bad(
@@ -126,12 +179,18 @@ class Checker:
                     % (path, name, got, self.exceptions[name])
                 )
         if found == 0:
-            self.bad("%s: no @aztec/* dependency found — the check would be vacuous" % path)
+            self.bad("%s: no %s dependency found — the check would be vacuous"
+                     % (path, "/".join(s + "/*" for s in sorted(own))))
 
     # -- package-lock.json -------------------------------------------------
-    def check_lockfile(self, tree: str, pin: str) -> None:
-        path = "%s/package-lock.json" % tree
-        lock = json.loads(read(path))
+    def check_lockfile(self, tree: str, role: str, text: str | None = None,
+                       label: str | None = None) -> None:
+        path = label or "%s/package-lock.json" % tree
+        if text is None:
+            text = read("%s/package-lock.json" % tree)
+        lock = json.loads(text)
+        pin = self.declared[role]
+        own = set(self.scopes[role])
         nodes = lock.get("packages")
         if not nodes:
             self.bad("%s: no 'packages' section (lockfileVersion %r)" % (path, lock.get("lockfileVersion")))
@@ -140,15 +199,14 @@ class Checker:
         for key, node in nodes.items():
             name = key.split("node_modules/")[-1] if key else ""
             resolved = node.get("resolved") or ""
-            is_aztec = name.startswith("@aztec/") or "/@aztec/" in resolved
-            if not is_aztec:
-                continue
-            if not name.startswith("@aztec/"):
-                m = re.search(r"/(@aztec/[a-z0-9._-]+)/-/", resolved)
-                if m:
-                    name = m.group(1)
+            scope = scope_of(name) if name.startswith("@") else ""
+            if scope not in self.all_scopes:
+                m = re.search(r"/((@[a-z0-9-]+)/[a-z0-9._-]+)/-/", resolved)
+                if not m or m.group(2) not in self.all_scopes:
+                    continue
+                name, scope = m.group(1), m.group(2)
             version = node.get("version")
-            want = self.exceptions.get(name, pin)
+            want = self.exceptions.get(name)
             # An exception package brings its own closure: everything npm nests
             # under node_modules/<exception>/node_modules/ is resolved against
             # THAT package's line, not the tree's pin. Holding those to the
@@ -157,8 +215,14 @@ class Checker:
                 if "node_modules/%s/node_modules/" % exc_name in key:
                     want = exc_version
                     break
-            found += 1
             self.ok()
+            if want is None:
+                if scope not in own:
+                    self.bad("%s: %s is in %s, a scope of another declared pin line, not npm.%s's"
+                             % (path, name, scope, role))
+                    continue
+                want = pin
+            found += 1
             if version != want:
                 self.bad("%s: %s resolves to %s, pins.json says %s" % (path, name, version, want))
             # The tarball URL carries the version too; a lockfile whose URL and
@@ -167,7 +231,33 @@ class Checker:
                 self.bad("%s: %s url %s does not carry version %s" % (path, name, resolved, version))
                 self.ok()
         if found == 0:
-            self.bad("%s: no @aztec/* entry found — the check would be vacuous" % path)
+            self.bad("%s: no %s entry found — the check would be vacuous"
+                     % (path, "/".join(s + "/*" for s in sorted(own))))
+
+    # -- historical runtimes -------------------------------------------------
+    def check_historical(self) -> None:
+        """A commit a check executes instead of the working tree: its package files, out of the
+        object store, held to the line it declares. Absence is a failure, never a skip."""
+        for name, spec in self.historical.items():
+            commit = spec.get("commit", "")
+            tree = spec.get("subject_tree", "")
+            role = spec.get("npm_pin", "")
+            self.ok()
+            if role not in self.declared:
+                self.bad("pins.json: historical_runtimes.%s names undeclared npm pin %r"
+                         % (name, role))
+                continue
+            short = commit[:10]
+            pkg = read_at(commit, "%s/package.json" % tree)
+            lock = read_at(commit, "%s/package-lock.json" % tree)
+            if pkg is None or lock is None:
+                self.bad("historical_runtimes.%s: commit %s is not in this repository's object "
+                         "store, or carries no %s/package.json and package-lock.json "
+                         "(Remedy: just materialize-historical-replay, which fetches it)"
+                         % (name, commit, tree))
+                continue
+            self.check_package_json(tree, role, pkg, "%s:%s/package.json" % (short, tree))
+            self.check_lockfile(tree, role, lock, "%s:%s/package-lock.json" % (short, tree))
 
     # -- prose and stray declarations --------------------------------------
     def check_prose_and_authority(self) -> None:
@@ -226,9 +316,9 @@ class Checker:
             if role not in self.declared:
                 self.bad("pins.json: consumer %s names undeclared npm pin %r" % (tree, role))
                 continue
-            pin = self.declared[role]
-            self.check_package_json(tree, pin)
-            self.check_lockfile(tree, pin)
+            self.check_package_json(tree, role)
+            self.check_lockfile(tree, role)
+        self.check_historical()
         self.check_prose_and_authority()
 
 
@@ -238,13 +328,18 @@ def apply_pins(pins: dict) -> list[str]:
     changed = []
     for tree, role in c.consumers.items():
         pin = c.declared[role]
+        own = set(c.scopes[role])
         path = os.path.join(REPO, tree, "package.json")
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
 
         def sub(m: re.Match) -> str:
             name = m.group(1).split('"')[1]
-            return "%s%s%s" % (m.group(1), c.exceptions.get(name, pin), m.group(3))
+            if name in c.exceptions:
+                return "%s%s%s" % (m.group(1), c.exceptions[name], m.group(4))
+            if m.group(2) not in own:
+                return m.group(0)  # another line's scope: a --check failure, not a rewrite
+            return "%s%s%s" % (m.group(1), pin, m.group(4))
 
         new = DEP_RE.sub(sub, text)
         if new != text:
@@ -268,6 +363,9 @@ def main(argv: list[str]) -> int:
     if "--report" in argv:
         print("declared pins: %s" % ", ".join("%s=%s" % kv for kv in sorted(c.declared.items())))
         print("consumers:     %s" % ", ".join("%s->%s" % kv for kv in sorted(c.consumers.items())))
+        print("scopes:        %s" % ", ".join("%s=%s" % (r, "+".join(s)) for r, s in sorted(c.scopes.items())))
+        print("historical:    %s" % ", ".join(
+            "%s@%s->%s" % (k, v.get("commit", "")[:10], v.get("npm_pin")) for k, v in sorted(c.historical.items())))
     print("repin: %d assertion(s), %d problem(s)" % (c.checks, len(c.problems)))
     for p in c.problems:
         print("  PIN-MISMATCH %s" % p)

@@ -39,8 +39,8 @@
 // the effect counts explicitly, under a field named `publishedEffects`, beside the statement that
 // the execution is not among them. The counts are read off the `TxEffect` the node returned.
 
-import type { TxEffect } from '@aztec/stdlib/tx';
-import type { PrivateExecutionResult } from '@aztec/stdlib/tx';
+import type { TxEffect } from '@aztec-labs/stdlib/tx';
+import type { PrivateExecutionResult } from '@aztec-labs/stdlib/tx';
 
 /** The discriminant a recording, a check or a reader matches on. */
 export const PRIVATE_HALF_UNAVAILABLE = 'unavailable-in-principle' as const;

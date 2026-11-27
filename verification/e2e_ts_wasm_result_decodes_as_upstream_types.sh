@@ -215,10 +215,12 @@ else
   fail "no YAML parser was available, so the workflow's structure could not be asserted"
 fi
 
-# AND WHAT IT DOES NOT MEAN. Neither this job nor any other in this workflow has ever run: they
-# all abort at `Generate CI token` on "Input required and not supplied: app-id", which M11
-# recorded as undiagnosed and which the `vars.` spelling did not fix. The job existing means it
-# is wired and names the checks.
-assert_contains "the job says plainly that it has never run" "this job has never run" "$WF_TXT"
+# AND WHAT IT DOES NOT MEAN. The job existing means it is wired and names the checks, not that a
+# run has passed. The job carries a plain statement of its CI history, and that statement must be
+# the accurate one: the needle was "this job has never run" until 2026-11-26, which stopped being
+# true when every job passed in run 43170349830 (2026-11-12). Whether the statement matches GitHub's
+# history is decided by verify-m8 (`verify_upstream_world_state_reference_gate_green`), which
+# compares it with the API, so this needle and that comparison must agree.
+assert_contains "the job states its CI history plainly" "this job has run green in CI" "$WF_TXT"
 
 finish

@@ -135,7 +135,7 @@ if [ -f "$CACHE" ]; then
     "$(get wasi_sdk_path)/bin/clang++" "$CACHED_CXX"
 fi
 
-BUILD_OUT="$(in_shell_status "$FORK_ROOT" "cd barretenberg/cpp && ninja -C $BUILD numeric_objects")"
+BUILD_OUT="$(in_shell_status "$FORK_ROOT" "cd barretenberg/cpp && \"\$RQ_BRIDGE\" jobserver -- ninja -C $BUILD numeric_objects")"
 BUILD_RC=$?
 if [ "$BUILD_RC" -eq 0 ]; then
   pass "ninja numeric_objects compiles real barretenberg C++"
