@@ -32,6 +32,10 @@
 set -uo pipefail
 TEST_NAME="verify_l5_artifact_sources_live"
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# A LIVE-CHAIN CHECK, NOT PART OF THE OFFLINE FLOOR: it executes the working tree's replay/, the
+# runtime the follower ships, rather than the pinned historical runtime the floors guard the
+# committed v5 corpus with (lib_historical_replay.sh, DRIFT.md D36). Unchanged by that decision.
+REPLAY_RUNTIME=live
 . "$VERIFY_DIR/lib_l5_artifacts.sh"
 
 echo "== $TEST_NAME"

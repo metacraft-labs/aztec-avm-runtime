@@ -31,6 +31,11 @@
 
 set -uo pipefail
 
+# THE EXECUTED replay/ IS THE PINNED HISTORICAL RUNTIME (lib_historical_replay.sh, DRIFT.md D36).
+# The artifacts come from ITS install, which is npm.current, so the FeeJuice artifact the chain's
+# class was proved against is still the one the resolver is handed.
+[ -n "${REPLAY_DIR:-}" ] || . "$VERIFY_DIR/lib_historical_replay.sh"
+
 L5_WORK="${L5_WORK:-$HOME/.cache/aztec-l5-artifacts}"
 L5_FIXTURE="$REPO_ROOT/replay/fixtures/chain_contract_classes.json"
 L5_RESOLVER_ARMS="$L5_WORK/resolver-arms.json"
@@ -49,15 +54,16 @@ export L5_SOURCES L5_TOOL_SOURCES L5_ARM_RUNNERS
 l5_prepare() {
   local f
   mkdir -p "$L5_WORK" || die "could not create $L5_WORK"
+  historical_replay_prepare
   for f in "${L5_SOURCES[@]}"; do
-    assert_file "L5's source $f" "$REPO_ROOT/replay/src/$f"
-    assert_true "…and $f is TRACKED" \
-      git -C "$REPO_ROOT" ls-files --error-unmatch "replay/src/$f"
+    assert_file "L5's source $f" "$REPLAY_DIR/src/$f"
+    assert_true "…and $f is COMMITTED in the executed runtime" \
+      hist_committed "replay/src/$f"
   done
   for f in "${L5_TOOL_SOURCES[@]}"; do
-    assert_file "L5's tool $f" "$REPO_ROOT/replay/tools/$f"
-    assert_true "…and $f is TRACKED" \
-      git -C "$REPO_ROOT" ls-files --error-unmatch "replay/tools/$f"
+    assert_file "L5's tool $f" "$REPLAY_DIR/tools/$f"
+    assert_true "…and $f is COMMITTED in the executed runtime" \
+      hist_committed "replay/tools/$f"
   done
   for f in "${L5_ARM_RUNNERS[@]}"; do
     assert_file "L5's arms runner $f" "$REPO_ROOT/tools/$f"
@@ -74,21 +80,31 @@ l5_prepare() {
     "${#L5_SOURCES[@]}"
   for f in "${L5_SOURCES[@]}"; do
     assert_eq "…and $f imports no node: builtin, so L4's browser bundle still builds" "0" \
-      "$(grep -c "from 'node:" "$REPO_ROOT/replay/src/$f" || true)"
+      "$(grep -c "from 'node:" "$REPLAY_DIR/src/$f" || true)"
   done
+}
+
+# l5_runtime_key — WHICH runtime an arms output was produced against. The `-nt` staleness test below
+# cannot see a change of runtime: `git archive` stamps the historical tree with its commit date, so
+# its files are OLDER than an output produced against the working tree's v6 replay/, and that
+# output would be reused as if it described the historical runtime. The key is stored beside each
+# output and a mismatch is stale, whatever the mtimes say.
+l5_runtime_key() { printf '%s %s %s\n' "$REPLAY_RUNTIME" "$REPLAY_RUNTIME_ROOT" "${HIST_REPLAY_COMMIT:-}"; }
+l5_key_stale() { # <arms-file> -> 0 when its recorded runtime key differs from this run's
+  [ "$(cat "$1.runtime" 2>/dev/null)" != "$(l5_runtime_key)" ]
 }
 
 # l5_require_resolver_arms — run the resolver arms if anything they read is newer than their output.
 l5_require_resolver_arms() {
   local stale=0 src
-  if [ ! -f "$L5_RESOLVER_ARMS" ]; then
+  if [ ! -f "$L5_RESOLVER_ARMS" ] || l5_key_stale "$L5_RESOLVER_ARMS"; then
     stale=1
   else
     for src in "$REPO_ROOT/tools/run_l5_artifact_arms.mjs" \
-               "$REPO_ROOT/replay/src/artifact_resolution.ts" \
-               "$REPO_ROOT/replay/src/artifact_providers.ts" \
-               "$REPO_ROOT/replay/tools/artifact_sources.mjs" \
-               "$REPO_ROOT/ct-host/src/source_map.ts" "$L5_FIXTURE"; do
+               "$REPLAY_DIR/src/artifact_resolution.ts" \
+               "$REPLAY_DIR/src/artifact_providers.ts" \
+               "$REPLAY_DIR/tools/artifact_sources.mjs" \
+               "$REPLAY_RUNTIME_ROOT/ct-host/src/source_map.ts" "$L5_FIXTURE"; do
       [ -f "$src" ] || continue
       [ "$src" -nt "$L5_RESOLVER_ARMS" ] && stale=1
     done
@@ -100,6 +116,7 @@ l5_require_resolver_arms() {
       || { cat "$L5_WORK/resolver-arms.log" >&2
            die "tools/run_l5_artifact_arms.mjs failed; log at $L5_WORK/resolver-arms.log"; }
     mv "$L5_RESOLVER_ARMS.tmp" "$L5_RESOLVER_ARMS"
+    l5_runtime_key >"$L5_RESOLVER_ARMS.runtime"
   fi
   [ -s "$L5_RESOLVER_ARMS" ] || die "the resolver arms run produced no $L5_RESOLVER_ARMS"
   python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$L5_RESOLVER_ARMS" >/dev/null 2>&1 \
@@ -111,15 +128,15 @@ l5_require_recording_arms() {
   local stale=0 src
   L5_CT_WRITER="$(l3_find_ct_writer)"
   export L5_CT_WRITER
-  if [ ! -f "$L5_RECORDING_ARMS" ]; then
+  if [ ! -f "$L5_RECORDING_ARMS" ] || l5_key_stale "$L5_RECORDING_ARMS"; then
     stale=1
   else
     for src in "$REPO_ROOT/tools/run_l5_recording_arms.mjs" \
-               "$REPO_ROOT/replay/src/artifact_resolution.ts" \
-               "$REPO_ROOT/replay/src/artifact_providers.ts" \
-               "$REPO_ROOT/replay/src/recording.ts" \
-               "$REPO_ROOT/replay/tools/artifact_sources.mjs" \
-               "$REPO_ROOT/ct-host/src/source_map.ts" "$REPO_ROOT/ct-host/src/writer.ts" \
+               "$REPLAY_DIR/src/artifact_resolution.ts" \
+               "$REPLAY_DIR/src/artifact_providers.ts" \
+               "$REPLAY_DIR/src/recording.ts" \
+               "$REPLAY_DIR/tools/artifact_sources.mjs" \
+               "$REPLAY_RUNTIME_ROOT/ct-host/src/source_map.ts" "$REPLAY_RUNTIME_ROOT/ct-host/src/writer.ts" \
                "$L5_CT_WRITER" "$L5_FIXTURE"; do
       [ -f "$src" ] || continue
       [ "$src" -nt "$L5_RECORDING_ARMS" ] && stale=1
@@ -136,6 +153,7 @@ l5_require_recording_arms() {
       || { cat "$L5_WORK/recording-arms.log" >&2
            die "tools/run_l5_recording_arms.mjs failed; log at $L5_WORK/recording-arms.log"; }
     mv "$L5_RECORDING_ARMS.tmp" "$L5_RECORDING_ARMS"
+    l5_runtime_key >"$L5_RECORDING_ARMS.runtime"
   fi
   [ -s "$L5_RECORDING_ARMS" ] || die "the recording arms run produced no $L5_RECORDING_ARMS"
   python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$L5_RECORDING_ARMS" >/dev/null 2>&1 \

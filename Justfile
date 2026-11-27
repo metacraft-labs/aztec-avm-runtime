@@ -2822,17 +2822,28 @@ verify-m32:
 # `git show <anchor>:<path>` on every run, which is the deliverable rather than a convenience, so a
 # missing fork is a refusal and never a skip.
 #
-# `replay/node_modules` must be installed — the replay tree is on `npm.current`, NOT on
-# `npm.deletion_era` like `orchestration/`, and the two are not interchangeable.
+# The replay tree these checks EXECUTE is the pinned historical runtime (below), on `npm.current`,
+# NOT on `npm.deletion_era` like `orchestration/`, and the two are not interchangeable. The working
+# tree's `replay/node_modules` (`@aztec-labs/*` 6.0.0) is what `typecheck-replay` reads.
 # ---------------------------------------------------------------------------
 
-verify-l0-surface:
+# THE PINNED HISTORICAL REPLAY RUNTIME the Live-Chain-Replay floors execute (pins.json
+# historical_runtimes.replay_v5, DRIFT.md D36). The working tree's replay/ is on @aztec-labs/* 6.0.0,
+# whose schemas cannot read the v5 corpus in replay/fixtures/, so every floor recipe below depends
+# on this one and the checks assert they ran against exactly that commit. It is a no-op when the
+# directory already verifies; otherwise it `git archive`s the commit (fetching that one commit from
+# origin in a shallow checkout) and runs `npm ci` from the commit's own lockfile. The checks never
+# do this themselves: run directly, a floor check DIES naming this recipe.
+materialize-historical-replay:
+    @python3 tools/historical_replay.py materialize
+
+verify-l0-surface: materialize-historical-replay
     @verification/verify_node_client_surface_narrow.sh
 
-verify-l0-refusals:
+verify-l0-refusals: materialize-historical-replay
     @verification/test_node_client_refusals_distinguishable.sh
 
-verify-l0-schema:
+verify-l0-schema: materialize-historical-replay
     @verification/verify_client_uses_upstream_schema.sh
 
 # The compiler is a check here: `replay/src/node_client.ts` ends with a type-level assertion that a
@@ -2842,7 +2853,7 @@ verify-l0-schema:
 typecheck-replay:
     @cd replay && tsc -p tsconfig.json && echo "typecheck-replay: replay/ type-checks, seam assertion included"
 
-verify-l0:
+verify-l0: materialize-historical-replay
     #!/usr/bin/env bash
     set -uo pipefail
     rc=0
@@ -2955,13 +2966,13 @@ verify-m33:
 # an old transaction at all.
 # ---------------------------------------------------------------------------
 
-verify-l1-fetch:
+verify-l1-fetch: materialize-historical-replay
     @verification/e2e_fetch_settled_transaction.sh
 
-verify-l1-artifact:
+verify-l1-artifact: materialize-historical-replay
     @verification/test_missing_contract_artifact_refused.sh
 
-verify-l1-private:
+verify-l1-private: materialize-historical-replay
     @verification/test_private_half_declared_absent.sh
 
 # THE ONE RECIPE THAT NEEDS A LIVE CHAIN. `just capture-replay-fixture url=… out=… [tx=…]`
@@ -2980,7 +2991,7 @@ capture-replay-fixture url='https://aztec-testnet.drpc.org' out='replay/fixtures
     [ -n "{{pin}}" ] && args+=(--pin-reference-block)
     cd "{{justfile_directory()}}/replay" && node tools/capture_settled_fixture.mjs "${args[@]}"
 
-verify-l1:
+verify-l1: materialize-historical-replay
     #!/usr/bin/env bash
     set -uo pipefail
     rc=0
@@ -3035,16 +3046,16 @@ avm_wasm_default := env_var_or_default('AVM_WASM_PATH', env_var('HOME') + '/.cac
 # smaller milestone rather than a red one, which is this campaign's most-repeated defect wearing a
 # friendlier word. Nothing here touches a network.
 
-verify-l2-effects:
+verify-l2-effects: materialize-historical-replay
     @verification/e2e_replay_matches_published_effects.sh
 
-verify-l2-roots:
+verify-l2-roots: materialize-historical-replay
     @verification/verify_hydrated_roots_match_state_reference.sh
 
-verify-l2-routes:
+verify-l2-routes: materialize-historical-replay
     @verification/verify_state_route_decided_on_measurement.sh
 
-verify-l2:
+verify-l2: materialize-historical-replay
     #!/usr/bin/env bash
     set -uo pipefail
     rc=0
@@ -3092,13 +3103,13 @@ replay-settled fixture='replay/fixtures/testnet_replay_tx.json' module=avm_wasm_
 # HERE, and its absence is a measurement rather than an omission: no reverted settled transaction
 # exists to write it over. See `just scan-reverted-transactions` and pins.json.
 
-verify-l3-steppable:
+verify-l3-steppable: materialize-historical-replay
     @verification/e2e_settled_transaction_produces_steppable_ct.sh
 
-verify-l3-provenance:
+verify-l3-provenance: materialize-historical-replay
     @verification/test_recording_declares_its_provenance.sh
 
-verify-l3:
+verify-l3: materialize-historical-replay
     #!/usr/bin/env bash
     set -uo pipefail
     rc=0
@@ -3195,7 +3206,7 @@ verify-oracle-interface-hash:
 # fetching somebody else's deployment behind your back, and rather than skipping.
 # ---------------------------------------------------------------------------
 
-verify-l4:
+verify-l4: materialize-historical-replay
     #!/usr/bin/env bash
     set -uo pipefail
     rc=0
@@ -3225,10 +3236,10 @@ verify-l4-net url='https://aztec-testnet.drpc.org' module=avm_wasm_default:
     echo "    an empty table — it is a fact about the chain, not a failure of this code."
     L4_RANGE_URL="{{url}}" AVM_WASM_PATH="{{module}}" verification/e2e_replay_block_range.sh
 
-verify-browser-opens-and-steps:
+verify-browser-opens-and-steps: materialize-historical-replay
     @verification/smoke_browser_opens_and_steps_l3_container.sh
 
-verify-browser-produces:
+verify-browser-produces: materialize-historical-replay
     @verification/smoke_browser_replays_settled_transaction.sh
 
 # The whole replay, in a page, with the container written out so it can be read back.
@@ -3260,10 +3271,10 @@ build-replay-browser-bundle:
 # with a remedy rather than a skip. It reads the containers back rather than believing the writer,
 # which is L3's hard-won rule: the writer produced bytes for three containers `ct-print` refused.
 
-verify-l5-resolution:
+verify-l5-resolution: materialize-historical-replay
     @verification/test_offchain_artifact_resolution_verified.sh
 
-verify-l5-source:
+verify-l5-source: materialize-historical-replay
     @verification/e2e_resolved_contract_records_at_source_level.sh
 
 # The Noir CALL TREE, on top of the source positions `verify-l5-source` establishes.
@@ -3272,10 +3283,10 @@ verify-l5-source:
 # `NoirFrameTracker` — the same code both recorders run — over the version-matched FeeJuice artifact
 # and the published snapshot's own decoded step positions, both on disk. So it is in the OFFLINE
 # floor rather than beside `verify-l5-net`.
-verify-noir-frames:
+verify-noir-frames: materialize-historical-replay
     @verification/test_noir_frames_open_at_function_boundaries.sh
 
-verify-l5:
+verify-l5: materialize-historical-replay
     #!/usr/bin/env bash
     set -uo pipefail
     rc=0
@@ -3328,7 +3339,7 @@ await-resolvable-tx url='https://aztec-testnet.drpc.org' out='scratchpad/l5-live
 # WHAT IT SHOWS: the deployed CodeTracer engine, in a real headless browser, reporting
 # `fee_juice_contract/src/main.nr:203` for a step whose control reports `/aztec/l5.avm:130` — and
 # 130 is the program counter.
-verify-l5-browser engine='/tmp/l5engine':
+verify-l5-browser engine='/tmp/l5engine': materialize-historical-replay
     @L5_ENGINE_DIR="{{engine}}" verification/smoke_browser_shows_noir_source_lines.sh
 
 # The mutation harness. Restores by digest and refuses to start over a tree a previous run left
@@ -3336,7 +3347,7 @@ verify-l5-browser engine='/tmp/l5engine':
 l5-mutations *arms:
     @scratchpad/campaign/l5-mutations.sh {{arms}}
 
-verify-browser-replay-dd9:
+verify-browser-replay-dd9: materialize-historical-replay
     @verification/verify_browser_replay_dd9_clean.sh
 
 # The published engine's three files. Recorded with their statuses because "the engine is at that

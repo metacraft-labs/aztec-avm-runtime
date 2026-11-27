@@ -27,8 +27,10 @@ export L1_WORK
 
 . "$VERIFY_DIR/lib_l0_node_client.sh"
 
-L1_SRC="$REPO_ROOT/replay/src"
-L1_TOOLS="$REPO_ROOT/replay/tools"
+# Sources and tools are the EXECUTED tree's (lib_historical_replay.sh); the fixtures and the
+# capture script are the working tree's, because the corpus is what the floors guard.
+L1_SRC="$REPLAY_DIR/src"
+L1_TOOLS="$REPLAY_DIR/tools"
 L1_FIXTURE_DIR="$REPO_ROOT/replay/fixtures"
 L1_CAPTURE_SCRIPT="$REPO_ROOT/replay/tools/capture_settled_fixture.mjs"
 export L1_SRC L1_TOOLS L1_FIXTURE_DIR L1_CAPTURE_SCRIPT

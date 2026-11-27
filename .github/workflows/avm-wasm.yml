@@ -2846,11 +2846,17 @@ jobs:
     # `replay/fixtures/published_snapshot_step_positions.json`, which is the published snapshot
     # container's own decoded step positions.
     #
-    # IT NEEDS `npm ci` IN replay/ AND NOTHING ELSE. The artifact is what supplies `brillig_locations`
-    # (314 pcs), `location_tree` (155 nodes) and the 726 `function_locations` that NAME a frame, and
-    # the check DIES naming that remedy rather than skipping when it is absent. The pin matters:
-    # §1 asserts `aztec_version` is `5.3.0-nightly.20260819`, because a different nightly is a
-    # different contract with different pcs and would be a green run about nothing.
+    # IT NEEDS THE PINNED HISTORICAL REPLAY RUNTIME, AND `npm ci` IN replay/ FOR THE TYPE-CHECK. The
+    # artifact is what supplies `brillig_locations` (314 pcs), `location_tree` (155 nodes) and the 726
+    # `function_locations` that NAME a frame, and the check DIES naming its remedy rather than
+    # skipping when it is absent. The pin matters: §1 asserts `aztec_version` is
+    # `5.3.0-nightly.20260819`, because a different nightly is a different contract with different
+    # pcs and would be a green run about nothing. Since the working tree's replay/ moved onto
+    # `@aztec-labs/*` 6.0.0 (DRIFT.md D36) that artifact is no longer in replay/'s install: it is in
+    # the install of pins.json `historical_runtimes.replay_v5`, which `just materialize-historical-
+    # replay` builds from that commit's own lockfile (fetching the one commit this shallow checkout
+    # lacks). `just verify-noir-frames` depends on that recipe, so the step below is explicit only so
+    # its log is separate.
     #
     # It does NOT clone aztec-packages or codetracer-specs. `verification/lib.sh` only SETS
     # `FORK_ROOT`; nothing on this path reads it.
@@ -2917,14 +2923,24 @@ jobs:
             aztec-avm-runtime/tools/run_noir_frames_arms.mjs \
             aztec-avm-runtime/ct-host/src/noir_frames.ts \
             aztec-avm-runtime/ct-host/src/frame_fold.ts \
-            aztec-avm-runtime/verification/test_noir_frames_open_at_function_boundaries.sh ; do
+            aztec-avm-runtime/verification/test_noir_frames_open_at_function_boundaries.sh \
+            aztec-avm-runtime/verification/lib_historical_replay.sh \
+            aztec-avm-runtime/tools/historical_replay.py ; do
             test -f "$p" || { echo "::error::missing input: $p" >&2; exit 1; }
           done
 
-      - name: Install the published @aztec packages (FeeJuice.json is the artifact under test)
+      - name: Install replay/'s own packages (@aztec-labs/* 6.0.0; read by the type-check)
         working-directory: aztec-avm-runtime/replay
         shell: bash
         run: dev-exec npm ci 2>&1 | tail -20
+
+      - name: Materialise the pinned historical replay runtime (its install holds FeeJuice.json)
+        working-directory: aztec-avm-runtime
+        # STREAMED, NOT `| tail`: the fetch and `npm ci` are slow on a cold runner, and a tail shows
+        # nothing until they finish. `shell: bash` supplies `-o pipefail`, so `| tee` cannot swallow
+        # a failure.
+        shell: bash
+        run: dev-exec just materialize-historical-replay 2>&1 | tee materialize-historical-replay.log
 
       - name: Type-check the frame logic
         working-directory: aztec-avm-runtime
@@ -2949,6 +2965,7 @@ jobs:
           mkdir -p artifacts
           cp aztec-avm-runtime/verify-noir-frames.log artifacts/ 2>/dev/null || true
           cp aztec-avm-runtime/typecheck-*.log artifacts/ 2>/dev/null || true
+          cp aztec-avm-runtime/materialize-historical-replay.log artifacts/ 2>/dev/null || true
           cp "${{ github.workspace }}"/noir-frames-work/noir-frames.json artifacts/ 2>/dev/null || true
           cp "${{ github.workspace }}"/noir-frames-work/arms.log artifacts/ 2>/dev/null || true
           ls -la artifacts

@@ -15,6 +15,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+// The CLI under test is the replay RUNTIME the caller names (verification/lib_historical_replay.sh:
+// the floors run the pinned historical runtime, DRIFT.md D36); the fixture is the working tree's
+// committed corpus. No default: a run that does not say which runtime it measures refuses, rather
+// than silently measuring the working tree.
+const runtimeRoot = process.env.AZTEC_REPLAY_RUNTIME_ROOT;
+assert.ok(runtimeRoot, 'AZTEC_REPLAY_RUNTIME_ROOT must name the replay runtime under test');
 const fixturePath = join(root, 'replay/fixtures/testnet_replay_tx_proof.json');
 const fixture = JSON.parse(readFileSync(fixturePath, 'utf8'));
 const module = process.env.AVM_WASM_PATH ?? process.env.L2_MODULE;
@@ -37,9 +43,9 @@ globalThis.fetch = (input, init) => {
 `);
 const replay = (path) => spawnSync(process.execPath, ['--experimental-wasm-exnref',
   '--import', pathToFileURL(guard).href,
-  join(root, 'replay/tools/replay_settled_transaction.mjs'),
+  join(runtimeRoot, 'replay/tools/replay_settled_transaction.mjs'),
   '--fixture', path, '--module', module, '--json'], {
-  cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
+  cwd: runtimeRoot, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
   env: { ...process.env, HOME: temp, CRS_PATH: join(temp, 'crs'),
     BB_BINARY_PATH: join(temp, 'no-native-bb'), HARDWARE_CONCURRENCY: '2' },
 });
