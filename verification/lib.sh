@@ -275,6 +275,40 @@ assert_contains() { # <description> <needle> <haystack>
   esac
 }
 
+# ---- naming a commit the way a document spells it ---------------------------
+#
+# Documents abbreviate the anchor (`233d8e0993`, as every PR.md under codetracer-specs/upstream-bugs/
+# and every workflow guard writes it) while the libraries now carry the full 40-digit SHA read from
+# pins.json (`pins_anchor_commit`). Comparing the two as strings fails on a correct document, and
+# comparing them by prefix would accept any string that happens to start the same way. So the
+# comparison is made the way the rest of this tree makes it: resolve both in the fork's object
+# store and compare the commits. An abbreviation that is ambiguous, absent or not a commit fails.
+#
+# assert_same_commit <description> <named> <base>
+#   <named> is the spelling a document uses and must be at least 10 hex digits (the width of the
+#   pins.json `short` field), so a stray short hex word cannot pass; <base> is any revision.
+assert_same_commit() {
+  local desc="$1" named="$2" base="$3" want got
+  case "$named" in
+    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;;
+    *) fail "$desc  [$named] is not a commit spelled with at least 10 hex digits"; return ;;
+  esac
+  case "$named" in *[!0-9a-f]*) fail "$desc  [$named] is not a hex commit name"; return ;; esac
+  want="$(git -C "$FORK_ROOT" rev-parse --verify --quiet "$base^{commit}" 2>/dev/null)"
+  got="$(git -C "$FORK_ROOT" rev-parse --verify --quiet "$named^{commit}" 2>/dev/null)"
+  if [ -n "$want" ] && [ "$got" = "$want" ]; then
+    pass "$desc  [$named = $want]"
+  else
+    fail "$desc  [$named] resolves to [${got:-nothing}] in $FORK_ROOT, expected [${want:-unresolvable $base}]"
+  fi
+}
+
+# pr_md_base_commit <PR.md text>  ->  the commit on its `**Base commit:** \`<sha>\`` line, or nothing.
+# Only that header line is read: a base mentioned in passing elsewhere in the body does not count.
+pr_md_base_commit() {
+  printf '%s\n' "$1" | sed -n 's/^\*\*Base commit:\*\* *`\([0-9a-f][0-9a-f]*\)`.*/\1/p' | head -1
+}
+
 assert_not_contains() { # <description> <needle> <haystack>
   local desc="$1" needle="$2" haystack="$3"
   case "$haystack" in

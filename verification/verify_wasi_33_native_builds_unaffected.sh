@@ -233,9 +233,13 @@ normalise "$CC_PATCHED" "$PATCHED" > "$M4_WORK/cc.patched"
 
 N_BASE=$(wc -l < "$M4_WORK/cc.base")
 N_PATCHED=$(wc -l < "$M4_WORK/cc.patched")
-# Pinned, not merely "a real number": the write-up quotes 1,009 and 959, so those
-# are the numbers that must not drift away from the artefacts.
-assert_eq "the native configure covers the recorded 1,009 translation units" "1009" "$N_BASE"
+# Pinned, not merely "a real number": the write-up quotes 1,013 and 959, so those
+# are the numbers that must not drift away from the artefacts. It quoted 1,009 until
+# 2026-11-26: that count was taken on a host whose GTest package satisfied
+# barretenberg's FIND_PACKAGE_ARGS, so gtest's four translation units were not
+# compiled. The configure now refuses find_package for fetched dependencies
+# (_native_configure_inner.sh), so the count is the same on every host.
+assert_eq "the native configure covers the recorded 1,013 translation units" "1013" "$N_BASE"
 assert_eq "the same number of native translation units before and after" "$N_BASE" "$N_PATCHED"
 
 if diff -q "$M4_WORK/cc.base" "$M4_WORK/cc.patched" >/dev/null; then

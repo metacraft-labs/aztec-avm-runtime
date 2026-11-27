@@ -56,7 +56,8 @@ assert_prefix "and the Kind is a refactor" "refactor" "$pr_kind"
 assert_contains "PR.md carries a Status line" "**Status:**" "$doc"
 assert_contains "PR.md states it is not yet filed and has no upstream URL" \
   "not filed" "$doc"
-assert_contains "PR.md names the base commit" "**Base commit:** \`$M3_BASE_REV\`" "$doc"
+assert_contains "PR.md carries a Base commit line" "**Base commit:** \`" "$doc"
+assert_same_commit "PR.md names the base commit" "$(pr_md_base_commit "$doc")" "$M3_BASE_REV"
 assert_contains "PR.md records its order in the series and whether it stands alone" \
   "**Order in the series:**" "$doc"
 assert_contains "PR.md offers a suggested PR title" "Suggested PR title" "$doc"

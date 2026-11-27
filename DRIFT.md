@@ -328,7 +328,7 @@ were absorbed silently.
   version"; that statement was wrong and is corrected in the contribution's `PR.md`.
 - decision: Open, with the fix prepared rather than only described:
   `codetracer-specs/upstream-bugs/aztec-wasi-sdk-33/` is a `git format-patch` against `233d8e0993`
-  that moves the pin, demonstrated native-neutral (1,009 native translation units, byte-identical
+  that moves the pin, demonstrated native-neutral (1,013 native translation units, byte-identical
   compile commands) and artefact-neutral (identical imports and C-ABI exports, 1.02% smaller). It is
   **not filed**; M11 prepared the branch and the submission script and left the filing to a person.
   This entry closes when upstream's pin moves, and not before — the downstream carry (our own preset
@@ -1821,6 +1821,164 @@ were absorbed silently.
   second half now MEASURED rather than inferred.
   `@aztec-labs/stdlib@6.0.0`'s `constants.gen.js` carries `CONTRACT_ADDRESS_V3 = 993442748`,
   so the published TypeScript already agrees with the chain; only the wasm does not.
+
+## D36 — `replay/` runs `@aztec-labs/*` 6.0.0 while the committed Live-Chain-Replay corpus is v5, so the floors replay it on a pinned historical runtime
+
+- id: D36
+- status: accepted
+- opened: 2026-11-27
+- milestone: — (the `agents-to-dev-2026-11-26` stabilisation, on the operator's decision of
+  2026-11-26: codetracer-pm `issues/2026-11-26-aztec-replay-aztec-labs-6-rename-reached-agents-and-breaks-the-replay-floors.md`, "Decision")
+- design-question: which Aztec generation the offline Live-Chain-Replay floors guard, now that the
+  follower's runtime and the committed corpus are on different ones
+- sides: the working tree's `replay/` on `pins.json` `npm.aztec_labs_v6` (`@aztec-labs/*` and
+  `@aztec-foundation/*` 6.0.0, which both live networks run — D35) versus `replay/fixtures/`, every
+  file of which was captured from node-5.2.0 testnet nodes and is replayed through upstream's own
+  response schemas, which were `@aztec/*` `npm.current` (5.3.0-nightly.20260819) when they were
+  written
+- what: `d50bb03` and `a8b8efc` moved `replay/` onto the renamed packages. Their subjects said not
+  to land them and their bodies said `pins.json` was deliberately untouched; they reached `agents`
+  through PR #21 regardless, and the operator ADOPTED them on 2026-11-26, because blocktracer's
+  production follower depends on them (without them the runtime cannot decode a v6 node). They
+  carried a draft drift entry numbered D27 that was never committed; D27 has since been taken by an
+  unrelated entry, so this is that entry under a fresh number. The behavioural differences, each
+  measured rather than inferred:
+
+  1. **The wire format.** v6's `BlockHeader` consumes four bytes fewer than v5's before
+     `state.l1ToL2MessageTree`. Running L1's fetch probe with its imports rebased onto
+     `@aztec-labs/*`, over the working tree's `replay/src`, against
+     `replay/fixtures/testnet_settled_tx.json`, dies in `BlockHeader.fromBuffer` →
+     `AppendOnlyTreeSnapshot.fromBuffer` with `Value 0xd38750c4…2000 is greater or equal to field
+     modulus` (measured 2026-11-27 at `9c92c6c6f9`). blocktracer measured the same shift on its own
+     41 transcripts (its `flake.nix`, above `aztec-avm-runtime-historical`). So **no fixture in
+     `replay/fixtures/` is readable by the v6 runtime**, and the reverse holds too (a8b8efc: the
+     pinned v5 stdlib refuses a v6 body).
+  2. **The client API.** `createAztecNodeClient` took positional arguments in 5.3 and takes an
+     options object in 6.x; `versions` keeps its meaning, so `ProtocolVersionMismatch` still rests on
+     upstream's `getVersioningResponseHandler` (d50bb03). An absent transport is now an absent key.
+  3. **The scope split.** The rename is three-way: protocol packages under `@aztec-labs/*`,
+     cryptography and Noir bindings under `@aztec-foundation/*` (`@aztec-labs/bb.js` does not exist;
+     a8b8efc). That is why `npm.aztec_labs_v6` governs two scopes.
+  4. **The FeeJuice artifact.** `@aztec-labs/protocol-contracts@6.0.0`'s FeeJuice is a different
+     contract from the v5 class L5 proves at `0x…03`: over the working tree's install at `bf3e2b1`,
+     `test_offchain_artifact_resolution_verified` found the v6 artifact's `public_dispatch` (1,947
+     bytes) not byte-identical to the class's `packedBytecode` and refused it `bytecode-mismatch`,
+     and its revived artifact hash `0x03a70c5c…dba8b` is not the chain's `0x1a57ff2a…ae1d`. With no
+     `@aztec/protocol-contracts` left in `replay/`, `verify-noir-frames` fell back to
+     `orchestration/`'s `npm.deletion_era` copy (5.0.0-nightly.20260626) and every frame count moved
+     (726 → 721 `function_locations`, 44 → 42 frames). The guard that caught it is §1's version
+     assertion, which is why it stays exact.
+  5. **The protocol pins.** v6's `protocolContractsHash` is `0x0f54271c…54d7` and its
+     `getVKTreeRoot()` is `0x22fff5de…f219` — exactly the values both live networks advertise (D35)
+     — while `pins.json` `live_chain.protocol_version` and `replay/src/pinned_protocol_version.ts`
+     still carry the v5 values `0x2c075866…b2ca` / `0x2b3b6ea4…2892`. **NOT CHANGED HERE, on
+     purpose**: that is the shipped follower's version guard, and moving it needs a live measurement
+     through a direct (non-proxying) endpoint, not a transcription from a package. Recorded by the
+     promotions manager as a separate issue.
+- why it matters: the Live-Chain-Replay floors (`verify-l0` … `verify-l5`) and `verify-noir-frames`
+  are offline regression gates over that corpus, and the corpus cannot be re-captured — a settled
+  transaction stops being replayable about an hour after it settles, and no v5 chain exists any
+  more. With the working tree's runtime they could not run at all (every probe died on
+  `@aztec/stdlib`), and `verify_pinned_nightly_single_source` reported `replay/` as a vacuous
+  consumer.
+- decision: **Accepted, on the operator's decision, and split by generation.**
+  - The offline floors guard the committed v5 corpus **on the runtime that wrote it**: `pins.json`
+    `historical_runtimes.replay_v5` = this repository at `238a3a5b9f` (the newest `replay/` on the
+    mainline before the rename, byte-identical `replay/fixtures/`, and the commit blocktracer pins as
+    `aztec-avm-runtime-historical`). `tools/historical_replay.py` materialises it from the object
+    store and from its own lockfile (`just materialize-historical-replay`, a dependency of every
+    floor recipe), and `verification/lib_historical_replay.sh` asserts on every run that what the
+    floors execute IS that commit: every tracked blob re-hashed, nothing untracked in the runtime
+    source directories, the install on `npm.current`, `@aztec/stdlib` resolving into it from the
+    probe directory — and two negative controls of the verifier itself. Every floor assertion is
+    unchanged. `npm.current` keeps that tree as a checked consumer: `tools/repin.py` reads its
+    `package.json` and lockfile out of the object store.
+  - The working tree's `replay/` is declared on `npm.aztec_labs_v6`, held to it in both its scopes,
+    and refused any `@aztec/*` package (one tree, one generation).
+  - **What this costs, stated so nobody infers more:** the v6 runtime the follower ships has **no
+    offline floor**. Its changes since `238a3a5b9f` (contract discovery, #22's "nothing discovered",
+    the V8 SIGSEGV fix, the named L1→L2 refusal) are guarded by nothing in this repository until a v6
+    corpus is captured from a live v6 chain, which is milestone work and a follow-up issue. The
+    campaign's own mutation harnesses (`scratchpad/campaign/l*-mutations.sh`) still mutate the
+    working tree's `replay/src`, which the floors no longer execute, so they need re-pointing before
+    they are next relied on.
+
+## D37 — L3's and L5's floors read the legacy `ct-print` decode; the pinned reader emits only the split one
+
+- id: D37
+- status: closed
+- opened: 2026-11-27
+- milestone: the trace-format re-pins of 2026-10-02 … 10-09 (`pins.json` history, `ab5f1d1`,
+  `46c1fae`, `dcda6a2`), read by Aztec-Live-Chain-Replay L3 (`verify-l3`) and L5 (`verify-l5`);
+  codetracer-pm `issues/2026-11-27-aztec-l3-l5-floors-parse-ct-prints-pre-october-json.md`
+- design-question: —
+- sides: `ct-print --full` at `anchors.trace_format_nim` (`051efd22b0`), which decodes this
+  runtime's container through the split-stream reader only, versus the legacy combined-stream
+  decode that `e2e_settled_transaction_produces_steppable_ct`,
+  `test_recording_declares_its_provenance` and `e2e_resolved_contract_records_at_source_level`
+  were written against (last edited before the re-pins; `0953398` adapted three other checks, D32–D34,
+  and missed these)
+- what: five differences, every one measured over the L3 and L5 containers at `db45a82` on the
+  pinned v5 runtime (D36):
+  1. **The keys.** A step is `kind: "step"`, not `type: "Step"`; a frame is a `call_entry` record
+     (the interning table is the top-level `functions` array), not a `Function` event; a trace-log
+     event is `kind: "io", io_kind: "TraceLogEvent"` with its text in `text`, not
+     `event_kind: "elkTraceLogEvent"` / `content`. Read with the old keys every filter matched
+     nothing, and the checks reported empty answers: 11, 55 and 14 red assertions.
+  2. **The entry step.** The decode carries the writer's entry step first — `start` writes it at
+     line 1 of the session path in the `<toplevel>` root frame (D27), and
+     `codetracer-trace-format-spec` `trace-events.md` ("Recorder Integration — Starting a
+     Recording") requires it: 346 steps for L3's 345, 65 for L5's 64.
+  3. **`Line(0)` reads back as line 1.** The reader resolves each position through the path's
+     position space, whose line 1 is the file's base, so the writer's `Line(0)` — L3's pc 0, and
+     the placeholder slot of L5's partial arm — decodes as line 1, as
+     `test_ct_container_roundtrip_ct_print` measured on the same writer. Every other pc
+     round-trips unchanged.
+  4. **The v4 global line index is `line - 1`** on the first interned path
+     (`codetracer-trace-format-nim` `638ba06`), and index 0 is now the entry step: the rung-3
+     control's first recorder step is `STEP1_GLI` 129 for pc 130, where the check read `STEP0_GLI`
+     130.
+  5. **Container size no longer measures content.** The split container is allocated in 4096-byte
+     blocks: L3's 345-step container, L3's 254-step provenance control, L3's synthesised walk and
+     L5's 64-step control are all 77,824 bytes, and the same writer closed with nothing recorded
+     is 69,632. The `>= 100000`-byte "substantial container rather than a header" floor (L3 §1, L3
+     provenance §1) and two "the containers differ in size" assertions were therefore red on
+     well-formed containers.
+- why it matters: a filter that matches nothing reports an empty, successful answer — the
+  campaign's most repeated defect (D31) — and here it hid the floors' state since October, because
+  no workflow runs them. The size floor is the subtler half: lowering the constant to fit 77,824
+  would have kept a number that separates nothing, since a 64-step container and a 345-step one are
+  the same size.
+- decision: **Conformed, and no assertion was weakened.**
+  - One reader, `verification/_l3_decode.py` (`l3_decode` in `lib_l2_replay.sh`), serves all three
+    checks. It reads the split decode only and refuses any other shape, or a legacy `type` key, with
+    a non-zero exit and nothing on stdout, so a reader regressing to the old spelling turns the
+    checks red rather than empty. Every command, the frame and trace-log ones included, first
+    cross-checks the step, `call_entry` and `io` listings against the decode's own `counts` and
+    finds the entry step, so no command can answer an empty or truncated decode with zero rows.
+  - The entry step is excluded from every per-step listing only after it is found where the spec
+    puts it (first, index 0, `<toplevel>`, depth 0, path 0, line 1, no variables, the only step in
+    the root frame), and `l3_assert_entry_step` asserts the total as the recorder's count plus one
+    over every decoded container, so the exclusion is a measurement.
+  - L3's pc comparison stays record for record against the AVM's own pcs, put through the
+    `Line(0)` clamp; the check also asserts the clamp touches exactly one record. L5's partial-arm
+    placeholder is expected at `l5.avm:1`. L5 §5 compares `STEP1_GLI` with the control's first
+    recorder pc minus one, derived in the check, and asserts that `STEP0_GLI` is the entry step.
+  - The size floor is replaced by what it was for, measured in the same run: the probe also closes
+    a header-only container from the same writer and configuration, and the recording must be
+    strictly larger in bytes AND decode the recorder's steps where the header-only one decodes the
+    entry step alone (346 against 1 in `steps.dat`, through `ct-split-probe`, with a chunk
+    inflated; the provenance check reads its header-only container back through `ct-print` and
+    finds the entry step alone). "The two containers differ in size" became "differ in bytes"
+    (`cmp`), plus, for the provenance pair, a different step count found by the reader rather than
+    reported by the producer.
+  - Assertion counts, measured at `db45a82` without and with this change: steppable 128 → 144,
+    provenance 156 → 169, source level 183 → 192, with 11, 55 and 14 red before and none after.
+    No assertion was removed without a replacement asserting at least as much.
+- evidence: `aztec-avm-runtime/verification/_l3_decode.py`; `verification/lib_l2_replay.sh`
+  (`l3_decode`, `l3_assert_entry_step`); the three checks' §1 and the comments at each conformed
+  assertion; `verification/test_ct_container_roundtrip_ct_print.sh` (the entry step, the clamp and
+  the `line - 1` index, measured over the same writer).
 
 <!-- END:drift -->
 

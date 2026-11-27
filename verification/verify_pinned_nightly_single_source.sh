@@ -59,10 +59,27 @@ for path, role in wit.items():
     else:
         print("WITNESSVALUE %s %s" % (path, npm[role]["version"]))
 print("HISTORY %d" % len(p.get("history", [])))
+hist_rt = {k: v for k, v in p.get("historical_runtimes", {}).items() if not k.startswith("_")}
+print("HISTORICAL %s" % " ".join("%s@%s" % (k, v.get("commit", "")) for k, v in sorted(hist_rt.items())))
+for name, spec in hist_rt.items():
+    if not re.fullmatch(r"[0-9a-f]{40}", spec.get("commit", "")):
+        print("PROBLEM historical_runtimes.%s.commit is not a full SHA" % name)
+    if spec.get("npm_pin") not in npm:
+        print("PROBLEM historical_runtimes.%s names undeclared npm pin %r" % (name, spec.get("npm_pin")))
 print("ANCHORS %s" % " ".join(sorted(k for k in p["anchors"])))
 for role, spec in npm.items():
-    if not re.fullmatch(r"\d+\.\d+\.\d+-nightly\.\d{8}", spec["version"]):
-        print("PROBLEM npm.%s version %r is not a nightly" % (role, spec["version"]))
+    scopes = spec.get("scopes", ["@aztec"])
+    # The @aztec/* lines are nightlies. A line over another scope (aztec_labs_v6: @aztec-labs and
+    # @aztec-foundation, DRIFT.md D36) is an exact release, since upstream publishes no nightly
+    # under those scopes that this tree uses; either way the version is EXACT, never a range.
+    if scopes == ["@aztec"]:
+        if not re.fullmatch(r"\d+\.\d+\.\d+-nightly\.\d{8}", spec["version"]):
+            print("PROBLEM npm.%s version %r is not a nightly" % (role, spec["version"]))
+    elif not re.fullmatch(r"\d+\.\d+\.\d+", spec["version"]):
+        print("PROBLEM npm.%s version %r is not an exact release" % (role, spec["version"]))
+    if not scopes or any(not re.fullmatch(r"@[a-z0-9-]+", s) for s in scopes):
+        print("PROBLEM npm.%s declares malformed scopes %r" % (role, scopes))
+
     if not spec.get("role"):
         print("PROBLEM npm.%s has no stated role" % role)
 for name, spec in exc.items():
@@ -87,17 +104,23 @@ exceptions="$(printf '%s\n' "$info" | sed -n 's/^EXCEPTIONS //p')"
 witnesses="$(printf '%s\n' "$info" | sed -n 's/^WITNESSES //p')"
 history="$(printf '%s\n' "$info" | sed -n 's/^HISTORY //p')"
 anchors="$(printf '%s\n' "$info" | sed -n 's/^ANCHORS //p')"
+historical="$(printf '%s\n' "$info" | sed -n 's/^HISTORICAL //p')"
 
 note "pinned nightly: $current"
 note "consumers: $consumers"
 note "exceptions: $exceptions"
 note "witnesses: $witnesses"
 note "anchors: $anchors"
+note "historical runtimes: $historical"
 
 assert_ge "pins.json declares the npm pins it needs" 2 "$n_pins"
 assert_ge "pins.json declares several consumer trees" 3 "$(printf '%s' "$consumers" | wc -w)"
 assert_ge "pins.json records a bump history" 1 "$history"
 assert_ge "pins.json declares the upstream anchors too" 3 "$(printf '%s' "$anchors" | wc -w)"
+# The v5 line's only executed consumer since the rename (DRIFT.md D36) is the historical runtime the
+# Live-Chain-Replay floors run. If it disappeared, `npm.current` would lose that consumer silently.
+assert_ge "pins.json declares the historical runtime the floors execute" 1 \
+  "$(printf '%s' "$historical" | wc -w)"
 if [ -z "$problems" ]; then
   pass "pins.json is internally consistent and every pin states its role"
 else
@@ -249,6 +272,13 @@ if n < 8:
     raise SystemExit("staged only %d files" % n)
 PY
 ( cd "$SB/repo" && git init -q . && git add -- . >/dev/null 2>&1 ) || die "could not init the pin sandbox"
+# The historical runtimes' package files are read out of the OBJECT STORE (`git show <commit>:…`),
+# which a fresh sandbox does not have. Borrowing this repository's objects through `alternates`
+# gives the sandbox read access to exactly those commits without copying anything or letting a
+# mutation reach the real repository: the sandbox writes only its own objects.
+REAL_OBJECTS="$(cd "$REPO_ROOT" && realpath "$(git rev-parse --git-common-dir)/objects")"
+printf '%s\n' "$REAL_OBJECTS" >"$SB/repo/.git/objects/info/alternates" \
+  || die "could not lend the sandbox this repository's objects"
 
 # A control passes only when repin.py rejects the mutation WITH THE RULE IT IS NAMED FOR: every
 # mutation here also trips a neighbouring rule (a synthetic version is also undeclared prose, a
@@ -363,6 +393,70 @@ assert stripped != text, 'nothing to strip; the control is staged wrong'
 open(path, 'w', encoding='utf-8').write(stripped)
 EOF"
 
+
+# THE SECOND SCOPE'S CONTROLS (npm.aztec_labs_v6, DRIFT.md D36). The working tree's replay/ is held
+# to a line over @aztec-labs/* and @aztec-foundation/*; each rule that hold rests on must be shown
+# able to fail. The versions are DERIVED from pins.json, never typed: a typed nightly here would be
+# prose quoting a version, and the rule under test is not that one.
+pin_control "a v6-line dependency moved off its declared release" \
+  "replay/package\\.json: @aztec-labs/stdlib is [^ ]+, pins\\.json says " \
+  "python3 - <<'EOF'
+import json, re
+want = json.load(open('pins.json'))['npm']['aztec_labs_v6']['version']
+moved = re.sub(r'(\\d+)$', lambda m: str(int(m.group(1)) + 1), want)
+t = open('replay/package.json').read()
+needle = '\"@aztec-labs/stdlib\": \"%s\"' % want
+assert needle in t, 'the v6 dependency is not where the control expects it'
+open('replay/package.json', 'w').write(t.replace(needle, '\"@aztec-labs/stdlib\": \"%s\"' % moved))
+EOF"
+
+pin_control "a package of ANOTHER pin line's scope inside the v6 tree" \
+  "replay/package\\.json: @aztec/stdlib is in @aztec, a scope of another declared pin line, not npm\\.aztec_labs_v6's" \
+  "python3 - <<'EOF'
+import json
+cur = json.load(open('pins.json'))['npm']['current']['version']
+t = open('replay/package.json').read()
+needle = '\"dependencies\": {'
+assert needle in t
+open('replay/package.json', 'w').write(t.replace(needle, needle + '\\n    \"@aztec/stdlib\": \"%s\",' % cur, 1))
+EOF"
+
+pin_control "a v6-line lockfile entry resolving to a different version than pins.json declares" \
+  "replay/package-lock\\.json: @aztec-labs/foundation resolves to [^ ]+, pins\\.json says " \
+  "python3 - <<'EOF'
+import json, re
+want = json.load(open('pins.json'))['npm']['aztec_labs_v6']['version']
+p = 'replay/package-lock.json'
+d = json.load(open(p))
+hit = 0
+for k, v in d['packages'].items():
+    if k.endswith('node_modules/@aztec-labs/foundation'):
+        v['version'] = re.sub(r'(\\d+)$', lambda m: str(int(m.group(1)) + 1), want)
+        hit = 1
+        break
+assert hit, 'no @aztec-labs/foundation lock entry to move'
+json.dump(d, open(p, 'w'), indent=2)
+EOF"
+
+# THE HISTORICAL RUNTIME'S CONTROLS. Its package files are not in the working tree, so the rule
+# that holds them to npm.current could pass by never reading them; both directions are shown.
+pin_control "the historical runtime declared on a pin its commit's package files do not carry" \
+  "[0-9a-f]{10}:replay/package\\.json: @aztec/[^ ]+ is [^ ]+, pins\\.json says " \
+  "python3 - <<'EOF'
+import json
+d = json.load(open('pins.json'))
+d['historical_runtimes']['replay_v5']['npm_pin'] = 'deletion_era'
+json.dump(d, open('pins.json', 'w'), indent=2)
+EOF"
+
+pin_control "the historical runtime named by a commit the object store does not have" \
+  "historical_runtimes\\.replay_v5: commit [0-9a-f]{40} is not in this repository's object store" \
+  "python3 - <<'EOF'
+import json
+d = json.load(open('pins.json'))
+d['historical_runtimes']['replay_v5']['commit'] = 'f' * 40
+json.dump(d, open('pins.json', 'w'), indent=2)
+EOF"
 
 # --apply's no-op above is an empty diff and "rewrote 0 file(s)", which a rewriter that never writes
 # anything would also produce. So --apply must also REPAIR a tree it disagrees with: a package.json

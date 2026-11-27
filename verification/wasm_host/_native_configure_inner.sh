@@ -14,6 +14,17 @@
 #     fails the whole configure if node-addon-api cannot be resolved.
 #   * -DAVM_TRANSPILER_LIB= : the transpiler is a Rust staticlib produced by a
 #     separate bootstrap step; nothing here needs it.
+#
+# And one host fact that made the measurement depend on the machine:
+#   * -DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER : barretenberg declares gtest and
+#     google-benchmark with FetchContent's FIND_PACKAGE_ARGS (cmake/gtest.cmake,
+#     cmake/benchmark.cmake), so a host that offers a GTest package satisfies it
+#     through find_package and compiles none of gtest's four translation units,
+#     while a host without one fetches upstream's pinned v1.13.0 and compiles them.
+#     Measured 2026-11-26 on the same tree and toolchain: 1,009 TUs with a nix
+#     gtest on CMAKE_PREFIX_PATH, 1,013 without. NEVER makes every host build the
+#     versions upstream pins.
+#     https://cmake.org/cmake/help/latest/module/FetchContent.html#variable:FETCHCONTENT_TRY_FIND_PACKAGE_MODE
 set -uo pipefail
 
 tree="$1"
@@ -34,7 +45,8 @@ if [ ! -d src/barretenberg/nodejs_module/node_modules ]; then
 fi
 
 echo "### tree: $tree"
-cmake --preset default -DAVM_TRANSPILER_LIB= -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+cmake --preset default -DAVM_TRANSPILER_LIB= -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  -DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER
 rc=$?
 echo "### configure_rc=$rc"
 exit $rc

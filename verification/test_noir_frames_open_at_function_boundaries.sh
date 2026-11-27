@@ -80,10 +80,18 @@ assert_true "…and are tracked" git -C "$REPO_ROOT" ls-files --error-unmatch \
 # THE ARTIFACT IS THE VERSION-MATCHED ONE OR THE CHECK FAILS BY NAME. `@aztec/protocol-contracts` at
 # a different nightly is a different contract with different pcs, and measuring the wrong one would
 # be a green run about nothing. No SKIP: a check that cannot run FAILS, naming what supplies it.
+#
+# THE VERSION-MATCHED ARTIFACT COMES FROM THE PINNED HISTORICAL RUNTIME'S INSTALL. The working tree's
+# replay/ is on @aztec-labs/* 6.0.0 and carries no @aztec/protocol-contracts at all, and the v6
+# FeeJuice is a different contract (DRIFT.md D36), so the npm.current artifact this gate measures
+# lives in pins.json historical_runtimes.replay_v5's install — verified to be that commit, on that
+# pin, before it is read (lib_historical_replay.sh).
+. "$VERIFY_DIR/lib_historical_replay.sh"
+[ -n "${NOIR_FRAMES_ARTIFACT:-}" ] || historical_replay_prepare
 ARTIFACT="${NOIR_FRAMES_ARTIFACT:-}"
 if [ -z "$ARTIFACT" ]; then
   for root in \
-    "$REPO_ROOT/replay/node_modules" \
+    "$REPLAY_DIR/node_modules" \
     "$REPO_ROOT/orchestration/node_modules" \
     "/Users/$(id -un)/m/dev/aztec-artifacts/replay/node_modules"
   do
@@ -93,8 +101,12 @@ if [ -z "$ARTIFACT" ]; then
 fi
 [ -n "$ARTIFACT" ] && [ -f "$ARTIFACT" ] || die \
   "no FeeJuice.json found. Supply NOIR_FRAMES_ARTIFACT=<path>, or install the package with \
-'npm ci' in replay/ so @aztec/protocol-contracts/artifacts/FeeJuice.json exists."
+'just materialize-historical-replay' so the historical runtime's \
+@aztec/protocol-contracts/artifacts/FeeJuice.json exists."
 note "artifact: $ARTIFACT"
+[ -n "${NOIR_FRAMES_ARTIFACT:-}" ] || assert_prefix \
+  "the artifact was read from the executed runtime's install, not a fallback root" \
+  "$REPLAY_DIR/node_modules/" "$ARTIFACT"
 
 ARMS="$WORK/noir-frames.json"
 node "$REPO_ROOT/tools/run_noir_frames_arms.mjs" \

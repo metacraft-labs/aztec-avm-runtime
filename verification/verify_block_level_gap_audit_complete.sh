@@ -40,7 +40,7 @@ FORK_SHOW() { git -C "$FORK_ROOT" show "$M6_BASE_REV:$1" 2>/dev/null; }
 echo "== A. the fork at the anchor: what exists, by pattern over the WHOLE tree =="
 # ===========================================================================
 
-assert_eq "the anchor is the pinned one" "233d8e0993" "$M6_BASE_REV"
+assert_same_commit "the anchor is the pinned one" "233d8e0993" "$M6_BASE_REV"
 assert_true "the anchor commit is in the fork" \
   git -C "$FORK_ROOT" rev-parse --verify --quiet "$M6_BASE_REV^{commit}"
 

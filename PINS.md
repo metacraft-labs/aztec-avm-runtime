@@ -15,6 +15,8 @@ Enforced by `just verify-pinned-nightly` (`verification/verify_pinned_nightly_si
 | `anchors.historical-protocol-specs` | `reference/historical-protocol-specs/`, the only commit at which the deleted protocol specs still exist |
 | `npm.current` | **the** pinned `@aztec/*` nightly — what new work uses |
 | `npm.deletion_era` | frozen evidence: the published line that is byte-comparable with `anchors.ts` |
+| `npm.aztec_labs_v6` | the live-chain follower's runtime: the working tree's `replay/`, on upstream's v6 release, which publishes under the `@aztec-labs` and `@aztec-foundation` scopes instead of `@aztec` (adopted 2026-11-26, `DRIFT.md` D36) |
+| `historical_runtimes.replay_v5` | a commit of THIS repository that the Live-Chain-Replay floors and `verify-noir-frames` execute instead of the working tree's `replay/`, because the committed corpus is v5 and the v6 schemas cannot read it (`DRIFT.md` D36). Its package files, read out of the object store, are held to `npm.current` |
 | `anchors.trace_format` | the Rust trace-format tree: DD-7's **Path A** writer, materialised into `ct-writer/build-wasm-deps/ctf` — built for the differential checks, no longer shipped |
 | `anchors.trace_format_nim` | the **READER** role: the `ct-print` this repository verifies containers with, and its control — a published ancestor that cannot read this runtime's containers |
 | `anchors.trace_format_nim_writer` | the **WRITER** role: the Nim source `ct-writer/build.rs` cross-compiles for DD-7's **Path B** — the writer the runtime ships since M41 |
@@ -33,7 +35,25 @@ without a barretenberg build. Bumping it does not update the evidence — it des
 
 So the two are separated by role rather than by accident, `pins.json` says which tree uses which,
 and the check fails if a tree drifts onto the wrong one. `drift/` exists precisely to answer "what
-would happen on the current line", which is why it is the one tree on `npm.current`.
+would happen on the current line", which is why it is the one working-tree directory on
+`npm.current`; the other consumer of that line is `historical_runtimes.replay_v5`, below.
+
+## The third line is a different scope, and it was adopted rather than bumped
+
+`npm.aztec_labs_v6` is not a newer nightly of the same packages. Upstream's v6 release moved the
+protocol packages to `@aztec-labs/*` and the cryptography and Noir bindings to `@aztec-foundation/*`;
+nothing under `@aztec/*` describes the chain the follower reads any more. Every npm line therefore
+names the scopes it governs (`scopes`, default `["@aztec"]`), and `tools/repin.py` holds a tree to its
+own line in those scopes **and refuses a package from another line's scopes in the same tree**,
+because two generations in one install is a class-identity hazard rather than a version detail.
+
+The line entered `pins.json` on the operator's decision of 2026-11-26, after `replay/` had already
+moved, so it did not follow rule 1's cadence; rule 5's record is `DRIFT.md` D36 and `pins.json`'s
+history entry of 2026-11-27. The committed v5 corpus did not move with it: the offline floors replay
+it on `historical_runtimes.replay_v5`, which `just materialize-historical-replay` builds from that
+commit and its own lockfile and `verification/lib_historical_replay.sh` proves on every run. Moving
+that commit is not a cadence bump either — it changes which runtime the floors certify, and needs the
+operator.
 
 ## Single source, and what that honestly means
 
@@ -42,8 +62,9 @@ values, and each is held to the declaration rather than trusted:
 
 | kind | how it is held to `pins.json` |
 |---|---|
-| `*/package.json` | every `@aztec/*` dependency must equal the pin declared for that tree in `npm_consumers`. `tools/repin.py --apply` rewrites them; `--check` fails on any disagreement |
-| `*/package-lock.json` | every `@aztec/*` entry's resolved `version`, and the version embedded in its `resolved` tarball URL, must equal the same pin |
+| `*/package.json` | every dependency in the scopes of the line declared for that tree in `npm_consumers` must equal that line's version, and no dependency may be in another line's scopes. `tools/repin.py --apply` rewrites them; `--check` fails on any disagreement |
+| `*/package-lock.json` | every entry in those scopes — its resolved `version`, and the version embedded in its `resolved` tarball URL — must equal the same pin, with the same cross-line refusal |
+| a historical runtime's `package.json` and lockfile | read out of the object store at the declared commit and held to its `npm_pin` by the same two rules. They cannot be rewritten, so `--apply` leaves them alone |
 | tracked prose (`*.md`) | any `x.y.z-nightly.YYYYMMDD` literal it mentions must be one of the declared pins. A stale number in a README therefore fails the check instead of quietly misinforming |
 
 The literal cannot be reduced to one physical occurrence: npm requires a version in each

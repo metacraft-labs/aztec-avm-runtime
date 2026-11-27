@@ -342,7 +342,7 @@ Only `x86_64-linux` was exercised, as in M6 through M12.
 in its own `M13_WORK` — a different directory from the reactor job's, so neither can answer for the
 other.
 
-**It has never run.** Neither has any other job in that workflow: they all still abort at
-`Generate CI token` on "Input required and not supplied: app-id", which M11 recorded as undiagnosed
-after the `vars.` spelling did not fix it. So this job existing means it is wired and names the
-check — not that a run has ever gated anything.
+**It has run in CI.** The `avm-contract-db` job first passed in run 34152022353 (2026-09-07, job
+101836102111), once the CI token blocker recorded in `avm-wasm.yml` was resolved, and every job in
+that workflow passed together in run 43170349830 (2026-11-12). Measured from the GitHub API on
+2026-11-26. The newest result is GitHub's to report.

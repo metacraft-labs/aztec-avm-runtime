@@ -33,22 +33,38 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 
-import {
+// THE REPLAY RUNTIME THESE ARMS EXECUTE IS NAMED BY THE CALLER, NOT BY THIS FILE'S LOCATION.
+// `AZTEC_REPLAY_RUNTIME_ROOT` is set by verification/lib_historical_replay.sh: the Live-Chain-Replay
+// floors run the pinned historical runtime (pins.json historical_runtimes.replay_v5, DRIFT.md D36),
+// because the working tree's v6 replay/ cannot read the v5 corpus. A static `../replay/src` import
+// would bind this runner to the working tree whatever the check asserted, so the runtime's modules
+// are imported dynamically from that root — replay/ AND ct-host/ together, since replay/src imports
+// ct-host by relative path and two copies of a class in one process do not satisfy `instanceof`.
+// There is no default: a run that does not say which runtime it measures refuses.
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+const RUNTIME_ROOT = process.env.AZTEC_REPLAY_RUNTIME_ROOT;
+if (!RUNTIME_ROOT) {
+  throw new Error('AZTEC_REPLAY_RUNTIME_ROOT is not set: say which replay runtime these arms measure '
+    + '(verification/lib_historical_replay.sh sets it)');
+}
+const runtime = (rel) => import(pathToFileURL(join(RUNTIME_ROOT, rel)).href);
+const {
   RUNG_BYTECODE_VALUE,
   buildSettledRecording,
   packageArtifactProvider,
   recordingIdFor,
   resolveContractArtifact,
-} from '../replay/src/index.ts';
-import {
+} = await runtime('replay/src/index.ts');
+const {
   ContractSourceMap,
   CtWriter,
   instantiateCtWriter,
   resolveTracingConfig,
   RUNG_SOURCE,
   WRITER_PATH_B_NIM,
-} from '../ct-host/src/index.ts';
-import { artifactCrypto, installedProtocolContracts } from '../replay/tools/artifact_sources.mjs';
+} = await runtime('ct-host/src/index.ts');
+const { artifactCrypto, installedProtocolContracts } = await runtime('replay/tools/artifact_sources.mjs');
 
 const CT_WRITER = process.argv[2] ?? process.env.CT_WRITER_WASM_PATH;
 const FIXTURE = process.argv[3] ?? 'replay/fixtures/chain_contract_classes.json';

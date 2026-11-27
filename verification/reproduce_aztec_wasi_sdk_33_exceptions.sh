@@ -229,8 +229,8 @@ assert_contains "PR.md says plainly that upstream has no live defect" "Not a def
 assert_contains "PR.md discloses our motive at the end" "Why we care" "$PR"
 assert_contains "PR.md records the prior-art search" "Prior art searched" "$PR"
 assert_contains "PR.md states its known limitations" "Known limitations" "$PR"
-assert_contains "PR.md names the base commit the patch was generated against" \
-  "$M4_BASE_REV" "$PR"
+assert_same_commit "PR.md names the base commit the patch was generated against" \
+  "$(pr_md_base_commit "$PR")" "$M4_BASE_REV"
 assert_contains "PR.md is not filed yet, and says so" "not filed" "$PR"
 
 finish

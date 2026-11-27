@@ -59,16 +59,20 @@ l2_prepare
 # than one, and the page entry made this pass multi-entry — so the library entry moved into
 # `dist-browser/src/`. The old path silently stopped existing and the check said so, which is the
 # assertion working.
-BUNDLE="$REPO_ROOT/replay/dist-browser/src/index.js"
-META="$REPO_ROOT/replay/dist-browser/meta.json"
-BUILDER="$REPO_ROOT/replay/tools/build_browser_bundle.mjs"
-BUDGETS="$REPO_ROOT/replay/browser-budgets.json"
-DIST="$REPO_ROOT/replay/dist-browser"
+# The bundle is built from the EXECUTED replay tree — the pinned historical runtime, see
+# lib_historical_replay.sh (DRIFT.md D36) — and lands in that tree's dist-browser/, never in the
+# working tree's.
+historical_replay_prepare
+BUNDLE="$REPLAY_DIR/dist-browser/src/index.js"
+META="$REPLAY_DIR/dist-browser/meta.json"
+BUILDER="$REPLAY_DIR/tools/build_browser_bundle.mjs"
+BUDGETS="$REPLAY_DIR/browser-budgets.json"
+DIST="$REPLAY_DIR/dist-browser"
 
 assert_file "the bundle builder is committed" "$BUILDER"
-assert_true "…and TRACKED" git -C "$REPO_ROOT" ls-files --error-unmatch "replay/tools/build_browser_bundle.mjs"
+assert_true "…and COMMITTED in the executed runtime" hist_committed "replay/tools/build_browser_bundle.mjs"
 assert_file "…and the budgets it enforces are DATA, not a literal in the builder" "$BUDGETS"
-assert_true "…also TRACKED" git -C "$REPO_ROOT" ls-files --error-unmatch "replay/browser-budgets.json"
+assert_true "…also COMMITTED in the executed runtime" hist_committed "replay/browser-budgets.json"
 
 # ---------------------------------------------------------------------------
 echo "== 1. the artifact is BUILT here, not assumed"
@@ -76,7 +80,7 @@ echo "== 1. the artifact is BUILT here, not assumed"
 # Built every run rather than read from wherever a previous run left it: a DD-9 claim over a stale
 # bundle is a claim about a tree that no longer exists.
 # ---------------------------------------------------------------------------
-rm -rf "$REPO_ROOT/replay/dist-browser"
+rm -rf "$DIST"
 BUILD_LOG="$L2_WORK/probes/dd9-build.log"
 mkdir -p "$(dirname "$BUILD_LOG")"
 if ! timeout "${L4_BUILD_TIMEOUT:-600}" node "$BUILDER" >"$BUILD_LOG" 2>&1; then

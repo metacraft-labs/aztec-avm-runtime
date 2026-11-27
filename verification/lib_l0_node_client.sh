@@ -28,13 +28,18 @@
 L0_WORK="${L0_WORK:-$HOME/.cache/aztec-l0-node-client}"
 export L0_WORK
 
-L0_SRC="$REPO_ROOT/replay/src"
+# THE EXECUTED replay/ IS THE PINNED HISTORICAL RUNTIME, not the working tree's: see
+# lib_historical_replay.sh for why (DRIFT.md D36) and for the proof it asserts on every run.
+. "$VERIFY_DIR/lib_historical_replay.sh"
+
+L0_SRC="$REPLAY_DIR/src"
 export L0_SRC
 
 l0_prepare() {
   require_work_dir "$L0_WORK" 1
+  historical_replay_prepare
   mkdir -p "$L0_WORK/probes"
-  ln -sfn "$REPO_ROOT/replay/node_modules" "$L0_WORK/probes/node_modules"
+  ln -sfn "$REPLAY_DIR/node_modules" "$L0_WORK/probes/node_modules"
   cp "$VERIFY_DIR/_l0_fake_node.mjs" "$L0_WORK/probes/l0_fake_node.mjs"
 
   assert_dir "the replay sources are where L0 expects them" "$L0_SRC"
@@ -45,7 +50,12 @@ l0_prepare() {
   assert_file "…and the shared membership-witness seam L2 and M35 both answer" \
     "$L0_SRC/membership_witness_source.ts"
   assert_dir "…and the package's own node_modules, on npm.current, which the probes resolve through" \
-    "$REPO_ROOT/replay/node_modules/@aztec/stdlib"
+    "$REPLAY_DIR/node_modules/@aztec/stdlib"
+  # The sources a probe imports by absolute path, and the install it resolves bare specifiers
+  # through, are BOTH the executed tree's — asserted, so the redirection cannot point elsewhere.
+  assert_eq "…the probes import replay/src from the executed runtime" "$REPLAY_DIR/src" "$L0_SRC"
+  hist_assert_resolves_into "…and node resolves @aztec/stdlib from the probe directory into that runtime's install" \
+    "$L0_WORK/probes" "@aztec/stdlib/tx"
   assert_file "the fake node was copied onto the probe's resolution root" \
     "$L0_WORK/probes/l0_fake_node.mjs"
 }

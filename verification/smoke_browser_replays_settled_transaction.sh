@@ -64,17 +64,20 @@ echo "== $TEST_NAME"
 l3_prepare
 
 DRIVER="$REPO_ROOT/tools/produce_container_in_page.mjs"
-PAGE_ENTRY="$REPO_ROOT/replay/browser-demo/replay_in_page.ts"
-HOST="$REPO_ROOT/replay/tools/browser_avm_host.ts"
+# The page runs the EXECUTED replay tree — the pinned historical runtime (lib_historical_replay.sh,
+# DRIFT.md D36). The driver is the working tree's check-side code.
+PAGE_ENTRY="$REPLAY_DIR/browser-demo/replay_in_page.ts"
+HOST="$REPLAY_DIR/tools/browser_avm_host.ts"
+DIST="$REPLAY_DIR/dist-browser"
 PAGE_CT="$L2_WORK/probes/l4-page.ct"
 NODE_CT="$L2_WORK/probes/l4-page-node.ct"
 REPORT="$L2_WORK/probes/l4-page.json"
 DECODE="$L2_WORK/probes/l4-page.decode.json"
 
 assert_file "the page entry is committed" "$PAGE_ENTRY"
-assert_true "…and TRACKED" git -C "$REPO_ROOT" ls-files --error-unmatch "replay/browser-demo/replay_in_page.ts"
+assert_true "…and COMMITTED in the executed runtime" hist_committed "replay/browser-demo/replay_in_page.ts"
 assert_file "the browser AVM host is committed" "$HOST"
-assert_true "…and TRACKED" git -C "$REPO_ROOT" ls-files --error-unmatch "replay/tools/browser_avm_host.ts"
+assert_true "…and COMMITTED in the executed runtime" hist_committed "replay/tools/browser_avm_host.ts"
 assert_file "the driver is committed" "$DRIVER"
 assert_true "…and TRACKED" git -C "$REPO_ROOT" ls-files --error-unmatch "tools/produce_container_in_page.mjs"
 
@@ -92,20 +95,20 @@ echo "== 1. the bundle is BUILT here, so the page runs the tree as it stands"
 # ---------------------------------------------------------------------------
 BUILD_LOG="$L2_WORK/probes/l4-page-build.log"
 mkdir -p "$(dirname "$BUILD_LOG")"
-if ! timeout "${L4_BUILD_TIMEOUT:-600}" node "$REPO_ROOT/replay/tools/build_browser_bundle.mjs" \
+if ! timeout "${L4_BUILD_TIMEOUT:-600}" node "$REPLAY_DIR/tools/build_browser_bundle.mjs" \
      >"$BUILD_LOG" 2>&1; then
   die "the browser bundle failed to build; the builder's output is in $BUILD_LOG:
 $(tail -20 "$BUILD_LOG")"
 fi
-assert_file "the page entry was emitted" "$REPO_ROOT/replay/dist-browser/browser-demo/replay_in_page.js"
-assert_file "…and the library entry beside it" "$REPO_ROOT/replay/dist-browser/src/index.js"
+assert_file "the page entry was emitted" "$DIST/browser-demo/replay_in_page.js"
+assert_file "…and the library entry beside it" "$DIST/src/index.js"
 
 # ---------------------------------------------------------------------------
 echo "== 2. A REAL HEADLESS BROWSER RUNS THE WHOLE REPLAY AND EMITS A CONTAINER"
 # ---------------------------------------------------------------------------
 if ! timeout "${L4_PAGE_TIMEOUT:-900}" node "$DRIVER" \
       --avm "$L2_MODULE" --ct-writer "$CT_WRITER" \
-      --fixture "$L2_FIXTURE" --out "$PAGE_CT" --report "$REPORT" \
+      --fixture "$L2_FIXTURE" --out "$PAGE_CT" --report "$REPORT" --dist "$DIST" \
       >"$L2_WORK/probes/l4-page.driver.log" 2>&1; then
   note "the page driver exited non-zero; its output follows"
   tail -30 "$L2_WORK/probes/l4-page.driver.log" >&2
@@ -236,7 +239,7 @@ while stack:
         if imp.get("kind") == "import-statement" and imp["path"] in outs and imp["path"] not in eager:
             eager.add(imp["path"]); stack.append(imp["path"])
 print(" ".join(sorted(os.path.basename(k) for k in set(outs) - eager)))
-' "$REPO_ROOT/replay/dist-browser/meta.json")"
+' "$DIST/meta.json")"
 assert_contains "barretenberg is still a LAZY chunk of the PAGE entry" "barretenberg-" "$LAZY_NAMES"
 assert_contains "…and so is barretenberg-threads" "barretenberg-threads-" "$LAZY_NAMES"
 

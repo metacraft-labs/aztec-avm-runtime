@@ -180,7 +180,21 @@ assert_file "the CI workflow exists" "$WORKFLOW"
 WF="$(cat "$WORKFLOW")"
 assert_contains "…and it declares a job for the M8 differential" "native-vs-wasm-differential" "$WF"
 assert_contains "…which runs this milestone's checks" "just verify-m8" "$WF"
-assert_contains "…and asserts the series base commit before building" "$M6_BASE_REV" "$WF"
+# The workflow spells the base abbreviated (`git rev-parse --verify 233d8e0993^{commit}`), so the
+# guards are resolved in the fork rather than string-matched against the 40-digit pin. The file
+# also guards the separate `ts` anchor (the orchestration job), so the claim is that AT LEAST ONE
+# guard names the pinned cpp base -- what the string match asserted before the pin became full.
+# A guard counts only when it spells the commit with at least 10 hex digits (the pins.json `short`
+# width, as assert_same_commit requires), so a shorter prefix that happens to resolve does not.
+WF_BASES="$(printf '%s\n' "$WF" | sed -n 's/.*git rev-parse --verify \([0-9a-f]\{10,\}\)^{commit}.*/\1/p')"
+WF_CPP_GUARDS=0
+for wf_base in $WF_BASES; do
+  [ -n "$(git -C "$FORK_ROOT" rev-parse --verify --quiet "$wf_base^{commit}" 2>/dev/null)" ] \
+    && [ "$(git -C "$FORK_ROOT" rev-parse --verify --quiet "$wf_base^{commit}")" \
+         = "$(git -C "$FORK_ROOT" rev-parse --verify --quiet "$M6_BASE_REV^{commit}")" ] \
+    && WF_CPP_GUARDS=$((WF_CPP_GUARDS + 1))
+done
+assert_ge "…and asserts the series base commit before building" 1 "$WF_CPP_GUARDS"
 assert_contains "…and names M8's overlay among the patches it requires" \
   "verification/m8/0001-test-vm2-AVM_DIFFERENTIAL" "$WF"
 # Parsed, not grepped, wherever a YAML parser can be had — a job declared at the wrong indentation
