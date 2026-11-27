@@ -43,6 +43,19 @@
     "tsc resolves the JavaScript, loses the declarations, and reports TS7016 implicit-any over a",
     "module that is fully typed.",
     "",
+    "THE TWO MAPPINGS POINT AT orchestration/'s INSTALL, NOT replay/'s, SINCE replay/ MOVED TO",
+    "@aztec-labs/* 6.0.0 (DRIFT.md D36). `browser/src/poseidon.ts` imports `@aztec/foundation`, a",
+    "scope replay/'s install no longer carries, so a mapping into `./node_modules/@aztec/...` names",
+    "nothing. tsc then fell back to resolving from the importing file, which succeeds only through",
+    "the gitignored `browser/node_modules -> ../orchestration/node_modules` symlink: green on a",
+    "developer's box, TS2307 in a clean CI checkout. `browser/` builds against orchestration/'s",
+    "install (pins.json `npm.deletion_era`, AGENTS.md), so that is the declared install these",
+    "mappings name, and every CI job that runs `just typecheck-replay` runs `npm ci` there first.",
+    "The esbuild side, `build_browser_bundle.mjs` in THIS tree, still aliases into",
+    "`replay/node_modules/@aztec/...` and refuses to start without `replay/node_modules/@aztec/stdlib`;",
+    "the bundle the floors measure is built from the pinned historical runtime",
+    "(`historical_runtimes.replay_v5`), whose tsconfig and builder still agree with each other.",
+    "",
     "`skipLibCheck` is true for the same reason it is true in orchestration/: the dependencies are",
     "@aztec/* .d.ts files whose own errors are not ours to fix, and turning it off would make this",
     "a check about @aztec/stdlib's typings rather than about the replay client."
@@ -65,8 +78,8 @@
     "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
-      "@aztec/foundation/curves/bn254": ["./node_modules/@aztec/foundation/dest/curves/bn254/index"],
-      "@aztec/foundation/serialize": ["./node_modules/@aztec/foundation/dest/serialize/index"]
+      "@aztec/foundation/curves/bn254": ["../orchestration/node_modules/@aztec/foundation/dest/curves/bn254/index"],
+      "@aztec/foundation/serialize": ["../orchestration/node_modules/@aztec/foundation/dest/serialize/index"]
     },
     "forceConsistentCasingInFileNames": true,
     "types": []

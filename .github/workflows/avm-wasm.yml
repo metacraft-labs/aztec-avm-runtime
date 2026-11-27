@@ -2846,7 +2846,8 @@ jobs:
     # `replay/fixtures/published_snapshot_step_positions.json`, which is the published snapshot
     # container's own decoded step positions.
     #
-    # IT NEEDS THE PINNED HISTORICAL REPLAY RUNTIME, AND `npm ci` IN replay/ FOR THE TYPE-CHECK. The
+    # IT NEEDS THE PINNED HISTORICAL REPLAY RUNTIME, AND `npm ci` IN replay/ AND orchestration/ FOR
+    # THE TYPE-CHECK. The
     # artifact is what supplies `brillig_locations` (314 pcs), `location_tree` (155 nodes) and the 726
     # `function_locations` that NAME a frame, and the check DIES naming its remedy rather than
     # skipping when it is absent. The pin matters: §1 asserts `aztec_version` is
@@ -2934,6 +2935,17 @@ jobs:
         shell: bash
         run: dev-exec npm ci 2>&1 | tail -20
 
+      # `typecheck-replay` also type-checks `browser/src/poseidon.ts`, which imports
+      # `@aztec/foundation` — a scope replay/'s 6.0.0 install does not carry. replay/tsconfig.json
+      # maps those subpaths into orchestration/'s install (pins.json `npm.deletion_era`, the one
+      # `browser/` builds against). Without this step they resolved only through the gitignored
+      # `browser/node_modules` symlink, which a clean checkout lacks: TS2307 in job 140320252951.
+      # STREAMED, NOT `| tail`, for the same reason as the materialise step below.
+      - name: Install the orchestration's published @aztec packages (browser/'s imports, read by the type-check)
+        working-directory: aztec-avm-runtime/orchestration
+        shell: bash
+        run: dev-exec npm ci 2>&1 | tee ../npm-ci-orchestration.log
+
       - name: Materialise the pinned historical replay runtime (its install holds FeeJuice.json)
         working-directory: aztec-avm-runtime
         # STREAMED, NOT `| tail`: the fetch and `npm ci` are slow on a cold runner, and a tail shows
@@ -2966,6 +2978,7 @@ jobs:
           cp aztec-avm-runtime/verify-noir-frames.log artifacts/ 2>/dev/null || true
           cp aztec-avm-runtime/typecheck-*.log artifacts/ 2>/dev/null || true
           cp aztec-avm-runtime/materialize-historical-replay.log artifacts/ 2>/dev/null || true
+          cp aztec-avm-runtime/npm-ci-orchestration.log artifacts/ 2>/dev/null || true
           cp "${{ github.workspace }}"/noir-frames-work/noir-frames.json artifacts/ 2>/dev/null || true
           cp "${{ github.workspace }}"/noir-frames-work/arms.log artifacts/ 2>/dev/null || true
           ls -la artifacts
