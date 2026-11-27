@@ -164,6 +164,10 @@ SUB_OUT="$L5_WORK/resolved.read"
 CON_OUT="$L5_WORK/control.read"
 l3_read_container "$SUB_CT" "$SUB_OUT"
 l3_read_container "$CON_CT" "$CON_OUT"
+# Every per-step listing below excludes the writer's entry step, which `start` writes before the
+# recorder's first step; these find it first, and count it (`DRIFT.md` D37).
+l3_assert_entry_step "$SUB_OUT" 64
+l3_assert_entry_step "$CON_OUT" 64
 
 # THE PATHS. Read out of the reader's own decode, not out of the arms report.
 SUB_PATHS="$(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["paths"]))' "$SUB_OUT" 2>/dev/null)"
@@ -198,22 +202,8 @@ assert_true "the subject's paths include the AVM oracle sublib it inlines throug
   str_has_sub "$SUB_PATHS" "aztec_sublib/src/oracle/avm.nr"
 
 # THE STEP LINES. This is the claim: real Noir lines where there were program counters.
-SUB_STEPS="$(python3 - "$SUB_OUT" <<'PY' 2>/dev/null
-import json, sys
-d = json.load(open(sys.argv[1], encoding="utf-8"))
-for e in d["events"]:
-    if e.get("type") == "Step":
-        print(f'{e["path_id"]}:{e["line"]}')
-PY
-)"
-CON_STEPS="$(python3 - "$CON_OUT" <<'PY' 2>/dev/null
-import json, sys
-d = json.load(open(sys.argv[1], encoding="utf-8"))
-for e in d["events"]:
-    if e.get("type") == "Step":
-        print(f'{e["path_id"]}:{e["line"]}')
-PY
-)"
+SUB_STEPS="$(l3_decode path-lines "$SUB_OUT")"
+CON_STEPS="$(l3_decode path-lines "$CON_OUT")"
 assert_eq "the reader found 64 steps in the subject" "64" \
   "$(printf '%s\n' "$SUB_STEPS" | grep -c . || true)"
 assert_eq "…and 64 in the control" "64" "$(printf '%s\n' "$CON_STEPS" | grep -c . || true)"
@@ -261,15 +251,7 @@ assert_eq "…and none of them is the unpositionable marker, for the resolved ar
 # Decode `basename:line:column` out of the container by joining each step's `path_id` to the
 # reader's own `paths` array. Column comes from the split probe's territory, so the comparison here
 # is over `basename:line` and §5 asserts the column awareness separately.
-SUB_ACTUAL="$(python3 - "$SUB_OUT" <<'PY' 2>/dev/null
-import json, sys
-d = json.load(open(sys.argv[1], encoding="utf-8"))
-paths = d["paths"]
-for e in d["events"]:
-    if e.get("type") == "Step":
-        print(f'{paths[e["path_id"]].split("/")[-1]}:{e["line"]}')
-PY
-)"
+SUB_ACTUAL="$(l3_decode basename-lines "$SUB_OUT")"
 SUB_EXPECT_NOCOL="$(printf '%s\n' "$SUB_EXPECT" | sed 's/:[0-9]*$//')"
 assert_eq "the reader decoded one position per step" "64" \
   "$(printf '%s\n' "$SUB_ACTUAL" | grep -c . || true)"
@@ -292,20 +274,20 @@ PAR_CT="$L5_CONTAINERS/partial.ct"
 PAR_OUT="$L5_WORK/partial.read"
 assert_file "the partial container was written" "$PAR_CT"
 l3_read_container "$PAR_CT" "$PAR_OUT"
-PAR_ACTUAL="$(python3 - "$PAR_OUT" <<'PY' 2>/dev/null
-import json, sys
-d = json.load(open(sys.argv[1], encoding="utf-8"))
-paths = d["paths"]
-for e in d["events"]:
-    if e.get("type") == "Step":
-        print(f'{paths[e["path_id"]].split("/")[-1]}:{e["line"]}')
-PY
-)"
-# The unpositioned step reads back on the SESSION's own path at line 0 — the placeholder slot the
-# writer stages rather than skipping. Its NEIGHBOURS are what the shift would move.
+l3_assert_entry_step "$PAR_OUT" 64
+PAR_ACTUAL="$(l3_decode basename-lines "$PAR_OUT")"
+# The unpositioned step reads back on the SESSION's own path — the placeholder slot the writer
+# stages rather than skipping. Its NEIGHBOURS are what the shift would move.
+#
+# AT LINE 1, WHERE THE LEGACY DECODE SAID 0. The writer stages the placeholder as `Line(0)`, and
+# `Line(0)` is not a source line: the pinned reader resolves every position through the path's
+# position space, which puts line 1 at the file's own base, so an address below it reads back as
+# line 1 — the same clamp `test_ct_container_roundtrip_ct_print` measures on pc 0. The legacy
+# combined decode reported the recorder's raw number without resolving it (`DRIFT.md` D37). It is
+# still the session's path, which no Noir step is on, so the slot is exactly as distinguishable.
 assert_eq "the partial container decodes 64 steps" "64" \
   "$(printf '%s\n' "$PAR_ACTUAL" | grep -c . || true)"
-PAR_EXPECT_FULL="$(printf '%s\n' "$PAR_EXPECT" | sed 's/:[0-9]*$//' | sed 's/^-$/l5.avm:0/')"
+PAR_EXPECT_FULL="$(printf '%s\n' "$PAR_EXPECT" | sed 's/:[0-9]*$//' | sed 's/^-$/l5.avm:1/')"
 assert_eq "…and every one of them matches the resolver's answer, with the unpositioned step's slot
   occupied by a line-0 placeholder rather than skipped — which is what stops the 32 steps AFTER it
   taking the lines of the 32 before" \
@@ -325,10 +307,23 @@ if [ -x "$L3_CTPRINT_WORK/ct-split-probe" ]; then
   assert_true "…while the control is NOT column aware" \
     str_has_line "$(cat "$CON_PROBE")" "COLUMN_AWARE	false"
   # THE GLOBAL POSITION INDEX IS THE M25 SIGNATURE: at rung 3 the first step's index IS the pc.
-  assert_true "the control's first step index is 130 — the program counter itself" \
-    str_has_line "$(cat "$CON_PROBE")" "STEP0_GLI	130"
+  #
+  # The first RECORDER step is index 1, not 0: index 0 is the writer's entry step, at line 1 of the
+  # session path (GLI 0), which `l3_assert_entry_step` found above. And the v4 global line index is
+  # `prefixSum[path] + (line - 1)` (`codetracer-trace-format-nim` `638ba06`); the session path is
+  # the first interned, so its prefix sum is 0 and a step at `Line(pc)` has index pc - 1.
+  # `test_ct_container_roundtrip_ct_print` compares a pc against an index one lower for the same
+  # reason. The claim is unchanged: the control's first step's index is its program counter.
+  CON_FIRST_PC="$(printf '%s\n' "$CON_STEPS" | head -1 | cut -d: -f2)"
+  assert_eq "the control's first recorder step is at the program counter 130" "130" "$CON_FIRST_PC"
+  assert_true "the control's first step index is 130 — the program counter itself, as a v4 global index" \
+    str_has_line "$(cat "$CON_PROBE")" "STEP1_GLI	$(( CON_FIRST_PC - 1 ))"
   assert_false "…and the subject's is not, because it is an address in a line/column space" \
-    str_has_line "$(cat "$SUB_PROBE")" "STEP0_GLI	130"
+    str_has_line "$(cat "$SUB_PROBE")" "STEP1_GLI	$(( CON_FIRST_PC - 1 ))"
+  assert_true "…while the control's probe puts the writer's entry step at index 0, so index 1 IS its first recorder step" \
+    str_has_line "$(cat "$CON_PROBE")" "STEP0_GLI	0"
+  assert_true "…and so does the subject's" \
+    str_has_line "$(cat "$SUB_PROBE")" "STEP0_GLI	0"
 else
   die "no ct-split-probe at $L3_CTPRINT_WORK/ct-split-probe. Column awareness is half of what rung 1
      buys and ct-print does not report it, so this check will not claim it from the writer's own

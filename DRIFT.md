@@ -1903,6 +1903,83 @@ were absorbed silently.
     working tree's `replay/src`, which the floors no longer execute, so they need re-pointing before
     they are next relied on.
 
+## D37 — L3's and L5's floors read the legacy `ct-print` decode; the pinned reader emits only the split one
+
+- id: D37
+- status: closed
+- opened: 2026-11-27
+- milestone: the trace-format re-pins of 2026-10-02 … 10-09 (`pins.json` history, `ab5f1d1`,
+  `46c1fae`, `dcda6a2`), read by Aztec-Live-Chain-Replay L3 (`verify-l3`) and L5 (`verify-l5`);
+  codetracer-pm `issues/2026-11-27-aztec-l3-l5-floors-parse-ct-prints-pre-october-json.md`
+- design-question: —
+- sides: `ct-print --full` at `anchors.trace_format_nim` (`051efd22b0`), which decodes this
+  runtime's container through the split-stream reader only, versus the legacy combined-stream
+  decode that `e2e_settled_transaction_produces_steppable_ct`,
+  `test_recording_declares_its_provenance` and `e2e_resolved_contract_records_at_source_level`
+  were written against (last edited before the re-pins; `0953398` adapted three other checks, D32–D34,
+  and missed these)
+- what: five differences, every one measured over the L3 and L5 containers at `db45a82` on the
+  pinned v5 runtime (D36):
+  1. **The keys.** A step is `kind: "step"`, not `type: "Step"`; a frame is a `call_entry` record
+     (the interning table is the top-level `functions` array), not a `Function` event; a trace-log
+     event is `kind: "io", io_kind: "TraceLogEvent"` with its text in `text`, not
+     `event_kind: "elkTraceLogEvent"` / `content`. Read with the old keys every filter matched
+     nothing, and the checks reported empty answers: 11, 55 and 14 red assertions.
+  2. **The entry step.** The decode carries the writer's entry step first — `start` writes it at
+     line 1 of the session path in the `<toplevel>` root frame (D27), and
+     `codetracer-trace-format-spec` `trace-events.md` ("Recorder Integration — Starting a
+     Recording") requires it: 346 steps for L3's 345, 65 for L5's 64.
+  3. **`Line(0)` reads back as line 1.** The reader resolves each position through the path's
+     position space, whose line 1 is the file's base, so the writer's `Line(0)` — L3's pc 0, and
+     the placeholder slot of L5's partial arm — decodes as line 1, as
+     `test_ct_container_roundtrip_ct_print` measured on the same writer. Every other pc
+     round-trips unchanged.
+  4. **The v4 global line index is `line - 1`** on the first interned path
+     (`codetracer-trace-format-nim` `638ba06`), and index 0 is now the entry step: the rung-3
+     control's first recorder step is `STEP1_GLI` 129 for pc 130, where the check read `STEP0_GLI`
+     130.
+  5. **Container size no longer measures content.** The split container is allocated in 4096-byte
+     blocks: L3's 345-step container, L3's 254-step provenance control, L3's synthesised walk and
+     L5's 64-step control are all 77,824 bytes, and the same writer closed with nothing recorded
+     is 69,632. The `>= 100000`-byte "substantial container rather than a header" floor (L3 §1, L3
+     provenance §1) and two "the containers differ in size" assertions were therefore red on
+     well-formed containers.
+- why it matters: a filter that matches nothing reports an empty, successful answer — the
+  campaign's most repeated defect (D31) — and here it hid the floors' state since October, because
+  no workflow runs them. The size floor is the subtler half: lowering the constant to fit 77,824
+  would have kept a number that separates nothing, since a 64-step container and a 345-step one are
+  the same size.
+- decision: **Conformed, and no assertion was weakened.**
+  - One reader, `verification/_l3_decode.py` (`l3_decode` in `lib_l2_replay.sh`), serves all three
+    checks. It reads the split decode only and refuses any other shape, or a legacy `type` key, with
+    a non-zero exit and nothing on stdout, so a reader regressing to the old spelling turns the
+    checks red rather than empty. Every command, the frame and trace-log ones included, first
+    cross-checks the step, `call_entry` and `io` listings against the decode's own `counts` and
+    finds the entry step, so no command can answer an empty or truncated decode with zero rows.
+  - The entry step is excluded from every per-step listing only after it is found where the spec
+    puts it (first, index 0, `<toplevel>`, depth 0, path 0, line 1, no variables, the only step in
+    the root frame), and `l3_assert_entry_step` asserts the total as the recorder's count plus one
+    over every decoded container, so the exclusion is a measurement.
+  - L3's pc comparison stays record for record against the AVM's own pcs, put through the
+    `Line(0)` clamp; the check also asserts the clamp touches exactly one record. L5's partial-arm
+    placeholder is expected at `l5.avm:1`. L5 §5 compares `STEP1_GLI` with the control's first
+    recorder pc minus one, derived in the check, and asserts that `STEP0_GLI` is the entry step.
+  - The size floor is replaced by what it was for, measured in the same run: the probe also closes
+    a header-only container from the same writer and configuration, and the recording must be
+    strictly larger in bytes AND decode the recorder's steps where the header-only one decodes the
+    entry step alone (346 against 1 in `steps.dat`, through `ct-split-probe`, with a chunk
+    inflated; the provenance check reads its header-only container back through `ct-print` and
+    finds the entry step alone). "The two containers differ in size" became "differ in bytes"
+    (`cmp`), plus, for the provenance pair, a different step count found by the reader rather than
+    reported by the producer.
+  - Assertion counts, measured at `db45a82` without and with this change: steppable 128 → 144,
+    provenance 156 → 169, source level 183 → 192, with 11, 55 and 14 red before and none after.
+    No assertion was removed without a replacement asserting at least as much.
+- evidence: `aztec-avm-runtime/verification/_l3_decode.py`; `verification/lib_l2_replay.sh`
+  (`l3_decode`, `l3_assert_entry_step`); the three checks' §1 and the comments at each conformed
+  assertion; `verification/test_ct_container_roundtrip_ct_print.sh` (the entry step, the clamp and
+  the `line - 1` index, measured over the same writer).
+
 <!-- END:drift -->
 
 ---

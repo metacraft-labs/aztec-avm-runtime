@@ -208,6 +208,34 @@ l3_read_container() { # <container> <outfile>
     "$(wc -l <"$out" | tr -d ' ')"
 }
 
+# l3_decode <command> <decode.json> [<arg>] — the ONE reader of a `ct-print --full` decode that L3
+# and L5 assert through. It reads the SPLIT decode the pinned reader emits and nothing else, and it
+# excludes the writer's entry step only after finding it where the spec puts it. Its header says
+# why; `DRIFT.md` D37 says what changed. A decode it refuses is a non-zero exit with the reason on
+# stderr and NOTHING on stdout, so every assertion over its answer fails rather than reading zero.
+l3_decode() { # <command> <decode.json> [<arg>]
+  python3 "$VERIFY_DIR/_l3_decode.py" "$@"
+}
+
+# l3_assert_entry_step <decode.json> <recorder-steps> — the decode is the split one, its first step
+# is the writer's entry step, and it carries EXACTLY that one step more than the recorder wrote.
+#
+# `codetracer-trace-format-spec` `trace-events.md`, "Recorder Integration — Starting a Recording":
+# *a recording contains one more step than the recorder emitted — the entry step, which `start`
+# emits.* The exclusion every per-step listing makes is asserted here, as a count, so it is a
+# measurement and not an assumption: a container that lost a recorder step, or grew a second
+# entry step, is red at this line rather than being quietly re-indexed.
+l3_assert_entry_step() { # <decode.json> <recorder-steps>
+  local decode="$1" want="$2" rows rc
+  rows="$(l3_decode check "$decode" 2>&1)"
+  rc=$?
+  assert_eq "the decode of $(basename "$decode") is the split one, and opens on the writer's entry step" \
+    "0" "$rc"
+  [ "$rc" -eq 0 ] || note "$rows"
+  assert_eq "…which carries the recorder's $want step(s) plus that one entry step" \
+    "$(( want + 1 ))" "$(printf '%s\n' "$rows" | sed -n 's/^TOTAL_STEPS\t//p')"
+}
+
 # The import prologue every L2 probe shares.
 l2_imports() {
   cat <<EOF
